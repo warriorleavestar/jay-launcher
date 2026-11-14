@@ -352,9 +352,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
                 DrawMovementPad(canvas, x, y, radius);
             else
                 DrawActionButton(canvas, control, x, y, radius,
-                    !gameplayControlsActive && control.Action == TouchControlAction.SecondaryAction
-                        ? "拆分"
-                        : control.Label);
+                    splitGlyph: !gameplayControlsActive && control.Action == TouchControlAction.SecondaryAction);
         }
         DrawLongPressIndicators(canvas);
         if (_profile.Mode == TouchControlMode.JoystickAndCrosshair && gameplayControlsActive)
@@ -435,9 +433,9 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     {
         _hint.TextSize = Math.Max(18, Math.Min(Width, Height) * 0.021f);
         canvas.DrawRect(Width * 0.35f, Height * 0.115f, Width * 0.65f, Height * 0.185f, _fill);
-        canvas.DrawText("拖动按键调整位置", Width * 0.5f, Height * 0.160f, _hint);
+        canvas.DrawText(L.T("mobile.touch.edit_hint"), Width * 0.5f, Height * 0.160f, _hint);
         canvas.DrawRect(Width * 0.87f, Height * 0.02f, Width * 0.98f, Height * 0.10f, _activeFill);
-        canvas.DrawText("完成", Width * 0.925f, Height * 0.075f, _hint);
+        canvas.DrawText(L.T("mobile.touch.done"), Width * 0.925f, Height * 0.075f, _hint);
     }
 
     private void DrawSettings(Canvas canvas)
@@ -447,17 +445,17 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         canvas.DrawRect(0, 0, Width, Height, _scrim);
         canvas.DrawRect(left, Height * 0.08f, right, Height * 0.96f, _panel);
         _hint.TextSize = Math.Max(17, Math.Min(Width, Height) * 0.021f);
-        canvas.DrawText("触控设置", (left + right) / 2, Height * 0.14f, _hint);
-        DrawSettingRow(canvas, "摇杆 + 点击互动", 0.23f, _profile.Mode == TouchControlMode.JoystickAndTap);
-        DrawSettingRow(canvas, "方向键 + 点击互动", 0.33f, _profile.Mode == TouchControlMode.DPadAndTap);
-        DrawSettingRow(canvas, "摇杆 + 准星", 0.43f, _profile.Mode == TouchControlMode.JoystickAndCrosshair);
-        DrawStepper(canvas, $"按键大小  {Math.Round(_profile.Scale * 100):0}%", 0.56f);
-        DrawStepper(canvas, $"透明度  {Math.Round(_controlOpacity * 100):0}%", 0.66f);
-        DrawSettingRow(canvas, _profile.ForcedSprint ? "强制疾跑：开" : "强制疾跑：关", 0.75f,
+        canvas.DrawText(L.T("mobile.touch.settings"), (left + right) / 2, Height * 0.14f, _hint);
+        DrawSettingRow(canvas, L.T("mobile.touch.mode.joystick_tap"), 0.23f, _profile.Mode == TouchControlMode.JoystickAndTap);
+        DrawSettingRow(canvas, L.T("mobile.touch.mode.dpad_tap"), 0.33f, _profile.Mode == TouchControlMode.DPadAndTap);
+        DrawSettingRow(canvas, L.T("mobile.touch.mode.joystick_crosshair"), 0.43f, _profile.Mode == TouchControlMode.JoystickAndCrosshair);
+        DrawStepper(canvas, L.F("mobile.touch.size", (int)Math.Round(_profile.Scale * 100)), 0.56f);
+        DrawStepper(canvas, L.F("mobile.touch.opacity", (int)Math.Round(_controlOpacity * 100)), 0.66f);
+        DrawSettingRow(canvas, _profile.ForcedSprint ? L.T("mobile.touch.sprint_on") : L.T("mobile.touch.sprint_off"), 0.75f,
             _profile.ForcedSprint);
-        DrawPanelButton(canvas, "恢复默认", 0.615f, 0.83f, 0.77f, 0.90f);
-        DrawPanelButton(canvas, "编辑布局", 0.80f, 0.83f, 0.955f, 0.90f);
-        DrawPanelButton(canvas, "完成", 0.70f, 0.91f, 0.87f, 0.955f);
+        DrawPanelButton(canvas, L.T("mobile.touch.reset"), 0.615f, 0.83f, 0.77f, 0.90f);
+        DrawPanelButton(canvas, L.T("mobile.touch.edit_layout"), 0.80f, 0.83f, 0.955f, 0.90f);
+        DrawPanelButton(canvas, L.T("mobile.touch.done"), 0.70f, 0.91f, 0.87f, 0.955f);
     }
 
     private void DrawSettingRow(Canvas canvas, string text, float y, bool selected)
@@ -522,7 +520,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     }
 
     private void DrawActionButton(Canvas canvas, TouchControlDefinition control,
-        float x, float y, float radius, string label)
+        float x, float y, float radius, bool splitGlyph)
     {
         var compact = control.Action is TouchControlAction.PreviousSlot or TouchControlAction.NextSlot;
         var utility = control.Action is TouchControlAction.Menu or TouchControlAction.Keyboard or
@@ -534,10 +532,11 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         _buttonBorder.SetStyle(Paint.Style.Stroke);
         canvas.DrawRect(bounds, _router.IsPressed(control.Action) ? _buttonPressed : _buttonFace);
         canvas.DrawRect(bounds, _buttonBorder);
-        DrawGlyph(canvas, control.Action, x, y, Math.Min(halfWidth, halfHeight) * 0.68f, label);
+        DrawGlyph(canvas, control.Action, x, y, Math.Min(halfWidth, halfHeight) * 0.68f, control.Label, splitGlyph);
     }
 
-    private void DrawGlyph(Canvas canvas, TouchControlAction action, float x, float y, float size, string fallback)
+    private void DrawGlyph(Canvas canvas, TouchControlAction action, float x, float y, float size, string fallback,
+        bool splitGlyph)
     {
         _glyph.SetStyle(Paint.Style.Stroke);
         _glyph.StrokeWidth = Math.Max(3, size * 0.12f);
@@ -610,7 +609,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
                 canvas.Restore();
                 break;
             case TouchControlAction.SecondaryAction:
-                if (fallback == "拆分")
+                if (splitGlyph)
                 {
                     canvas.DrawRect(x - size * 0.62f, y - size * 0.44f,
                         x - size * 0.08f, y + size * 0.10f, _glyph);

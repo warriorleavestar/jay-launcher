@@ -119,7 +119,8 @@ public sealed class MobilePortTests
         Assert.Equal(1, right.X, 6);
         Assert.Equal(0, right.Y, 6);
         Assert.DoesNotContain(TouchControlLayout.Default, control => control.Label is "Q" or "E" or "Run" or "Use");
-        Assert.Equal("背包", TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Inventory).Label);
+        Assert.Equal("mobile.touch.inventory",
+            TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Inventory).LabelKey);
         Assert.DoesNotContain(TouchControlLayout.Default, control => control.Action == TouchControlAction.Drop);
 
         var menu = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Menu);
@@ -198,6 +199,37 @@ public sealed class MobilePortTests
         // A bad size never breaks hit testing.
         profile.AspectRatio = double.NaN;
         Assert.Equal(1, profile.AspectRatio);
+    }
+
+    [Fact]
+    public void TouchControlTextIsTranslatedInEveryLanguage()
+    {
+        // The game screen follows the app language, so every string it shows must come from the
+        // language files: control names from the layout, and the settings panel text in GameActivity.
+        var src = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));
+        var keys = Enum.GetValues<TouchControlMode>()
+            .SelectMany(TouchControlLayout.For)
+            .Select(control => control.LabelKey)
+            .ToHashSet();
+        foreach (var file in Directory.EnumerateFiles(Path.Combine(src, "Amber.Android"), "*.cs")
+                     .Concat(Directory.EnumerateFiles(Path.Combine(src, "Amber.Mobile"), "*.cs")))
+            foreach (System.Text.RegularExpressions.Match match in System.Text.RegularExpressions.Regex.Matches(
+                         File.ReadAllText(file), @"\bL\.[TF]\(\s*""(mobile\.[^""]+)"""))
+                keys.Add(match.Groups[1].Value);
+        Assert.Contains("mobile.touch.edit_layout", keys);
+        var literals = Directory.EnumerateFiles(Path.Combine(src, "Amber.Android"), "*.cs")
+            .Concat(Directory.EnumerateFiles(Path.Combine(src, "Amber.Mobile"), "*.cs"))
+            .SelectMany(file => System.Text.RegularExpressions.Regex.Matches(File.ReadAllText(file),
+                    @"""[^""\n]*[\u3040-\u30ff\u4e00-\u9fff][^""\n]*""")
+                .Select(match => $"{Path.GetFileName(file)}: {match.Value}"))
+            .ToList();
+        Assert.True(literals.Count == 0, "Hard-coded UI text:\n" + string.Join("\n", literals));
+
+        foreach (var code in new[] { "en", "zh-Hans", "zh-Hant", "ja", "lzh" })
+        {
+            var table = Amber.Core.Localization.L.Load(code);
+            Assert.All(keys, key => Assert.True(table.ContainsKey(key), $"{code} is missing {key}"));
+        }
     }
 
     [Fact]

@@ -1,3 +1,5 @@
+using Amber.Core.Localization;
+
 namespace Amber.Mobile;
 
 public enum TouchControlAction
@@ -13,8 +15,12 @@ public enum TouchControlMode { JoystickAndTap, DPadAndTap, JoystickAndCrosshair 
 /// fraction of the view's shorter side, the same unit the overlay draws with.
 /// </summary>
 public sealed record TouchControlDefinition(
-    TouchControlAction Action, double CenterX, double CenterY, double Radius, string Label,
-    bool GameplayVisible = true, bool MenuVisible = false);
+    TouchControlAction Action, double CenterX, double CenterY, double Radius, string LabelKey,
+    bool GameplayVisible = true, bool MenuVisible = false)
+{
+    /// <summary>The control's name in the current UI language.</summary>
+    public string Label => L.T(LabelKey);
+}
 
 /// <summary>A mutable, resolution-independent touch profile shared by rendering and hit testing.</summary>
 public sealed class TouchControlProfile
@@ -87,15 +93,15 @@ public static class TouchControlLayout
 {
     private static readonly TouchControlDefinition[] Shared =
     [
-        new(TouchControlAction.Keyboard, 0.475, 0.050, 0.026, "聊天与指令", MenuVisible: true),
-        new(TouchControlAction.Menu, 0.525, 0.050, 0.026, "菜单", MenuVisible: true),
-        new(TouchControlAction.Settings, 0.575, 0.050, 0.026, "触控设置", MenuVisible: true),
+        new(TouchControlAction.Keyboard, 0.475, 0.050, 0.026, "mobile.touch.keyboard", MenuVisible: true),
+        new(TouchControlAction.Menu, 0.525, 0.050, 0.026, "mobile.touch.menu", MenuVisible: true),
+        new(TouchControlAction.Settings, 0.575, 0.050, 0.026, "mobile.touch.settings", MenuVisible: true),
         // Keep both actions in the landscape right-thumb arc instead of the unreachable top edge.
-        new(TouchControlAction.Jump, 0.940, 0.780, 0.036, "跳跃"),
-        new(TouchControlAction.Sneak, 0.860, 0.860, 0.036, "潜行"),
+        new(TouchControlAction.Jump, 0.940, 0.780, 0.036, "mobile.touch.jump"),
+        new(TouchControlAction.Sneak, 0.860, 0.860, 0.036, "mobile.touch.sneak"),
         // The square face starts exactly where the vanilla hotbar ends and shares its centre line.
-        new(TouchControlAction.Inventory, 0.608, 0.975, 0.025, "背包"),
-        new(TouchControlAction.SecondaryAction, 0.940, 0.455, 0.044, "拆分",
+        new(TouchControlAction.Inventory, 0.608, 0.975, 0.025, "mobile.touch.inventory"),
+        new(TouchControlAction.SecondaryAction, 0.940, 0.455, 0.044, "mobile.touch.split",
             GameplayVisible: false, MenuVisible: true)
     ];
 
@@ -103,14 +109,14 @@ public static class TouchControlLayout
         new Dictionary<TouchControlMode, IReadOnlyList<TouchControlDefinition>>
         {
             [TouchControlMode.JoystickAndTap] = [.. Shared,
-                new(TouchControlAction.Move, 0.145, 0.735, 0.105, "移动")],
+                new(TouchControlAction.Move, 0.145, 0.735, 0.105, "mobile.touch.move")],
             [TouchControlMode.DPadAndTap] = [.. Shared.Where(control => control.Action != TouchControlAction.Sneak),
-                new(TouchControlAction.Move, 0.145, 0.735, 0.105, "方向键"),
-                new(TouchControlAction.Sneak, 0.145, 0.735, 0.032, "潜行")],
+                new(TouchControlAction.Move, 0.145, 0.735, 0.105, "mobile.touch.dpad"),
+                new(TouchControlAction.Sneak, 0.145, 0.735, 0.032, "mobile.touch.sneak")],
             [TouchControlMode.JoystickAndCrosshair] = [.. Shared,
-                new(TouchControlAction.Move, 0.145, 0.735, 0.105, "移动"),
-                new(TouchControlAction.PrimaryAction, 0.845, 0.710, 0.048, "攻击"),
-                new(TouchControlAction.SecondaryAction, 0.925, 0.610, 0.048, "使用")]
+                new(TouchControlAction.Move, 0.145, 0.735, 0.105, "mobile.touch.move"),
+                new(TouchControlAction.PrimaryAction, 0.845, 0.710, 0.048, "mobile.touch.attack"),
+                new(TouchControlAction.SecondaryAction, 0.925, 0.610, 0.048, "mobile.touch.use")]
         };
 
     public static IReadOnlyList<TouchControlDefinition> Default => For(TouchControlMode.JoystickAndTap);
