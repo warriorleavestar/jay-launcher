@@ -22,8 +22,8 @@
     <Style Selector="Border#AddCard Button /template/ ContentPresenter">
       <Setter Property="TextWrapping" Value="Wrap" />
     </Style>
-    <!-- The Jay account and devices cards can be narrow too (expanded sidebar beside a small content area): their buttons wrap the same way. -->
-    <Style Selector="Border#JayCard Button /template/ ContentPresenter, Border#DevicesCard Button /template/ ContentPresenter">
+    <!-- The other cards can be narrow too (expanded sidebar beside a small content area): their buttons wrap the same way. -->
+    <Style Selector="Border.card Button /template/ ContentPresenter">
       <Setter Property="TextWrapping" Value="Wrap" />
     </Style>
     <ContainerQuery Name="AccountsPageRoot" Query="max-width:640">
