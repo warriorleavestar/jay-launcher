@@ -232,6 +232,18 @@ public sealed class AppSettings
     /// <summary>Room settings › mod sync: people who join may get my mod list and the mod files that are not on public sites.</summary>
     public bool MultiplayerAllowModSync { get; set; } = true;
 
+    // Calls and screen (reserved, redesign batch 11): kept for when calls exist; nothing reads them while the feature is off.
+    /// <summary>Who may call me: "friends-room" (default), "room" or "nobody". People I've only met and strangers never can.</summary>
+    public string CallsWhoCanCall { get; set; } = "friends-room";
+    public bool CallsNoiseSuppression { get; set; } = true;
+    public bool CallsPushToTalk { get; set; }
+    /// <summary>"auto" (default), "sharp" or "smooth".</summary>
+    public string CallsVideoQuality { get; set; } = "auto";
+    /// <summary>Sharing the screen starts with the game window only; the whole screen is a choice each time.</summary>
+    public bool CallsShareGameOnly { get; set; } = true;
+    /// <summary>Friends may ask to control my shared screen; each time still needs my "just this once".</summary>
+    public bool CallsAllowControlRequests { get; set; } = true;
+
     /// <summary>打开启动器时检查一次更新（只在设置导航上显示提示，不自动下载）。</summary>
     public bool CheckUpdatesOnStart { get; set; } = true;
 

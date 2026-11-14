@@ -1,3 +1,4 @@
+using Amber.Core.Calls;
 using Amber.Core.Multiplayer.Transport;
 
 namespace Amber.Core.Multiplayer;
@@ -20,11 +21,18 @@ public sealed record AdvancedValues(
     bool RequestPopup,
     bool ModSync,
     bool GameProxy,
-    bool NetworkExit);
+    bool NetworkExit,
+    string CallsWho = "friends-room",
+    bool CallsNoise = true,
+    bool CallsPushToTalk = false,
+    string CallsQuality = "auto",
+    bool CallsShareGameOnly = true,
+    bool CallsAllowControl = true);
 
 /// <summary>
 /// The multiplayer advanced settings panel (redesign batch 10): Settings › Multiplayer, one group open at a time.
-/// Files and calls get their groups with the batches that add them.
+/// The files group comes with the batch that adds files; the calls group shows only while calls are switched on
+/// (<see cref="CallFeature.Enabled"/>), since calls are reserved.
 /// </summary>
 public static class AdvancedSettings
 {
@@ -34,9 +42,13 @@ public static class AdvancedSettings
     public const string Room = "room";
     public const string Network = "network";
     public const string Troubleshoot = "troubleshoot";
+    public const string Calls = "calls";
 
-    /// <summary>The groups in panel order.</summary>
-    public static readonly IReadOnlyList<string> Groups = [Protection, Connection, Invites, Room, Network, Troubleshoot];
+    /// <summary>The groups in panel order (calls last, and only while calls are switched on).</summary>
+    public static IReadOnlyList<string> Groups => GroupsFor(CallFeature.Enabled);
+
+    public static IReadOnlyList<string> GroupsFor(bool calls) =>
+        calls ? [Protection, Connection, Invites, Room, Network, Troubleshoot, Calls] : [Protection, Connection, Invites, Room, Network, Troubleshoot];
 
     /// <summary>What a fresh install starts with: the "standard" protection level and everything else off or at its usual value.</summary>
     public static readonly AdvancedValues Defaults = new(
@@ -56,7 +68,10 @@ public static class AdvancedSettings
         NetworkExit: false);
 
     /// <summary>The groups (in panel order) with at least one value that is not the default.</summary>
-    public static IReadOnlyList<string> Customized(AdvancedValues values)
+    public static IReadOnlyList<string> Customized(AdvancedValues values) => Customized(values, CallFeature.Enabled);
+
+    /// <summary><see cref="Customized(AdvancedValues)"/> with calls switched on or off.</summary>
+    public static IReadOnlyList<string> Customized(AdvancedValues values, bool calls)
     {
         var d = Defaults;
         var changed = new List<string>();
@@ -71,6 +86,11 @@ public static class AdvancedSettings
         // Routing through me needs the full LAN; without it the switch has no effect, so it is not a change.
         if (values.ModSync != d.ModSync || values.GameProxy != d.GameProxy || (values.FullLan && values.NetworkExit != d.NetworkExit))
             changed.Add(Room);
+        // The calls group is hidden while calls are off, so its values do not count then.
+        if (calls && (CallRules.Parse(values.CallsWho) != CallRules.Parse(d.CallsWho) || values.CallsNoise != d.CallsNoise || values.CallsPushToTalk != d.CallsPushToTalk
+            || !string.Equals(values.CallsQuality, d.CallsQuality, StringComparison.OrdinalIgnoreCase) || values.CallsShareGameOnly != d.CallsShareGameOnly
+            || values.CallsAllowControl != d.CallsAllowControl))
+            changed.Add(Calls);
         return changed;
     }
 }

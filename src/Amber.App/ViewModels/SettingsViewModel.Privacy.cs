@@ -48,6 +48,7 @@ public sealed partial class SettingsViewModel
         foreach (var name in (string[])[nameof(ChildMode), nameof(ChildNoRemote), nameof(ChildNoPublic), nameof(ChildNoExit), nameof(ChildFriendsFiles),
                      nameof(ChildAlwaysAsk), nameof(ChildQuietNotify), nameof(ChildModeStatusText)])
             OnPropertyChanged(name);
+        NotifyCalls();
         ChildModeChanged?.Invoke();
     }
 

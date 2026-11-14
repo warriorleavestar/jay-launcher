@@ -379,6 +379,7 @@ public sealed partial class PeopleViewModel : PageViewModel
         foreach (var name in (string[])[nameof(SafetyText), nameof(SafetyShortText), nameof(SafetyNeedsLook), nameof(SafetyIsFine), nameof(SafetyHint), nameof(CanJoinRoom), nameof(JoinRoomText),
                      nameof(CanInvite), nameof(ShowInviteHint), nameof(AutoAdmit), nameof(CanMessage), nameof(ShowMessageHint), nameof(DraftPlaceholder)])
             OnPropertyChanged(name);
+        NotifyCallButtons();
     }
 
     [RelayCommand]

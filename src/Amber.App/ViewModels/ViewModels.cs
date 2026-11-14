@@ -168,6 +168,9 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>活动中心、请求条、正在玩胶囊（§6.22）。</summary>
     public ActivityViewModel Activity { get; }
 
+    /// <summary>Calls and screen sharing (reserved, redesign batch 11): the panel, the top bar chip, the red bar and frame.</summary>
+    public CallViewModel Call { get; }
+
     /// <summary>The first-run wizard over the whole window (§6.1).</summary>
     public FirstRunViewModel FirstRun { get; }
 
@@ -383,7 +386,17 @@ public sealed partial class MainViewModel : ObservableObject
         about.List.Multiplayer = multiplayer;
         settingsPage.NetworkList.Navigate = r => shell.Navigate(r);
         settingsPage.NetworkList.Multiplayer = multiplayer;
-        settingsPage.ChildModeChanged = () => { multiplayer.ApplyChildMode(); about.Refresh(); };
+        var call = new CallViewModel(service) { Navigate = r => shell.Navigate(r) };
+        Call = call;
+        multiplayer.Call = call;
+        Pages.OfType<PeopleViewModel>().Single().Call = call;
+        // Leaving the room (or the room closing) ends every call: room voice, sharing, and a friend's call too, which
+        // rides on the same room link as messages do.
+        multiplayer.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(MultiplayerViewModel.IsIdle) && multiplayer.IsIdle) call.RoomClosed();
+        };
+        settingsPage.ChildModeChanged = () => { multiplayer.ApplyChildMode(); call.ApplyChildMode(); about.Refresh(); };
         Drop = new DropViewModel(service)
         {
             PreviewPack = async path =>

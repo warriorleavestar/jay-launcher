@@ -247,6 +247,12 @@ Pages and their regions (every region except a title is required):
 | `content.json` | `content.header` `content.filters` `content.body` `content.status` |
 | `multiplayer.json` | `multiplayer.title` `multiplayer.tabs` (the row with Back and the name of a sub-view: the public network or my server; empty on the lobby and in a room, which have no tabs any more) `multiplayer.room` (the room banner with its cover, connection mark and faces, and the knock panel) `multiplayer.body` `multiplayer.status` |
 
+Calls (reserved, not built yet): the call panel sits inside `people.detail` (at the top of the conversation) and inside
+`multiplayer.room` (under the banner), so it moves with those regions. The names `call.panel`, `call.stage` (the shared
+screen and the people's tiles) and `call.bar` (microphone, camera, share, control, hang up) are reserved for when calls
+can be laid out on their own; a pack can't use them yet. The red bar while someone controls the computer and the red
+frame while sharing are safety surfaces: theme packs can't move or restyle them.
+
 `home.json`, `tools.json` and `log.json` laid out the launch page, the toolbox and the standalone log page. Those pages are
 gone (starting a game happens on each instance, the toolbox moved into Settings, the live log is a dock: Ctrl+`). A pack
 that still carries these files installs as before and their regions (`home.*`, `tools.*`, `log.*`) still validate; Jay

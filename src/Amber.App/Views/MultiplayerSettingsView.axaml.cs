@@ -19,7 +19,7 @@ public partial class MultiplayerSettingsView : UserControl
     public MultiplayerSettingsView()
     {
         InitializeComponent();
-        foreach (var group in Groups) group.PropertyChanged += OnGroupChanged;
+        foreach (var group in AllGroups) group.PropertyChanged += OnGroupChanged;
         MultiplayerResetConfirm.PropertyChanged += (_, e) =>
         {
             if (e.Property == IsVisibleProperty && MultiplayerResetConfirm.IsVisible)
@@ -40,8 +40,11 @@ public partial class MultiplayerSettingsView : UserControl
     }
 
     /// <summary>The groups in panel order.</summary>
-    internal IReadOnlyList<Expander> Groups =>
-        [MpGroupProtection, MpGroupConnection, MpGroupInvites, MpGroupRoom, MpGroupNetwork, MpGroupTroubleshoot];
+    internal IReadOnlyList<Expander> Groups => [.. AllGroups.Where(g => g.IsVisible)];
+
+    /// <summary>Every group, including the calls group that shows only while calls are switched on.</summary>
+    private IReadOnlyList<Expander> AllGroups =>
+        [MpGroupProtection, MpGroupConnection, MpGroupInvites, MpGroupRoom, MpGroupNetwork, MpGroupTroubleshoot, MpGroupCalls];
 
     private void OnGroupChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
     {

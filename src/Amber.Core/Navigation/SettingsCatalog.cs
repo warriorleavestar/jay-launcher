@@ -7,9 +7,11 @@ public sealed record SettingsGroup(string Id, string TitleKey, string SummaryKey
 /// One setting on the settings page. <paramref name="Field"/> is the route fragment (<c>settings#Field</c>) and the name
 /// of the control (<c>Field</c> or <c>FieldBox</c>); <paramref name="HintKey"/> is searched too. A <paramref name="WindowsOnly"/>
 /// setting has no control on other systems, and a <paramref name="DesktopOnly"/> one none on phones and tablets, so they
-/// are left out of <see cref="SettingsCatalog.Fields"/> there.
+/// are left out of <see cref="SettingsCatalog.Fields"/> there; a <paramref name="CallsOnly"/> setting belongs to the
+/// reserved calls group and is listed only while calls are switched on.
 /// </summary>
-public sealed record SettingsField(string Field, string Group, string LabelKey, string? HintKey = null, bool WindowsOnly = false, bool DesktopOnly = false);
+public sealed record SettingsField(string Field, string Group, string LabelKey, string? HintKey = null, bool WindowsOnly = false, bool DesktopOnly = false,
+    bool CallsOnly = false);
 
 /// <summary>
 /// The ten settings groups and every setting with a control, in page order. The settings search and the command
@@ -107,6 +109,15 @@ public static class SettingsCatalog
         new("AllowGameProxy", Multiplayer, "multiplayer.proxy.allow"),
         new("AllowExitNode", Multiplayer, "multiplayer.exit.allow", "multiplayer.exit.warning"),
         new("Troubleshoot", Multiplayer, "multiplayer.room.problems", "settings.mp.troubleshoot.hint"),
+        // Calls and screen (redesign batch 11, reserved).
+        new("CallsWho", Multiplayer, "settings.calls.who", "settings.calls.who_hint", CallsOnly: true),
+        new("CallsMic", Multiplayer, "settings.calls.mic_device", CallsOnly: true),
+        new("CallsCamera", Multiplayer, "settings.calls.camera_device", CallsOnly: true),
+        new("CallsNoise", Multiplayer, "settings.calls.noise", CallsOnly: true),
+        new("CallsPushToTalk", Multiplayer, "settings.calls.ptt", CallsOnly: true),
+        new("CallsQuality", Multiplayer, "settings.calls.quality", CallsOnly: true),
+        new("CallsShareGame", Multiplayer, "settings.calls.share_game", CallsOnly: true),
+        new("CallsAllowControl", Multiplayer, "settings.calls.allow_control", "settings.calls.allow_control_hint", CallsOnly: true),
         new("MultiplayerReset", Multiplayer, "settings.mp.reset_all", "settings.mp.reset_confirm"),
 
         new("NetworksCard", Network, "multiplayer.settings.public", "multiplayer.network.hint"),
@@ -123,8 +134,15 @@ public static class SettingsCatalog
         new("AboutPage", About, "about.title", "about.promise"),
     ];
 
-    /// <summary>The settings this system shows (Windows-only ones elsewhere, desktop-only ones on phones and tablets are dropped).</summary>
-    public static readonly IReadOnlyList<SettingsField> Fields = [.. All.Where(f => (!f.WindowsOnly || OperatingSystem.IsWindows()) && (!f.DesktopOnly || PlatformFeatures.IsDesktop))];
+    private static readonly SettingsField[] OnThisSystem =
+        [.. All.Where(f => (!f.WindowsOnly || OperatingSystem.IsWindows()) && (!f.DesktopOnly || PlatformFeatures.IsDesktop))];
+    private static readonly SettingsField[] WithoutCalls = [.. OnThisSystem.Where(f => !f.CallsOnly)];
+
+    /// <summary>The settings this system shows (Windows-only ones elsewhere and desktop-only ones on phones and tablets are
+    /// dropped; the calls group only while calls are on).</summary>
+    public static IReadOnlyList<SettingsField> Fields => FieldsFor(Amber.Core.Calls.CallFeature.Enabled);
+
+    public static IReadOnlyList<SettingsField> FieldsFor(bool calls) => calls ? OnThisSystem : WithoutCalls;
 
     public static SettingsGroup? Group(string? id) =>
         Groups.FirstOrDefault(g => string.Equals(g.Id, id, StringComparison.OrdinalIgnoreCase));
