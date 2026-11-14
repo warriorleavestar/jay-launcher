@@ -62,6 +62,7 @@ public static class ThemeService
             Source = new Uri("avares://Jay/Themes/Safety.axaml"),
         });
         window.FontFamily = Avalonia.Media.FontFamily.Parse(DefaultUiFont);
+        LockedWindows.RemoveAll(w => !w.TryGetTarget(out _));
         LockedWindows.Add(new WeakReference<Window>(window));
     }
 

@@ -153,7 +153,9 @@ public static partial class ThemePackReader
         ".json", ".ttf", ".otf", ".png", ".jpg", ".jpeg", ".txt", ".md",
     };
 
-    [GeneratedRegex("^[a-z0-9][a-z0-9._-]{1,63}$")]
+    // 2-64 chars that start and end with a letter or digit: Windows drops a trailing dot from folder names,
+    // so "sakura." would land in the folder of an installed "sakura".
+    [GeneratedRegex("^[a-z0-9][a-z0-9._-]{0,62}[a-z0-9]$")]
     private static partial Regex IdPattern();
 
     [GeneratedRegex("^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$")]
@@ -215,20 +217,29 @@ public static partial class ThemePackReader
                 if (entry.Length > MaxEntryBytes) throw new ThemePackException("file_too_large", name);
                 total += entry.Length;
                 if (total > MaxPackBytes) throw new ThemePackException("pack_too_large", $"{total}");
-                using var input = entry.Open();
-                using var buffer = new MemoryStream();
-                // 不信 entry.Length：按实际读出的字节数再限一次（防伪造长度的压缩炸弹）。
-                var chunk = new byte[81920];
-                int read;
-                while ((read = input.Read(chunk)) > 0)
-                {
-                    buffer.Write(chunk, 0, read);
-                    if (buffer.Length > MaxEntryBytes) throw new ThemePackException("file_too_large", name);
-                }
-                if (!files.TryAdd(name, buffer.ToArray())) throw new ThemePackException("duplicate_file", name);
+                byte[] bytes;
+                try { bytes = ReadEntryBytes(entry, name); }
+                // A corrupt entry or an unsupported compression method only shows up while reading it.
+                catch (InvalidDataException e) { throw new ThemePackException("bad_zip", e.Message); }
+                if (!files.TryAdd(name, bytes)) throw new ThemePackException("duplicate_file", name);
             }
             return files;
         }
+    }
+
+    private static byte[] ReadEntryBytes(ZipArchiveEntry entry, string name)
+    {
+        using var input = entry.Open();
+        using var buffer = new MemoryStream();
+        // 不信 entry.Length：按实际读出的字节数再限一次（防伪造长度的压缩炸弹）。
+        var chunk = new byte[81920];
+        int read;
+        while ((read = input.Read(chunk)) > 0)
+        {
+            buffer.Write(chunk, 0, read);
+            if (buffer.Length > MaxEntryBytes) throw new ThemePackException("file_too_large", name);
+        }
+        return buffer.ToArray();
     }
 
     /// <summary>zip 里的路径：只允许相对路径、正斜杠，不允许 ..、盘符、绝对路径。</summary>
@@ -257,7 +268,12 @@ public static partial class ThemePackReader
         if (SafetyWords.Contains(Str(m, "author"))) throw new ThemePackException("reserved_words", "author");
         var problems = new List<ThemeProblem>();
         // No "format" at all: the pack was written for format 1 (format 2 packs always say so).
-        var format = m.TryGetProperty("format", out var fmt) && fmt.TryGetInt32(out var f) ? Math.Max(1, f) : 1;
+        var format = 1;
+        if (m.TryGetProperty("format", out var fmt))
+        {
+            if (fmt.ValueKind == JsonValueKind.Number && fmt.TryGetInt32(out var f)) format = Math.Max(1, f);
+            else problems.Add(new("bad_value", "format"));
+        }
         if (format > FormatVersion) problems.Add(new("newer_format", $"{format}"));
         var minJay = Str(m, "minJay") is { } mj ? Clip(mj, 32) : null;
         if (minJay is not null && ThemeFormat.NeedsNewerJay(minJay, JayVersion)) problems.Add(new("needs_newer_jay", minJay));
@@ -284,7 +300,11 @@ public static partial class ThemePackReader
                 var error = CheckAsset(open, img, ["assets/"], [".png", ".jpg", ".jpeg"]);
                 if (error is null) background = img; else problems.Add(error);
             }
-            if (bg.TryGetProperty("opacity", out var op) && op.TryGetDouble(out var o)) backgroundOpacity = Math.Clamp(o, 0, 1);
+            if (bg.TryGetProperty("opacity", out var op))
+            {
+                if (op.ValueKind == JsonValueKind.Number && op.TryGetDouble(out var o) && double.IsFinite(o)) backgroundOpacity = Math.Clamp(o, 0, 1);
+                else problems.Add(new("bad_value", "background.opacity"));
+            }
         }
         string? mono = null;
         var uiFonts = new Dictionary<string, string>();

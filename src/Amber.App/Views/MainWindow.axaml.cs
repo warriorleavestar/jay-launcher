@@ -84,9 +84,6 @@ public partial class MainWindow : Window
                 File.AppendAllText(Path.Combine(layoutDir, "layout.txt"), $"total {problems.Count}" + Environment.NewLine);
                 Close();
             };
-        // 开发用：AMBER_SPIKE=报告目录，界面改版第 0 批的技术验证。
-        if (Environment.GetEnvironmentVariable("AMBER_SPIKE") is { Length: > 0 } spikeDir)
-            Opened += async (_, _) => await new Spike(this, spikeDir).RunAsync();
         // 开发用：AMBER_SELFTEST=报告目录，走一遍端到端自检。
         if (Environment.GetEnvironmentVariable("AMBER_SELFTEST") is { Length: > 0 } report)
             Opened += async (_, _) =>
@@ -133,10 +130,6 @@ public partial class MainWindow : Window
             }, DispatcherPriority.Background);
         }
     }
-
-    /// <summary>最小尺寸（见 WindowSizing）。屏幕放不下时再往下收到可用区域。</summary>
-    public const double PreferredMinWidth = Amber.Core.Layout.WindowSizing.MinWidth;
-    public const double PreferredMinHeight = Amber.Core.Layout.WindowSizing.MinHeight;
 
     /// <summary>
     /// 按屏幕的可用区域定窗口大小和位置：恢复上次的（还在某块屏幕上时），否则按可用区域的比例取默认大小并居中；
@@ -258,6 +251,8 @@ public partial class MainWindow : Window
     private void RememberPlacement()
     {
         if (_settings is null || Environment.GetEnvironmentVariable("AMBER_SELFTEST") is { Length: > 0 }) return;
+        // A minimized window reports an off-screen position (about -32000 on Windows): keep the last real placement.
+        if (WindowState == WindowState.Minimized) return;
         var maximized = WindowState == WindowState.Maximized;
         var old = _settings.LauncherWindow;
         var placement = new WindowPlacement

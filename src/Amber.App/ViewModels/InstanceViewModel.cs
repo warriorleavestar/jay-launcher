@@ -1042,7 +1042,7 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
             SetStatus(StatusMessage.Success("instance.worlds.imported", folder));
             LoadWorlds();
         }
-        catch (Exception e) when (e is IOException or InvalidDataException)
+        catch (Exception e) when (e is IOException or InvalidDataException or UnauthorizedAccessException)
         {
             SetStatus(StatusMessage.Failure("instance.worlds.import_failed", e, ErrorText.Of(e)));
         }

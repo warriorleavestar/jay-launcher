@@ -172,7 +172,7 @@ public static partial class ThemeStyles
             case "borderWidth": props.BorderWidth = Number(pack, v, at, 0, 8); break;
             case "radius": props.Radius = Number(pack, v, at, 0, 64); break;
             case "padding":
-                if (v.ValueKind == JsonValueKind.Array && v.GetArrayLength() == 2 && v[0].TryGetDouble(out var h) && v[1].TryGetDouble(out var vert))
+                if (v.ValueKind == JsonValueKind.Array && v.GetArrayLength() == 2 && v[0].TryGetDoubleSafe(out var h) && v[1].TryGetDoubleSafe(out var vert))
                     props.Padding = (Math.Clamp(h, 0, 48), Math.Clamp(vert, 0, 32));
                 else if (v.TryGetDoubleSafe(out var all)) props.Padding = (Math.Clamp(all, 0, 48), Math.Clamp(all, 0, 32));
                 else pack.Problems.Add(new("bad_value", at));

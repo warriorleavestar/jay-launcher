@@ -256,9 +256,6 @@ public sealed class AppSettings
     /// <summary>Say so when a file has finished arriving.</summary>
     public bool FilesNotifyDone { get; set; } = true;
 
-    /// <summary>打开启动器时检查一次更新（只在设置导航上显示提示，不自动下载）。</summary>
-    public bool CheckUpdatesOnStart { get; set; } = true;
-
     /// <summary>
     /// The universal loader's default: instances that have not chosen for themselves (and new instances, which start from
     /// this) launch through it. It used to be the one global "bake" switch; the name stays so old settings keep their meaning.
@@ -314,6 +311,7 @@ public sealed class AppSettings
                 if (File.Exists(path))
                 {
                     var loaded = JsonSerializer.Deserialize(read(path), AppJsonContext.Default.AppSettings) ?? new AppSettings();
+                    loaded.Normalize();
                     // Upgraded from a Jay without the switch: that Jay never checked by itself, so neither does this one.
                     loaded.AutoUpdateCheckSaved ??= false;
                     return loaded;
@@ -338,6 +336,35 @@ public sealed class AppSettings
         }
     }
 
+    /// <summary>
+    /// A hand-edited file can hold null for a setting that is never null in code: put the default back, so startup
+    /// does not fail on it. Instance metadata is keyed case-insensitively, as when it is first created.
+    /// </summary>
+    private void Normalize()
+    {
+        var defaults = new AppSettings();
+        if (string.IsNullOrWhiteSpace(GameDirectory)) GameDirectory = defaults.GameDirectory;
+        DownloadSource ??= defaults.DownloadSource;
+        ChildMode ??= new();
+        StrongSandboxFolders ??= [];
+        PlayerName ??= defaults.PlayerName;
+        Theme ??= defaults.Theme;
+        SecurityAttestation ??= defaults.SecurityAttestation;
+        AfterLaunch ??= defaults.AfterLaunch;
+        Tutorial ??= new();
+        Density ??= defaults.Density;
+        MultiplayerKnockWait ??= defaults.MultiplayerKnockWait;
+        CallsWhoCanCall ??= defaults.CallsWhoCanCall;
+        CallsVideoQuality ??= defaults.CallsVideoQuality;
+        FilesSaveFolder ??= defaults.FilesSaveFolder;
+        FilesSpeed ??= defaults.FilesSpeed;
+        if (Instances is { } instances && instances.Comparer != StringComparer.OrdinalIgnoreCase)
+        {
+            Instances = new(StringComparer.OrdinalIgnoreCase);
+            foreach (var (id, meta) in instances) Instances.TryAdd(id, meta);
+        }
+    }
+
     /// <summary>The settings file could not be read at startup: this session runs on defaults and never writes it.</summary>
     [System.Text.Json.Serialization.JsonIgnore]
     public bool ReadOnly { get; private init; }
@@ -350,11 +377,8 @@ public sealed class AppSettings
         if (ReadOnly) return;
         // A new install shows the daily update check on: write that down, or the next start would read it as an upgrade.
         AutoUpdateCheckSaved ??= true;
-        var path = SavePathForTest ?? FilePath;
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        var temp = path + ".tmp";
-        File.WriteAllText(temp, JsonSerializer.Serialize(this, JsonOptions.Info<AppSettings>()));
-        File.Move(temp, path, true);
+        // Owner-only on macOS and Linux (it holds an API key and launch commands), through a unique temp file.
+        Amber.Core.PrivateFile.WriteAllText(SavePathForTest ?? FilePath, JsonSerializer.Serialize(this, JsonOptions.Info<AppSettings>()));
     }
 }
 

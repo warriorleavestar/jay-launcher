@@ -377,4 +377,55 @@ public class ThemePackTests : IDisposable
         Assert.Equal((512, 256), ThemeAssets.ImageSize(jpeg));
         Assert.Null(ThemeAssets.ImageSize("GIF89a....."u8));
     }
+
+    [Fact]
+    public void StringsWhereNumbersBelongBecomeProblemsNotCrashes()
+    {
+        var pack = Read(
+            Text("theme.json", """{ "format": "2", "id": "test-theme", "name": "Test", "version": "1.0.0" }"""),
+            Text("tokens.json", """
+            {
+              "background": { "image": "assets/bg.png", "opacity": "0.5" },
+              "slots": { "banner": { "image": "assets/bg.png", "focus": ["0.5", "0.3"] } }
+            }
+            """),
+            Text("styles.json", """{ "button.primary": { "padding": ["8", "4"] } }"""),
+            ("assets/bg.png", Png(64, 64)));
+        var where = pack.Problems.Where(p => p.Code == "bad_value").Select(p => p.Detail).ToList();
+        Assert.Contains("format", where);
+        Assert.Contains("background.opacity", where);
+        Assert.Contains("slots.banner.focus", where);
+        Assert.Contains(where, d => d is not null && d.Contains("padding"));
+        Assert.Null(pack.Styles.GetValueOrDefault("button.primary")?.GetValueOrDefault("")?.Padding);
+    }
+
+    [Fact]
+    public void CorruptEntryIsABadPackNotACrash()
+    {
+        var zip = Zip(Text("theme.json", Manifest));
+        // Change the entry's compression method (local header and central directory) to one ZipArchive cannot read.
+        static void Patch(byte[] b, int signature, int offset)
+        {
+            for (var i = 0; i + 4 <= b.Length; i++)
+                if (BitConverter.ToInt32(b, i) == signature) { b[i + offset] = 99; b[i + offset + 1] = 0; return; }
+            throw new InvalidOperationException("signature not found");
+        }
+        Patch(zip, 0x04034b50, 8);
+        Patch(zip, 0x02014b50, 10);
+        Assert.Equal("bad_zip", Code(() => ThemePackReader.Read(new MemoryStream(zip))));
+    }
+
+    [Theory]
+    [InlineData("sakura", true)]
+    [InlineData("pixel-night", true)]
+    [InlineData("high-contrast", true)]
+    [InlineData("a1", true)]
+    [InlineData(BuiltInThemes.ClassicAmber, true)]
+    [InlineData(BuiltInThemes.HighContrast, true)]
+    [InlineData("sakura.", false)]
+    [InlineData("sakura-", false)]
+    [InlineData("sakura_", false)]
+    [InlineData("a", false)]
+    [InlineData("a..b", false)]
+    public void ThemeIdsEndWithALetterOrDigit(string id, bool valid) => Assert.Equal(valid, ThemePackReader.IsValidId(id));
 }
