@@ -70,6 +70,20 @@ public sealed class HttpsUpgradeTests : IDisposable
         Assert.Equal(Payload, File.ReadAllBytes(item.LocalPath));
     }
 
+    [Fact]
+    public async Task AddressThePersonTypedIsFetchedAsGiven()
+    {
+        // The download tool: someone typed a plain-http address (a LAN share, a host without https) and gave no hash.
+        var seen = new List<string>();
+        using var http = new HttpClient(new Handler(seen, url => url.StartsWith("http://", StringComparison.Ordinal)));
+        var item = new DownloadItem("http://192.168.1.20:8000/pack.zip", Path.Combine(_root, "pack.zip")) { UserTyped = true };
+
+        await Make(http).DownloadOneAsync(item);
+
+        Assert.Equal(["http://192.168.1.20:8000/pack.zip"], seen);
+        Assert.Equal(Payload, File.ReadAllBytes(item.LocalPath));
+    }
+
     private static Downloader Make(HttpClient http) => new(http, new SourceChain([new OfficialSource()])) { RetriesPerSource = 1 };
 
     private sealed class Handler(List<string> seen, Func<string, bool> serves) : HttpMessageHandler

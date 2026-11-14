@@ -12,7 +12,14 @@ namespace Amber.Core.Net;
 
 /// <summary>一个下载项：官方地址 + 本地路径 + 可选校验信息。</summary>
 /// <param name="Within">设了的话，文件只能写在这个目录里面（版本文件、库、资源这类路径来自不可信的版本文件时用）。</param>
-public sealed record DownloadItem(string Url, string LocalPath, string? Sha1 = null, long? Size = null, string? Within = null);
+public sealed record DownloadItem(string Url, string LocalPath, string? Sha1 = null, long? Size = null, string? Within = null)
+{
+    /// <summary>
+    /// The person typed this address in themselves (the download tool): it is fetched as given, plain http included,
+    /// instead of being moved to https as addresses from version JSONs and other files are.
+    /// </summary>
+    public bool UserTyped { get; init; }
+}
 
 /// <summary>BytesDownloaded 是实时累计的字节数，CurrentFile 可能为空。</summary>
 public readonly record struct DownloadProgress(int CompletedFiles, int TotalFiles, long BytesDownloaded, string? CurrentFile);
@@ -114,7 +121,7 @@ public sealed class Downloader
     /// </summary>
     private IReadOnlyList<string> CandidatesFor(DownloadItem item)
     {
-        if (HttpsUpgrade.Upgrade(item.Url) is not { } secure) return OrderedCandidates(item.Url);
+        if (item.UserTyped || HttpsUpgrade.Upgrade(item.Url) is not { } secure) return OrderedCandidates(item.Url);
         var list = OrderedCandidates(secure).ToList();
         if (item.Sha1 is not null && !list.Contains(item.Url)) list.Add(item.Url);
         return list;
