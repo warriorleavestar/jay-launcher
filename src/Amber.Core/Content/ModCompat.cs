@@ -45,7 +45,6 @@ public sealed record CompatResult(CompatLevel Level, string Text)
 public static partial class ModCompat
 {
     public const string ConnectorProject = "connector";
-    public const string ForgifiedFabricApiProject = "forgified-fabric-api";
 
     /// <summary>这些依赖由加载器自己提供，不算缺失。</summary>
     private static readonly HashSet<string> Builtin = new(StringComparer.OrdinalIgnoreCase)

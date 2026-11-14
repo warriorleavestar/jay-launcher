@@ -8,7 +8,7 @@ namespace Amber.Core.Launch;
 
 /// <summary>
 /// Jay's release signatures (privacy plan, items 2 and 3). A release counts only when enough of the Jay trustees signed it
-/// (2 of 3), each with both Ed25519 and ML-DSA-65, using their release keys (<see cref="JayTrust.ReleaseKeys"/>), which are
+/// (<see cref="JayTrust.ReleaseNeed"/> of <see cref="JayTrust.ReleaseKeys"/>, currently 2 of 2), each with both Ed25519 and ML-DSA-65, using their release keys (<see cref="JayTrust.ReleaseKeys"/>), which are
 /// separate from the keys that review networks.
 /// <para>
 /// Next to the packages a release carries <c>SHA256SUMS.txt</c>, <c>SHA256SUMS.txt.sigs</c> (JSON, see
@@ -290,7 +290,7 @@ public sealed class TrustList
 /// <para>
 /// A JSON array of <c>{"from": old list hash, "keys": [new full public keys, base64], "need", "seq", "sigs": [{"k","ed","ml"}…]}</c>.
 /// Signed bytes: <c>jay-trust-change-v1</c>, from, new list hash, seq, each followed by "\n".
-/// Losing two of three keys can't be repaired this way: old installs then have to reinstall.
+/// Losing more keys than the list can spare (with 2 of 2, any one) can't be repaired this way: old installs then have to reinstall.
 /// </para>
 /// </summary>
 public static class TrustChain

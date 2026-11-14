@@ -107,6 +107,24 @@ public sealed class NetworkStringTests
         Assert.Equal(2, list.Networks.Count);
     }
 
+    /// <summary>An update that only its owner signed does not silently replace a reviewed network.</summary>
+    [Fact]
+    public void AnUpdateThatLostTheReviewIsConfirmedFirst()
+    {
+        var list = new PublicNetworkList(null, Trusted);
+        Assert.Equal(NetworkAddResult.Added, list.Add(NetworkString.Create(Info("someone", 1), Someone, Registry), false, out _));
+        Assert.True(list.Find("someone")!.Reviewed);
+        var ownerOnly = NetworkString.Create(Info("someone", 2), Someone);
+        Assert.Equal(NetworkAddResult.NeedsConfirm, list.Add(ownerOnly, false, out _));
+        Assert.Equal(1, list.Find("someone")!.Info.Seq);
+        Assert.True(list.Find("someone")!.Reviewed);
+        Assert.Equal(NetworkAddResult.Updated, list.Add(ownerOnly, true, out _));
+        Assert.False(list.Find("someone")!.Reviewed);
+        // A reviewed update needs no confirmation.
+        Assert.Equal(NetworkAddResult.Updated, list.Add(NetworkString.Create(Info("someone", 3), Someone, Registry), false, out _));
+        Assert.True(list.Find("someone")!.Reviewed);
+    }
+
     [Fact]
     public void ListReplacesOnlyNewerVersionsFromTheSameKey()
     {
