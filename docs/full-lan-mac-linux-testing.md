@@ -46,8 +46,8 @@ Linux 已在云端测过：开出口后能经出口成员上网，出口成员�
 1. 房主勾“允许别人经自己上网”，加入方在房间页选房主当出口，点“开始”。
 2. 加入方打开 `https://ifconfig.me`（或 `curl ifconfig.me`），显示的应该是房主的公网 IP。
 3. 查规则和 DNS：
-   - macOS：`sudo pfctl -a com.apple/250.JayExit -s rules` 能看到 Jay 的规则；`scutil --dns | head -20` 第一个 resolver 是 1.1.1.1 / 8.8.8.8。
-   - Linux：`sudo nft list table inet jay_exit`；`resolvectl status` 里虚拟网卡（amberlan-端口号）的 DNS 是 1.1.1.1 / 8.8.8.8。
+   - macOS：`sudo pfctl -a com.apple/250.JayExit -s rules` 能看到 Jay 的规则；`scutil --dns | head -20` 第一个 resolver 是 `UnixExitNetwork.DnsServers` 里的两个地址。
+   - Linux：`sudo nft list table inet jay_exit`；`resolvectl status` 里虚拟网卡（amberlan-端口号）的 DNS 是 `UnixExitNetwork.DnsServers` 里的两个地址。
 4. 断开测试：房主直接关 Jay。加入方此时打不开任何网页（不会漏到自己的网络），房间页提示连接断了。
 5. 加入方停止出口或关房间：上网恢复正常，`pfctl -a com.apple/250.JayExit -s rules` / `nft list table inet jay_exit` 没有了，`scutil --dns` / `resolvectl status` 恢复原来的 DNS。
 6. macOS 额外留意：系统设置里如果本来就开着别的 VPN 或者第三方防火墙，记一下有没有冲突。

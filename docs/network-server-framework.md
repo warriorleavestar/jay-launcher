@@ -112,7 +112,7 @@ await server.RunAsync(CancellationToken.None);
 | `drop` | `{box, token: "<32 位十六进制>"}`：收信人提前删信，目录删掉 `drop` 等于这个令牌哈希的信 | `{ok}`（没有也回 `ok`） |
 | `rv.put` | `{id: "<64 位十六进制>", blob: "<base64，最长 2 KB>", ttl?: <秒，最多 600>}`：放一条一次性记录（见 [一次性记录](security/zero-leak-codes.md#one-shot-rendezvous-records)） | `{ok}`。同一个 `id` 还在等着时回 `exists`（不覆盖）；目录最多 4096 条，满了回 `full`；每个来源地址 10 分钟最多 30 次，多了回 `rate` |
 | `rv.take` | `{id}` | `{ok, blob}`，同一步里删掉这条；没有回 `not_found` |
-| `rec.put` | `{record: {lookup, signer, seq, expires, blob, sig}}`：登记一条签过名的记录（见 [签名记录](security/zero-leak-codes.md#long-lived-signed-records)，格式以 `SignedRecord` 为准）。目录核对签名，`expires` 已过或比现在晚 7 天又 10 分钟以上回 `bad` | `{ok}`。`lookup` 归第一个签名者，直到记录过期：别人签的回 `owner`，`seq` 不比原来大回 `stale`；目录最多 20000 条（`full`），每个来源地址每小时最多 60 次（`rate`） |
+| `rec.put` | `{record: {lookup, signer, seq, expires, blob, sig}}`：登记一条签过名的记录（见 [签名记录](security/zero-leak-codes.md#long-lived-signed-records)，格式以 `SignedRecord` 为准）。目录核对签名，`expires` 已过或比现在晚 7 天又 10 分钟以上回 `bad` | `{ok}`。`lookup` 归第一个签名者，直到记录过期：别人签的回 `owner`；同一签名者重发完全相同的记录（`seq` 和签名都一样）回 `ok`，方便丢了回复后重试；否则 `seq` 不比原来大回 `stale`；目录最多 20000 条（`full`），每个来源地址每小时最多 60 次（`rate`） |
 | `rec.get` | `{lookup: "<64 位十六进制>"}` | `{ok, record}`；没有回 `not_found` |
 | `x-*` | 你自己的 | 你自己的 |
 

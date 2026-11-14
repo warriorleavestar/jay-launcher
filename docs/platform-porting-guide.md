@@ -245,7 +245,7 @@ EasyTier（组网，P2P 或经节点中继）
 - Mac/Linux 上“经别人上网”（`UnixExitNetwork.cs`，root 守护里运行，对应 Windows 的三个 Exit*Script）：
   1. 启动 easytier-core 之前，按当前路由表给每个承载地址加经物理网关的主机路由（Linux `ip route replace … proto 201`，macOS `route add -host`），EasyTier 的两条 /1 路由不会把承载吸进隧道；
   2. 虚拟网卡就绪后上防漏规则：只放行回环、虚拟网卡、发往承载地址（限定原网卡）的包和 DHCP，其他出站（含 IPv6、局域网）一律丢弃。Linux 用单独的 nftables 表 `inet jay_exit`，macOS 用 pf 锚点 `com.apple/250.JayExit`（`pfctl -E` 拿引用令牌，结束时 `-X` 放掉）；
-  3. DNS 换成 1.1.1.1 / 8.8.8.8（经隧道）：Linux 有 systemd-resolved 时用 `resolvectl dns/domain ~.`，没有时临时改写 `/etc/resolv.conf` 并在结束时写回；macOS 改主服务的 `State:/Network/Service/<id>/DNS`，结束时还原；
+  3. DNS 换成经隧道的 Cloudflare 和 Google 公共 DNS（地址见 `UnixExitNetwork.DnsServers`）：Linux 有 systemd-resolved 时用 `resolvectl dns/domain ~.`，没有时临时改写 `/etc/resolv.conf` 并在结束时写回；macOS 改主服务的 `State:/Network/Service/<id>/DNS`，结束时还原；
   4. 结束顺序：先换回 DNS，再结束核心，最后撤路由和防漏规则，中间不漏。守护被强制结束来不及恢复时，下次开出口先清掉 `proto 201` 路由、`jay_exit` 表和 pf 锚点。
   Linux 缺 `ip` 或 `nft` 时这个按钮不显示，全条件测试不排出口步骤。提供出口（`--enable-exit-node`）不用改系统路由（云端验证过 Linux 不需要 ip_forward）。
 
