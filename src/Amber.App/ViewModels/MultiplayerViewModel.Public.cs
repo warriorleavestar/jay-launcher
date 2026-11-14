@@ -131,6 +131,23 @@ public sealed partial class MultiplayerViewModel
         SetStatus(StatusMessage.Success("multiplayer.public.nodes_saved"));
     }
 
+    /// <summary>The running connect, until it has fully stopped (also after a cancel); null when none ran yet.</summary>
+    private Task? _publicAttempt;
+
+    /// <summary>Tests: stands in for starting the network and waiting for its directory.</summary>
+    internal Func<CancellationToken, Task>? TestPublicAttempt { get; set; }
+
+    /// <summary>
+    /// Connects to the selected network once a cancelled connect has fully stopped (another network was picked while
+    /// one was still connecting): two connects must never run the network component in the same work folder.
+    /// </summary>
+    internal async Task ConnectPublicWhenFreeAsync()
+    {
+        while (IsPublicConnecting && _publicCts is { IsCancellationRequested: true } && _publicAttempt is { IsCompleted: false } previous)
+            await previous;
+        await ConnectPublicAsync();
+    }
+
     /// <summary>连公共网络：第一次先显示隐私说明，同意后才连。</summary>
     [RelayCommand]
     private async Task ConnectPublicAsync()
@@ -154,11 +171,18 @@ public sealed partial class MultiplayerViewModel
         IsPublicConnecting = true;
         var cts = new CancellationTokenSource();
         _publicCts = cts;
+        var stopped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _publicAttempt = stopped.Task;
         PublicNetworkSession? session = null;
         try
         {
             var profile = _service.PublicNetwork;
             if (!await LoadNetworkConfigAsync(profile, cts.Token) || _publicCts != cts) return;
+            if (TestPublicAttempt is { } attempt)
+            {
+                await attempt(cts.Token);
+                return;
+            }
             session = PublicNetworkSession.Start(_service.EasyTier, new PublicNetworkOptions(profile, EasyTierArgs.FreeTcpPort(), EasyTierArgs.FreeTcpPort(),
                     ExtraPeers: RememberedVolunteers(profile), Volunteer: VolunteerFor(profile)),
                 Path.Combine(EasyTierWorkRoot, "public"));
@@ -193,6 +217,7 @@ public sealed partial class MultiplayerViewModel
                 IsPublicConnecting = false;
             }
             cts.Dispose();
+            stopped.TrySetResult();
         }
     }
 
