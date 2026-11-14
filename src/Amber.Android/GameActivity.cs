@@ -24,8 +24,8 @@ namespace Amber.Android;
 public sealed class GameActivity : Activity, ISurfaceHolderCallback
 {
     public const string ServerAddressExtra = "nz.work.minecraft.jay.SERVER_ADDRESS";
-    private CancellationTokenSource? _runtimeSetup;
-    private CancellationTokenSource? _gameSetup;
+    private MobileSetupAttempt? _runtimeSetup;
+    private MobileSetupAttempt? _gameSetup;
     private TouchControlOverlay? _touchOverlay;
 
     protected override void OnCreate(Bundle? savedInstanceState)
@@ -99,11 +99,7 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
     protected override void OnDestroy()
     {
         _runtimeSetup?.Cancel();
-        _runtimeSetup?.Dispose();
-        _runtimeSetup = null;
         _gameSetup?.Cancel();
-        _gameSetup?.Dispose();
-        _gameSetup = null;
         base.OnDestroy();
     }
 
@@ -112,6 +108,16 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
         _touchOverlay?.ReleaseHardwareInput();
         base.OnPause();
     }
+
+    /// <summary>App folders that error logs and messages name by placeholder instead of their full path.</summary>
+    private (string Directory, string Placeholder)[] LocalFolders() =>
+    [
+        (AndroidRuntimeStore.Root(this), "<runtime>"),
+        (ApplicationInfo?.NativeLibraryDir ?? "", "<native-libs>"),
+        (CacheDir?.AbsolutePath ?? "", "<cache>"),
+        (FilesDir?.AbsolutePath ?? "", "<files>"),
+        (ApplicationInfo?.DataDir ?? "", "<app-data>"),
+    ];
 
     private void AddRuntimeSetup(FrameLayout root)
     {
@@ -124,6 +130,31 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
         var buttons = CreateButtonRow(install, cancel);
         content.AddView(buttons, SetupRow(ViewGroup.LayoutParams.WrapContent, Dp(20), 0));
 
+        var acceptingProgress = false;
+        var attempt = new MobileSetupAttempt(new MobileSetupPage(
+            setBusy: busy =>
+            {
+                install.Enabled = !busy;
+                cancel.Visibility = busy ? ViewStates.Visible : ViewStates.Gone;
+                if (!busy) return;
+                progress.Visibility = ViewStates.Visible;
+                progress.Progress = 0;
+            },
+            showPanel: () => { },
+            showCancelled: () =>
+            {
+                acceptingProgress = false;
+                status.Text = L.T("mobile.runtime.missing");
+                progress.Visibility = ViewStates.Gone;
+            },
+            showFailed: message =>
+            {
+                acceptingProgress = false;
+                status.Text = L.F("mobile.runtime.failed", message);
+            },
+            logError: line => global::Android.Util.Log.Error("JayRuntime", line)), LocalFolders());
+        _runtimeSetup = attempt;
+
         install.Click += async (_, _) =>
         {
             var descriptor = AndroidRuntimeCatalog.ForCurrentProcess();
@@ -133,14 +164,9 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
                 return;
             }
 
-            _runtimeSetup?.Dispose();
-            _runtimeSetup = new CancellationTokenSource();
-            install.Enabled = false;
-            cancel.Visibility = ViewStates.Visible;
-            progress.Visibility = ViewStates.Visible;
-            progress.Progress = 0;
+            if (attempt.IsRunning) return;
+            acceptingProgress = true;
 
-            var acceptingProgress = true;
             var report = new Progress<RuntimeInstallProgress>(value =>
             {
                 if (!acceptingProgress) return;
@@ -155,9 +181,9 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
                 };
             });
 
-            try
+            await attempt.RunAsync(MobileSetupStage.RuntimeDownload, async (_, token) =>
             {
-                await AndroidRuntimeStore.InstallAsync(this, descriptor, report, _runtimeSetup.Token);
+                await AndroidRuntimeStore.InstallAsync(this, descriptor, attempt.TrackRuntimeStages(report), token);
                 acceptingProgress = false;
                 progress.Progress = 100;
                 status.Text = L.T("mobile.runtime.ready");
@@ -166,26 +192,9 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
                 root.RemoveView(backdrop);
                 root.RemoveView(content);
                 AddGameSetup(root);
-            }
-            catch (System.OperationCanceledException)
-            {
-                acceptingProgress = false;
-                status.Text = L.T("mobile.runtime.missing");
-                progress.Visibility = ViewStates.Gone;
-            }
-            catch (Exception exception)
-            {
-                acceptingProgress = false;
-                global::Android.Util.Log.Error("JayRuntime", exception.ToString());
-                status.Text = L.F("mobile.runtime.failed", exception.Message);
-            }
-            finally
-            {
-                install.Enabled = true;
-                cancel.Visibility = ViewStates.Gone;
-            }
+            });
         };
-        cancel.Click += (_, _) => _runtimeSetup?.Cancel();
+        cancel.Click += (_, _) => attempt.Cancel();
     }
 
     private void AddGameSetup(FrameLayout root)
@@ -212,16 +221,26 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
         var buttons = CreateButtonRow(play, cancel);
         content.AddView(buttons, SetupRow(ViewGroup.LayoutParams.WrapContent, Dp(20), 0));
 
+        var attempt = new MobileSetupAttempt(new MobileSetupPage(
+            setBusy: busy =>
+            {
+                play.Enabled = !busy;
+                playerName.Enabled = !busy;
+                play.Visibility = busy ? ViewStates.Gone : ViewStates.Visible;
+                playerName.Visibility = busy ? ViewStates.Gone : ViewStates.Visible;
+                cancel.Visibility = busy ? ViewStates.Visible : ViewStates.Gone;
+                progress.Visibility = busy ? ViewStates.Visible : ViewStates.Gone;
+            },
+            showPanel: () => RestoreSetup(backdrop, content),
+            showCancelled: () => status.Text = L.T("mobile.game.setup"),
+            showFailed: message => status.Text = L.F("mobile.game.failed", message),
+            logError: line => global::Android.Util.Log.Error("JayGame", line)), LocalFolders());
+        _gameSetup = attempt;
+
         play.Click += async (_, _) =>
         {
-            _gameSetup?.Dispose();
-            _gameSetup = new CancellationTokenSource();
-            play.Enabled = false;
-            playerName.Enabled = false;
-            playerName.Visibility = ViewStates.Gone;
-            play.Visibility = ViewStates.Gone;
-            cancel.Visibility = ViewStates.Visible;
-            progress.Visibility = ViewStates.Visible;
+            if (attempt.IsRunning) return;
+
             var report = new Progress<AndroidGameInstallProgress>(value =>
             {
                 var percent = value.Total <= 0 ? 0 : (int)Math.Clamp(value.Completed * 100L / value.Total, 0, 100);
@@ -234,17 +253,18 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
                     _ => L.T("mobile.game.preparing")
                 };
             });
-            try
+            await attempt.RunAsync(MobileSetupStage.GameInstall, async (current, token) =>
             {
                 var name = playerName.Text?.Trim() ?? "";
                 var prepared = await AndroidEmbeddedGame.PrepareAsync(this, name,
-                    Intent?.GetStringExtra(ServerAddressExtra), report, _gameSetup.Token);
+                    Intent?.GetStringExtra(ServerAddressExtra), report, token);
                 var editor = preferences.Edit();
                 editor?.PutString("offline-player", name);
                 editor?.Apply();
+                current.Stage = MobileSetupStage.GameLaunch;
                 progress.Progress = 100;
                 status.Text = L.T("mobile.game.preparing");
-                var runTask = Task.Run(() => AndroidEmbeddedGame.Run(prepared), _gameSetup.Token);
+                var runTask = Task.Run(() => AndroidEmbeddedGame.Run(prepared), token);
                 await Task.Delay(900);
                 await RevealGameAsync(backdrop, content);
                 await runTask;
@@ -261,29 +281,9 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
                 content.Alpha = 0;
                 backdrop.Animate().Alpha(1).SetDuration(240).Start();
                 content.Animate().Alpha(1).SetDuration(240).Start();
-            }
-            catch (System.OperationCanceledException)
-            {
-                status.Text = L.T("mobile.game.setup");
-                RestoreSetup(backdrop, content);
-            }
-            catch (Exception exception) when (exception is IOException or InvalidDataException or HttpRequestException
-                                               or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
-            {
-                status.Text = L.F("mobile.game.failed", exception.Message);
-                RestoreSetup(backdrop, content);
-            }
-            finally
-            {
-                play.Enabled = true;
-                play.Visibility = ViewStates.Visible;
-                playerName.Enabled = true;
-                playerName.Visibility = ViewStates.Visible;
-                cancel.Visibility = ViewStates.Gone;
-                progress.Visibility = ViewStates.Gone;
-            }
+            });
         };
-        cancel.Click += (_, _) => _gameSetup?.Cancel();
+        cancel.Click += (_, _) => attempt.Cancel();
     }
 
     private (View Backdrop, LinearLayout Content, TextView Status) AddSetupShell(

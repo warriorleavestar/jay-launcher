@@ -140,4 +140,22 @@ public sealed class RunLogsTests : IDisposable
         Assert.Contains("line 50", text);
         Assert.Contains("line " + (ErrorReport.MaxLines + 49), text);
     }
+
+    [Fact]
+    public void RedactPathsReplacesKnownFoldersWithPlaceholders()
+    {
+        var text = ErrorReport.RedactPaths(
+            "missing /data/user/0/app/files/game-runtime/lib/libjvm.so; cache /data/user/0/app/cache/game/x.jar; " +
+            "other /data/user/0/app/files2/keep; done /data/user/0/app/files",
+            [
+                ("/data/user/0/app/files/", "<files>"),
+                ("/data/user/0/app/files/game-runtime", "<runtime>"),
+                ("/data/user/0/app/cache", "<cache>"),
+                ("", "<empty>"),
+            ]);
+
+        Assert.Equal(
+            "missing <runtime>/lib/libjvm.so; cache <cache>/game/x.jar; other /data/user/0/app/files2/keep; done <files>",
+            text);
+    }
 }

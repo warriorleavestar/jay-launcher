@@ -431,7 +431,7 @@ jobs:
   # Windows 代码签名（SignPath Foundation）。只在发布标签上跑，并且要先在仓库设置里配好
   # 变量 SIGNPATH_ORGANIZATION_ID 和密钥 SIGNPATH_API_TOKEN，没配时整个任务跳过，发布照旧（未签名）。
   # 每次签名都要在 SignPath 网页上人工批准，所以等待时间放宽到 1 小时。
-  # 签名范围见 .signpath/artifact-configuration.xml，政策见 docs/code-signing-policy.md。
+  # 签名范围见 .signpath/artifact-configuration.xml。
   sign-windows:
     if: startsWith(github.ref, 'refs/tags/v') && vars.SIGNPATH_ORGANIZATION_ID != ''
     needs: publish
@@ -525,6 +525,5 @@ jobs:
             --repo "${GITHUB_REPOSITORY}" \
             --verify-tag \
             --draft \
-            --notes "代码签名政策 / Code signing policy: https://github.com/${GITHUB_REPOSITORY}/blob/main/docs/code-signing-policy.md" \
             --generate-notes \
             --title "Jay ${GITHUB_REF_NAME}"
