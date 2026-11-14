@@ -11,7 +11,10 @@ namespace Amber.Core.Multiplayer;
 /// 2. 虚拟网卡就绪后把 DNS 换成 1.1.1.1 / 8.8.8.8（经隧道）：Linux 用 systemd-resolved，没有的话临时覆盖 /etc/resolv.conf；macOS 改主服务的 DNS；
 /// 3. 防漏：只放行回环、虚拟网卡、发往承载地址的包和 DHCP，其他出站一律丢弃（Linux 用单独的 nftables 表，macOS 用 pf 锚点），
 ///    隧道断了也不会退回直接上网。
-/// 结束时按相反顺序恢复。守护被强制结束来不及恢复时，下次启动先清掉上次留下的表、锚点和路由（它们都有固定的标记）。
+/// 结束时按相反顺序恢复。
+/// If the guard is killed before it can restore, the next start cleans up what it can: on Linux the leftover nft table and
+/// the proto-201 routes; on macOS only the pf anchor is flushed. macOS host routes carry no marker, so they stay until
+/// removed by hand or the network resets.
 /// 这里的提示只给开发者看，不翻译。
 /// </summary>
 [UnsupportedOSPlatform("windows")]
@@ -38,7 +41,10 @@ internal sealed class UnixExitNetwork
 
     public UnixExitNetwork(ExitNetworkPlan plan) => _plan = plan;
 
-    /// <summary>上次守护被强制结束时留下的规则和路由：每次启动出口之前先清掉。</summary>
+    /// <summary>
+    /// Runs before every exit start to clear what a killed guard left behind: on Linux the nft table and the proto-201
+    /// routes, on macOS only the pf anchor (macOS host routes have no marker and are not removed here).
+    /// </summary>
     public static void CleanupStale()
     {
         if (OperatingSystem.IsLinux())
