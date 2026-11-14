@@ -1,5 +1,7 @@
 # Jay 公共网络节点（种子节点 + 房间目录）的 systemd 服务。
-# 用法见 docs/public-network.md：把 jay-server 放到 /opt/jay-server/，数据放 /var/lib/jay-public-node/，用单独的 jay 用户运行。
+# 用法见 docs/public-network.md：把 jay-server 放到 /opt/jay-server/，数据放 /var/lib/jay-public-node/，用单独的 jay-network 用户运行
+# (not the `jay` user of jay-server.service: a Minecraft server on the same machine must not read the node's keys).
+# server/install-network-node.sh sets all of this up for you.
 [Unit]
 Description=Jay public network node (seed + room directory)
 After=network-online.target
@@ -7,8 +9,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=jay
-Group=jay
+User=jay-network
+Group=jay-network
 Environment=JAY_SERVER_DIR=/var/lib/jay-public-node
 ExecStart=/opt/jay-server/jay-server directory --listen 11010
 Restart=on-failure
@@ -19,7 +21,18 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=/var/lib/jay-public-node
+# jay-server's own data (a Minecraft server on the same machine) is none of the node's business.
+InaccessiblePaths=-/var/lib/jay-server
 PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+# Not PrivateDevices (hardware binding uses /dev/tpmrm0) and not MemoryDenyWriteExecute (.NET compiles code at run time).
 
 [Install]
 WantedBy=multi-user.target

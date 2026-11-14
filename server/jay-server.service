@@ -22,8 +22,8 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=/var/lib/jay-server
-# A public network node on the same machine (server/install-network-node.sh) keeps its keys there.
-InaccessiblePaths=-/var/lib/jay-network
+# A public network node on the same machine (server/install-network-node.sh, or jay-public-node.service) keeps its keys there.
+InaccessiblePaths=-/var/lib/jay-network -/var/lib/jay-public-node
 PrivateTmp=true
 ProtectKernelTunables=true
 ProtectKernelModules=true
