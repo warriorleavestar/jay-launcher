@@ -124,6 +124,34 @@ public sealed class ContentSafetyTests : IDisposable
     }
 
     [Fact]
+    public async Task ACachedFileSavedFirstByAnotherCallerIsKeptNotReplaced()
+    {
+        // Another caller's file is already in place and open (on Windows, replacing an open file fails).
+        var target = Path.Combine(_root, "cached.png");
+        byte[] theirs = [.. PngHeader, (byte)'a'], ours = [.. PngHeader, (byte)'b'];
+        File.WriteAllBytes(target, theirs);
+        using (var reader = new FileStream(target, FileMode.Open, FileAccess.Read, FileShare.Read))
+            await Amber.Core.Net.CacheFile.SaveAsync(target, ours, saved => saved.AsSpan().StartsWith(PngHeader), 1024);
+        Assert.Equal(theirs, File.ReadAllBytes(target));
+        Assert.Empty(Directory.EnumerateFiles(_root, "*.tmp"));
+    }
+
+    [Fact]
+    public async Task ACachedFileThatDoesNotCheckOutIsReplaced()
+    {
+        var target = Path.Combine(_root, "cached.png");
+        byte[] ours = [.. PngHeader, (byte)'b'];
+        File.WriteAllBytes(target, Encoding.ASCII.GetBytes("<html>"));
+        await Amber.Core.Net.CacheFile.SaveAsync(target, ours, saved => saved.AsSpan().StartsWith(PngHeader), 1024);
+        Assert.Equal(ours, File.ReadAllBytes(target));
+        // Too big to be the file: replaced as well.
+        File.WriteAllBytes(target, [.. PngHeader, .. new byte[2048]]);
+        await Amber.Core.Net.CacheFile.SaveAsync(target, ours, saved => saved.AsSpan().StartsWith(PngHeader), 1024);
+        Assert.Equal(ours, File.ReadAllBytes(target));
+        Assert.Empty(Directory.EnumerateFiles(_root, "*.tmp"));
+    }
+
+    [Fact]
     public async Task AnAuthlibJarThatCannotBeMovedIntoPlaceLeavesNoTempFile()
     {
         var http = new FakeHttp().On("https://authlib-injector.yushi.moe/artifact/latest.json", """{"version":"1.2.5","download_url":"https://example.org/a.jar"}""")

@@ -352,19 +352,15 @@ public sealed partial class AuthlibInjector(HttpClient http, string cacheDir)
         if (expected is not null && !Convert.ToHexStringLower(SHA256.HashData(bytes)).Equals(expected, StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException(L.T("core.auth.injector.checksumfailed"));
         // Write next to it and move into place, so a cancelled write never leaves a truncated jar under the final name.
-        // Each attempt has its own temp name, so two downloads of the same version at once do not collide.
-        var temp = target + "." + Guid.NewGuid().ToString("N") + ".tmp";
-        try
-        {
-            await File.WriteAllBytesAsync(temp, bytes, ct);
-            File.Move(temp, target, overwrite: true);
-        }
-        finally
-        {
-            try { File.Delete(temp); } catch (IOException) { } catch (UnauthorizedAccessException) { }
-        }
+        // Two downloads of the same version at once: the first one saved is kept and used by both, once it checks out.
+        await Amber.Core.Net.CacheFile.SaveAsync(target, bytes, saved => expected is not null
+            ? Convert.ToHexStringLower(SHA256.HashData(saved)).Equals(expected, StringComparison.OrdinalIgnoreCase)
+            : saved.AsSpan().SequenceEqual(bytes), MaxJarBytes, ct);
         return target;
     }
+
+    /// <summary>Anything bigger under the jar's name is not the agent another download just saved.</summary>
+    private const long MaxJarBytes = 64L * 1024 * 1024;
 
     [System.Text.RegularExpressions.GeneratedRegex("^[0-9A-Za-z][0-9A-Za-z._+-]{0,63}$")]
     private static partial System.Text.RegularExpressions.Regex SafeVersion();
