@@ -107,7 +107,16 @@ await server.RunAsync(CancellationToken.None);
 | `volunteer` | `{url: "tcp://<公网地址>:<端口>", operator?: {cert, at, sig}}`：登记或续期志愿中转（每 3 分钟）。`operator` 是志愿者的 Jay 账户给这台设备签的证书（`DeviceCertificate`）、Unix 秒和设备混合签名（`"jay-volunteer-v3\n" ‖ 网络标记 ‖ "\n" ‖ url ‖ "\n" ‖ at`，64 位大端；网络标记是 `VolunteerOperator.NetworkTag`：网络编号 + ":" + SHA-256("jay-volunteer-net-v1\n" ‖ EasyTier 网络名 ‖ "\n" ‖ 网络密钥) 的前 16 字节十六进制，编号撞了的两个网络也互相用不了对方的签名），见 `VolunteerOperator` | `{ok, listed}`：第一次先探测，探测通过后的续期 `listed` 为真。新地址每分钟不签名的最多收 60 个、签名的另外 60 个，每个 Jay 账户 8 个，每个来源地址 10 个（经本机转发进来的不分来源）；续期不算，同一账户回到刚才列出过（探测通过过）的地址也不算；探测没通过的地址 10 秒内谁登记都不收；对已有地址的签名认领也按账户每分钟 8 次、按来源每分钟 10 次算；多了回 `rate`（不签名和按来源的上限在验签之前就查）。不收时回 `off`，被封回 `banned`，地址不是公网回 `bad`；签名或证书不对、不是这个网络的、时间比目录慢 3 分钟以上或快 1 分钟以上、或网络要求签名（`RequireSignedVolunteers`）而没带时回 `operator`；同一账户给同一地址的签名时间没有比上次接受的新时回 `stale`（Jay 每次至少比上次晚 1 秒）；地址已由别的运营者登记（别的账户、没签名换成签名、或签过名换成不签）、还没过期时回 `owner`，运营者不变，管理接口的 `/nodes` 记下这次认领（签名的记账户，不签名的只计数） |
 | `nodes` | `{}` | `{ok, nodes: ["tcp://...", ...最多 8 个，随机]}`：探测过、还在续期的志愿中转，同一个运营者的先只给一个（目录按签名登记的账户分散，只用来分散负载，不是安全保证：一个人可以有好几个 Jay 账户）。谁运行哪个中转只留在目录里，不发给成员 |
 | `probe` | `{url: "tcp://<公网地址>:<端口>"}`：想当志愿中转的人先测端口 | `{ok, reachable}`：目录从外网连一次，不列出。不收志愿中转时回 `off`，被封回 `banned`，地址不是公网回 `bad`，测得太频繁回 `rate` |
+| `post` | `{box: "<32 位十六进制>", blob: "<base64，最长 4 KB>", drop: "<64 位十六进制>"}`：往一个邮箱放一封封好的信（见 [封信](security/zero-leak-codes.md#sealed-mail-through-the-directories)）。`drop` 是删除令牌的哈希 | `{ok}`。同样的信再放一次也回 `ok`；每个邮箱最多 32 封、整个目录最多 8000 封，满了回 `full`；信放 48 小时 |
+| `fetch` | `{boxes: ["<32 位十六进制>", ...最多 3 个], from?: <序号>}` | `{ok, items: [{box, blob}, ...], next?}`：一次回复里的信合计约 12 KB，还有没给的就带 `next`，下次从它接着取 |
+| `drop` | `{box, token: "<32 位十六进制>"}`：收信人提前删信，目录删掉 `drop` 等于这个令牌哈希的信 | `{ok}`（没有也回 `ok`） |
+| `rv.put` | `{id: "<64 位十六进制>", blob: "<base64，最长 2 KB>", ttl?: <秒，最多 600>}`：放一条一次性记录（见 [一次性记录](security/zero-leak-codes.md#one-shot-rendezvous-records)） | `{ok}`。同一个 `id` 还在等着时回 `exists`（不覆盖）；目录最多 4096 条，满了回 `full`；每个来源地址 10 分钟最多 30 次，多了回 `rate` |
+| `rv.take` | `{id}` | `{ok, blob}`，同一步里删掉这条；没有回 `not_found` |
+| `rec.put` | `{record: {lookup, signer, seq, expires, blob, sig}}`：登记一条签过名的记录（见 [签名记录](security/zero-leak-codes.md#long-lived-signed-records)，格式以 `SignedRecord` 为准）。目录核对签名，`expires` 已过或比现在晚 7 天又 10 分钟以上回 `bad` | `{ok}`。`lookup` 归第一个签名者，直到记录过期：别人签的回 `owner`，`seq` 不比原来大回 `stale`；目录最多 20000 条（`full`），每个来源地址每小时最多 60 次（`rate`） |
+| `rec.get` | `{lookup: "<64 位十六进制>"}` | `{ok, record}`；没有回 `not_found` |
 | `x-*` | 你自己的 | 你自己的 |
+
+缺了 `post` / `fetch` / `drop`，好友之间的信和寄出的邀请都送不到；缺了 `rec.put` / `rec.get`，第 3 版 Jay 服务器邀请（`JAYS2-`）和中转的记录码（`JAYNR1-`）都找不到地址。`rv.put` / `rv.take` 是给只带随机令牌的码用的一次性记录。
 
 Jay 认识的错误码：`owner` / `lookup` / `stale`（编号或查找键被别人占着、旧版本）、`full`（满了）、`gone`、`rate`（限流）、`busy`（快照名额满了，稍后再试）、`clock`（房主电脑时间不准）、`version`（Jay 太旧，带 `min`）、`login`（要先登录），其他码有 `reason` 就显示 `reason`。
 
