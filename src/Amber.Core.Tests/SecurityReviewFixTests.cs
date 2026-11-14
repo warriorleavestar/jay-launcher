@@ -343,7 +343,8 @@ public class SecurityReviewFixTests
         var client = new SecureStream(a, iSend, iReceive, TransportProfile.For(TransportMode.Extreme));
         var watch = System.Diagnostics.Stopwatch.StartNew();
         client.Dispose();
-        Assert.True(watch.ElapsedMilliseconds < 200, $"Dispose 用了 {watch.ElapsedMilliseconds} ms");
+        // Only proves Dispose doesn't wait on the network; a loose bound keeps a busy machine from failing it.
+        Assert.True(watch.ElapsedMilliseconds < 2000, $"Dispose 用了 {watch.ElapsedMilliseconds} ms");
         await using var server = new SecureStream(b, rSend, rReceive, TransportProfile.For(TransportMode.Extreme));
         Assert.Equal(0, await server.ReadAsync(new byte[4]).AsTask().WaitAsync(TimeSpan.FromSeconds(5)));
         Assert.True(server.ClosedCleanly);

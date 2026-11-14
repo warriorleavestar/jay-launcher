@@ -50,6 +50,8 @@ public sealed partial class ExitPolicy : IDisposable
     internal TimeSpan ReadyInterval { get; set; } = TimeSpan.FromMinutes(3);
     internal TimeSpan RetryInterval { get; set; } = TimeSpan.FromSeconds(15);
     internal TimeSpan Debounce { get; set; } = TimeSpan.FromSeconds(3);
+    /// <summary>Clock for the public IP's age. Tests use a manual clock instead of waiting.</summary>
+    internal TimeProvider Time { get; set; } = TimeProvider.System;
 
     /// <summary>
     /// 查到公网 IP 后最多信任这么久：路由器重新拨号（PPPoE）会换公网 IP，而本机网卡还是私有地址、不会触发地址变化。
@@ -137,7 +139,7 @@ public sealed partial class ExitPolicy : IDisposable
                 if (ok && generation == _generation && _collecting == 0)
                 {
                     _failure = null;
-                    Interlocked.Exchange(ref _lastSuccessTicks, System.Diagnostics.Stopwatch.GetTimestamp());
+                    Interlocked.Exchange(ref _lastSuccessTicks, Time.GetTimestamp());
                     _ready = true;
                 }
                 else if (!ok && generation == _generation)
@@ -154,7 +156,7 @@ public sealed partial class ExitPolicy : IDisposable
     }
 
     private bool IsFresh(TimeSpan maxAge) =>
-        _ready && (maxAge == TimeSpan.MaxValue || System.Diagnostics.Stopwatch.GetElapsedTime(Interlocked.Read(ref _lastSuccessTicks)) <= maxAge);
+        _ready && (maxAge == TimeSpan.MaxValue || Time.GetElapsedTime(Interlocked.Read(ref _lastSuccessTicks)) <= maxAge);
 
     /// <summary>
     /// 每次转发前（收到 CONNECT 请求、去连目标之前）调用：公网 IP 查到太久（可能路由器重新拨号了）就先重查一次。
@@ -190,14 +192,14 @@ public sealed partial class ExitPolicy : IDisposable
         _localAddresses = localAddresses.Select(Normalize).ToHashSet();
         _localNetworks = localNetworks.Select(n => (Normalize(n.Item1), n.Item2)).ToList();
         _ready = true;
-        _lastSuccessTicks = System.Diagnostics.Stopwatch.GetTimestamp();
+        _lastSuccessTicks = Time.GetTimestamp();
         MaxPublicIpAge = TimeSpan.MaxValue;
     }
 
     /// <summary>测试用：模拟还没查到公网地址的状态。</summary>
     internal void SetReady(bool ready)
     {
-        if (ready) _lastSuccessTicks = System.Diagnostics.Stopwatch.GetTimestamp();
+        if (ready) Interlocked.Exchange(ref _lastSuccessTicks, Time.GetTimestamp());
         _ready = ready;
     }
 
