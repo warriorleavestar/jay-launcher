@@ -601,6 +601,25 @@ public sealed class KnockTests : IAsyncDisposable
         Assert.Single(_asked);
     }
 
+    /// <summary>An invite that asks each time is answered by the host even for someone on the "let straight in" list.</summary>
+    [Fact]
+    public async Task AnInviteThatAsksEachTimeAsksEvenATrustedGuest()
+    {
+        _trusted = pub => pub.AsSpan().SequenceEqual(_guest.PublicKey);
+        _decide = (_, _) => Task.FromResult(false);
+        var invite = _book.Create(5, TimeSpan.FromMinutes(10), false, TunnelSettings.Default, askEachTime: true);
+        var refused = await KnockAsync(invite.Invite);
+        Assert.False(refused.Approved);
+        Assert.Null(refused.Credentials);
+        Assert.True(Assert.Single(_asked).Trusted);
+
+        _decide = (_, _) => Task.FromResult(true);
+        Assert.True((await KnockAsync(invite.Invite)).Approved);
+        Assert.Equal(2, _asked.Count);
+        // It can't also let people in without asking.
+        Assert.Throws<ArgumentException>(() => _book.Create(1, null, true, TunnelSettings.Default, askEachTime: true));
+    }
+
     /// <summary>prologue 里带着邀请编号：报的是这张邀请的编号、握手却按另一个编号做，第一条消息就失败。</summary>
     [Fact]
     public async Task PrologueBindsTheInviteId()
