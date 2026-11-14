@@ -694,15 +694,17 @@ public sealed partial class MultiplayerViewModel
         _knockCts = cts;
         var peers = LobbyPeers(host: false);
         SetStatus(StatusMessage.Info(peers.Count > 0 ? "multiplayer.invite.connecting_relay" : "multiplayer.invite.entering_lobby"));
+        // Direct rooms: the host sends its addresses only after approving, inside the encrypted reply. Then (and only
+        // then) a direct session is made here and our addresses go back in the encrypted ack. Until the join takes it
+        // over, the finally below disposes it, so a knock that fails or is cancelled after it was made leaves nothing open.
+        DirectSession? guestDirect = null;
+        var adopted = false;
         try
         {
             var me = Identity.KeyPair;
             var name = ChatName;
             var device = Device;
             var jay = JayCertificate;
-            // Direct rooms: the host sends its addresses only after approving, inside the encrypted reply. Then (and only
-            // then) a direct session is made here and our addresses go back in the encrypted ack.
-            DirectSession? guestDirect = null;
             Func<DirectAddresses, CancellationToken, Task<DirectAddresses?>> answerDirect =
                 (host, ct) => AnswerDirectOfferAsync(invite, host, made => guestDirect = made, ct);
             KnockOutcome? viaPublic = null;
@@ -737,20 +739,14 @@ public sealed partial class MultiplayerViewModel
                 if (again is null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(e);
                 outcome = again;
             }
-            if (_knockCts != cts)
-            {
-                if (guestDirect is not null) await guestDirect.DisposeAsync();
-                return KnockEnd.NotAnswered;
-            }
+            if (_knockCts != cts) return KnockEnd.NotAnswered;
             if (outcome.Credentials is not { } credentials)
             {
-                if (guestDirect is not null) await guestDirect.DisposeAsync();
                 SetStatus(StatusMessage.Warning(KnockReasonKey(outcome.Reason)));
                 return outcome.Reason is "expired" or "invalid" or "removed" or "closed" ? KnockEnd.InviteSpent : KnockEnd.NotAnswered;
             }
             if (credentials.Tunnel.Mode == TransportMode.Extreme && !NoiseHandshake.HybridSupported)
             {
-                if (guestDirect is not null) await guestDirect.DisposeAsync();
                 SetStatus(StatusMessage.Warning("multiplayer.room.extreme_unsupported"));
                 return KnockEnd.NotAnswered;
             }
@@ -758,6 +754,7 @@ public sealed partial class MultiplayerViewModel
             if (guestDirect is not null)
             {
                 // A failed punch leaves the room: the invite may still work (a friend's has more uses), so it stays.
+                adopted = true;
                 return await CompleteDirectJoinAsync(guestDirect, credentials.ToRoom(), outcome) ? KnockEnd.Joined : KnockEnd.NotAnswered;
             }
             if (!StartJoin(credentials.ToRoom())) return KnockEnd.NotAnswered;
@@ -790,6 +787,7 @@ public sealed partial class MultiplayerViewModel
                 IsKnocking = false;
             }
             cts.Dispose();
+            if (!adopted && guestDirect is { } leftover) await leftover.DisposeAsync();
         }
         return KnockEnd.NotAnswered;
     }
