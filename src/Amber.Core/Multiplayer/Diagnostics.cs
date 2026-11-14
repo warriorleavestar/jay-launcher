@@ -76,7 +76,7 @@ public static partial class NetDiagnostics
         return $"{groups[0]}:{groups[1]}:*";
     }
 
-    [GeneratedRegex(@"AMB-((?:T[1-3]D?-)?[0-9A-Z]{8})-[0-9A-Z]{12}-(\d{1,5})", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"AMB-((?:T[1-3]D?-)?[0-9A-Z]{8})-(?:[0-9A-Z]{26}|[0-9A-Z]{12})-(\d{1,5})", RegexOptions.IgnoreCase)]
     private static partial Regex RoomCodePattern();
 
     [GeneratedRegex(@"(AMBDIRECT\d+|AMBREPLY\d+|JAY2D|JAY2R|JAYDS1|JAYDR1|JAYS1|JAYS2|JAYSS1|JAYNS1|JAYNR1)-[A-Za-z0-9_-]+", RegexOptions.IgnoreCase)]

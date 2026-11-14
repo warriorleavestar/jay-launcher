@@ -460,9 +460,9 @@ public class ForwardingTests
         Assert.EndsWith("-25565", room.ToString());
         Assert.True(RoomCode.TryParse("朋友发来的：" + room + " 快来", out var parsed));
         Assert.Equal(room, parsed);
-        // 通用模式的房间码和以前完全一样，老版本也能用。
+        // General-mode codes keep the old shape, but the secret is now 26 characters: older versions say the format is wrong.
         var plain = RoomCode.Create(25565);
-        Assert.Matches("^AMB-[0-9A-Z]{8}-[0-9A-Z]{12}-25565$", plain.ToString());
+        Assert.Matches("^AMB-[0-9A-Z]{8}-[0-9A-Z]{26}-25565$", plain.ToString());
         Assert.True(RoomCode.TryParse(plain.ToString(), out var p2));
         Assert.Equal(TransportMode.General, p2.Tunnel.Mode);
     }

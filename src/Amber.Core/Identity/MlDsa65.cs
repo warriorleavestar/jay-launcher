@@ -36,7 +36,9 @@ internal static class MlDsa65
             return key.ExportMLDsaPublicKey();
 #pragma warning restore SYSLIB5006
         }
-        return MLDsaPrivateKeyParameters.FromSeed(Bc, seed.ToArray()).GetPublicKeyEncoded();
+        var copy = seed.ToArray();
+        try { return MLDsaPrivateKeyParameters.FromSeed(Bc, copy).GetPublicKeyEncoded(); }
+        finally { CryptographicOperations.ZeroMemory(copy); }
     }
 
     /// <summary>Signs <paramref name="message"/> with the key from <paramref name="seed"/> (hedged, so two signatures differ).</summary>
@@ -50,11 +52,17 @@ internal static class MlDsa65
             return key.SignData(message.ToArray());
 #pragma warning restore SYSLIB5006
         }
-        var signer = new MLDsaSigner(Bc, deterministic: false);
-        signer.Init(true, new Org.BouncyCastle.Crypto.Parameters.ParametersWithRandom(MLDsaPrivateKeyParameters.FromSeed(Bc, seed.ToArray()), new SecureRandom()));
-        var bytes = message.ToArray();
-        signer.BlockUpdate(bytes, 0, bytes.Length);
-        return signer.GenerateSignature();
+        // The seed copy is zeroed after use. The key BouncyCastle expands from it is managed memory it doesn't let us clear.
+        var copy = seed.ToArray();
+        try
+        {
+            var signer = new MLDsaSigner(Bc, deterministic: false);
+            signer.Init(true, new Org.BouncyCastle.Crypto.Parameters.ParametersWithRandom(MLDsaPrivateKeyParameters.FromSeed(Bc, copy), new SecureRandom()));
+            var bytes = message.ToArray();
+            signer.BlockUpdate(bytes, 0, bytes.Length);
+            return signer.GenerateSignature();
+        }
+        finally { CryptographicOperations.ZeroMemory(copy); }
     }
 
     /// <summary>True when <paramref name="signature"/> is a valid signature of <paramref name="message"/> by <paramref name="publicKey"/>.</summary>

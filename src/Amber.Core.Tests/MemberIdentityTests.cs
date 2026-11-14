@@ -230,6 +230,31 @@ public sealed class MemberIdentityTests : IDisposable
         Assert.Equal(again.Device.EdPublicKey, next.Device.EdPublicKey);
     }
 
+    /// <summary>After a reset, the old key was given up on purpose: a damaged new file gets a fresh identity, not the old key.</summary>
+    [Fact]
+    public void AfterAResetTheOldKeyNeverComesBack()
+    {
+        Directory.CreateDirectory(_dir);
+        using var legacy = Amber.Core.Multiplayer.Transport.X25519KeyPair.Generate();
+        File.WriteAllBytes(Path.Combine(_dir, MemberIdentity.LegacyFileName), MemberIdentity.Protect(_dir, legacy.ExportPrivateKey()));
+        using (var first = MemberIdentity.LoadOrCreate(_dir))
+        {
+            Assert.Equal(legacy.PublicKey, first.PublicKey);
+            first.Reset();
+        }
+        Assert.True(File.Exists(Path.Combine(_dir, MemberIdentity.RetiredFileName)));
+        var path = Path.Combine(_dir, MemberIdentity.FileName);
+        File.WriteAllText(path, "garbage");
+        using (var damaged = MemberIdentity.LoadOrCreate(_dir))
+        {
+            Assert.NotEqual(legacy.PublicKey, damaged.PublicKey);
+            Assert.NotNull(damaged.Warning);
+        }
+        File.Delete(path);
+        using var missing = MemberIdentity.LoadOrCreate(_dir);
+        Assert.NotEqual(legacy.PublicKey, missing.PublicKey);
+    }
+
     /// <summary>
     /// What an older version finds: it reads only the old file, as a bare key. A new device never writes that file, and a
     /// damaged old file is neither copied nor replaced.

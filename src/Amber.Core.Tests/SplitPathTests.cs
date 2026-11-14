@@ -193,6 +193,35 @@ public sealed class SplitPathTests
     [InlineData("auto,auto,2,extra")]
     public void AnythingElseMeansNoSplit(string? value) => Assert.False(SplitSettings.FromSwitch(value).Enabled);
 
+    [Fact]
+    public void AnOpenSwitchLetsTheRelaysPickTheNumberOfPaths()
+    {
+        var open = SplitSettings.FromSwitch("auto,auto");
+        Assert.True(open.PathsOpen);
+        Assert.False(SplitSettings.FromSwitch("auto,auto,2").PathsOpen);
+        string[] three = ["tcp://a.one.example:1", "tcp://b.one.example:1", "tcp://two.example:1", "tcp://three.example:1"];
+        // One more path than independent groups, between two and three.
+        Assert.Equal(2, open.FitTo([]).Paths);
+        Assert.Equal(2, open.FitTo([Community]).Paths);
+        Assert.Equal(3, open.FitTo(three[..3]).Paths);
+        Assert.Equal(3, open.FitTo(three).Paths);
+        var fitted = open.FitTo(three[..3]);
+        Assert.False(fitted.PathsOpen);
+        Assert.Equal((SplitPolicy.Auto, SplitPolicy.Auto, 2), (fitted.Game, fitted.Chat, fitted.Nets.Count));
+        // A fixed count, and no split, stay as they are.
+        var fixedTwo = SplitSettings.FromSwitch("auto,auto,2");
+        Assert.Same(fixedTwo, fixedTwo.FitTo(three));
+        Assert.Same(SplitSettings.None, SplitSettings.None.FitTo(three));
+    }
+
+    [Fact]
+    public void IndependentGroupsCountsOneGroupPerOperator()
+    {
+        Assert.Equal(0, SplitPathPlanner.IndependentGroups([]));
+        Assert.Equal(0, SplitPathPlanner.IndependentGroups(["not a node"]));
+        Assert.Equal(2, SplitPathPlanner.IndependentGroups(["tcp://a.one.example:1", "tcp://b.one.example:1", " tcp://two.example:1 ", "tcp://two.example:1"]));
+    }
+
     // ---- readiness ----
 
     [Fact]
@@ -456,5 +485,101 @@ public sealed class SplitPathTests
         using var l = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
         l.Start();
         return ((System.Net.IPEndPoint)l.LocalEndpoint).Port;
+    }
+
+    // ---- follow-ups ----
+
+    [Theory]
+    [InlineData("p2p", true)]
+    [InlineData("relay(2)", true)]
+    [InlineData("Relay(1)", true)]
+    [InlineData("relay(3)", false)]
+    [InlineData("relay(12)", false)]
+    [InlineData("relay", false)]
+    [InlineData("", false)]
+    [InlineData("relay(2)\n", false)]
+    [InlineData("relay(\u0662)", false)]
+    [InlineData("relay(+2)", false)]
+    public void AnExtraPathCrossesOneRelayAtMost(string cost, bool ok)
+    {
+        Assert.Equal(ok, SplitPathPlanner.OneRelayAtMost(cost));
+        var extra = new PeerInfo("jay-path-host", SplitPathArgs.HostIp(1), cost, 90, "tcp");
+        var problem = SplitPathPlanner.Check(DirectHost, [extra]);
+        if (ok) Assert.Null(problem);
+        else Assert.Equal(Amber.Core.Localization.L.T("core.mp.split.relay_multi_hop"), problem);
+    }
+
+    [Fact]
+    public async Task ATransportStartingAgainKeepsTheSessionsLegPorts()
+    {
+        var (hostRoom, _) = Rooms(SplitSettings.Create(SplitPolicy.Auto, SplitPolicy.Auto));
+        var held = WithLegs(new EasyTierOptions(hostRoom, true, [Community], 15000), out _, [FreePort(), FreePort()]);
+        using var legs = held.HostSplitLegs!;
+        var ports = legs.AllForTest.Select(l => ((System.Net.IPEndPoint)l.LocalEndpoint).Port).ToArray();
+        for (var round = 0; round < 2; round++)
+        {
+            var lent = legs.TryBorrow();
+            Assert.NotNull(lent);
+            Assert.Null(legs.TryBorrow());
+            Assert.Null(legs.TryTake());
+            await using (new SplitTunnelServer(hostRoom, _ => null, listeners: lent, giveBack: legs.Return)) { }
+            // Stopped transport: the ports are still this machine's, so nothing else can take them in between.
+            foreach (var port in ports)
+                Assert.Throws<System.Net.Sockets.SocketException>(() => SplitLegReservation.Bind(System.Net.IPAddress.Loopback, port));
+        }
+        // A refused start gives lent listeners back too.
+        Assert.Throws<ArgumentException>(() => new SplitTunnelServer(hostRoom, _ => null, ports: [1], listeners: legs.TryBorrow(), giveBack: legs.Return));
+        Assert.NotNull(legs.TryBorrow());
+        legs.Return();
+        // The session ending releases them.
+        legs.Dispose();
+        foreach (var port in ports) SplitLegReservation.Bind(System.Net.IPAddress.Loopback, port).Stop();
+    }
+
+    [Fact]
+    public void AnExtraPathThatCantStartDoesntStopAnAutoRoom()
+    {
+        var (hostRoom, memberRoom) = Rooms(SplitSettings.Create(SplitPolicy.Auto, SplitPolicy.Auto));
+        var work = Path.Combine(Path.GetTempPath(), "jay-split-" + Guid.NewGuid().ToString("N"));
+        Task<List<PeerInfo>> NoPeers(CancellationToken _) => Task.FromResult<List<PeerInfo>>([]);
+        (System.Diagnostics.Process, ProcessJob?) Broken(string core, IEnumerable<string> args, IReadOnlyDictionary<string, string> env, string dir) =>
+            throw new System.ComponentModel.Win32Exception("no core");
+        string[] peers = [Community, "tcp://relay.example.net:11010"];
+        var logged = new List<string>();
+        using var member = SplitPathGroup.Start("core", "cli",
+            new EasyTierOptions(memberRoom, false, peers, 15000) { LocalSplitPorts = [40010, 40011] }, work, NoPeers, logged.Add, Broken);
+        Assert.NotNull(member);
+        Assert.Empty(member.Instances);
+        Assert.StartsWith(Amber.Core.Localization.L.T("core.mp.split.start_failed"), member.Problem);
+        Assert.Contains(logged, l => l.StartsWith(Amber.Core.Localization.L.T("core.mp.split.start_failed"), StringComparison.Ordinal));
+
+        var held = WithLegs(new EasyTierOptions(hostRoom, true, peers, 15000), out _, [FreePort(), FreePort()]);
+        using (held.HostSplitLegs)
+            Assert.Null(SplitPathGroup.Start("core", "cli", held, work, NoPeers, launch: Broken));
+
+        // Strict: the failure is the room's.
+        var (_, strictMember) = Rooms(SplitSettings.Create(SplitPolicy.Strict, SplitPolicy.Auto));
+        Assert.Throws<System.ComponentModel.Win32Exception>(() => SplitPathGroup.Start("core", "cli",
+            new EasyTierOptions(strictMember, false, peers, 15000) { LocalSplitPorts = [40010, 40011] }, work, NoPeers, launch: Broken));
+    }
+
+    [Fact]
+    public async Task AFailingCheckIsLoggedOnceUntilItRecovers()
+    {
+        var failing = 1;
+        Task<List<PeerInfo>> Extra(SplitPathOptions o, CancellationToken _) => Volatile.Read(ref failing) != 0
+            ? throw new InvalidOperationException("query broke")
+            : Task.FromResult<List<PeerInfo>>([new("jay-path-host", SplitPathArgs.HostIp(o.Index), "relay(2)", 90, "tcp")]);
+        var logged = new List<string>();
+        int Failures() { lock (logged) return logged.Count(l => l.Contains(nameof(InvalidOperationException))); }
+        using var group = SplitPathGroup.ForTest(TwoExtraPaths(), _ => Task.FromResult<List<PeerInfo>>([DirectHost]), Extra,
+            TimeSpan.FromMilliseconds(10), line => { lock (logged) logged.Add(line); });
+        Assert.True(await Eventually(() => Failures() == 1));
+        await Task.Delay(200);
+        Assert.Equal(1, Failures());
+        Volatile.Write(ref failing, 0);
+        Assert.True(await Eventually(() => group.Problem is null));
+        Volatile.Write(ref failing, 1);
+        Assert.True(await Eventually(() => Failures() == 2));
     }
 }

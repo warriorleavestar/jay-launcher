@@ -45,6 +45,7 @@ static jmethodID g_dispatch_key;
 static jmethodID g_dispatch_scroll;
 static jmethodID g_dispatch_char;
 static jmethodID g_dispatch_look;
+static jmethodID g_is_block_target;
 static _Atomic int g_input_bridge_error_logged;
 static char g_load_error[256];
 static char g_runtime_error[2048];
@@ -61,6 +62,7 @@ static _Atomic uint64_t g_pointer_generation;
 static _Atomic uint32_t g_actions;
 static _Atomic uint32_t g_action_taps;
 static _Atomic int g_gameplay_mode;
+static _Atomic int g_block_target;
 static _Atomic uint64_t g_generation;
 static pthread_mutex_t g_event_mutex = PTHREAD_MUTEX_INITIALIZER;
 static uint32_t g_text[JAY_TEXT_CAPACITY];
@@ -231,6 +233,7 @@ int jay_jvm_run_main(JNIEnv *env, const char *class_name, int argc, const char *
         JAY_INPUT_METHOD(g_dispatch_scroll, "dispatchScroll", "(DD)Z");
         JAY_INPUT_METHOD(g_dispatch_char, "dispatchChar", "(I)Z");
         JAY_INPUT_METHOD(g_dispatch_look, "dispatchLook", "(FF)Z");
+        JAY_INPUT_METHOD(g_is_block_target, "isBlockTarget", "()Z");
 #undef JAY_INPUT_METHOD
     }
     jclass string_class = (*env)->FindClass(env, "java/lang/String");
@@ -284,6 +287,31 @@ int jay_java_pointer(float x, float y, uint32_t clicks) {
     jboolean delivered = (*env)->CallStaticBooleanMethod(env, g_input_bridge_class,
         g_dispatch_pointer, (jfloat)x, (jfloat)y, (jint)clicks);
     return jay_finish_input_call(env, attached, delivered);
+}
+
+__attribute__((visibility("default")))
+int jay_block_target_get(void) {
+    return atomic_load(&g_block_target);
+}
+
+static void jay_refresh_block_target(void) {
+    int attached;
+    JNIEnv *env = jay_input_environment(&attached);
+    if (env == NULL || g_is_block_target == NULL) {
+        atomic_store(&g_block_target, 0);
+        return;
+    }
+    jboolean targeted = (*env)->CallStaticBooleanMethod(env, g_input_bridge_class,
+        g_is_block_target);
+    if ((*env)->ExceptionCheck(env)) {
+        if (!atomic_exchange(&g_input_bridge_error_logged, 1))
+            (*env)->ExceptionDescribe(env);
+        (*env)->ExceptionClear(env);
+        atomic_store(&g_block_target, 0);
+    } else {
+        atomic_store(&g_block_target, targeted == JNI_TRUE ? 1 : 0);
+    }
+    if (attached && g_vm != NULL) (*g_vm)->DetachCurrentThread(g_vm);
 }
 
 __attribute__((visibility("default")))
@@ -424,6 +452,9 @@ void jay_input_add_key(int32_t key) {
 __attribute__((visibility("default")))
 void jay_input_read(jay_input_snapshot *snapshot) {
     if (snapshot == NULL) return;
+    // GLFW polls this function on Minecraft's game thread. Refresh the reflected hit result
+    // here; the Android drawing thread only reads the atomic cache above.
+    jay_refresh_block_target();
     snapshot->move_x = atomic_load(&g_move_x);
     snapshot->move_y = atomic_load(&g_move_y);
     snapshot->look_x = atomic_exchange(&g_look_x, 0.f);
