@@ -672,6 +672,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     protected override void OnSizeChanged(int width, int height, int oldWidth, int oldHeight)
     {
         base.OnSizeChanged(width, height, oldWidth, oldHeight);
+        _profile.AspectRatio = height > 0 ? (double)width / height : 1;
         if (Build.VERSION.SdkInt < BuildVersionCodes.Q) return;
 #pragma warning disable CA1416
         SystemGestureExclusionRects = [new Rect(0, Math.Max(0, height - 200), width, height)];

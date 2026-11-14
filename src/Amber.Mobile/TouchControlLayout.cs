@@ -8,6 +8,10 @@ public enum TouchControlAction
 
 public enum TouchControlMode { JoystickAndTap, DPadAndTap, JoystickAndCrosshair }
 
+/// <summary>
+/// One on-screen control. Centres are fractions of the view width and height; <see cref="Radius"/> is a
+/// fraction of the view's shorter side, the same unit the overlay draws with.
+/// </summary>
 public sealed record TouchControlDefinition(
     TouchControlAction Action, double CenterX, double CenterY, double Radius, string Label,
     bool GameplayVisible = true, bool MenuVisible = false);
@@ -16,10 +20,21 @@ public sealed record TouchControlDefinition(
 public sealed class TouchControlProfile
 {
     private readonly Dictionary<(TouchControlMode Mode, TouchControlAction Action), (double X, double Y)> _positions = [];
+    private double _aspectRatio = 1;
 
     public TouchControlMode Mode { get; set; } = TouchControlMode.JoystickAndTap;
     public double Scale { get; set; } = 1;
     public bool ForcedSprint { get; set; } = true;
+
+    /// <summary>
+    /// View width divided by height. Hit testing and the joystick measure distances in units of the
+    /// shorter side so a control's touch area matches its drawn size on any screen shape.
+    /// </summary>
+    public double AspectRatio
+    {
+        get => _aspectRatio;
+        set => _aspectRatio = double.IsFinite(value) && value > 0 ? value : 1;
+    }
 
     public IReadOnlyList<TouchControlDefinition> Controls => TouchControlLayout.For(Mode)
         .Select(Apply).ToArray();
@@ -27,12 +42,12 @@ public sealed class TouchControlProfile
     public TouchControlDefinition? HitTest(double x, double y, bool gameplayControlsActive = true) =>
         Controls.LastOrDefault(control =>
             (gameplayControlsActive ? control.GameplayVisible : control.MenuVisible) &&
-            TouchControlLayout.Distance(control, x, y) <= control.Radius);
+            TouchControlLayout.Distance(control, x, y, AspectRatio) <= control.Radius);
 
     public (double X, double Y) MovementVector(double x, double y)
     {
         var move = Controls.Single(control => control.Action == TouchControlAction.Move);
-        var vector = TouchControlLayout.MovementVector(move, x, y);
+        var vector = TouchControlLayout.MovementVector(move, x, y, AspectRatio);
         if (Mode != TouchControlMode.DPadAndTap) return vector;
         var length = Math.Sqrt(vector.X * vector.X + vector.Y * vector.Y);
         if (length < 0.20) return (0, 0);
@@ -105,19 +120,31 @@ public static class TouchControlLayout
     public static (double X, double Y) JoystickVector(double x, double y) =>
         new TouchControlProfile().MovementVector(x, y);
 
-    internal static (double X, double Y) MovementVector(TouchControlDefinition move, double x, double y)
+    internal static (double X, double Y) MovementVector(TouchControlDefinition move, double x, double y,
+        double aspectRatio = 1)
     {
-        var dx = (x - move.CenterX) / move.Radius;
-        var dy = (y - move.CenterY) / move.Radius;
+        var (dx, dy) = ShortSideOffset(move, x, y, aspectRatio);
+        dx /= move.Radius;
+        dy /= move.Radius;
         var length = Math.Sqrt(dx * dx + dy * dy);
         if (length > 1) { dx /= length; dy /= length; }
         return (dx, dy);
     }
 
-    internal static double Distance(TouchControlDefinition control, double x, double y)
+    internal static double Distance(TouchControlDefinition control, double x, double y, double aspectRatio = 1)
     {
-        var dx = x - control.CenterX;
-        var dy = y - control.CenterY;
+        var (dx, dy) = ShortSideOffset(control, x, y, aspectRatio);
         return Math.Sqrt(dx * dx + dy * dy);
+    }
+
+    /// <summary>
+    /// Converts an offset in view fractions (x of the width, y of the height) into fractions of the
+    /// shorter side, the unit control radii are drawn in.
+    /// </summary>
+    private static (double X, double Y) ShortSideOffset(TouchControlDefinition control, double x, double y,
+        double aspectRatio)
+    {
+        var shortSide = Math.Min(aspectRatio, 1);
+        return ((x - control.CenterX) * aspectRatio / shortSide, (y - control.CenterY) / shortSide);
     }
 }

@@ -172,6 +172,35 @@ public sealed class MobilePortTests
     }
 
     [Fact]
+    public void TouchHitAreasAndJoystickFollowTheDrawnSizeOnAWideScreen()
+    {
+        const double width = 2400, height = 1080;
+        var profile = new TouchControlProfile { AspectRatio = width / height };
+        var jump = profile.Controls.Single(control => control.Action == TouchControlAction.Jump);
+        var radiusPixels = jump.Radius * Math.Min(width, height);
+
+        // Inside the drawn size in both directions, outside it at 1.5 radii (in pixels) sideways.
+        Assert.Equal(TouchControlAction.Jump,
+            profile.HitTest(jump.CenterX + radiusPixels * 0.9 / width, jump.CenterY)!.Action);
+        Assert.Equal(TouchControlAction.Jump,
+            profile.HitTest(jump.CenterX, jump.CenterY + radiusPixels * 0.9 / height)!.Action);
+        Assert.NotEqual(TouchControlAction.Jump,
+            profile.HitTest(jump.CenterX + radiusPixels * 1.5 / width, jump.CenterY)?.Action);
+
+        // The same finger travel in pixels moves the joystick equally far in either direction.
+        var move = profile.Controls.Single(control => control.Action == TouchControlAction.Move);
+        var travel = move.Radius * Math.Min(width, height) * 0.5;
+        var sideways = profile.MovementVector(move.CenterX + travel / width, move.CenterY);
+        var forward = profile.MovementVector(move.CenterX, move.CenterY - travel / height);
+        Assert.Equal(0.5, sideways.X, 6);
+        Assert.Equal(-0.5, forward.Y, 6);
+
+        // A bad size never breaks hit testing.
+        profile.AspectRatio = double.NaN;
+        Assert.Equal(1, profile.AspectRatio);
+    }
+
+    [Fact]
     public void TouchSettingsRemainAvailableWhileMinecraftMenusAreOpen()
     {
         var sink = new RecordingTouchSink();
