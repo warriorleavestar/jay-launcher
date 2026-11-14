@@ -315,6 +315,19 @@ public partial class LocalizationTests
     }
 
     /// <summary>
+    /// On Android the game runs inside Jay, so the gateway hint must not send people to another launcher, matching the
+    /// scope text on the same screen.
+    /// </summary>
+    [Fact]
+    public void AndroidGatewayHintPointsAtTheBuiltInGame()
+    {
+        var en = L.Load("en");
+        Assert.DoesNotContain("another", en["mobile.tunnel.hint.android"], StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("built-in", en["mobile.tunnel.hint.android"], StringComparison.Ordinal);
+        Assert.Contains("No separate launcher", en["mobile.scope.description.android"], StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// Classical Chinese is written in traditional characters (its interface falls back to zh-Hant): no value uses a
     /// character that only exists in simplified Chinese.
     /// </summary>

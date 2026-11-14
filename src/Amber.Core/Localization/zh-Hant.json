@@ -1737,7 +1737,7 @@
   "mobile.enroll.button": "登記這台手機",
   "mobile.enroll.invalid": "邀請無效",
   "mobile.tunnel.title": "本機網關已啟用",
-  "mobile.tunnel.hint.android": "在其他 Android Java 版啟動器的多人遊戲中輸入上方地址。使用期間請儘量讓 Jay 保持在前台。",
+  "mobile.tunnel.hint.android": "下面 Jay 內建的遊戲會自己連上這個地址，不需要別的啟動器。玩的時候請讓 Jay 保持開啟。",
   "mobile.tunnel.hint.ios": "在同一 iPhone 或 iPad 上的相容用戶端中輸入上方地址。使用期間請讓 Jay 保持在前台；iOS 不保證後台網關持續運作。",
   "mobile.tunnel.hint.mobile": "在同一裝置的相容用戶端中輸入上方地址，並讓 Jay 保持在前台。",
   "mobile.tunnel.disconnect": "關閉網關",

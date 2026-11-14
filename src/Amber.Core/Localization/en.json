@@ -1770,7 +1770,7 @@
   "mobile.enroll.button": "Enroll this phone",
   "mobile.enroll.invalid": "The invite is invalid",
   "mobile.tunnel.title": "Local gateway is running",
-  "mobile.tunnel.hint.android": "Enter the address above in the multiplayer screen of another Android Minecraft Java launcher. Keep Jay in the foreground while using it when possible.",
+  "mobile.tunnel.hint.android": "Jay's built-in game below joins this address by itself, so no other launcher is needed. Keep Jay open while you play.",
   "mobile.tunnel.hint.ios": "Enter the address above in a compatible client on this iPhone or iPad. Keep Jay in the foreground; iOS does not guarantee that the gateway will keep running in the background.",
   "mobile.tunnel.hint.mobile": "Enter the address above in a compatible client on the same device and keep Jay in the foreground.",
   "mobile.tunnel.disconnect": "Stop gateway",
