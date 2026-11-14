@@ -179,6 +179,7 @@ public sealed class DirectSession : IAsyncDisposable
             Bridge.Connected += OnConnected;
             Bridge.ControlReceived += OnControl;
         }
+        Bridge.OwnsMappedPort = _gathered.Candidates.Any(c => c.Kind == PathKind.Mapped);
         if (!Options.Simulated) await StartNatKeepAliveAsync(ct);
         var session = IsHost ? Convert.ToHexStringLower(System.Security.Cryptography.RandomNumberGenerator.GetBytes(8)) : _remote?.Session ?? "";
         LocalAddresses = new DirectAddresses(session.Length >= 8 ? session : "0000000000000000", _gathered.Nat, _gathered.Candidates);

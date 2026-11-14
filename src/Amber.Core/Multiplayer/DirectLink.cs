@@ -423,12 +423,14 @@ public sealed class DirectBridge : IAsyncDisposable
         {
             for (var tick = 0; !limit.IsCancellationRequested; tick++)
             {
-                var probe = Seal(Probe, BuildProbePayload(round));
+                // Each probe names the kind of candidate it was aimed at, so the receiver can tell a probe that came in
+                // through its router-mapped port from one that came through its ordinary NAT address.
                 foreach (var t in targets)
                 {
-                    await SendRawAsync(probe, t.EndPoint, limit.Token);
+                    await SendRawAsync(Seal(Probe, BuildProbePayload(round, t.Kind)), t.EndPoint, limit.Token);
                     sent++;
                 }
+                var probe = Seal(Probe, BuildProbePayload(round, PathKind.Punch));
                 if (spray is not null && tick % 2 == 0)
                 {
                     // 先往映射端口附近（端口预测），再往随机端口（生日悖论）。
@@ -537,14 +539,24 @@ public sealed class DirectBridge : IAsyncDisposable
     /// <summary>房主没有对方地址时也能被连：只要有人发来认证通过的探测包就接受。</summary>
     public Task<DirectPeer?> WaitForPeerAsync(TimeSpan timeout, CancellationToken ct = default) => PunchAsync([], NatKind.Unknown, timeout, ct);
 
-    private byte[] BuildProbePayload(int round)
+    /// <summary>Probe payload: side (1 = host), punch round, 8 random bytes, and the kind of candidate it was aimed at.</summary>
+    private byte[] BuildProbePayload(int round, PathKind? aimedAt = null)
     {
-        var payload = new byte[13];
+        var payload = new byte[ProbeLength];
         payload[0] = _isHost ? (byte)1 : (byte)0;
         BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(1), round);
-        RandomNumberGenerator.Fill(payload.AsSpan(5));
+        RandomNumberGenerator.Fill(payload.AsSpan(5, 8));
+        payload[ProbeLength - 1] = aimedAt is { } kind ? (byte)kind : NotAimed;
         return payload;
     }
+
+    private const int ProbeLength = 14;
+    private const byte NotAimed = 0xFF;
+
+    private static bool AimedAtMapped(byte[] payload) => payload.Length >= ProbeLength && payload[ProbeLength - 1] == (byte)PathKind.Mapped;
+
+    /// <summary>This side holds a router-mapped port (UPnP / NAT-PMP) that it offered as a candidate.</summary>
+    internal bool OwnsMappedPort { get; set; }
 
     private async Task SendRawAsync(ReadOnlyMemory<byte> packet, IPEndPoint target, CancellationToken ct)
     {
@@ -560,11 +572,14 @@ public sealed class DirectBridge : IAsyncDisposable
         }
     }
 
-    private PathKind Classify(IPEndPoint from, IReadOnlyList<Candidate>? hints = null)
+    /// <param name="throughMapping">The probe that set this up was aimed at a router-mapped port (ours, or the other side's).</param>
+    private PathKind Classify(IPEndPoint from, bool throughMapping = false)
     {
         if (from.AddressFamily == AddressFamily.InterNetworkV6) return PathKind.IPv6;
+        if (throughMapping) return PathKind.Mapped;
         if (!PortMapping.IsPublic(from.Address)) return PathKind.Lan;
-        return _lastRemote?.FirstOrDefault(c => c.EndPoint.Equals(from))?.Kind ?? PathKind.Punch;
+        // A port-preserving NAT can give the STUN and the mapped candidate the same endpoint: that is the mapped path.
+        return _lastRemote?.Where(c => c.EndPoint.Equals(from)).OrderBy(c => c.Kind == PathKind.Mapped ? 0 : 1).FirstOrDefault()?.Kind ?? PathKind.Punch;
     }
 
     private IReadOnlyList<Candidate>? _lastRemote;
@@ -625,14 +640,19 @@ public sealed class DirectBridge : IAsyncDisposable
                 // 对方是同一侧（房主收到房主的探测）就不理，防止自己连自己。
                 if (payload.Length >= 1 && payload[0] == (_isHost ? 1 : 0)) break;
                 // 先登记再回确认：不接（人满、路径没开）就不回，对方不会以为连上了。
-                if (!Accept(from)) break;
+                // Aimed at our mapped port: only believed while we really hold one.
+                if (!Accept(from, OwnsMappedPort && AimedAtMapped(payload))) break;
                 await SendRawAsync(Seal(ProbeAck, payload), from, _cts.Token);
                 break;
             case ProbeAck:
-                if (Accept(from) && payload.Length >= 5 && payload[0] == (_isHost ? 1 : 0)
-                    && _punches.TryGetValue(BinaryPrimitives.ReadInt32BigEndian(payload.AsSpan(1)), out var round)
-                    && _peers.TryGetValue(from, out var acknowledged)) round.TrySetResult(acknowledged);
+            {
+                // The answer echoes our own probe: when that probe went to the other side's mapped port, this is the mapped path.
+                var ours = payload.Length >= 5 && payload[0] == (_isHost ? 1 : 0);
+                var punch = ours && _punches.TryGetValue(BinaryPrimitives.ReadInt32BigEndian(payload.AsSpan(1)), out var r) ? r : null;
+                var throughMapping = punch is not null && AimedAtMapped(payload) && _lastRemote?.Any(c => c.Kind == PathKind.Mapped) == true;
+                if (Accept(from, throughMapping) && punch is not null && _peers.TryGetValue(from, out var acknowledged)) punch.TrySetResult(acknowledged);
                 break;
+            }
             case Ping when _peers.TryGetValue(from, out var p1):
                 p1.LastSeen = DateTime.UtcNow;
                 await SendRawAsync(Seal(Pong, payload), from, _cts.Token);
@@ -661,11 +681,11 @@ public sealed class DirectBridge : IAsyncDisposable
     internal TimeSpan PeerTimeout { get; init; } = TimeSpan.FromSeconds(60);
 
     /// <summary>登记一个对方。已经登记过返回 true；不接（加入方已经有房主、人满、路径没开、建不了套接字）返回 false。</summary>
-    private bool Accept(IPEndPoint from)
+    private bool Accept(IPEndPoint from, bool throughMapping = false)
     {
         DirectPeer? connected;
         bool accepted;
-        lock (_peerGate) accepted = AcceptLocked(from, out connected);
+        lock (_peerGate) accepted = AcceptLocked(from, throughMapping, out connected);
         if (connected is not null)
         {
             _log(L.F("core.mp.punch.connected", from, DirectText.Path(connected.Path)));
@@ -674,7 +694,7 @@ public sealed class DirectBridge : IAsyncDisposable
         return accepted;
     }
 
-    private bool AcceptLocked(IPEndPoint from, out DirectPeer? connected)
+    private bool AcceptLocked(IPEndPoint from, bool throughMapping, out DirectPeer? connected)
     {
         connected = null;
         if (_cts.IsCancellationRequested) return false;
@@ -686,7 +706,7 @@ public sealed class DirectBridge : IAsyncDisposable
         }
         if (!_isHost && !_peers.IsEmpty) return false;
         if (_blocked.Contains(from)) return false;
-        var path = Classify(from);
+        var path = Classify(from, throughMapping);
         if (!AllowedPaths.Contains(path) && !(path == PathKind.Punch && AllowedPaths.Contains(PathKind.PunchSpray)))
         {
             _log(L.F("core.mp.punch.disabled", from, DirectText.Path(path)));

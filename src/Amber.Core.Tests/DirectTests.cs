@@ -184,6 +184,40 @@ public class DirectBridgeTests
         Assert.Empty(host.Peers);
     }
 
+    /// <summary>
+    /// Only the host has a router-mapped port and both sides allow only the mapped path (the test's "mapped port" step):
+    /// the guest's probe aimed at that port is recognised as the mapped path on both sides.
+    /// </summary>
+    [Fact]
+    public async Task MappedPathWorksWhenOnlyOneSideHasAMapping()
+    {
+        await using var host = new DirectBridge(DirectBridge.CreateSocket(), DirectTestKeys.Bridge, true, 1, _ => { }) { OwnsMappedPort = true };
+        await using var guest = new DirectBridge(DirectBridge.CreateSocket(), DirectTestKeys.Bridge, false, null, _ => { });
+        host.AllowedPaths.Clear();
+        host.AllowedPaths.Add(PathKind.Mapped);
+        guest.AllowedPaths.Clear();
+        guest.AllowedPaths.Add(PathKind.Mapped);
+        List<Candidate> hostCandidates = [new(PathKind.Mapped, new IPEndPoint(IPAddress.Loopback, host.SocketEndPoint.Port))];
+        guest.SetRemoteCandidates(hostCandidates);
+        var hostWait = host.WaitForPeerAsync(TimeSpan.FromSeconds(5));
+        var peer = await guest.PunchAsync(hostCandidates, NatKind.Open, TimeSpan.FromSeconds(5));
+        Assert.NotNull(peer);
+        Assert.Equal(PathKind.Mapped, peer!.Path);
+        Assert.Equal(PathKind.Mapped, (await hostWait)!.Path);
+    }
+
+    /// <summary>A probe that claims to be aimed at a mapped port is not believed by a side that holds none.</summary>
+    [Fact]
+    public async Task MappedClaimNeedsAMappingOnTheReceivingSide()
+    {
+        await using var host = new DirectBridge(DirectBridge.CreateSocket(), DirectTestKeys.Bridge, true, 1, _ => { });
+        await using var guest = new DirectBridge(DirectBridge.CreateSocket(), DirectTestKeys.Bridge, false, null, _ => { });
+        host.AllowedPaths.Clear();
+        host.AllowedPaths.Add(PathKind.Mapped);
+        Assert.Null(await guest.PunchAsync([new(PathKind.Mapped, new IPEndPoint(IPAddress.Loopback, host.SocketEndPoint.Port))], NatKind.Open, TimeSpan.FromSeconds(1.5)));
+        Assert.Empty(host.Peers);
+    }
+
     [Fact]
     public async Task WrongRoomKeyIsIgnored()
     {
