@@ -399,6 +399,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
 {
     private const long LongPressDelayMs = 340;
     private const long LongPressRingMs = 900;
+    private const long StatePollMs = 100;
     private readonly Paint _fill = new() { AntiAlias = true, Color = Color.Argb(142, 48, 53, 59) };
     private readonly Paint _activeFill = new() { AntiAlias = true, Color = Color.Argb(218, 105, 112, 120) };
     private readonly Paint _buttonFace = new() { AntiAlias = false, Color = Color.Argb(82, 76, 82, 86) };
@@ -423,6 +424,9 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     private float _controlOpacity = 0.62f;
     private int _guiScaleOption = MinecraftHotbar.DefaultGuiScaleOption;
     private bool _lastGameplayControlsActive;
+    private bool _polling;
+    private bool _polledGameplay;
+    private Java.Lang.Runnable? _poll;
 
     public TouchControlOverlay(Context context) : base(context)
     {
@@ -472,7 +476,35 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
             DrawSettings(canvas);
         else if (_layoutEditing)
             DrawEditGuide(canvas);
-        PostInvalidateDelayed(100);
+    }
+
+    protected override void OnAttachedToWindow()
+    {
+        base.OnAttachedToWindow();
+        _polling = true;
+        _poll ??= new Java.Lang.Runnable(PollGameState);
+        RemoveCallbacks(_poll);
+        PostDelayed(_poll, StatePollMs);
+    }
+
+    protected override void OnDetachedFromWindow()
+    {
+        _polling = false;
+        if (_poll is not null) RemoveCallbacks(_poll);
+        base.OnDetachedFromWindow();
+    }
+
+    /// <summary>
+    /// Redraws only when something on screen can have changed without a touch: the game switched
+    /// between play and a menu, or a long-press ring is animating. Touches redraw directly.
+    /// </summary>
+    private void PollGameState()
+    {
+        if (!_polling) return;
+        var gameplay = NativeJvmHost.GameplayControlsActive;
+        if (gameplay != _polledGameplay || _longPressIndicators.Count > 0) Invalidate();
+        _polledGameplay = gameplay;
+        if (_poll is not null) PostDelayed(_poll, StatePollMs);
     }
 
     private void DrawMovementPad(Canvas canvas, float x, float y, float radius)
@@ -908,6 +940,8 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     {
         if (e is null) return false;
         if (HandleSettingsTouch(e) || HandleLayoutEditTouch(e)) return true;
+        // Pressed keys and the joystick knob follow the finger.
+        Invalidate();
         var actionIndex = e.ActionIndex;
         switch (e.ActionMasked)
         {
