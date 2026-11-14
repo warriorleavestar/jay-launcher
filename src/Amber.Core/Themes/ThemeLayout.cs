@@ -68,6 +68,14 @@ public static partial class ThemeLayout
         ["log"] = Page("log", ["header", "jump", "filters", "list"]),
     };
 
+    /// <summary>
+    /// Whether a control a page tags with <paramref name="name"/> is a region a theme layout of <paramref name="pageId"/>
+    /// can place. Other tagged controls (for example mods.inspector inside instances.details) are not taken out of their
+    /// parent, so they move with the region that contains them instead of disappearing.
+    /// </summary>
+    public static bool IsPlaceableRegion(string pageId, string name) =>
+        Regions.TryGetValue(pageId, out var regions) && regions.All.Contains(RegionAliases.GetValueOrDefault(name, name));
+
     private static (string[] All, string[] Required) Page(string id, string[] required, params string[] optional)
     {
         var req = required.Select(r => $"{id}.{r}").ToArray();
