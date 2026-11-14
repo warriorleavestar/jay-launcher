@@ -708,6 +708,17 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             }
             else
             {
+                // A room this directory doesn't hold must come with a recent version: the version is the host's signing
+                // time, so a listing copied from an earlier snapshot can't bring a closed room back after it expired or
+                // after a restart. A host whose clock is behind is told this directory's time and signs again (see
+                // RoomDirectoryClient.AnnounceAsync); renewals of rooms already held aren't checked.
+                var nowMs = _now().ToUnixTimeMilliseconds();
+                if (listing.Seq < nowMs - (long)MaxNewListingAge.TotalMilliseconds)
+                {
+                    var old = Error("stale");
+                    old["now"] = nowMs;
+                    return old;
+                }
                 if (_rooms.Count >= MaxRooms) return Error("full");
                 if (_withdrawn.TryGetValue(listing.Id, out var gone) && listing.Seq <= gone) return Error("stale");
                 entry = new Entry { Listing = listing };
@@ -765,6 +776,9 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             return reply;
         }
     }
+
+    /// <summary>How old a listing's version (its signing time) may be when it adds a room this directory doesn't hold.</summary>
+    public static readonly TimeSpan MaxNewListingAge = HiddenEntry.MaxClockSkew;
 
     private JsonObject Withdraw(JsonObject request)
     {
@@ -1207,6 +1221,11 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
     }
 
     /// <summary>至少一个目录收下就算成功；都不收时，有明确拒绝就报拒绝，否则报连不上。</summary>
+    /// <summary>The directory's time from a "stale" reply that says the listing was too old, when it is ahead of <paramref name="seq"/>.</summary>
+    private static long? DirectoryTimeIfTooOld(JsonObject? reply, long seq) =>
+        reply is not null && !IsOk(reply) && reply["error"] is JsonValue e && e.TryGetValue<string>(out var code) && code == "stale"
+        && reply["now"] is JsonValue n && n.TryGetValue<long>(out var now) && now > seq ? now : null;
+
     private static List<JsonObject> NeedOne(List<(JsonObject? Reply, Exception? Error)> results)
     {
         var ok = results.Where(r => r.Reply?["ok"]?.GetValue<bool>() == true).Select(r => r.Reply!).ToList();
@@ -1331,9 +1350,14 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
     /// <param name="lobbyKeys">Lobby keys of the invites still open: each gets a sealed hidden entry, so holders of the invite find the room in their snapshot.</param>
     /// <param name="searchKey">本机的指纹密钥：给了就能用这台电脑的指纹码找到这个房间。</param>
     /// <param name="account">This network's login token, if logged in: lets networks that require login accept the room and tie it to the account.</param>
+    /// <param name="behind">
+    /// Called with a directory's time (Unix milliseconds) when it refused the listing as too old for a room it doesn't hold:
+    /// this computer's clock is behind. The caller moves its <see cref="RoomSigner"/> on (<see cref="RoomSigner.AdvanceTo"/>)
+    /// and publishes again.
+    /// </param>
     /// <returns>A warning to show the host (the room is listed but its invites can't be found), or null.</returns>
     public async Task<AnnounceWarning?> AnnounceAsync(RoomListing listing, bool listed, IEnumerable<byte[]> lobbyKeys, CancellationToken ct,
-        byte[]? searchKey = null, string? account = null)
+        byte[]? searchKey = null, string? account = null, Action<long>? behind = null)
     {
         var hit = new DirectoryHit(listing.Id, listing.Ip, listing.HostKey);
         var hidden = new JsonArray();
@@ -1360,7 +1384,9 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
         };
         if (searchKey is not null) request["fp"] = Convert.ToHexStringLower(searchKey);
         if (account is not null) request["account"] = account;
-        var replies = NeedOne(await FanOutAsync(request, ct));
+        var results = await FanOutAsync(request, ct);
+        if (behind is not null && results.Select(r => DirectoryTimeIfTooOld(r.Reply, listing.Seq)).Max() is { } directoryNow) behind(directoryNow);
+        var replies = NeedOne(results);
         if (replies.Any(r => r["warn"]?.GetValue<string>() == "clock")) return AnnounceWarning.Clock;
         return replies.Any(r => r["warn"]?.GetValue<string>() == "lookup") ? AnnounceWarning.Lookup : null;
     }

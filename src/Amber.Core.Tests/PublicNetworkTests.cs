@@ -166,6 +166,52 @@ public sealed class PublicNetworkTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task AnOldListingCannotBringBackAnExpiredRoom()
+    {
+        var client = new RoomDirectoryClient(_net);
+        var signed = new RoomSigner().Sign(Listing(), _now);
+        await client.AnnounceAsync(signed, true, [], default);
+        // The room closes; its signed listing stays in everyone's snapshot.
+        _now += RoomDirectoryServer.MaxNewListingAge + TimeSpan.FromMinutes(1);
+        Assert.Empty(await client.ListAsync(default));
+        var replay = await Assert.ThrowsAsync<DirectoryRejectedException>(() => client.AnnounceAsync(signed, true, [], default));
+        Assert.Equal("stale", replay.Code);
+        Assert.Empty(await client.ListAsync(default));
+    }
+
+    [Fact]
+    public async Task AHostWhoseClockIsBehindStillGetsListed()
+    {
+        var client = new RoomDirectoryClient(_net);
+        var signer = new RoomSigner();
+        var hostTime = _now - TimeSpan.FromHours(3);
+        long? told = null;
+        await Assert.ThrowsAsync<DirectoryRejectedException>(() => client.AnnounceAsync(signer.Sign(Listing(), hostTime), true, [], default, behind: t => told = t));
+        Assert.Equal(_now.ToUnixTimeMilliseconds(), told);
+        signer.AdvanceTo(told!.Value);
+        await client.AnnounceAsync(signer.Sign(Listing(), hostTime), true, [], default);
+        Assert.Single(await client.ListAsync(default));
+        // Renewals of a room the directory holds keep working with the host's slow clock, well past the age limit.
+        for (var i = 1; i <= 20; i++)
+        {
+            _now += TimeSpan.FromMinutes(1);
+            await client.AnnounceAsync(signer.Sign(Listing() with { Players = 4 }, hostTime + TimeSpan.FromMinutes(i)), true, [], default);
+        }
+        Assert.Equal(4, Assert.Single(await client.ListAsync(default)).Players);
+    }
+
+    [Fact]
+    public async Task TheAnnouncerSignsAgainWhenTheDirectorySaysItsClockIsBehind()
+    {
+        // This directory's clock is hours ahead of the wall clock the announcer signs with.
+        _now = DateTimeOffset.UtcNow + TimeSpan.FromHours(3);
+        await using var announcer = new RoomAnnouncer(_net, () => Listing(), () => [], every: TimeSpan.FromHours(1));
+        await announcer.AnnounceOnceAsync(default);
+        Assert.True(announcer.Published, announcer.LastError);
+        Assert.Single(await new RoomDirectoryClient(_net).ListAsync(default));
+    }
+
+    [Fact]
     public async Task OneInvitesIndexHoldsOnlyAFewRooms()
     {
         var client = new RoomDirectoryClient(_net);

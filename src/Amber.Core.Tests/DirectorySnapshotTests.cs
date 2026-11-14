@@ -431,8 +431,9 @@ public sealed class DirectorySnapshotTests : IAsyncDisposable
     public void AWrongClockOnlyLeavesOutTheHiddenEntries()
     {
         var lobby = RandomNumberGenerator.GetBytes(16);
-        // A public room from a host whose clock is hours off: listed, its invite entry left out, the host told.
-        var skewed = new RoomSigner().Sign(Listing(RoomVisibility.Public), _now - TimeSpan.FromHours(3));
+        // A public room from a host whose clock is hours off: listed, its invite entry left out, the host told. (A clock that
+        // is behind first gets the directory's time and signs again: PublicNetworkTests.AHostWhoseClockIsBehindStillGetsListed.)
+        var skewed = new RoomSigner().Sign(Listing(RoomVisibility.Public), _now + TimeSpan.FromHours(3));
         var reply = Publish(lobby, lobby, skewed, null, listed: true);
         Assert.True(reply["ok"]!.GetValue<bool>());
         Assert.Equal("clock", reply["warn"]!.GetValue<string>());

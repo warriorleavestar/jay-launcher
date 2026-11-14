@@ -225,6 +225,17 @@ public sealed class RoomSigner
         return unsigned with { Signature = SignBytes(unsigned.SignedBytes()) };
     }
 
+    /// <summary>
+    /// A directory said this computer's clock is behind (its time is <paramref name="seq"/>, Unix milliseconds): the next
+    /// version is signed after it, so a directory that doesn't hold the room yet takes it. Never moves back.
+    /// </summary>
+    public void AdvanceTo(long seq)
+    {
+        long seen;
+        do seen = Interlocked.Read(ref _lastSeq);
+        while (seq > seen && Interlocked.CompareExchange(ref _lastSeq, seq, seen) != seen);
+    }
+
     /// <summary>撤下房间的签名（带序号，旧的撤下请求不能重放到以后的房间版本上）。</summary>
     public (long Seq, byte[] Signature) SignWithdraw(DateTimeOffset now)
     {
