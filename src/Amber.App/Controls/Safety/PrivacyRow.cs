@@ -58,6 +58,9 @@ public class PrivacyRow : SafetySurface
             _panel.HorizontalAlignment = value ? HorizontalAlignment.Center : HorizontalAlignment.Left;
             _text.TextAlignment = value ? TextAlignment.Center : TextAlignment.Left;
             _text.MaxWidth = value ? 68 : double.PositiveInfinity;
+            // The opaque backing keeps its vertical padding, but in the narrow icon rail the side padding would push
+            // "No telemetry" onto three lines with a word cut in half.
+            Padding = value ? new Thickness(0, 4) : new Thickness(6, 4);
             foreach (var c in _panel.Children) c.HorizontalAlignment = value ? HorizontalAlignment.Center : HorizontalAlignment.Left;
             Update();
         }
