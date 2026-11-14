@@ -69,9 +69,22 @@ public sealed class InstanceSettings
     {
         try
         {
-            return JsonSerializer.Deserialize(File.ReadAllText(path), Options.Info<InstanceSettings>());
+            return Parse(File.ReadAllText(path));
         }
-        catch (Exception e) when (e is JsonException or IOException or UnauthorizedAccessException)
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>The settings in <paramref name="json"/>; null when it is not a settings file.</summary>
+    internal static InstanceSettings? Parse(string json)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize(json, Options.Info<InstanceSettings>());
+        }
+        catch (JsonException)
         {
             return null;
         }
@@ -84,8 +97,8 @@ public sealed class InstanceSettings
     public void Save(GameDirectory dir, string id)
     {
         Directory.CreateDirectory(dir.VersionDir(id));
-        InstanceSettingsTrust.Trust(dir, this);
-        File.WriteAllText(Path.Combine(dir.VersionDir(id), FileName), JsonSerializer.Serialize(this, Options.Info<InstanceSettings>()));
+        var json = JsonSerializer.Serialize(this, Options.Info<InstanceSettings>());
+        InstanceSettingsTrust.Trust(dir, this, () => File.WriteAllText(Path.Combine(dir.VersionDir(id), FileName), json));
     }
 
     /// <summary>

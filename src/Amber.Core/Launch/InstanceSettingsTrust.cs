@@ -80,30 +80,40 @@ internal static class InstanceSettingsTrust
         }
     }
 
-    /// <summary>Records the values Jay is about to save. Throws <see cref="IOException"/> when they cannot be recorded.</summary>
-    internal static void Trust(GameDirectory dir, InstanceSettings settings) => Change(store =>
+    /// <summary>
+    /// Records the values Jay is about to save, then runs <paramref name="save"/> (which writes the instance file) under
+    /// the same lock, so no other Jay process can trim the new record away before the file that uses it is written.
+    /// Throws <see cref="IOException"/> when the values cannot be recorded; <paramref name="save"/> then does not run.
+    /// </summary>
+    internal static void Trust(GameDirectory dir, InstanceSettings settings, Action? save = null) => Change(store =>
     {
         var changed = AdoptIfNew(dir, store);
         if (Fingerprint(settings) is { } print) changed |= Add(store, print);
         return changed;
-    });
+    }, then: save);
 
-    /// <summary>Reads the record, applies <paramref name="change"/> and writes it back if it changed, all under the lock.</summary>
-    private static void Change(Func<Store, bool> change, bool keepGoingIfUnwritable = false)
+    /// <summary>
+    /// Reads the record, applies <paramref name="change"/>, writes it back if it changed and runs <paramref name="then"/>,
+    /// all under the lock.
+    /// </summary>
+    private static void Change(Func<Store, bool> change, bool keepGoingIfUnwritable = false, Action? then = null)
     {
         lock (Gate)
         {
             using var held = TakeLock();
             var store = Read();
-            if (!change(store)) return;
-            try
+            if (change(store))
             {
-                Write(store);
+                try
+                {
+                    Write(store);
+                }
+                catch (IOException) when (keepGoingIfUnwritable)
+                {
+                    // Only a check: its answer stands for this read. Launching still needs the record (EnsureAdopted).
+                }
             }
-            catch (IOException) when (keepGoingIfUnwritable)
-            {
-                // Only a check: its answer stands for this read. Launching still needs the record (EnsureAdopted).
-            }
+            then?.Invoke();
         }
     }
 
@@ -112,30 +122,52 @@ internal static class InstanceSettingsTrust
     {
         var root = Key(dir.Root);
         if (store.Roots.Contains(root)) return false;
+        // Every settings file must be read now: one skipped (locked, unreadable) would never be adopted later. The folder
+        // is recorded only when all of them were, otherwise the whole adoption is tried again next time.
+        var prints = PrintsIn(dir.Root, out var unreadable);
+        if (unreadable is not null)
+            throw new IOException(L.F("core.launch.settings_file_unreadable", unreadable.Message), unreadable);
         store.Roots.Add(root);
-        foreach (var print in PrintsIn(dir.Root)) Add(store, print);
+        foreach (var print in prints) Add(store, print);
         return true;
     }
 
-    /// <summary>The fingerprints of the instance settings in a game folder now.</summary>
-    private static IEnumerable<string> PrintsIn(string root)
+    /// <summary>
+    /// The fingerprints of the instance settings in a game folder now. <paramref name="unreadable"/> is the first error
+    /// when a folder or settings file that exists could not be read (a damaged file is not an error: it holds nothing).
+    /// </summary>
+    private static List<string> PrintsIn(string root, out Exception? unreadable)
     {
+        unreadable = null;
+        List<string> prints = [];
         var versions = Path.Combine(root, "versions");
-        IEnumerable<string> folders;
+        List<string> folders;
         try
         {
-            folders = Directory.Exists(versions) ? Directory.EnumerateDirectories(versions).ToList() : [];
+            folders = Directory.Exists(versions) ? [.. Directory.EnumerateDirectories(versions)] : [];
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
-            yield break;
+            unreadable = e;
+            return prints;
         }
         foreach (var folder in folders)
         {
             var file = Path.Combine(folder, InstanceSettings.FileName);
-            if (File.Exists(file) && InstanceSettings.ReadFile(file) is { } existing && Fingerprint(existing) is { } print)
-                yield return print;
+            if (!File.Exists(file)) continue;
+            string text;
+            try
+            {
+                text = File.ReadAllText(file);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                unreadable ??= e;
+                continue;
+            }
+            if (InstanceSettings.Parse(text) is { } existing && Fingerprint(existing) is { } print) prints.Add(print);
         }
+        return prints;
     }
 
     private static bool Add(Store store, string print)
@@ -155,7 +187,13 @@ internal static class InstanceSettingsTrust
     /// </summary>
     private static void Trim(Store store)
     {
-        var inUse = new HashSet<string>(store.Roots.SelectMany(PrintsIn), StringComparer.Ordinal);
+        HashSet<string> inUse = new(StringComparer.Ordinal);
+        foreach (var root in store.Roots)
+        {
+            inUse.UnionWith(PrintsIn(root, out var unreadable));
+            // Can't tell what that folder uses right now: drop nothing this time.
+            if (unreadable is not null) return;
+        }
         // The newest record is the one being added; it always stays.
         for (var i = 0; i < store.Trusted.Count - 1 && store.Trusted.Count > MaxTrusted;)
         {

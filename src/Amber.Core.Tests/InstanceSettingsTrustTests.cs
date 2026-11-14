@@ -207,6 +207,37 @@ public sealed class InstanceSettingsTrustTests : IDisposable
     }
 
     [Fact]
+    public void AFolderWithASettingsFileItCannotReadYetIsAdoptedOnceItCan()
+    {
+        UsePrivateStore();
+        WriteRaw("old", $$"""{"JvmArgs":"-Dold={{_marker}}"}""");
+        // Another program holds the file: the folder is not recorded, so nothing is taken as seen too early.
+        using (new FileStream(FileOf("old"), FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            Assert.Throws<IOException>(() => InstanceSettingsTrust.EnsureAdopted(Dir));
+            Assert.Throws<IOException>(() => new InstanceSettings { MaxMemoryMb = 1024 }.Save(Dir, "new"));
+            Assert.False(File.Exists(FileOf("new")));
+        }
+        // Readable again: adopted as it was, the player's settings intact.
+        var loaded = InstanceSettings.Load(Dir, "old");
+        Assert.False(loaded.DroppedUnknownValues);
+        Assert.Equal("-Dold=" + _marker, loaded.JvmArgs);
+    }
+
+    [Fact]
+    public void TheInstanceFileIsWrittenWhileTheRecordIsHeld()
+    {
+        var store = UsePrivateStore();
+        var heldDuringSave = false;
+        InstanceSettingsTrust.Trust(Dir, new InstanceSettings { GameArgs = "--" + _marker }, () =>
+        {
+            try { using var probe = new FileStream(store + ".lock", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None); }
+            catch (IOException) { heldDuringSave = true; }
+        });
+        Assert.True(heldDuringSave);
+    }
+
+    [Fact]
     public void ASaveWaitsForAnotherJayHoldingTheRecord()
     {
         var store = UsePrivateStore();
