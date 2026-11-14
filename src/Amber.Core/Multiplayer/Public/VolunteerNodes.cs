@@ -692,10 +692,15 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
                     var others = _entries.Where(p => p.Key != address && p.Value.Machine == machine).ToList();
                     int Listeners(bool verified) => others.Where(p => (p.Value.VerifiedAt is not null) == verified && p.Value.Ip is not null)
                         .Select(p => Endpoint(p.Value.Ip!, new Uri(p.Key).Port)).Where(e => e != endpoint).Distinct().Count();
-                    crowded = Listeners(true) >= MaxPerHost || Listeners(false) >= MaxPerHost || CoolingDown(DialKey(ip, address), _now());
+                    _entries.TryGetValue(address, out var mine);
+                    // A listed node being checked again keeps its place: only its own check decides whether it stays, so
+                    // other entries for the machine (say, ones still being probed) can't push it out. A name that now
+                    // resolves to another listener is new there and counted like any new one.
+                    var holdsItsPlace = mine is { VerifiedAt: not null } && mine.Ip == ip.ToString();
+                    crowded = !holdsItsPlace && (Listeners(true) >= MaxPerHost || Listeners(false) >= MaxPerHost)
+                              || CoolingDown(DialKey(ip, address), _now());
                     // A listener checked under another name since this one was needn't be dialled again: the name takes
                     // that check's time, so the listener is still dialled once its newest check is too old.
-                    _entries.TryGetValue(address, out var mine);
                     var now = _now();
                     sameListener = crowded ? null : others
                         .Where(p => p.Value.VerifiedAt is { } at && now - at < ReprobeEvery && at > (mine?.VerifiedAt ?? DateTimeOffset.MinValue)

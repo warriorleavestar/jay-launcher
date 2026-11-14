@@ -329,6 +329,53 @@ public sealed class VolunteerNodesTests : IAsyncDisposable
         Assert.Equal(["tcp://q.example.org:11010"], registry.Listed());
     }
 
+    [Theory]
+    [InlineData("tcp://node.example.org:11010", "tcp://node.example.org:{0}")]
+    [InlineData("tcp://node.example.org:11010", "tcp://alias{0}.example.org:{0}")]
+    [InlineData("tcp://node.six.example.org:11010", "tcp://h{0}.six.example.org:{0}")]
+    public async Task AListedNodeKeepsItsPlaceWhileOthersAreProbed(string node, string otherFormat)
+    {
+        // The node is listed; when it is due to be checked again, two other ports of its machine are still being probed
+        // (they hang). Its renewal is still dialled, and it stays listed and given out.
+        var hang = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var dialled = new List<string>();
+        Task<IPAddress?> Resolve(string url, CancellationToken _) =>
+            Task.FromResult<IPAddress?>(IPAddress.Parse(new Uri(url).Host.EndsWith(".six.example.org")
+                ? (new Uri(url).Host.StartsWith("node.") ? "fd00:1:2:3::5" : $"fd00:1:2:3::{new Uri(url).Port % 1000:x}") : "10.20.30.40"));
+        var registry = new VolunteerRegistry((url, _) =>
+        {
+            lock (dialled) dialled.Add(url);
+            return url == node ? Task.FromResult(true) : hang.Task;
+        }, () => _now, Resolve);
+        Assert.True(Ok(registry.Register(node)));
+        await registry.LastProbe;
+        Assert.Equal([node], registry.Listed());
+        // Renewed as usual until its check is about to be old.
+        var checkedAt = _now;
+        while (_now + VolunteerNodes.RenewEvery - checkedAt < VolunteerRegistry.ReprobeEvery)
+        {
+            _now += VolunteerNodes.RenewEvery;
+            Assert.True(Ok(registry.Register(node)));
+        }
+        var others = new List<Task>();
+        foreach (var port in new[] { 12001, 12002 })
+        {
+            Assert.True(Ok(registry.Register(string.Format(System.Globalization.CultureInfo.InvariantCulture, otherFormat, port))));
+            others.Add(registry.LastProbe);
+        }
+        await Task.Delay(50);
+        _now += VolunteerNodes.RenewEvery;
+        var renewed = registry.Register(node);
+        Assert.True(Ok(renewed), renewed.ToJsonString());
+        await registry.LastProbe;
+        Assert.True(2 == dialled.Count(u => u == node), string.Join(",", dialled));
+        Assert.Equal([node], registry.Listed());
+        Assert.Equal(node, Assert.Single(registry.Pick(10)).Url);
+        hang.SetResult(false);
+        await Task.WhenAll(others);
+        Assert.Equal([node], registry.Listed());
+    }
+
     [Fact]
     public async Task ANodeOfTheNetworkMustAnswer()
     {
