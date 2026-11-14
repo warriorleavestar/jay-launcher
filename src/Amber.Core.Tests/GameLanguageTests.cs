@@ -114,5 +114,13 @@ public sealed class GameLanguageTests : IDisposable
     [Fact]
     public void PlayfulLanguageMissingFromOldGameFallsBack() =>
         Assert.Null(GameLanguage.PlayfulMatch("lzh", ["en_us", "zh_tw"]));
+
+    [Theory]
+    [InlineData("zh-Hans", "zh_cn")]
+    [InlineData("zh-Hant", "zh_tw")]
+    [InlineData("en", "en_us")]
+    [InlineData("ja", "ja_jp")]
+    public void FreshGameFollowsTheLauncherLanguage(string launcher, string expected) =>
+        Assert.Equal(expected, GameLanguage.LauncherMatch(launcher, Languages));
 }
 
