@@ -186,8 +186,9 @@ internal sealed class UnixExitNetwork
             return;
         }
         // 没有 systemd-resolved：临时换掉 /etc/resolv.conf，结束时原样换回。
-        ReplaceResolvConf();
+        // Marked first: if the swap fails halfway (original already moved aside), ending the session still puts it back.
         _resolvConfReplaced = true;
+        ReplaceResolvConf();
     }
 
     /// <summary>The resolver file; tests point it at a temporary folder.</summary>

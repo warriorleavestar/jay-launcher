@@ -908,7 +908,7 @@
   "multiplayer.exit.direct_route": "（直接接続）",
   "multiplayer.exit.peer_label": "この人経由でインターネットに接続（すべての通信）",
   "multiplayer.exit.relay_route": "（ほかのメンバーまたは中継が転送するため、遅くなることがあります）",
-  "multiplayer.exit.start_tooltip": "相手が先に「ルームの人に自分経由のインターネット接続を許可」をオンにする必要があります。Windows では権限確認が再び表示されます。 オンの間は、PC の名前解決（DNS）も相手を経由して Cloudflare と Google の公開 DNS サーバーに送られます。",
+  "multiplayer.exit.start_tooltip": "相手が先に「ルームの人に自分経由のインターネット接続を許可」をオンにする必要があります。Windows では権限確認が再び表示されます。オンの間は、PC の名前解決（DNS）も相手を経由して Cloudflare と Google の公開 DNS サーバーに送られます。",
   "multiplayer.exit.stop": "停止",
   "multiplayer.exit.stopped": "メンバー経由のインターネット接続を停止し、通常の接続に戻しました",
   "multiplayer.exit.switch_failed": "インターネット接続に使うメンバーを切り替えられず、マルチプレイを終了しました：{0}",
