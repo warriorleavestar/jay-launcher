@@ -47,14 +47,15 @@ public static partial class ContainedFiles
 
     /// <summary>
     /// Reads <paramref name="file"/> in <paramref name="folders"/> under <paramref name="root"/> ("" when it does not
-    /// exist), and writes <paramref name="update"/>'s result back when it differs (UTF-8, no BOM).
+    /// exist), and writes <paramref name="update"/>'s result back when it differs, in the file's own encoding: UTF-8
+    /// (with its byte order mark when it had one) or UTF-16 with a byte order mark; a new file is UTF-8 without one.
+    /// A file that is not valid text in its encoding is left exactly as it is, and the result is false.
     /// </summary>
-    public static void UpdateText(string root, IReadOnlyList<string> folders, string file, Func<string, string> update)
+    public static bool UpdateText(string root, IReadOnlyList<string> folders, string file, Func<string, string> update)
     {
         CheckName(file);
         using var chain = Chain.Open(root, folders, create: true);
-        if (OperatingSystem.IsWindows()) Windows.UpdateText(chain, file, update);
-        else Unix.UpdateText(chain, root, file, update);
+        return OperatingSystem.IsWindows() ? Windows.UpdateText(chain, file, update) : Unix.UpdateText(chain, root, file, update);
     }
 
     private static void CheckName(string name)
@@ -76,10 +77,28 @@ public static partial class ContainedFiles
         return @"\\?\" + path;
     }
 
-    private static string Decode(byte[] bytes, int length)
+    /// <summary>How a text file was written: its encoding and the byte order mark it started with (maybe none).</summary>
+    internal sealed record TextForm(Encoding Encoding, byte[] Preamble)
     {
-        var text = new UTF8Encoding(false).GetString(bytes, 0, length);
-        return text.Length > 0 && text[0] == '\uFEFF' ? text[1..] : text;
+        public static readonly TextForm Utf8 = new(new UTF8Encoding(false, true), []);
+
+        public byte[] Encode(string text) => [.. Preamble, .. Encoding.GetBytes(text)];
+    }
+
+    /// <summary>
+    /// The text of a file and how it was written, or null when it is not valid text (then it is never written back):
+    /// a UTF-8 or UTF-16 byte order mark says the encoding, else it is UTF-8. UTF-32 is not read.
+    /// </summary>
+    internal static string? Decode(byte[] bytes, int length, out TextForm form)
+    {
+        var data = bytes.AsSpan(0, length);
+        form = TextForm.Utf8;
+        if (data.StartsWith((byte[])[0xFF, 0xFE, 0x00, 0x00]) || data.StartsWith((byte[])[0x00, 0x00, 0xFE, 0xFF])) return null;
+        if (data.StartsWith((byte[])[0xEF, 0xBB, 0xBF])) form = new TextForm(new UTF8Encoding(false, true), [0xEF, 0xBB, 0xBF]);
+        else if (data.StartsWith((byte[])[0xFF, 0xFE])) form = new TextForm(new UnicodeEncoding(false, false, true), [0xFF, 0xFE]);
+        else if (data.StartsWith((byte[])[0xFE, 0xFF])) form = new TextForm(new UnicodeEncoding(true, false, true), [0xFE, 0xFF]);
+        try { return form.Encoding.GetString(data[form.Preamble.Length..]); }
+        catch (DecoderFallbackException) { return null; }
     }
 
     private static byte[] ReadAll(Stream stream, string path)
@@ -221,7 +240,7 @@ public static partial class ContainedFiles
             return info.FileAttributes;
         }
 
-        public static void UpdateText(Chain chain, string file, Func<string, string> update)
+        public static bool UpdateText(Chain chain, string file, Func<string, string> update)
         {
             var path = System.IO.Path.Combine(chain.Path, file);
             using var handle = Open(path, GenericRead | GenericWrite, OpenAlways, 0);
@@ -232,14 +251,15 @@ public static partial class ContainedFiles
                 throw Blocked(path);
             using var stream = new FileStream(handle, FileAccess.ReadWrite);
             var bytes = ReadAll(stream, path);
-            var text = Decode(bytes, bytes.Length);
+            if (Decode(bytes, bytes.Length, out var form) is not { } text) return false;
             var updated = update(text);
-            if (updated == text) return;
+            if (updated == text) return true;
             stream.Position = 0;
             stream.SetLength(0);
-            var output = new UTF8Encoding(false).GetBytes(updated);
+            var output = form.Encode(updated);
             stream.Write(output, 0, output.Length);
             stream.Flush(true);
+            return true;
         }
     }
 
@@ -321,10 +341,11 @@ public static partial class ContainedFiles
             throw new IOException(L.F("core.launch.open_failed", path, error));
         }
 
-        public static void UpdateText(Chain chain, string root, string file, Func<string, string> update)
+        public static bool UpdateText(Chain chain, string root, string file, Func<string, string> update)
         {
             var path = System.IO.Path.Combine(chain.Path, file);
             var text = "";
+            var form = TextForm.Utf8;
             // Non-blocking: opening a FIFO with no writer would otherwise wait forever.
             var fd = OpenAt(Fd(chain.Last), file, ReadOnly | NoFollow | NonBlocking | CloseOnExec);
             if (fd < 0)
@@ -337,10 +358,11 @@ public static partial class ContainedFiles
             {
                 using var handle = Wrap(fd);
                 var bytes = ReadRegular(handle, path);
-                text = Decode(bytes, bytes.Length);
+                if (Decode(bytes, bytes.Length, out form) is not { } read) return false;
+                text = read;
             }
             var updated = update(text);
-            if (updated == text) return;
+            if (updated == text) return true;
             // A new file in the root (never through a link: CreateNew fails on an existing name), moved over the old
             // name with renameat on the held folder, which replaces whatever is there instead of writing through it.
             var temp = ".jay-write-" + Guid.NewGuid().ToString("N")[..12] + ".tmp";
@@ -349,12 +371,13 @@ public static partial class ContainedFiles
             {
                 using (var stream = new FileStream(tempPath, FileMode.CreateNew, FileAccess.Write))
                 {
-                    var output = new UTF8Encoding(false).GetBytes(updated);
+                    var output = form.Encode(updated);
                     stream.Write(output, 0, output.Length);
                     stream.Flush(true);
                 }
                 if (RenameAt(Fd(chain.Handles[0]), temp, Fd(chain.Last), file) != 0)
                     throw new IOException(L.F("core.launch.open_failed", path, Marshal.GetLastPInvokeError()));
+                return true;
             }
             finally
             {

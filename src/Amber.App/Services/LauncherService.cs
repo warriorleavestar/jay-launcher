@@ -499,7 +499,9 @@ public sealed class LauncherService : IDisposable
     {
         var options = GameSandboxOptions;
         if (!options.Enabled || !OperatingSystem.IsWindows()) return options;
-        var decision = DecideWindowsSandbox(javaPath);
+        // Off the UI thread, once: telling the version may take the restricted probe (remembered afterwards).
+        var javaMajor = await Amber.Core.Java.JavaFinder.MajorOfAsync(javaPath, ct);
+        var decision = DecideWindowsSandbox(javaPath, javaMajor);
         if (decision.AskFirst)
         {
             // The first time the whole step is explained; later (loopback already done) the dialog names the new folders.
@@ -513,7 +515,7 @@ public sealed class LauncherService : IDisposable
                 if (error is null && StrongSandboxReady(javaPath)) return options with { WindowsLevel = WindowsSandboxLevel.Strong };
                 if (error is null) RememberSandboxFallback(WindowsSandboxPolicy.Failed, WindowsSandboxSetup.FoldersToOpen(SandboxSetupPaths(javaPath)).FirstOrDefault() ?? "CheckNetIsolation");
             }
-            decision = DecideWindowsSandbox(javaPath);
+            decision = DecideWindowsSandbox(javaPath, javaMajor);
         }
         if (decision.Fallback is not null) RememberSandboxFallback(decision.Fallback, null);
         if (decision.Reason is not null) note(L.F("home.sandbox.standard_because", decision.Reason));
@@ -521,10 +523,10 @@ public sealed class LauncherService : IDisposable
     }
 
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]
-    private WindowsSandboxDecision DecideWindowsSandbox(string javaPath) => WindowsSandboxPolicy.Decide(
+    private WindowsSandboxDecision DecideWindowsSandbox(string javaPath, int javaMajor) => WindowsSandboxPolicy.Decide(
         Settings.StrongSandbox, Settings.StrongSandboxFallback, Settings.StrongSandboxFallbackDetail,
-        WindowsSandboxPolicy.JavaCanUseStrong(WindowsSandbox.JavaMajor(javaPath), GameSandbox.JavaHome(javaPath), WindowsSandbox.HasResolver),
-        WindowsSandbox.JavaMajor(javaPath), StrongSandboxReady(javaPath), WindowsSandbox.Elevation());
+        WindowsSandboxPolicy.JavaCanUseStrong(javaMajor, GameSandbox.JavaHome(javaPath), WindowsSandbox.HasResolver),
+        javaMajor, StrongSandboxReady(javaPath), WindowsSandbox.Elevation());
 
     /// <summary>Strong mode needs no admin step for this Java: the loopback exemption is there and every parent folder is open.</summary>
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]

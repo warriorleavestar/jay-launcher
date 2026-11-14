@@ -1174,10 +1174,16 @@ public sealed class BakeTests : IDisposable
         var downloads = new List<DownloadItem>();
         var bake = Service(loader, downloads);
 
-        // The instance's Java (unknown version here: the path does not exist) is kept for the game; the stages get Java 21.
+        // A Java whose version cannot be told is a Java problem, never a guess.
+        var unknown = await Assert.ThrowsAsync<BakeException>(() => bake.ChooseJavaAsync(instance, 8, "instance-java",
+            (major, _) => Task.FromResult("java" + major), CancellationToken.None));
+        Assert.Equal("java_unknown", unknown.Code);
+
+        // The instance's Java 8 is kept for the game; the stages get Java 21.
+        var instanceJava = ReleaseJava("instance-jre8", "1.8.0_402");
         var asked = new List<int>();
-        var (java, gamePath) = await bake.ChooseJavaAsync(instance, 8, "instance-java", (major, _) => { asked.Add(major); return Task.FromResult("java" + major); }, CancellationToken.None);
-        Assert.Equal("instance-java", gamePath);
+        var (java, gamePath) = await bake.ChooseJavaAsync(instance, 8, instanceJava, (major, _) => { asked.Add(major); return Task.FromResult("java" + major); }, CancellationToken.None);
+        Assert.Equal(instanceJava, gamePath);
         Assert.Equal(new BakeJava("java21", 21, 8), java);
         Assert.Equal([21], asked);
 
@@ -1265,6 +1271,43 @@ public sealed class BakeTests : IDisposable
             Instance("forge", "1.12.2", "14.23.5.2860", "f1122"), Data, download, null, CancellationToken.None));
         Assert.Contains("launchwrapper-1.12.jar", e.Message);
         Assert.DoesNotContain("server-only", e.Message);
+    }
+
+    /// <summary>A Java folder with only a release file and an empty program file.</summary>
+    private string ReleaseJava(string name, string version)
+    {
+        var home = Directory.CreateDirectory(Path.Combine(_root, "javas", name)).FullName;
+        File.WriteAllText(Path.Combine(home, "release"), $"JAVA_VERSION=\"{version}\"\nOS_ARCH=\"amd64\"\n");
+        var java = Path.Combine(Directory.CreateDirectory(Path.Combine(home, "bin")).FullName, OperatingSystem.IsWindows() ? "java.exe" : "java");
+        File.WriteAllText(java, "");
+        return java;
+    }
+
+    [Fact]
+    public async Task Forge1122TellsAPickedJavaWithoutVersionFilesOnlyInTheRestrictedProbe()
+    {
+        LegacyInstall();
+        var instance = Instance("forge", "1.12.2", LegacyForge, "f1122");
+        var bake = Service(LegacyLoader());
+        var picked = new EscapingJava(Directory.CreateDirectory(Path.Combine(_root, "picked")).FullName);
+        try
+        {
+            if (EscapingJava.ProbeAvailable)
+            {
+                // Told in the probe (Java 8), so the game keeps it; whatever it tried outside did not happen.
+                var (java, gamePath) = await bake.ChooseJavaAsync(instance, 8, picked.Java, (major, _) => Task.FromResult("java" + major), CancellationToken.None);
+                Assert.Equal(picked.Java, gamePath);
+                Assert.Equal(8, java.GameMajor);
+            }
+            else
+            {
+                var e = await Assert.ThrowsAsync<BakeException>(() => bake.ChooseJavaAsync(instance, 8, picked.Java,
+                    (major, _) => Task.FromResult("java" + major), CancellationToken.None));
+                Assert.Equal("java_unknown", e.Code);
+            }
+            picked.AssertContained();
+        }
+        finally { Environment.SetEnvironmentVariable(EscapingJava.Secret, null); }
     }
 
     [Fact]
@@ -1524,6 +1567,46 @@ public sealed class BakeTests : IDisposable
         File.WriteAllText(cfg, "version_checking {\n    B:other=true\n}\n");
         BakePlatform.DisableLegacyForgeUpdateCheck(work);
         Assert.Equal("version_checking {\n    B:Global=false\n    B:other=true\n}\n", File.ReadAllText(cfg));
+    }
+
+    [Fact]
+    public async Task ABrokenCachedInstallerIsRemovedSoTheNextAttemptDownloadsItAgain()
+    {
+        var installer = Path.Combine(Data, "platforms", "installers", "neoforge-21.1.265-installer.jar");
+        Directory.CreateDirectory(Path.GetDirectoryName(installer)!);
+        File.WriteAllText(installer, "not a zip");
+        var instance = Instance("neoforge", "1.21.1", "21.1.265", "neoforge-1.21.1");
+        await Assert.ThrowsAsync<InvalidDataException>(() => BakePlatform.PrepareAsync(new GameDirectory(Game), instance, Data, null, null, CancellationToken.None));
+        Assert.False(File.Exists(installer));
+    }
+
+    [Fact]
+    public async Task AnInstallerWithABrokenProfileIsUnpackedAgainAfterTheNextDownload()
+    {
+        PlatformInstall("neoforge", "1.21.1", "21.1.265");
+        var good = FakeFiles[BakePlatform.InstallerUrl("neoforge", "21.1.265")];
+        string goodProfile;
+        using (var zip = ZipFile.OpenRead(good))
+        using (var reader = new StreamReader(zip.GetEntry("install_profile.json")!.Open()))
+            goodProfile = reader.ReadToEnd();
+        // A cached installer whose profile is not JSON but has exactly the same length as the good one.
+        var installer = Path.Combine(Data, "platforms", "installers", "neoforge-21.1.265-installer.jar");
+        Directory.CreateDirectory(Path.GetDirectoryName(installer)!);
+        using (var zip = ZipFile.Open(installer, ZipArchiveMode.Create))
+        using (var w = new StreamWriter(zip.CreateEntry("install_profile.json").Open()))
+            w.Write(new string('x', goodProfile.Length));
+        var instance = Instance("neoforge", "1.21.1", "21.1.265", "neoforge-1.21.1");
+        Task Download(IReadOnlyCollection<DownloadItem> items, CancellationToken _)
+        {
+            foreach (var item in items) { Directory.CreateDirectory(Path.GetDirectoryName(item.LocalPath)!); File.Copy(FakeFiles[item.Url], item.LocalPath, true); }
+            return Task.CompletedTask;
+        }
+
+        await Assert.ThrowsAnyAsync<System.Text.Json.JsonException>(() => BakePlatform.PrepareAsync(new GameDirectory(Game), instance, Data, Download, null, CancellationToken.None));
+        Assert.False(File.Exists(installer));
+
+        var root = await BakePlatform.PrepareAsync(new GameDirectory(Game), instance, Data, Download, null, CancellationToken.None);
+        Assert.Equal(goodProfile, File.ReadAllText(Path.Combine(root, "inst", "install_profile.json")));
     }
 
     [Fact]

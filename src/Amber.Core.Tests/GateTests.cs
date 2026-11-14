@@ -62,6 +62,9 @@ public sealed class GateTests : IAsyncLifetime
         Assert.Equal(invite.Port, parsed.Port);
         Assert.Equal(invite.Token, parsed.Token);
         Assert.Equal(invite.ServerKeyHash, parsed.ServerKeyHash);
+        // Latin words after the code, on the same line or the next, are not part of it.
+        Assert.NotNull(GateInvite.TryParse(code + " thanks, see you at 8", out _));
+        Assert.NotNull(GateInvite.TryParse(code + "\nJoin tonight", out _));
         var raw = GateInvite.Base32Decode(code[GateInvite.Prefix.Length..])!;
         Assert.DoesNotContain("Steve", System.Text.Encoding.ASCII.GetString(raw), StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain(Convert.ToHexString(invite.Token), invite.ToString());

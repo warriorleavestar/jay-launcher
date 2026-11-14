@@ -29,8 +29,6 @@ public sealed record TrustQuorum(IReadOnlyList<byte[]> Keys, int Need)
     /// <summary>Enough listed keys signed. Never true for an empty quorum or a quorum asking for nothing.</summary>
     public bool IsMet(IEnumerable<byte[]> signers) => Need >= 1 && Keys.Count >= Need && Count(signers) >= Need;
 
-    public static TrustQuorum FromBase64(IEnumerable<string> keys, int need) => new([.. keys.Select(Convert.FromBase64String)], need);
-
     internal static bool Contains(IEnumerable<byte[]> keys, byte[] key)
     {
         var match = false;

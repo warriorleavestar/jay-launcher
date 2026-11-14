@@ -447,6 +447,10 @@ public sealed class GameLauncher(GameDirectory dir)
         WindowsSandboxLevel? windowsLevel = null;
         if (OperatingSystem.IsWindows())
         {
+            // The arguments below differ by Java version; a version that cannot be told is not guessed (a Java 8 given
+            // Java 9's --patch-module does not start). Known here already: the launch asked before (and remembered it).
+            var javaMajor = WindowsSandbox.JavaMajor(psi.FileName);
+            if (javaMajor <= 0) throw new Java.JavaVersionUnknownException(psi.FileName);
             windowsLevel = sandbox.WindowsLevel;
             // Inside the container Java must be able to list every parent of what it uses. A parent the admin step
             // has not opened (a new game folder, another Java): standard this time instead of a game that cannot start.
@@ -466,7 +470,7 @@ public sealed class GameLauncher(GameDirectory dir)
                 // Name lookups inside the container go to the system's DNS servers directly (see DnsArguments).
                 // Without DNS servers (offline) there is nothing to look up and the container needs no help.
                 var javaHome = GameSandbox.JavaHome(psi.FileName);
-                var major = WindowsSandbox.JavaMajor(psi.FileName);
+                var major = javaMajor;
                 var servers = WindowsSandbox.SystemDnsServers();
                 if (!WindowsSandboxPolicy.JavaCanUseStrong(major, javaHome, WindowsSandbox.HasResolver))
                 {
@@ -489,7 +493,7 @@ public sealed class GameLauncher(GameDirectory dir)
             // remapped game jar and anything else written through a zip file system fails as "read-only".
             if (WindowsSandbox.FileSystemJar(Path.Combine(dir.Root, "libraries", "jay", "jay-fs")) is { } fs)
             {
-                var fsArgs = WindowsSandbox.FileSystemArguments(WindowsSandbox.JavaMajor(psi.FileName), fs);
+                var fsArgs = WindowsSandbox.FileSystemArguments(javaMajor, fs);
                 for (var i = 0; i < fsArgs.Count; i++) psi.ArgumentList.Insert(i, fsArgs[i]);
                 extraReadOnly.Add(fs);
             }

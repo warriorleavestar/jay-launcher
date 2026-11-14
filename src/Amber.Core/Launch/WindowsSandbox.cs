@@ -523,20 +523,11 @@ public static unsafe class WindowsSandbox
         return servers;
     }
 
-    /// <summary>The Java major version from the release file next to bin, or 0 when unknown.</summary>
-    public static int JavaMajor(string javaPath)
-    {
-        var release = Path.Combine(GameSandbox.JavaHome(javaPath), "release");
-        try
-        {
-            foreach (var line in File.ReadLines(release))
-                if (line.StartsWith("JAVA_VERSION=", StringComparison.Ordinal))
-                    return Java.JavaFinder.ParseMajor(line["JAVA_VERSION=".Length..].Trim('"'));
-        }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
-        // No release file: ask the Java itself. Guessing wrong matters: a Java 8 given Java 9's --patch-module does not start.
-        return Java.JavaFinder.MajorOf(javaPath);
-    }
+    /// <summary>
+    /// The Java major version (from its files, else from the restricted probe; remembered), or 0 when unknown. Guessing
+    /// wrong matters: a Java 8 given Java 9's --patch-module does not start.
+    /// </summary>
+    public static int JavaMajor(string javaPath, CancellationToken ct = default) => Java.JavaFinder.MajorOf(javaPath, ct);
 
     /// <summary>The resolver jar's resource; missing when the build had no JDK (then Java 18+ uses the standard level).</summary>
     internal const string ResolverResource = "Amber.Core.jay-dns.jar";
@@ -598,9 +589,18 @@ public static unsafe class WindowsSandbox
     /// The temp folder is moved to one the sandboxed game may write: LocalLow\Jay\temp (standard) or the container's
     /// Temp folder (strong). Every handle but the output pipes stays in Jay.
     /// </summary>
-    public static Process Start(ProcessStartInfo psi, WindowsSandboxLevel level, string? tempFolder = null)
+    public static Process Start(ProcessStartInfo psi, WindowsSandboxLevel level, string? tempFolder = null) =>
+        Start(psi, level == WindowsSandboxLevel.Strong ? ContainerSid() : null, tempFolder, network: true, track: true);
+
+    /// <summary>
+    /// Starts a Java version probe in <paramref name="container"/>: no network capabilities, not listed as a strong game,
+    /// temp files in <paramref name="tempFolder"/>. The caller grants the container what it may read.
+    /// </summary>
+    internal static Process StartProbe(ProcessStartInfo psi, SecurityIdentifier container, string tempFolder) =>
+        Start(psi, container, tempFolder, network: false, track: false);
+
+    private static Process Start(ProcessStartInfo psi, SecurityIdentifier? container, string? tempFolder, bool network, bool track)
     {
-        SecurityIdentifier? container = level == WindowsSandboxLevel.Strong ? ContainerSid() : null;
         var temp = tempFolder ?? (container is not null ? Path.Combine(ContainerFolder(container), "Temp") : LowTempFolder());
         Directory.CreateDirectory(temp);
         psi.Environment["TEMP"] = temp;
@@ -655,8 +655,8 @@ public static unsafe class WindowsSandbox
                 {
                     var sidText = container.Value;
                     if (!ConvertStringSidToSidW(sidText, out containerSid)) throw new Win32Exception();
-                    caps = Capabilities(out capsBuffers);
-                    securityCaps = new SECURITY_CAPABILITIES { AppContainerSid = containerSid, Capabilities = caps, CapabilityCount = (uint)CapabilitySids.Length };
+                    if (network) caps = Capabilities(out capsBuffers);
+                    securityCaps = new SECURITY_CAPABILITIES { AppContainerSid = containerSid, Capabilities = caps, CapabilityCount = network ? (uint)CapabilitySids.Length : 0 };
                     if (!UpdateProcThreadAttribute(attributes, 0, PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES, &securityCaps, sizeof(SECURITY_CAPABILITIES), 0, 0))
                         throw new Win32Exception();
                 }
@@ -686,7 +686,7 @@ public static unsafe class WindowsSandbox
             outRead = errRead = 0;
             started = true;
             ResumeThread(pi.hThread);
-            if (container is not null) TrackStrong(process);
+            if (container is not null && track) TrackStrong(process);
             return process;
         }
         finally
