@@ -505,6 +505,42 @@ public sealed class MobilePortTests
     }
 
     [Fact]
+    public async Task AndroidRuntimeArchiveInstallerRemovesLeftoversFromInterruptedInstalls()
+    {
+        var parent = Path.Combine(Path.GetTempPath(), "jay-runtime-archive-" + Guid.NewGuid().ToString("N"));
+        var target = Path.Combine(parent, "game-runtime");
+        var staging = Path.Combine(parent, "game-runtime.install-x");
+        var backup = Path.Combine(parent, "game-runtime.backup-y");
+        var download = Path.Combine(parent, "game-runtime.download-z");
+        var unrelated = Path.Combine(parent, "game-runtime-notes.txt");
+        Directory.CreateDirectory(Path.Combine(staging, "lib"));
+        Directory.CreateDirectory(backup);
+        await File.WriteAllTextAsync(Path.Combine(staging, "lib", "partial"), "partial");
+        await File.WriteAllTextAsync(Path.Combine(backup, "release"), "old");
+        await File.WriteAllTextAsync(download, "partial archive");
+        await File.WriteAllTextAsync(unrelated, "keep");
+        try
+        {
+            var archive = Convert.FromBase64String(RuntimeXzFixture);
+            await RuntimeArchiveInstaller.InstallAsync(
+                target,
+                RuntimeArchive(archive),
+                (_, _) => Task.FromResult<Stream>(new MemoryStream(archive, writable: false)));
+
+            Assert.True(Directory.Exists(target));
+            Assert.False(Directory.Exists(staging));
+            Assert.False(Directory.Exists(backup));
+            Assert.False(File.Exists(download));
+            Assert.True(File.Exists(unrelated));
+            Assert.Equal([target], Directory.GetDirectories(parent));
+        }
+        finally
+        {
+            if (Directory.Exists(parent)) Directory.Delete(parent, true);
+        }
+    }
+
+    [Fact]
     public async Task AndroidRuntimeArchiveInstallerRejectsTraversalWithoutReplacingRuntime()
     {
         var parent = Path.Combine(Path.GetTempPath(), "jay-runtime-archive-" + Guid.NewGuid().ToString("N"));

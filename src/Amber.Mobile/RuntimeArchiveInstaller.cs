@@ -63,6 +63,7 @@ public static class RuntimeArchiveInstaller
         var parent = Directory.GetParent(target)?.FullName
             ?? throw new InvalidDataException("The runtime destination has no parent directory.");
         Directory.CreateDirectory(parent);
+        SweepLeftovers(target, parent);
 
         var suffix = Guid.NewGuid().ToString("N");
         var staging = target + ".install-" + suffix;
@@ -95,6 +96,27 @@ public static class RuntimeArchiveInstaller
         {
             if (File.Exists(archivePath)) File.Delete(archivePath);
             if (Directory.Exists(staging)) Directory.Delete(staging, true);
+        }
+    }
+
+    /// <summary>
+    /// Removes staging, backup and download leftovers from earlier installs that were interrupted
+    /// (for example when the app was killed), so they do not use storage forever.
+    /// </summary>
+    private static void SweepLeftovers(string target, string parent)
+    {
+        var name = Path.GetFileName(target);
+        foreach (var pattern in new[] { name + ".install-*", name + ".backup-*" })
+            foreach (var directory in Directory.EnumerateDirectories(parent, pattern))
+            {
+                try { Directory.Delete(directory, true); }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+            }
+
+        foreach (var file in Directory.EnumerateFiles(parent, name + ".download-*"))
+        {
+            try { File.Delete(file); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
         }
     }
 
