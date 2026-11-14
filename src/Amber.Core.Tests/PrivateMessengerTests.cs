@@ -88,6 +88,31 @@ public sealed class PrivateMessengerTests : IDisposable
         Assert.Equal(ids[^1], declined[0]);
     }
 
+    /// <summary>The relaying host delivering the same sealed message again, or an old message later, shows nothing new.</summary>
+    [Fact]
+    public async Task ReplayedPrivateMessagesAreDropped()
+    {
+        var all = new Dictionary<string, RoutedLink>();
+        foreach (var (key, name) in new[] { (_alice, "Alice"), (_bob, "Bob") }) all[Fp(key)] = new RoutedLink(Fp(key), key.PublicKey, name, all);
+        var keys = new Dictionary<string, byte[]> { [Fp(_alice)] = _alice.PublicKey, [Fp(_bob)] = _bob.PublicKey };
+        await using var bob = new PrivateMessenger(all[Fp(_bob)], _bob, f => keys.GetValueOrDefault(f), Path.Combine(_dir, "bob"));
+        var got = new List<string>();
+        bob.MessageReceived += m => { lock (got) got.Add(m.Text); };
+        byte[] Sealed(string text, DateTimeOffset at) => PrivateSeal.Seal(_alice, _bob.PublicKey, System.Text.Encoding.UTF8.GetBytes(
+            new System.Text.Json.Nodes.JsonObject { ["t"] = "msg", ["text"] = text, ["ts"] = at.ToUnixTimeMilliseconds() }.ToJsonString()));
+        var now = DateTimeOffset.UtcNow;
+        var first = Sealed("old news", now);
+        await all[Fp(_alice)].SendPrivateAsync(Fp(_bob), first, default);
+        await all[Fp(_alice)].SendPrivateAsync(Fp(_bob), first, default);
+        await all[Fp(_alice)].SendPrivateAsync(Fp(_bob), Sealed("later", now + TimeSpan.FromMinutes(30)), default);
+        // Sealed long ago (a new frame, so not caught by the frame memory) and delivered now.
+        await all[Fp(_alice)].SendPrivateAsync(Fp(_bob), Sealed("from before", now), default);
+        await all[Fp(_alice)].SendPrivateAsync(Fp(_bob), Sealed("a bit out of order", now + TimeSpan.FromMinutes(29)), default);
+        Assert.True(await WaitUntil(() => { lock (got) return got.Count >= 3; }));
+        await Task.Delay(200);
+        lock (got) Assert.Equal(["old news", "later", "a bit out of order"], got);
+    }
+
     private static async Task<bool> WaitUntil(Func<bool> condition)
     {
         for (var i = 0; i < 100 && !condition(); i++) await Task.Delay(50);

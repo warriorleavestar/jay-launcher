@@ -442,12 +442,66 @@ public sealed partial class PrivateMessenger : IAsyncDisposable
 
     // ---- 接收 ----
 
+    /// <summary>Frames already taken from one sender, by the one-time key each frame is sealed with.</summary>
+    private sealed class SeenFrames
+    {
+        public readonly HashSet<string> Keys = new(StringComparer.Ordinal);
+        public readonly Queue<string> Order = new();
+        /// <summary>The newest sender time ("ts") of a message from this sender.</summary>
+        public long NewestMessage = long.MinValue;
+    }
+
+    /// <summary>How many sealed frames per sender are remembered to drop a second delivery of the same frame.</summary>
+    internal const int SeenPerSender = 4096;
+    private const int SeenSenders = 256;
+    /// <summary>A message more than this much older (by the sender's own clock) than the newest one from that sender is a replay.</summary>
+    internal static readonly TimeSpan MessageReorder = TimeSpan.FromMinutes(5);
+    private readonly Dictionary<string, SeenFrames> _seen = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// False when this sealed frame was already taken: the host passes frames on and could deliver an old one again.
+    /// Each frame is sealed with a fresh one-time key, so the same key twice means the same frame.
+    /// </summary>
+    private bool FirstDelivery(string from, ReadOnlySpan<byte> sealedData)
+    {
+        var key = Convert.ToBase64String(sealedData.Slice(1, X25519KeyPair.Length));
+        lock (_seen)
+        {
+            if (!_seen.TryGetValue(from, out var seen))
+            {
+                if (_seen.Count >= SeenSenders) _seen.Remove(_seen.Keys.First());
+                _seen[from] = seen = new SeenFrames();
+            }
+            if (!seen.Keys.Add(key)) return false;
+            seen.Order.Enqueue(key);
+            if (seen.Order.Count > SeenPerSender) seen.Keys.Remove(seen.Order.Dequeue());
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// False for a message older (by the sender's clock) than what this sender already sent, beyond <see cref="MessageReorder"/>:
+    /// an old message delivered again after its frame left <see cref="FirstDelivery"/>'s memory. Only the sender's own times
+    /// are compared, so a clock that is off doesn't matter.
+    /// </summary>
+    private bool FreshMessage(string from, long? sentAt)
+    {
+        if (sentAt is not { } ts) return true;
+        lock (_seen)
+        {
+            if (!_seen.TryGetValue(from, out var seen)) return true;
+            if (seen.NewestMessage != long.MinValue && ts < seen.NewestMessage - (long)MessageReorder.TotalMilliseconds) return false;
+            seen.NewestMessage = Math.Max(seen.NewestMessage, ts);
+            return true;
+        }
+    }
+
     private void OnFrame(PrivateFrame frame)
     {
         // Replies and offers are keyed by the sender's fingerprint, so it must be the fingerprint of the key that sealed it.
         if (MemberIdentity.FingerprintOf(frame.FromPublicKey) != frame.FromFingerprint) return;
         var plain = PrivateSeal.Open(_me, frame.FromPublicKey, frame.Sealed);
-        if (plain is null) return;
+        if (plain is null || !FirstDelivery(frame.FromFingerprint, frame.Sealed)) return;
         JsonObject? body;
         try { body = JsonNode.Parse(plain) as JsonObject; }
         catch (JsonException) { return; }
@@ -464,6 +518,7 @@ public sealed partial class PrivateMessenger : IAsyncDisposable
             {
                 case "msg":
                     var text = RoomChat.Clean(body["text"]?.GetValue<string>(), MaxTextLength);
+                    if (!FreshMessage(frame.FromFingerprint, body["ts"]?.GetValue<long>())) break;
                     if (text.Length > 0) MessageReceived?.Invoke(new PrivateMessage(frame.FromFingerprint, frame.FromPublicKey, frame.FromName, text, DateTimeOffset.UtcNow));
                     break;
                 case "offer" when id is { Length: 16 } && !_incoming.ContainsKey(id):
