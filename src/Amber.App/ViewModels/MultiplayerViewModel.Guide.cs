@@ -106,7 +106,15 @@ public sealed partial class MultiplayerViewModel
         }
         OnPropertyChanged(nameof(AdvancedHeaderText));
     }
-    partial void OnAllowGameProxyChanged(bool value) => OnPropertyChanged(nameof(AdvancedHeaderText));
+    partial void OnAllowGameProxyChanged(bool value)
+    {
+        if (value && Child.HideNetworkExit)
+        {
+            AllowGameProxy = false;
+            return;
+        }
+        OnPropertyChanged(nameof(AdvancedHeaderText));
+    }
     partial void OnSelectedTransportChanged(TransportChoice value) => OnPropertyChanged(nameof(AdvancedHeaderText));
 
     /// <summary>

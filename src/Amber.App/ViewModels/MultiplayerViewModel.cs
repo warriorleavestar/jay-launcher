@@ -718,7 +718,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         var room = WithMyRelayChoice(credentials.ToHostRoom(members, ChatName));
         if (!TryStartSession(new EasyTierOptions(room, true, TestPeers ?? _service.MultiplayerPeers, EasyTierArgs.FreeTcpPort(), null, TestListeners, Guid.NewGuid().ToString(), FullLanMode, null, FullLanMode && AllowExitNode)
             {
-                AllowProxy = AllowGameProxy,
+                AllowProxy = AllowGameProxy && !Child.HideNetworkExit,
             }))
         {
             if (relay is not null) await relay.DisposeAsync();
@@ -798,7 +798,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
                 // One local port per split leg (each forwarded over its own network); none when the room doesn't split.
                 LocalSplitPorts = wraps && !FullLanMode && room.FromInvite && room.Split.Enabled ? [.. Enumerable.Range(0, room.Split.Paths).Select(_ => EasyTierArgs.FreeTcpPort())] : null,
                 LocalRemotePort = remotePort,
-                AllowProxy = AllowGameProxy,
+                AllowProxy = AllowGameProxy && !Child.HideNetworkExit,
             })) return false;
         _room = room;
         _joinedRelayRule = relayRule;
