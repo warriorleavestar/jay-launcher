@@ -288,13 +288,18 @@ internal sealed partial class SelfTest
         window.Width = 600;
         window.Height = 420;
         await Task.Delay(300);
-        foreach (var (what, key) in new[] { ("mail", "core.mp.public.err_mail_rate"), ("mail-busy", "core.mp.public.err_mail_busy") })
+        foreach (var language in new[] { "zh-Hans", "en", "ja" })
         {
-            var refused = RoomDirectoryClient.Rejection(new System.Text.Json.Nodes.JsonObject { ["ok"] = false, ["error"] = "rate", ["what"] = what })!;
-            Dispatcher.UIThread.Invoke(() => vm.MailFailed(refused));
-            Check($"好友：信箱限流（{what}）的提示写清楚原因", vm.Status.Contains(L.T(key), StringComparison.Ordinal), vm.Status);
-            await ShotAsync($"Jay账户-信箱限流-{what}-窄");
+            L.SetLanguage(language);
+            foreach (var (what, key) in new[] { ("mail", "core.mp.public.err_mail_rate"), ("mail-busy", "core.mp.public.err_mail_busy") })
+            {
+                var refused = RoomDirectoryClient.Rejection(new System.Text.Json.Nodes.JsonObject { ["ok"] = false, ["error"] = "rate", ["what"] = what })!;
+                Dispatcher.UIThread.Invoke(() => vm.MailFailed(refused));
+                Check($"好友：信箱限流（{what}，{language}）的提示写清楚原因", vm.Status.Contains(L.T(key), StringComparison.Ordinal), vm.Status);
+                await ShotAsync($"Jay账户-信箱限流-{what}-{language}-窄");
+            }
         }
+        L.SetLanguage("zh-Hans");
         window.Width = width;
         window.Height = height;
         await Task.Delay(200);
