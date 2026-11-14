@@ -43,8 +43,9 @@ public partial class MainWindow
     /// <summary>§9.3 rule 1: no tip while a game is starting, someone is knocking (except the knock tip), or a dialog or overlay is open.</summary>
     private bool TipBusy(Tip tip)
     {
-        // A dialog is an owned window; while one is open the main window waits.
-        if (OwnedWindows.Any(w => w.IsVisible) || DataContext is not MainViewModel main) return true;
+        // A dialog is an owned window; while one is open the main window waits. The popped-out log is owned too but
+        // stays open for a whole session, so it doesn't count.
+        if (OwnedWindows.Any(w => w.IsVisible && w is not LogWindow) || DataContext is not MainViewModel main) return true;
         if (main.Palette.IsOpen || main.Help.IsOpen || main.FirstRun.IsOpen) return true;
         if (main.Pages.OfType<HomeViewModel>().Any(h => h.IsBusy)) return true;
         return tip != Tips.FirstKnock && main.Multiplayer.HasKnocks;
@@ -58,11 +59,13 @@ public partial class MainWindow
         ShowTip(next.Tip);
     }
 
-    private void ShowTip(Tip tip)
+    private void ShowTip(Tip tip) => ShowTip(tip, TipAnchors.TryGetValue(tip.Id, out var name)
+        ? this.GetVisualDescendants().OfType<Control>().FirstOrDefault(c => c.Name == name && c.IsEffectivelyVisible && c.Bounds.Width > 0)
+        : null);
+
+    /// <summary>Shows <paramref name="tip"/> at <paramref name="anchor"/> (the bar when null). The self-check calls it with its own anchors.</summary>
+    internal void ShowTip(Tip tip, Control? anchor)
     {
-        var anchor = TipAnchors.TryGetValue(tip.Id, out var name)
-            ? this.GetVisualDescendants().OfType<Control>().FirstOrDefault(c => c.Name == name && c.IsEffectivelyVisible && c.Bounds.Width > 0)
-            : null;
         var mode = TipRules.ModeFor(Bounds.Height, anchor is not null);
         TutorialService.Showing(tip);
         CurrentTipMode = mode;
@@ -81,7 +84,11 @@ public partial class MainWindow
             void Gone(object? s, Avalonia.VisualTreeAttachmentEventArgs e)
             {
                 anchor!.DetachedFromVisualTree -= Gone;
-                if (!TipPopup.IsOpen) return;
+                // Still hooked after this bubble was closed with "Got it": only take away a bubble on this anchor.
+                // The popup closes itself when its target leaves (before this runs), so ask whether this bubble is
+                // still the tip on screen rather than whether the popup is open; otherwise the tip would stay
+                // "current" and no other tip could show for the rest of the session.
+                if (CurrentTipMode != TipMode.Bubble || !ReferenceEquals(TipPopup.PlacementTarget, anchor)) return;
                 TipPopup.IsOpen = false;
                 CurrentTipMode = null;
                 TutorialService.Hidden();

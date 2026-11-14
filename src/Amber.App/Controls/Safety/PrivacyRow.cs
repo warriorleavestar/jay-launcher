@@ -1,3 +1,4 @@
+using Amber.App.Localization;
 using Amber.Core.Localization;
 using Avalonia;
 using Avalonia.Controls;
@@ -30,7 +31,8 @@ public class PrivacyRow : SafetySurface
         _panel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children = { shield, _text } };
         Child = _panel;
         Update();
-        L.Changed += () => Avalonia.Threading.Dispatcher.UIThread.Post(Update);
+        // Weak subscription, so a dropped row can be collected (LanguageListeners notifies on the UI thread).
+        LanguageListeners.Add(this, static p => ((PrivacyRow)p).Update());
     }
 
     private string FullText => $"{L.T("main.no_cloud_control")} · {L.T("main.no_telemetry")}";
