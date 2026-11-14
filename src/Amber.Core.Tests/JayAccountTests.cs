@@ -434,6 +434,33 @@ public sealed class JayAccountTests : IDisposable
         Assert.Null(store.Open("jay1qj0vnu2a9rqzk04wwj7xz3395djcne576wt4q5wmt87u4rx2xh7fqdxvdag"));
     }
 
+    /// <summary>
+    /// A creation time past the last date there is (a hand-edited or damaged file) loads as that last date. Before, it threw
+    /// out of <see cref="JayAccountStore.Load"/>; an ordinary time still loads unchanged.
+    /// </summary>
+    [Theory]
+    [InlineData(1_700_000_000L, 1_700_000_000L)]
+    [InlineData(-5L, 0L)]
+    [InlineData(long.MaxValue, 253_402_300_799L)]
+    public void ASavedCreationTimeOutsideTheDateRangeIsClamped(long saved, long expected)
+    {
+        using var keys = DeviceKeys.Generate();
+        using var account = JayAccount.FromMnemonic(Bip39.Generate(MnemonicLanguage.English), null);
+        new JayAccountStore(_dir).Add(account, "Main", backedUp: false, keys, "PC", DateTimeOffset.FromUnixTimeSeconds(1_700_000_000));
+        var path = Path.Combine(_dir, JayAccountStore.FileName);
+        var json = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!;
+        json["accounts"]![0]!["created"] = saved;
+        File.WriteAllText(path, json.ToJsonString());
+
+        var again = new JayAccountStore(_dir);
+        again.Load();
+        var entry = Assert.Single(again.Accounts);
+        Assert.Equal(account.Address, entry.Address);
+        Assert.Equal(expected, entry.Created.ToUnixTimeSeconds());
+        using var opened = again.Open(account.Address);
+        Assert.NotNull(opened);
+    }
+
     public void Dispose()
     {
         try { Directory.Delete(_dir, true); }

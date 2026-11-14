@@ -1918,10 +1918,15 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         var appSettings = Page<HomeViewModel>().Service.Settings;
         var feed = appSettings.UpdateFeedUrl;
         appSettings.UpdateFeedUrl = "http://127.0.0.1:9/jay-selftest/latest.json";
+        // A page left from an earlier check must not stay offered once a check fails. A failed check of any kind
+        // (no answer, an unreadable reply, a verified release whose number can't be saved) ends in the same failure
+        // branch; ReleaseSignatureTests covers the save failure itself, which needs a signed test release.
+        tools.UpdateUrl = "https://releases.example.test/stale";
         try { await tools.CheckUpdateCommand.ExecuteAsync(null); }
         finally { appSettings.UpdateFeedUrl = feed; }
         var failedPrefix = L.F("tools.update.failed", "");
         Check("更新地址连不上时写明检查失败", tools.UpdateStatus.StartsWith(failedPrefix, StringComparison.Ordinal), tools.UpdateStatus);
+        Check("检查失败时不给【打开发布页】", tools.UpdateUrl is null, tools.UpdateUrl ?? "");
         tools.DownloadUrl = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
         tools.DownloadFolder = reportDir;
         await tools.DownloadFileCommand.ExecuteAsync(null);

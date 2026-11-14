@@ -200,7 +200,8 @@ public static class ServerList
     {
         var path = Path.Combine(workDir, "servers.dat");
         var root = File.Exists(path) ? Nbt.ReadFile(path) : [];
-        if (root.GetValueOrDefault("servers") is not Nbt.NbtList list)
+        // The game writes an emptied list with element type End; an entry can't be appended to that one, so start a typed list.
+        if (root.GetValueOrDefault("servers") is not Nbt.NbtList list || (list.Items.Count == 0 && list.ElementType != 10))
         {
             list = new Nbt.NbtList(10, []);
             root["servers"] = list;
@@ -215,6 +216,8 @@ public static class ServerList
         if (address.StartsWith('['))
         {
             var close = address.IndexOf(']');
+            // "[" without "]" is a typo, not an IPv6 literal: hand it on as written so the lookup fails with a readable error.
+            if (close < 0) return (address, 25565);
             var host = address[1..close];
             return (host, close + 2 < address.Length && int.TryParse(address[(close + 2)..], out var p6) ? p6 : 25565);
         }

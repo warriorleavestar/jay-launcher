@@ -367,12 +367,75 @@ public sealed class ReleaseSignatureTests : IDisposable
     }
 
     [Fact]
+    public async Task AVerifiedReleaseWhoseNumberCannotBeSavedEndsTheManualCheckAsAFailure()
+    {
+        // The data folder can't be written (here a file stands where it should be): the release verifies, saving its
+        // seq throws, and Settings › About reports a failed check with no page to open instead of the command faulting.
+        var dataDir = Path.Combine(_dir, "data-blocked");
+        File.WriteAllText(dataDir, "not a folder");
+        var (http, _) = FeedFor("v1.0.0", Files());
+        var checker = new UpdateCheck(new HttpClient(http), dataDir, Own);
+        var (status, page) = await Amber.App.ViewModels.ToolsViewModel.RunUpdateCheckAsync(checker, Feed, "0.9.0");
+        Assert.StartsWith(Amber.Core.Localization.L.F("tools.update.failed", ""), status);
+        Assert.Null(page);
+        // The signatures were fetched, so the failure came after the check, from saving.
+        Assert.Contains(http.Requests, r => r.Url.EndsWith(ReleaseSignature.SignatureFileName, StringComparison.Ordinal));
+        Assert.Equal(0, checker.HighestSeq);
+
+        // The same release with a writable folder is offered, so only the save made the difference.
+        var (fine, _) = FeedFor("v1.0.0", Files());
+        var (okStatus, okPage) = await Amber.App.ViewModels.ToolsViewModel.RunUpdateCheckAsync(
+            new UpdateCheck(new HttpClient(fine), Path.Combine(_dir, "data-writable"), Own), Feed, "0.9.0");
+        Assert.False(okStatus.StartsWith(Amber.Core.Localization.L.F("tools.update.failed", ""), StringComparison.Ordinal), okStatus);
+        Assert.Equal("https://releases.example.test/v1.0.0", okPage);
+    }
+
+    [Fact]
     public async Task UpdateCheckFollowsTheTrustChain()
     {
         var chain = ReleaseSignature_Chain(Own, Next, 6, T[1], T[2]);
         var (http, _) = FeedFor("v1.0.0", Files(Statement(tag: "v1.0.0", seq: 7, trust: Next.Hash), [T[3], T[0]], chain: chain));
         var update = await new UpdateCheck(new HttpClient(http), Path.Combine(_dir, "data-chain"), Own).CheckAsync(Feed, "0.9.0");
         Assert.True(update!.IsVerified);
+    }
+
+    [Theory]
+    [InlineData("[]", false)]
+    [InlineData("\"v9.9.9\"", false)]
+    [InlineData("{\"tag_name\":5}", false)]
+    [InlineData("{\"tag_name\":\"v9.9.9\",\"html_url\":7}", true)]
+    [InlineData("{\"tag_name\":\"v9.9.9\",\"body\":[1],\"assets\":[1,\"x\",{\"name\":3},{\"name\":\"a.zip\",\"browser_download_url\":{}}]}", true)]
+    public async Task UpdateCheckSurvivesAFeedOfTheWrongShape(string json, bool namesAVersion)
+    {
+        // A feed address that returns a list, an error page shaped as JSON or wrongly typed fields never ends as an
+        // InvalidOperationException out of JsonElement: without a version the check fails, with one the update is
+        // reported as unsigned and the wrongly typed fields are left out.
+        var http = new FakeHttp();
+        http.On(Feed, json);
+        var checker = new UpdateCheck(new HttpClient(http), Path.Combine(_dir, "data-shape"), Own);
+        if (!namesAVersion)
+        {
+            await Assert.ThrowsAsync<InvalidDataException>(() => checker.CheckAsync(Feed, "0.9.0"));
+            return;
+        }
+        var update = await checker.CheckAsync(Feed, "0.9.0");
+        Assert.NotNull(update);
+        Assert.False(update!.IsVerified);
+        Assert.Equal("9.9.9", update.Info.Version);
+        Assert.Null(update.Info.Url);
+        Assert.Null(update.Info.Notes);
+    }
+
+    [Theory]
+    [InlineData("not a url")]
+    [InlineData("releases.example.test/latest")]
+    [InlineData("file:///etc/passwd")]
+    public async Task UpdateCheckRefusesAFeedAddressThatIsNotHttp(string feed)
+    {
+        var http = new FakeHttp();
+        var checker = new UpdateCheck(new HttpClient(http), Path.Combine(_dir, "data-url"), Own);
+        await Assert.ThrowsAsync<InvalidDataException>(() => checker.CheckAsync(feed, "0.9.0"));
+        Assert.Empty(http.Requests);
     }
 
     [Fact]

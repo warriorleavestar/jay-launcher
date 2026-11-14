@@ -151,4 +151,32 @@ public sealed class NetworkStringTests
         // 选的网络不在了：回到内置的 Jay 网络。
         Assert.True(list.Current("gone", null).IsBuiltIn);
     }
+
+    /// <summary>
+    /// Anyone can sign their own string, so an "exp" outside the range of dates, or a number that doesn't fit, must read
+    /// as a bad string (<see cref="InvalidDataException"/>) and not escape as another exception type.
+    /// </summary>
+    [Theory]
+    [InlineData("9223372036854775807")]
+    [InlineData("-9223372036854775808")]
+    [InlineData("99999999999999999999")]
+    [InlineData("1.5")]
+    [InlineData("\"soon\"")]
+    public void AnExpiryOutsideTheDateRangeIsABadString(string exp)
+    {
+        var json = Info().ToJson();
+        json["exp"] = System.Text.Json.Nodes.JsonNode.Parse(exp);
+        var payload = Encoding.UTF8.GetBytes(json.ToJsonString());
+        var signature = Registry.Sign([.. "jay-network-v2\n"u8, .. payload]);
+        var text = "JAYNET2-" + NetworkString.Base64Url(payload) + "." + NetworkString.Base64Url(signature.Encode());
+        Assert.Throws<InvalidDataException>(() => NetworkString.Parse(text, Trusted));
+        Assert.Null(NetworkString.TryParse(text, Trusted));
+
+        // The same string with an ordinary expiry still reads.
+        json["exp"] = DateTimeOffset.UtcNow.AddDays(30).ToUnixTimeSeconds();
+        payload = Encoding.UTF8.GetBytes(json.ToJsonString());
+        signature = Registry.Sign([.. "jay-network-v2\n"u8, .. payload]);
+        text = "JAYNET2-" + NetworkString.Base64Url(payload) + "." + NetworkString.Base64Url(signature.Encode());
+        Assert.True(NetworkString.Parse(text, Trusted).Reviewed);
+    }
 }

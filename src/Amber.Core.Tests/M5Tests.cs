@@ -37,6 +37,16 @@ public class M5Tests : IDisposable
         Assert.Contains(analysis.Findings, f => f.Title.Contains(expected));
     }
 
+    [Theory]
+    [InlineData("has been compiled by a more recent version of the Java Runtime (class file version 99999999999.0)")]
+    public void CrashAnalyzer_ANumberTooLongToParseSkipsThatRuleOnly(string line)
+    {
+        // latest.log carries chat from other players, so anyone can put such a line into the analysed text.
+        var analysis = CrashAnalyzer.Analyze(line + "\njava.lang.OutOfMemoryError: Java heap space");
+        Assert.Contains(analysis.Findings, f => f.Title.Contains("内存不够用"));
+        Assert.DoesNotContain(analysis.Findings, f => f.Key == "core.crash.java.tooold");
+    }
+
     [Fact]
     public void CrashAnalyzer_NoGuessOnCleanLog()
     {
@@ -121,8 +131,22 @@ public class M5Tests : IDisposable
     [InlineData("play.example.com", "play.example.com", 25565)]
     [InlineData("play.example.com:1234", "play.example.com", 1234)]
     [InlineData("[::1]:25570", "::1", 25570)]
+    [InlineData("[::1", "[::1", 25565)]
+    [InlineData("[", "[", 25565)]
     public void ParseServerAddress(string input, string host, int port) =>
         Assert.Equal((host, port), ServerList.ParseAddress(input));
+
+    [Fact]
+    public void ServerListAddsToTheEmptyListTheGameLeavesBehind()
+    {
+        // After the last server is removed in game, servers.dat holds an empty list with element type End.
+        var path = Path.Combine(_root, "servers.dat");
+        Nbt.WriteFile(path, new Dictionary<string, object> { ["servers"] = new Nbt.NbtList(0, []) });
+        Assert.Empty(ServerList.Read(_root));
+        ServerList.Add(_root, new ServerEntry("新服", "b.example"));
+        Assert.Equal([new ServerEntry("新服", "b.example")], ServerList.Read(_root));
+        Assert.Equal(10, ((Nbt.NbtList)Nbt.ReadFile(path)["servers"]).ElementType);
+    }
 
     /// <summary>一个只回状态的假服务器，验证 Ping 协议来回。</summary>
     [Fact]
@@ -297,6 +321,16 @@ public class M5Tests : IDisposable
         var update = await checker.CheckAsync("https://u.example/feed", "1.0.0");
         Assert.Equal(("1.2.0", "https://u.example/r"), (update!.Version, update.Url));
         Assert.Null(await checker.CheckAsync("https://u.example/feed", "1.2.0"));
+    }
+
+    [Theory]
+    [InlineData("[]")]
+    [InlineData("\"v1.2.0\"")]
+    [InlineData("{\"tag_name\":5}")]
+    public async Task UpdateChecker_AFeedOfTheWrongShapeIsAFeedWithoutAVersion(string json)
+    {
+        var fake = new FakeHttp().On("https://u.example/feed", json);
+        await Assert.ThrowsAsync<InvalidDataException>(() => new UpdateChecker(new HttpClient(fake)).CheckAsync("https://u.example/feed", "1.0.0"));
     }
 
     [Fact]

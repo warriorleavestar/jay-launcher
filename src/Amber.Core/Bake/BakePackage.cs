@@ -66,7 +66,8 @@ public sealed record BakePackage(
         var classpath = new List<string>();
         foreach (var entry in manifest["classpath"] as JsonArray ?? [])
         {
-            var relative = Normalize(entry?.GetValue<string>() ?? "");
+            // An entry that is not a string is no file the manifest vouches for.
+            var relative = Normalize(entry is JsonValue item && item.TryGetValue<string>(out var listed) ? listed : "");
             // Every class path entry must be one of the files the manifest vouches for (and so inside the folder).
             if (!files.ContainsKey(relative)) throw new BakeException(L.F("core.bake.package_bad", root), [], "package_bad");
             classpath.Add(GameDirectory.Contained(root, relative));
@@ -75,7 +76,7 @@ public sealed record BakePackage(
 
         var platforms = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
         foreach (var (kind, versions) in manifest["platforms"] as JsonObject ?? [])
-            platforms[kind] = versions is JsonArray a ? a.Select(v => v?.GetValue<string>() ?? "").Where(v => v.Length > 0).ToList() : [];
+            platforms[kind] = versions is JsonArray a ? a.Select(v => v is JsonValue item && item.TryGetValue<string>(out var version) ? version : "").Where(v => v.Length > 0).ToList() : [];
         var javaMin = new Dictionary<string, int>(StringComparer.Ordinal);
         foreach (var (kind, value) in manifest["javaMin"] as JsonObject ?? [])
             if (value is JsonValue v && v.TryGetValue<int>(out var major)) javaMin[kind] = major;
@@ -154,7 +155,12 @@ public sealed record BakePackage(
                 .Select(f => Normalize(System.IO.Path.GetRelativePath(temp, f)))
                 .FirstOrDefault(f => f != ManifestName && !package.Files.ContainsKey(f));
             if (extra is not null) throw new BakeException(L.F("core.bake.package_extra", extra), [], "package_mismatch");
-            if (package.LoaderVersion.Length == 0 || package.LoaderVersion.Any(c => !(char.IsAsciiLetterOrDigit(c) || c is '.' or '-' or '_' or '+')))
+            // The version becomes a folder name under installRoot that is deleted and replaced below. It must start and end
+            // with a letter or digit: "." and ".." would point at installRoot or above, and Windows drops trailing dots.
+            // Windows device names (CON, NUL, COM1, ...) can't be folders either.
+            if (package.LoaderVersion.Length == 0 || package.LoaderVersion.Any(c => !(char.IsAsciiLetterOrDigit(c) || c is '.' or '-' or '_' or '+'))
+                || !char.IsAsciiLetterOrDigit(package.LoaderVersion[0]) || !char.IsAsciiLetterOrDigit(package.LoaderVersion[^1])
+                || FileNames.IsDeviceName(package.LoaderVersion))
                 throw new BakeException(L.F("core.bake.package_bad", System.IO.Path.GetFileName(zipPath)), [], "package_bad");
 
             var final = System.IO.Path.Combine(installRoot, package.LoaderVersion);

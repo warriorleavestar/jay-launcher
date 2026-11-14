@@ -223,15 +223,25 @@ public sealed partial class ToolsViewModel : PageViewModel
             UpdateStatus = L.T("tools.update.store");
             return;
         }
+        // Privacy plan item 2: a newer release is offered only when 2 of the 3 Jay trustees signed it.
+        (UpdateStatus, UpdateUrl) = await RunUpdateCheckAsync(new UpdateCheck(service.Http, AppSettings.DataDir), feed, UpdateChecker.CurrentVersion);
+    }
+
+    /// <summary>
+    /// Asks <paramref name="feed"/> through <paramref name="check"/> and says what the manual check shows. A check that
+    /// fails (no answer, a reply it can't read, or the accepted release number not saved) is a status line with no page.
+    /// </summary>
+    internal static async Task<(string Status, string? Page)> RunUpdateCheckAsync(UpdateCheck check, string feed, string currentVersion)
+    {
         try
         {
-            // Privacy plan item 2: a newer release is offered only when 2 of the 3 Jay trustees signed it.
-            var update = await new UpdateCheck(service.Http, AppSettings.DataDir).CheckAsync(feed, UpdateChecker.CurrentVersion);
-            (UpdateStatus, UpdateUrl) = DescribeUpdate(feed, update);
+            return DescribeUpdate(feed, await check.CheckAsync(feed, currentVersion));
         }
-        catch (Exception e) when (e is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException or InvalidDataException)
+        catch (Exception e) when (e is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException or InvalidDataException
+                                      or IOException or UnauthorizedAccessException)
         {
-            UpdateStatus = L.F("tools.update.failed", e.Message);
+            // IOException / UnauthorizedAccessException: the accepted release number could not be saved (read-only data folder).
+            return (L.F("tools.update.failed", e.Message), null);
         }
     }
 
