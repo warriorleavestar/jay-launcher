@@ -1961,7 +1961,7 @@
   "multiplayer.device.rotated": "已換新，以前的碼全部作廢",
   "multiplayer.device.failed": "裝置碼沒能儲存：{0}",
   "multiplayer.device.find_title": "用裝置碼找房間",
-  "multiplayer.device.find_placeholder": "JAYF1-…",
+  "multiplayer.device.find_placeholder": "JAYF2-…",
   "multiplayer.device.find": "尋找",
   "multiplayer.device.bad_code": "這不是有效的裝置碼",
   "multiplayer.device.not_found": "沒找到：對方可能沒開房間，或者沒開啟「可以用裝置碼找到這個房間」",

@@ -28,7 +28,7 @@ One thing has one name, on every page and in every language. The table is the wh
 | Comparing four emoji when adding a friend | 对表情 | 對表情 | compare emoji | 絵文字の確認 | |
 | A person you added and checked | 朋友 | 朋友 | friend | フレンド | 联系人, contact, 連絡先 |
 | The code that lets someone ask to add you (`JAYC1-`) | 好友码 | 好友碼 | friend code | フレンドコード | 联系人码, contact code |
-| The code that points at one computer and finds its room (`JAYF1-`) | 设备码 | 裝置碼 | device code | デバイスコード | 好友码 / friend code for this code, 设备认证, device verification |
+| The code that points at one computer and finds its room (`JAYF2-`, older `JAYF1-`) | 设备码 | 裝置碼 | device code | デバイスコード | 好友码 / friend code for this code, 设备认证, device verification |
 | The host checking that a connection really comes from that computer | 核对设备 | 核對裝置 | device check | デバイス確認 | 设备验证 |
 | The key pair of this installation | 这台设备的身份 | 這台裝置的身分 | this device's identity | このデバイスの身元 | 联机身份, multiplayer identity |
 | A server that helps two sides meet and forwards when they cannot connect directly | 中转 | 中轉 | relay | 中継 | 中转服务器, 联机节点, 节点, relay server, node, ノード |
@@ -51,7 +51,7 @@ Rules that go with the table:
 - Status is a mark (a tag, a dot, a chip), not a sentence.
 - The old `AMB-` room code, the sealed direct codes (`JAYDS1-` / `JAYDR1-`: 加密直连码, 回复码) and the word "seed" keep their names because they only appear in their own flows.
 
-Names in code are older than the UI words and stay as they are. `PastedCodeKind.FriendCode` and the `multiplayer.device.*` keys are the device code (`JAYF1-`); `PastedCodeKind.ContactCode` and `multiplayer.contacts.*` are the friend code (`JAYC1-`) and the friends list; `multiplayer.nodes.*` is relays; `multiplayer.exit.*` is going online through a member; `multiplayer.breaker.*` is the emergency disconnect.
+Names in code are older than the UI words and stay as they are. `PastedCodeKind.FriendCode` and the `multiplayer.device.*` keys are the device code (`JAYF2-`, older `JAYF1-`); `PastedCodeKind.ContactCode` and `multiplayer.contacts.*` are the friend code (`JAYC1-`) and the friends list; `multiplayer.nodes.*` is relays; `multiplayer.exit.*` is going online through a member; `multiplayer.breaker.*` is the emergency disconnect.
 
 ## 账号
 

@@ -1993,7 +1993,7 @@
   "multiplayer.device.rotated": "Renewed; all old codes are void",
   "multiplayer.device.failed": "Couldn't save the device code setting: {0}",
   "multiplayer.device.find_title": "Find a room by device code",
-  "multiplayer.device.find_placeholder": "JAYF1-…",
+  "multiplayer.device.find_placeholder": "JAYF2-…",
   "multiplayer.device.find": "Find",
   "multiplayer.device.bad_code": "That isn't a valid device code",
   "multiplayer.device.not_found": "Not found. They may not have a room open, or haven't allowed finding it by device code",

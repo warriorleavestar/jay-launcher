@@ -1961,7 +1961,7 @@
   "multiplayer.device.rotated": "已换新，以前的码全部作废",
   "multiplayer.device.failed": "设备码没能保存：{0}",
   "multiplayer.device.find_title": "用设备码找房间",
-  "multiplayer.device.find_placeholder": "JAYF1-…",
+  "multiplayer.device.find_placeholder": "JAYF2-…",
   "multiplayer.device.find": "查找",
   "multiplayer.device.bad_code": "这不是有效的设备码",
   "multiplayer.device.not_found": "没找到：对方可能没开房间，或者没打开“可以用设备码找到这个房间”",

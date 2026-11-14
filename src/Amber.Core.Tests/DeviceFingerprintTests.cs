@@ -41,7 +41,7 @@ public sealed class DeviceFingerprintTests : IAsyncDisposable
         Assert.Equal(codes.Count, codes.Distinct().Count());
         foreach (var code in codes)
         {
-            Assert.Matches("^JAYF1(-[0-9A-HJKMNP-TV-Z]{4}){5}$", code);
+            Assert.Matches("^JAYF2(-[0-9A-HJKMNP-TV-Z]{4}){8}$", code);
             Assert.True(device.Owns(code));
             Assert.False(other.Owns(code));
         }
@@ -58,15 +58,73 @@ public sealed class DeviceFingerprintTests : IAsyncDisposable
     [InlineData("JAYF1-0000-0000-0000-0000-000U")]
     public void BadCodesAreRejected(string text) => Assert.False(FingerprintCode.TryParse(text, out _));
 
+    /// <summary>A version 1 code for <paramref name="device"/>, as older Jay made them.</summary>
+    private static string V1Code(DeviceFingerprint device)
+    {
+        var nonce = System.Security.Cryptography.RandomNumberGenerator.GetBytes(FingerprintCode.NonceLength);
+        return FingerprintCode.Format(new ParsedFingerprint(1, nonce, FingerprintCode.Tag(1, device.SearchKey, nonce)));
+    }
+
     [Fact]
     public void CodeWithWrongPaddingIsRejected()
     {
-        var code = DeviceFingerprint.Enable(Dir("a")).NewCode();
+        var code = V1Code(DeviceFingerprint.Enable(Dir("a")));
         // 最后一个字符只有最高 1 位是数据，低 4 位是补的 0：改动低位就不认。
         const string crockford = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
         var bumped = code[..^1] + crockford[crockford.IndexOf(code[^1]) ^ 1];
         Assert.True(FingerprintCode.TryParse(code, out _));
         Assert.False(FingerprintCode.TryParse(bumped, out _));
+    }
+
+    [Fact]
+    public void OlderCodesStillReadAndBelongToTheDevice()
+    {
+        var device = DeviceFingerprint.Enable(Dir("a"));
+        var old = V1Code(device);
+        Assert.Matches("^JAYF1(-[0-9A-HJKMNP-TV-Z]{4}){5}$", old);
+        Assert.True(FingerprintCode.TryParse(old, out var parsed));
+        Assert.Equal(1, parsed.Version);
+        Assert.True(device.Owns(old));
+        Assert.False(DeviceFingerprint.Enable(Dir("b")).Owns(old));
+    }
+
+    [Fact]
+    public void AnswersToAHostsNoncesMakeNoCode()
+    {
+        var device = DeviceFingerprint.Enable(Dir("a"));
+        var nonces = Enumerable.Range(0, 4).Select(_ => System.Security.Cryptography.RandomNumberGenerator.GetBytes(FingerprintCode.NonceLength)).ToList();
+        // A host asks with nonces of its own choosing, in both versions.
+        var proof = device.Prove(_host.PublicKey, _guest.PublicKey, nonces.Select(n => (1, n)).Concat(nonces.Select(n => (2, n))));
+        // Version 1 nonces get no answer at all.
+        Assert.All(proof.Answers.Take(nonces.Count), a => Assert.Empty(a));
+        // Nothing made from the version 2 answers is one of this device's codes.
+        for (var i = 0; i < nonces.Count; i++)
+        {
+            var answer = proof.Answers[nonces.Count + i];
+            Assert.Equal(FingerprintCode.AnswerLength, answer.Length);
+            foreach (var version in new[] { 1, 2 })
+            {
+                var forged = new ParsedFingerprint(version, nonces[i], answer[..FingerprintCode.TagLength],
+                    version == 2 ? FingerprintCode.Check(nonces[i], answer, device.PublicKey) : null);
+                Assert.False(FingerprintCode.Matches(device.SearchKey, forged));
+                Assert.False(device.Owns(FingerprintCode.Format(forged)));
+            }
+        }
+    }
+
+    [Fact]
+    public void AnswersPassedOnFromAnotherDeviceDontMatch()
+    {
+        var friend = DeviceFingerprint.Enable(Dir("friend"));
+        var other = DeviceFingerprint.Enable(Dir("other"));
+        Assert.True(FingerprintCode.TryParse(friend.NewCode(), out var code));
+        var list = new[] { code };
+        var nonce = new[] { (code.Version, code.Nonce) };
+        Assert.True(friend.Prove(_host.PublicKey, _guest.PublicKey, nonce).MatchesAny(list));
+        // Someone who got the friend's answer (by asking the friend with the same nonce) and knocks with their own device.
+        var relayed = other.Prove(_host.PublicKey, _guest.PublicKey, nonce) with { Answers = friend.Prove(_host.PublicKey, _guest.PublicKey, nonce).Answers };
+        Assert.True(relayed.Verify(_host.PublicKey, _guest.PublicKey));
+        Assert.False(relayed.MatchesAny(list));
     }
 
     [Fact]
@@ -199,6 +257,30 @@ public sealed class DeviceFingerprintTests : IAsyncDisposable
         Assert.Equal("device", (await PublicJoin.KnockAsync(_net, "10.235.0.7", invite, _guest, "S", "0.8.0", null, default, stranger)).Reason);
         Assert.Equal("device", (await PublicJoin.KnockAsync(_net, "10.235.0.7", invite, _guest, "S", "0.8.0", null, default)).Reason);
         Assert.True((await PublicJoin.KnockAsync(_net, "10.235.0.7", invite, _guest, "S", "0.8.0", null, default, friend)).Approved);
+    }
+
+    [Fact]
+    public async Task AnOlderCodeOnTheListAdmitsNobody()
+    {
+        var friend = DeviceFingerprint.Enable(Dir("friend"));
+        var codes = DevicePolicy.ParseCodes(V1Code(friend));
+        Assert.Single(codes);
+        // Still an active policy (it doesn't fall open), but the device no longer answers for version 1 codes.
+        Assert.True(new DevicePolicy(false, codes).IsActive);
+        var (_, invite) = StartKnock(() => new DevicePolicy(false, codes));
+        Assert.Equal("device", (await PublicJoin.KnockAsync(_net, "10.235.0.7", invite, _guest, "S", "0.8.0", null, default, friend)).Reason);
+    }
+
+    [Fact]
+    public async Task OlderCodesStillFindTheRoom()
+    {
+        await StartDirectoryAsync();
+        var client = new RoomDirectoryClient(_net);
+        var device = DeviceFingerprint.Enable(Dir("host"));
+        var invite = new InviteBook().CreateStanding(false, TunnelSettings.Default).Invite.ToString();
+        var signer = new RoomSigner();
+        await client.AnnounceAsync(signer.Sign(Hidden(invite), DateTimeOffset.UtcNow), false, [], default, device.SearchKey);
+        Assert.Equal(signer.RoomId, (await client.FindAsync(V1Code(device), default))?.Id);
     }
 
     [Fact]

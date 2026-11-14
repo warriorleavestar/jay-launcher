@@ -1961,7 +1961,7 @@
   "multiplayer.device.rotated": "更新しました。以前のコードはすべて無効です",
   "multiplayer.device.failed": "デバイスコードの設定を保存できませんでした：{0}",
   "multiplayer.device.find_title": "デバイスコードでルームを探す",
-  "multiplayer.device.find_placeholder": "JAYF1-…",
+  "multiplayer.device.find_placeholder": "JAYF2-…",
   "multiplayer.device.find": "探す",
   "multiplayer.device.bad_code": "有効なデバイスコードではありません",
   "multiplayer.device.not_found": "見つかりません。相手がルームを開いていないか、デバイスコードでの検索を許可していません",

@@ -1895,7 +1895,7 @@
   "multiplayer.device.rotated": "已易新，前碼盡廢",
   "multiplayer.device.failed": "器碼未能存：{0}",
   "multiplayer.device.find_title": "以器碼尋房",
-  "multiplayer.device.find_placeholder": "JAYF1-…",
+  "multiplayer.device.find_placeholder": "JAYF2-…",
   "multiplayer.device.find": "尋",
   "multiplayer.device.bad_code": "此非可用之器碼",
   "multiplayer.device.not_found": "不得：彼或未開房，或未啟「可以器碼尋此房」",
