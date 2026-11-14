@@ -364,7 +364,9 @@ public sealed partial class PrivateMessenger : IAsyncDisposable
         var have = File.Exists(temp) ? new FileInfo(temp).Length : 0;
         if (have > job.Offer.Size) have = 0;
         var from = have / ChunkSize;
-        if (FreeSpaceOf(Downloads) is { } free && free < job.Offer.Size - from * ChunkSize + DiskReserve)
+        // Written without adding DiskReserve to the size: a peer-declared size near long.MaxValue must not wrap around.
+        var need = job.Offer.Size - from * ChunkSize;
+        if (FreeSpaceOf(Downloads) is { } free && (free < DiskReserve || need > free - DiskReserve))
         {
             _incoming.TryRemove(id, out _);
             await SendAsync(job.Offer.FromFingerprint, new JsonObject { ["t"] = "decline", ["id"] = id }, _cts.Token);
