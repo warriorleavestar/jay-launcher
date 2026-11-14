@@ -473,7 +473,7 @@ public sealed class NetworkServerFrameworkTests : IAsyncDisposable
         Assert.Throws<ArgumentException>(() => Program.DirectoryBuilder(_dir, Options.Parse(["directory", "--rate-limit", "3,x"]), output, _ => { }));
         // --rate-limit is read (and checked) whatever other switches are given.
         Assert.Throws<ArgumentException>(() => Program.DirectoryBuilder(_dir, Options.Parse(["directory", "--no-volunteers", "--rate-limit", "3,x"]), output, _ => { }));
-        Assert.NotNull(Program.DirectoryBuilder(_dir, Options.Parse(["directory", "--no-volunteers", "--no-admin", "--rate-limit", "1,2,100"]), output, _ => { }).RateLimit);
+        Assert.Equal((1, 2, 100), Program.DirectoryBuilder(_dir, Options.Parse(["directory", "--no-volunteers", "--no-admin", "--rate-limit", "1,2,100"]), output, _ => { }).RateLimit!.Limits);
 
         var words = Path.Combine(_dir, "words.txt");
         File.WriteAllText(words, "# 屏蔽词\n广告\n");
