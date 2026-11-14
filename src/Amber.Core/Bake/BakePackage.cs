@@ -25,6 +25,9 @@ public sealed record BakePackage(
     public const string ManifestName = "manifest.json";
     public const string Schema = "amber-ul/package@1";
 
+    /// <summary>Interface v1.3.2 <c>javaLaunch</c>: the Java a platform's game runs on when it is not the stages' Java (forge-1.12.2: 8–8).</summary>
+    public IReadOnlyDictionary<string, JavaRange> JavaLaunch { get; init; } = new Dictionary<string, JavaRange>();
+
     /// <summary>The bridge jars the manifest lists (file names such as <c>fabricbridge.jar</c>).</summary>
     public IReadOnlyCollection<string> Bridges { get; init; } = [];
 
@@ -89,6 +92,7 @@ public sealed record BakePackage(
         {
             Bridges = bridges,
             Accepts = CrossLoader.AcceptTable.Parse(manifest["accepts"]),
+            JavaLaunch = JavaRange.ParseTable(manifest["javaLaunch"]),
         };
     }
 

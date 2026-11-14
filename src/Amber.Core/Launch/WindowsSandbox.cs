@@ -80,7 +80,19 @@ public static unsafe class WindowsSandbox
         // A strong launch left the container's rights on these folders. Low-integrity processes were seen to be refused
         // reading anything whose ACL names a specific container SID, so the standard level takes them off again.
         if (container is null && DerivedContainerSid() is { } previous)
-            foreach (var path in UngrantTargets(grants.ReadWrite.Concat(grants.ReadOnly))) Ungrant(path, previous);
+        {
+            var targets = UngrantTargets(grants.ReadWrite.Concat(grants.ReadOnly)).ToList();
+            // A strong game still running reads through the same folders (the ones above its grants above all): taking
+            // its rights away would break it, and leaving them would keep this game from reading them. Neither works,
+            // so this start stops with a plain reason. Where nothing of this launch names the container, both run.
+            if (StrongGameRunning)
+            {
+                if (targets.Any(p => NamesExplicitly(p, previous)))
+                    throw new SandboxUnavailableException(L.T("core.launch.sandbox.win.strong_running"));
+            }
+            else
+                foreach (var path in targets) Ungrant(path, previous);
+        }
         // Grants first, hidden folders after: a hidden folder inside a granted one keeps its own label.
         foreach (var path in grants.ReadWrite)
         {
@@ -105,6 +117,56 @@ public static unsafe class WindowsSandbox
     }
 
     private static bool Exists(string path) => Directory.Exists(path) || File.Exists(path);
+
+    private static readonly List<Process> StrongGames = [];
+
+    /// <summary>A game this Jay started at the strong level is still running (in the shared container).</summary>
+    internal static bool StrongGameRunning
+    {
+        get
+        {
+            lock (StrongGames)
+            {
+                StrongGames.RemoveAll(HasExited);
+                return StrongGames.Count > 0;
+            }
+        }
+    }
+
+    /// <summary>How many strong games are listed, without tidying up (tests).</summary>
+    internal static int StrongGamesListed
+    {
+        get { lock (StrongGames) return StrongGames.Count; }
+    }
+
+    /// <summary>Lists a strong game until it exits: it leaves the list itself then, so nothing is kept after.</summary>
+    internal static void TrackStrong(Process process)
+    {
+        void Gone(object? sender, EventArgs e)
+        {
+            process.Exited -= Gone;
+            lock (StrongGames) StrongGames.Remove(process);
+        }
+        lock (StrongGames)
+        {
+            StrongGames.RemoveAll(HasExited);
+            StrongGames.Add(process);
+        }
+        try
+        {
+            process.Exited += Gone;
+            process.EnableRaisingEvents = true;
+        }
+        catch (Exception e) when (e is InvalidOperationException or Win32Exception) { }
+        // Exited before the handler was in place: the event does not come.
+        if (HasExited(process)) Gone(null, EventArgs.Empty);
+    }
+
+    private static bool HasExited(Process process)
+    {
+        try { return process.HasExited; }
+        catch (Exception e) when (e is InvalidOperationException or Win32Exception) { return true; }
+    }
 
     /// <summary>The label SDDL now on a path, for diagnostics.</summary>
     public static string? CurrentLabelPublic(string path) => CurrentLabel(path);
@@ -229,12 +291,16 @@ public static unsafe class WindowsSandbox
     /// grants, the folder of every granted file, and the folders right inside every granted folder. The last two catch
     /// another instance's folder: a strong launch of instance A grants <c>versions\A</c> itself, and a standard launch
     /// of B that runs on A's game jar (a modded instance on the vanilla version) grants only <c>versions</c> and the jar.
+    /// Every folder above a grant is included too: a strong launch of an instance that shares the game folder grants
+    /// the game folder itself, and everything a later isolated standard launch reads inherits that entry.
     /// </summary>
     internal static IEnumerable<string> UngrantTargets(IEnumerable<string> grants)
     {
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var path in grants)
         {
+            for (var up = Path.GetDirectoryName(GameSandbox.Full(path)); !string.IsNullOrEmpty(up); up = Path.GetDirectoryName(up))
+                if (seen.Add(up)) yield return up;
             if (Directory.Exists(path))
             {
                 if (seen.Add(path)) yield return path;
@@ -244,12 +310,20 @@ public static unsafe class WindowsSandbox
                 foreach (var folder in inside)
                     if (seen.Add(folder)) yield return folder;
             }
-            else if (File.Exists(path))
-            {
-                if (seen.Add(path)) yield return path;
-                if (Path.GetDirectoryName(path) is { } folder && seen.Add(folder)) yield return folder;
-            }
+            else if (File.Exists(path) && seen.Add(path)) yield return path;
         }
+    }
+
+    /// <summary>The path's own (not inherited) entries name <paramref name="sid"/>; false when it cannot be told.</summary>
+    internal static bool NamesExplicitly(string path, SecurityIdentifier sid)
+    {
+        try
+        {
+            FileSystemSecurity acl = Directory.Exists(path) ? new DirectoryInfo(path).GetAccessControl(AccessControlSections.Access)
+                : File.Exists(path) ? new FileInfo(path).GetAccessControl(AccessControlSections.Access) : null!;
+            return acl is not null && acl.GetAccessRules(true, false, typeof(SecurityIdentifier)).OfType<FileSystemAccessRule>().Any(r => r.IdentityReference == sid);
+        }
+        catch (Exception e) when (e is UnauthorizedAccessException or IOException or PrivilegeNotHeldException or InvalidOperationException) { return false; }
     }
 
     internal static void Ungrant(string path, SecurityIdentifier sid)
@@ -449,19 +523,11 @@ public static unsafe class WindowsSandbox
         return servers;
     }
 
-    /// <summary>The Java major version from the release file next to bin, or 0 when unknown.</summary>
-    public static int JavaMajor(string javaPath)
-    {
-        var release = Path.Combine(GameSandbox.JavaHome(javaPath), "release");
-        try
-        {
-            foreach (var line in File.ReadLines(release))
-                if (line.StartsWith("JAVA_VERSION=", StringComparison.Ordinal))
-                    return Java.JavaFinder.ParseMajor(line["JAVA_VERSION=".Length..].Trim('"'));
-        }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
-        return 0;
-    }
+    /// <summary>
+    /// The Java major version (from its files, else from the restricted probe; remembered), or 0 when unknown. Guessing
+    /// wrong matters: a Java 8 given Java 9's --patch-module does not start.
+    /// </summary>
+    public static int JavaMajor(string javaPath, CancellationToken ct = default) => Java.JavaFinder.MajorOf(javaPath, ct);
 
     /// <summary>The resolver jar's resource; missing when the build had no JDK (then Java 18+ uses the standard level).</summary>
     internal const string ResolverResource = "Amber.Core.jay-dns.jar";
@@ -523,9 +589,18 @@ public static unsafe class WindowsSandbox
     /// The temp folder is moved to one the sandboxed game may write: LocalLow\Jay\temp (standard) or the container's
     /// Temp folder (strong). Every handle but the output pipes stays in Jay.
     /// </summary>
-    public static Process Start(ProcessStartInfo psi, WindowsSandboxLevel level, string? tempFolder = null)
+    public static Process Start(ProcessStartInfo psi, WindowsSandboxLevel level, string? tempFolder = null) =>
+        Start(psi, level == WindowsSandboxLevel.Strong ? ContainerSid() : null, tempFolder, network: true, track: true);
+
+    /// <summary>
+    /// Starts a Java version probe in <paramref name="container"/>: no network capabilities, not listed as a strong game,
+    /// temp files in <paramref name="tempFolder"/>. The caller grants the container what it may read.
+    /// </summary>
+    internal static Process StartProbe(ProcessStartInfo psi, SecurityIdentifier container, string tempFolder) =>
+        Start(psi, container, tempFolder, network: false, track: false);
+
+    private static Process Start(ProcessStartInfo psi, SecurityIdentifier? container, string? tempFolder, bool network, bool track)
     {
-        SecurityIdentifier? container = level == WindowsSandboxLevel.Strong ? ContainerSid() : null;
         var temp = tempFolder ?? (container is not null ? Path.Combine(ContainerFolder(container), "Temp") : LowTempFolder());
         Directory.CreateDirectory(temp);
         psi.Environment["TEMP"] = temp;
@@ -580,8 +655,8 @@ public static unsafe class WindowsSandbox
                 {
                     var sidText = container.Value;
                     if (!ConvertStringSidToSidW(sidText, out containerSid)) throw new Win32Exception();
-                    caps = Capabilities(out capsBuffers);
-                    securityCaps = new SECURITY_CAPABILITIES { AppContainerSid = containerSid, Capabilities = caps, CapabilityCount = (uint)CapabilitySids.Length };
+                    if (network) caps = Capabilities(out capsBuffers);
+                    securityCaps = new SECURITY_CAPABILITIES { AppContainerSid = containerSid, Capabilities = caps, CapabilityCount = network ? (uint)CapabilitySids.Length : 0 };
                     if (!UpdateProcThreadAttribute(attributes, 0, PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES, &securityCaps, sizeof(SECURITY_CAPABILITIES), 0, 0))
                         throw new Win32Exception();
                 }
@@ -611,6 +686,7 @@ public static unsafe class WindowsSandbox
             outRead = errRead = 0;
             started = true;
             ResumeThread(pi.hThread);
+            if (container is not null && track) TrackStrong(process);
             return process;
         }
         finally

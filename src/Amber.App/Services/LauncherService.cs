@@ -495,14 +495,17 @@ public sealed class LauncherService : IDisposable
     /// in one admin prompt; declined, no admin or failed: the standard level, remembered so Jay does not ask again.
     /// <paramref name="note"/> gets a line for the launch status when this launch uses less than the player chose.
     /// </summary>
-    public async Task<SandboxOptions> SandboxForLaunchAsync(string javaPath, Func<Task<bool>> ask, Action<string> note, CancellationToken ct = default)
+    public async Task<SandboxOptions> SandboxForLaunchAsync(string javaPath, Func<IReadOnlyList<string>, Task<bool>> ask, Action<string> note, CancellationToken ct = default)
     {
         var options = GameSandboxOptions;
         if (!options.Enabled || !OperatingSystem.IsWindows()) return options;
-        var decision = DecideWindowsSandbox(javaPath);
+        // Off the UI thread, once: telling the version may take the restricted probe (remembered afterwards).
+        var javaMajor = await Amber.Core.Java.JavaFinder.MajorOfAsync(javaPath, ct);
+        var decision = DecideWindowsSandbox(javaPath, javaMajor);
         if (decision.AskFirst)
         {
-            if (!await ask())
+            // The first time the whole step is explained; later (loopback already done) the dialog names the new folders.
+            if (!await ask(WindowsSandbox.LoopbackExempt() ? WindowsSandboxSetup.FoldersToOpen(SandboxSetupPaths(javaPath)) : []))
             {
                 RememberSandboxFallback(WindowsSandboxPolicy.Refused, null);
             }
@@ -512,7 +515,7 @@ public sealed class LauncherService : IDisposable
                 if (error is null && StrongSandboxReady(javaPath)) return options with { WindowsLevel = WindowsSandboxLevel.Strong };
                 if (error is null) RememberSandboxFallback(WindowsSandboxPolicy.Failed, WindowsSandboxSetup.FoldersToOpen(SandboxSetupPaths(javaPath)).FirstOrDefault() ?? "CheckNetIsolation");
             }
-            decision = DecideWindowsSandbox(javaPath);
+            decision = DecideWindowsSandbox(javaPath, javaMajor);
         }
         if (decision.Fallback is not null) RememberSandboxFallback(decision.Fallback, null);
         if (decision.Reason is not null) note(L.F("home.sandbox.standard_because", decision.Reason));
@@ -520,10 +523,10 @@ public sealed class LauncherService : IDisposable
     }
 
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]
-    private WindowsSandboxDecision DecideWindowsSandbox(string javaPath) => WindowsSandboxPolicy.Decide(
+    private WindowsSandboxDecision DecideWindowsSandbox(string javaPath, int javaMajor) => WindowsSandboxPolicy.Decide(
         Settings.StrongSandbox, Settings.StrongSandboxFallback, Settings.StrongSandboxFallbackDetail,
-        WindowsSandboxPolicy.JavaCanUseStrong(WindowsSandbox.JavaMajor(javaPath), GameSandbox.JavaHome(javaPath), WindowsSandbox.HasResolver),
-        WindowsSandbox.JavaMajor(javaPath), StrongSandboxReady(javaPath), WindowsSandbox.Elevation());
+        WindowsSandboxPolicy.JavaCanUseStrong(javaMajor, GameSandbox.JavaHome(javaPath), WindowsSandbox.HasResolver),
+        javaMajor, StrongSandboxReady(javaPath), WindowsSandbox.Elevation());
 
     /// <summary>Strong mode needs no admin step for this Java: the loopback exemption is there and every parent folder is open.</summary>
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]
@@ -533,9 +536,14 @@ public sealed class LauncherService : IDisposable
     /// <summary>
     /// The folders a launch grants whose parents the container must be able to list: inside the game folder (so the game
     /// folder itself is one of the parents: a launch grants its subfolders, not the folder), Java and the universal loader's runtime.
+    /// The missing parents of those folders are created first, so the admin step opens them now rather than on the next launch.
     /// </summary>
-    private IEnumerable<string?> SandboxSetupPaths(string javaPath) =>
-        [Path.Combine(Context.Directory.Root, "versions"), GameSandbox.JavaHome(javaPath), .. BakeRuntime.SandboxGrants.Select(g => g.Path)];
+    private IReadOnlyList<string?> SandboxSetupPaths(string javaPath)
+    {
+        IReadOnlyList<string?> paths = [Path.Combine(Context.Directory.Root, "versions"), GameSandbox.JavaHome(javaPath), .. BakeRuntime.SandboxGrants.Select(g => g.Path)];
+        if (OperatingSystem.IsWindows()) WindowsSandboxSetup.CreateMissingParents(paths);
+        return paths;
+    }
 
     /// <summary>
     /// Runs Jay's admin step (Windows shows its admin prompt): the loopback exemption when asked and the parent folders,
@@ -713,10 +721,10 @@ public sealed class LauncherService : IDisposable
         {
             var instance = GetInstance(ctx, id);
             var versionMajor = ctx.Directory.ResolveVersion(id).JavaVersion?.MajorVersion ?? Amber.Core.Bake.BakeService.DefaultJavaMin;
-            var major = bake.JavaMajorFor(instance, versionMajor);
-            if (major != versionMajor) javaPath = await ctx.Java.ForMajorAsync(major, ct);
-            var done = await bake.PrepareAsync(javaPath, major, ctx.Directory, instance, warm, progress, ct);
-            return (done.Launch, done.Reason, javaPath);
+            // forge-1.12.2 bakes on the loader's Java (21) and launches on Java 8; everything else uses one Java.
+            var (java, gamePath) = await bake.ChooseJavaAsync(instance, versionMajor, javaPath, ctx.Java.ForMajorAsync, ct);
+            var done = await bake.PrepareAsync(java, ctx.Directory, instance, warm, progress, ct);
+            return (done.Launch, done.Reason, gamePath);
         }
         finally
         {
@@ -768,8 +776,9 @@ public sealed class LauncherService : IDisposable
                 {
                     var instance = GetInstance(ctx, id);
                     if (Amber.Core.Bake.BakeRecord.Read(instance.WorkDir) is not { } record || !File.Exists(record.Launch.StateFile)) return;
+                    if (!Amber.Core.Bake.BakeService.CanWarm(Amber.Core.Bake.BakePlatform.KindOf(instance) ?? Amber.Core.Bake.BakePlatform.Vanilla)) return;
                     var major = bake.JavaMajorFor(instance, ctx.Directory.ResolveVersion(id).JavaVersion?.MajorVersion ?? Amber.Core.Bake.BakeService.DefaultJavaMin);
-                    var java = await ctx.Java.ForMajorAsync(major, CancellationToken.None);
+                    var java = await ctx.Java.ForMajorAsync(bake.ToolJavaMajorFor(instance, major), CancellationToken.None);
                     bake.Toolkit.Verify();
                     await bake.WarmAsync(java, record.Launch.StateFile, null, CancellationToken.None);
                 }

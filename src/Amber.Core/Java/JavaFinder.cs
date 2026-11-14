@@ -102,58 +102,39 @@ public static partial class JavaFinder
         catch { return []; }
     }
 
-    private static JavaInstall? Probe(string home, string exe)
-    {
-        // 优先读 release 文件，避免为每个 Java 起进程。
-        var release = Path.Combine(home, "release");
-        string? version = null;
-        bool? is64 = null;
-        if (File.Exists(release))
-        {
-            foreach (var line in File.ReadLines(release))
-            {
-                if (line.StartsWith("JAVA_VERSION=")) version = line["JAVA_VERSION=".Length..].Trim('"');
-                else if (line.StartsWith("OS_ARCH=")) is64 = line.Contains("64");
-            }
-        }
-        if (version is null || is64 is null)
-        {
-            (version, is64) = ProbeByRunning(exe);
-            if (version is null) return null;
-        }
-        return new JavaInstall(exe, version, ParseMajor(version), is64 ?? true);
-    }
+    private static JavaInstall? Probe(string home, string exe) =>
+        JavaVersionProbe.Detect(home, exe) is { } found ? new JavaInstall(exe, found.Version, ParseMajor(found.Version), found.Is64) : null;
 
-    private static (string?, bool?) ProbeByRunning(string exe)
+    // Remembered per program file (path, size, time): a probe that had to run Java does not run again for the same file.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<(string Path, long Length, DateTime Written), int> s_majors = new();
+
+    /// <summary>
+    /// The major version of one java executable: from its files (see <see cref="JavaVersionProbe"/>), else from the
+    /// restricted probe. Never runs it any other way. 0 when it cannot be told.
+    /// </summary>
+    public static int MajorOf(string javaPath, CancellationToken ct = default)
     {
+        if (!File.Exists(javaPath)) return 0;
+        var full = Path.GetFullPath(javaPath);
+        var bin = Path.GetDirectoryName(full) ?? full;
+        var home = Path.GetFileName(bin) == "bin" ? Path.GetDirectoryName(bin) ?? bin : bin;
         try
         {
-            using var p = Process.Start(new ProcessStartInfo(exe, "-XshowSettings:properties -version")
-            {
-                RedirectStandardError = true,
-                RedirectStandardOutput = true,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-            });
-            if (p is null) return (null, null);
-            // Read both pipes in the background and bound the wait: a broken or hung java.exe must not stall the Java scan forever.
-            var stderr = p.StandardError.ReadToEndAsync();
-            _ = p.StandardOutput.ReadToEndAsync();
-            if (!p.WaitForExit(10_000) || !stderr.Wait(2_000))
-            {
-                try { p.Kill(); } catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception) { }
-                return (null, null);
-            }
-            var output = stderr.Result;
-            var version = VersionProperty().Match(output) is { Success: true } m ? m.Groups[1].Value.Trim() : null;
-            var arch = ArchProperty().Match(output) is { Success: true } a ? a.Groups[1].Value.Trim() : "";
-            return (version, arch.Contains("64"));
+            var info = new FileInfo(full);
+            var key = (full, info.Length, info.LastWriteTimeUtc);
+            if (s_majors.TryGetValue(key, out var known)) return known;
+            var major = JavaVersionProbe.Detect(home, full, ct) is { } found ? ParseMajor(found.Version) : 0;
+            if (major > 0) s_majors[key] = major;
+            return major;
         }
-        catch
-        {
-            return (null, null);
-        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return 0; }
     }
+
+    /// <summary><see cref="MajorOf"/> off the calling thread (it may wait for the probe).</summary>
+    public static Task<int> MajorOfAsync(string javaPath, CancellationToken ct = default) => Task.Run(() => MajorOf(javaPath, ct), ct);
+
+    /// <summary>Forgets what <see cref="MajorOf"/> remembered (tests).</summary>
+    internal static void ForgetMajors() => s_majors.Clear();
 
     /// <summary>"1.8.0_401" → 8，"17.0.10" → 17，"21" → 21。</summary>
     public static int ParseMajor(string version)
@@ -162,10 +143,4 @@ public static partial class JavaFinder
         if (!int.TryParse(parts[0], out var first)) return 0;
         return first == 1 && parts.Length > 1 && int.TryParse(parts[1], out var second) ? second : first;
     }
-
-    [GeneratedRegex(@"java\.version = (.+)")]
-    private static partial Regex VersionProperty();
-
-    [GeneratedRegex(@"os\.arch = (.+)")]
-    private static partial Regex ArchProperty();
 }

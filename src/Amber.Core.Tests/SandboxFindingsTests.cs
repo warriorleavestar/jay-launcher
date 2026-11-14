@@ -126,7 +126,7 @@ public sealed class SandboxFindingsTests : IDisposable
         var asked = 0;
         var notes = new List<string>();
         // Never says yes: the test must not bring up Windows' admin prompt.
-        Task<bool> Ask() { asked++; return Task.FromResult(false); }
+        Task<bool> Ask(IReadOnlyList<string> _) { asked++; return Task.FromResult(false); }
 
         var first = await service.SandboxForLaunchAsync(java, Ask, notes.Add);
         Assert.Equal(Amber.Core.Launch.WindowsSandboxLevel.Standard, first.WindowsLevel);
@@ -159,7 +159,7 @@ public sealed class SandboxFindingsTests : IDisposable
         using var service = Service();
         service.Settings.StrongSandbox = false;
         var asked = false;
-        var options = await service.SandboxForLaunchAsync(Path.Combine(_game, "java.exe"), () => { asked = true; return Task.FromResult(true); }, _ => { });
+        var options = await service.SandboxForLaunchAsync(Path.Combine(_game, "java.exe"), _ => { asked = true; return Task.FromResult(true); }, _ => { });
         Assert.False(asked);
         Assert.Equal(Amber.Core.Launch.WindowsSandboxLevel.Standard, options.WindowsLevel);
         Assert.Equal(L.T("settings.sandbox.status.standard"), service.SandboxStatusText);

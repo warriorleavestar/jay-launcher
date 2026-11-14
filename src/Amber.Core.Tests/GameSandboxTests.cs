@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Amber.Core.Launch;
+using Amber.Core.Localization;
 
 namespace Amber.Core.Tests;
 
@@ -500,6 +501,39 @@ public sealed class GameSandboxTests : IDisposable
     }
 
     [Fact]
+    public void AGrantedFolderThatDoesNotExistYetHasItsParentCreatedBeforeTheAdminStep()
+    {
+        // Seen in a real run: on a fresh install the universal loader's runtime folder did not exist at the first strong
+        // launch, so its parent was not opened; the launch created it, and the next launch asked for the admin step again.
+        var runtime = Path.Combine(_root, "data-runtime");
+        var cache = Path.Combine(runtime, "bake-cache");
+        var loader = Path.Combine(runtime, "universal-loader");
+        var game = Dir("game", "versions");
+        var created = WindowsSandboxSetup.CreateMissingParents([game, cache, loader, null, Path.Combine("relative", "x")]);
+        Assert.Equal([runtime], created);
+        Assert.True(Directory.Exists(runtime));
+        // Only the parent: the granted folders themselves are left to their owners (an empty loader folder is not an install).
+        Assert.False(Directory.Exists(cache));
+        Assert.False(Directory.Exists(loader));
+        Assert.False(Directory.Exists(Path.Combine(Environment.CurrentDirectory, "relative")));
+        Assert.Empty(WindowsSandboxSetup.CreateMissingParents([cache, loader]));
+
+        if (!OperatingSystem.IsWindows()) return;
+        // So the first admin step already opens it.
+        Assert.Contains(runtime, WindowsSandboxSetup.FoldersToOpen([game, cache, loader]));
+    }
+
+    [Fact]
+    public void TheStrongSandboxConsentNamesTheFoldersWhenItAsksAgain()
+    {
+        Assert.Equal(L.T("home.sandbox.consent.body"), Amber.App.ViewModels.HomeViewModel.SandboxConsentBody([]));
+        var folders = new[] { Path.Combine(_root, "data-runtime"), Path.Combine(_root, "jdk8") };
+        var body = Amber.App.ViewModels.HomeViewModel.SandboxConsentBody(folders);
+        Assert.NotEqual(L.T("home.sandbox.consent.body"), body);
+        Assert.All(folders, f => Assert.Contains(f, body));
+    }
+
+    [Fact]
     public void Windows_StandardLevel_TakesTheContainerOffAnotherInstancesFolder_ItReadsThrough()
     {
         // Seen in a real run: a strong launch of the vanilla instance granted versions\1.21.1 to the container; the
@@ -525,6 +559,74 @@ public sealed class GameSandboxTests : IDisposable
         Assert.False(Named(vanilla));
         // Nothing to take off, and folders Jay never touched: no error.
         WindowsSandbox.Ungrant(Environment.SystemDirectory, sid);
+    }
+
+    [Fact]
+    public void Windows_StandardLevel_TakesTheContainerOffTheSharedGameFolder()
+    {
+        // Seen in a real run: a strong launch of an instance that shares the game folder granted the game folder itself;
+        // the next isolated standard launch granted only versions, libraries and assets, which inherited the container's
+        // entry, and Windows refused the low-integrity game reading them ("could not find java.dll").
+        if (!OperatingSystem.IsWindows()) return;
+        var game = Dir("shared-game");
+        var libraries = Dir("shared-game", "libraries");
+        var lib = Path.Combine(libraries, "a.jar");
+        File.WriteAllText(lib, "jar");
+        var sid = new System.Security.Principal.SecurityIdentifier("S-1-15-2-1-2-3-4-5-6-9");
+        bool Named(string path) => (Directory.Exists(path) ? (System.Security.AccessControl.FileSystemSecurity)new DirectoryInfo(path).GetAccessControl() : new FileInfo(path).GetAccessControl())
+            .GetAccessRules(true, true, typeof(System.Security.Principal.SecurityIdentifier))
+            .OfType<System.Security.AccessControl.FileSystemAccessRule>().Any(r => r.IdentityReference == sid);
+        WindowsSandbox.Grant(game, sid, write: true);
+        Assert.True(Named(lib));
+
+        var targets = WindowsSandbox.UngrantTargets([libraries]).ToList();
+        Assert.Contains(GameSandbox.Full(game), targets, StringComparer.OrdinalIgnoreCase);
+        foreach (var path in targets) WindowsSandbox.Ungrant(path, sid);
+        Assert.False(Named(lib));
+        Assert.False(Named(game));
+    }
+
+    [Fact]
+    public void Windows_StandardLevel_LeavesTheContainerAloneWhileAStrongGameRuns()
+    {
+        // A standard launch while a strong game of the same container still runs: taking the container's entries off the
+        // folders above its grants would break the running game, and leaving them keeps the low-integrity game from
+        // reading those folders. That start stops with a plain reason; one that touches nothing of the strong game's runs.
+        if (!OperatingSystem.IsWindows() || WindowsSandbox.DerivedContainerSid() is not { } sid) return;
+        var game = Dir("strong-game");
+        var libraries = Dir("strong-game", "libraries");
+        var instance = Dir("strong-game", "versions", "B");
+        var elsewhere = Dir("other-game", "versions", "C");
+        bool Named(string path) => new DirectoryInfo(path).GetAccessControl()
+            .GetAccessRules(true, false, typeof(System.Security.Principal.SecurityIdentifier))
+            .OfType<System.Security.AccessControl.FileSystemAccessRule>().Any(r => r.IdentityReference == sid);
+        WindowsSandbox.Grant(game, sid, write: false);
+        var strong = Process.Start(new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe"),
+            "-NoProfile -NonInteractive -Command Start-Sleep 60") { UseShellExecute = false, CreateNoWindow = true })!;
+        try
+        {
+            WindowsSandbox.TrackStrong(strong);
+            Assert.True(WindowsSandbox.StrongGameRunning);
+            var e = Assert.Throws<SandboxUnavailableException>(() =>
+                WindowsSandbox.Prepare(new SandboxGrants { ReadWrite = [instance], ReadOnly = [libraries] }, WindowsSandboxLevel.Standard));
+            Assert.Equal(L.T("core.launch.sandbox.win.strong_running"), e.Message);
+            Assert.True(Named(game));
+            // A game in another folder, which the strong game does not share: starts as usual.
+            WindowsSandbox.Prepare(new SandboxGrants { ReadWrite = [elsewhere] }, WindowsSandboxLevel.Standard);
+        }
+        finally
+        {
+            strong.Kill(true);
+            strong.WaitForExit(10_000);
+            strong.Dispose();
+        }
+        // The strong game leaves the list when it exits, without anyone asking.
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (WindowsSandbox.StrongGamesListed > 0 && DateTime.UtcNow < deadline) Thread.Sleep(20);
+        Assert.Equal(0, WindowsSandbox.StrongGamesListed);
+        Assert.False(WindowsSandbox.StrongGameRunning);
+        WindowsSandbox.Prepare(new SandboxGrants { ReadWrite = [instance], ReadOnly = [libraries] }, WindowsSandboxLevel.Standard);
+        Assert.False(Named(game));
     }
 
     /// <summary>A JDK for the real-Java tests: JAVA_HOME, else an Adoptium install; null skips them.</summary>

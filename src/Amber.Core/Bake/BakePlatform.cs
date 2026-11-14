@@ -28,20 +28,34 @@ public static partial class BakePlatform
     public const string Vanilla = "vanilla";
     public const string NeoForge = "neoforge";
     public const string Forge = "forge";
+    /// <summary>
+    /// Forge 1.12.2 (interface v1.3.2): LaunchWrapper and FML coremods, Java 8. The platform folder is Forge's
+    /// <c>version.json</c> (the installer's <c>versionInfo</c>) and a <c>libraries/</c> link; nothing else.
+    /// </summary>
+    public const string ForgeLegacy = "forge-1.12.2";
+    public const string ForgeLegacyMc = "1.12.2";
 
     /// <summary>The loader platform for this instance; null when the loader cannot run it (OptiFine, LiteLoader…).</summary>
     public static string? KindOf(GameInstance instance) => instance.Loader switch
     {
         null or "fabric" or "quilt" => Vanilla,
         "neoforge" => NeoForge,
+        "forge" when instance.McVersion == ForgeLegacyMc => ForgeLegacy,
         "forge" => Forge,
         _ => null,
     };
+
+    /// <summary>
+    /// The Java a platform's game runs on when Jay knows it without asking the loader: Forge 1.12.2 runs on Java 8
+    /// only (LaunchWrapper; most of its coremods break on 9+). Loaders say the same in <c>javaLaunch</c>.
+    /// </summary>
+    public static JavaRange? KnownJavaLaunch(string kind) => kind == ForgeLegacy ? new JavaRange(8, 8) : null;
 
     public static string DisplayName(string kind) => L.T(kind switch
     {
         NeoForge => "core.bake.platform.neoforge",
         Forge => "core.bake.platform.forge",
+        ForgeLegacy => "core.bake.platform.forge_legacy",
         _ => "core.bake.platform.vanilla",
     });
 
@@ -49,7 +63,7 @@ public static partial class BakePlatform
     public static string InstallerUrl(string kind, string version) => kind switch
     {
         NeoForge => $"https://maven.neoforged.net/releases/net/neoforged/neoforge/{version}/neoforge-{version}-installer.jar",
-        Forge => $"https://maven.minecraftforge.net/net/minecraftforge/forge/{version}/forge-{version}-installer.jar",
+        Forge or ForgeLegacy => $"https://maven.minecraftforge.net/net/minecraftforge/forge/{version}/forge-{version}-installer.jar",
         _ => throw new ArgumentOutOfRangeException(nameof(kind)),
     };
 
@@ -64,6 +78,11 @@ public static partial class BakePlatform
         if (kind is null or Vanilla) return null;
         var version = instance.LoaderVersion is { Length: > 0 } v && SafeName().IsMatch(v)
             ? v : throw new BakeException(L.F("core.bake.platform_unknown_version", DisplayName(kind)), []);
+        // Forge 1.12.2's own version reads "1.12.2-14.23.5.2860"; an instance may know only the build number.
+        if (kind == ForgeLegacy && !version.StartsWith(ForgeLegacyMc + "-", StringComparison.Ordinal)) version = ForgeLegacyMc + "-" + version;
+        // The loader runs Forge 1.12.2 14.23.5.x only (the last line, which every 1.12.2 modpack uses): say so before downloading.
+        if (kind == ForgeLegacy && !version.StartsWith(ForgeLegacyMc + "-14.23.5.", StringComparison.Ordinal))
+            throw new BakeException(L.F("core.bake.legacy_forge_version", version[(ForgeLegacyMc.Length + 1)..]), [], "bad_platform");
 
         var platforms = Path.Combine(dataRoot, "platforms");
         var installer = Path.Combine(platforms, "installers", $"{kind}-{version}-installer.jar");
@@ -78,6 +97,7 @@ public static partial class BakePlatform
         var libraries = Path.TrimEndingDirectorySeparator(Path.GetFullPath(dir.LibrariesDir));
         var tag = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(OperatingSystem.IsWindows() ? libraries.ToLowerInvariant() : libraries)))[..10];
         var root = Path.Combine(platforms, $"{kind}-{version}-{tag}");
+        if (kind == ForgeLegacy) return PrepareLegacy(dir, installer, root, libraries);
         var inst = Path.Combine(root, "inst");
         Directory.CreateDirectory(Path.Combine(inst, "data"));
 
@@ -141,6 +161,66 @@ public static partial class BakePlatform
         return root;
     }
 
+    /// <summary>
+    /// forge-1.12.2's platform folder: <c>version.json</c> is the installer's <c>versionInfo</c> (LaunchWrapper's
+    /// profile) without the server-only libraries, as Jay's own Forge install writes it, and <c>libraries/</c> links
+    /// to the game directory's libraries, which must hold every library it lists (the universal jar included). Jay's
+    /// normal Forge 1.12.2 install puts them there; anything missing is named here, before the loader runs.
+    /// </summary>
+    private static string PrepareLegacy(GameDirectory dir, string installer, string root, string libraries)
+    {
+        Directory.CreateDirectory(root);
+        JsonObject info;
+        using (var zip = ZipFile.OpenRead(installer))
+        {
+            var entry = zip.GetEntry("install_profile.json") ?? throw new InvalidDataException(L.T("core.install.forge.missingprofile"));
+            JsonObject? profile;
+            using (var stream = entry.Open()) profile = JsonNode.Parse(stream) as JsonObject;
+            // Two installer layouts: the old one keeps the profile in install_profile.json's versionInfo; the later 1.12.2
+            // builds (14.23.5.2851 and up) ship it as its own entry named by "json" (/version.json).
+            if (profile?["versionInfo"] is JsonObject embedded) info = embedded;
+            else
+            {
+                var name = (profile?["json"] is JsonValue j && j.TryGetValue<string>(out var n) ? n : "/version.json").TrimStart('/');
+                var versionEntry = zip.GetEntry(name)
+                    ?? throw new BakeException(L.F("core.bake.platform_incomplete", DisplayName(ForgeLegacy), name), []);
+                using var versionStream = versionEntry.Open();
+                info = JsonNode.Parse(versionStream) as JsonObject
+                       ?? throw new BakeException(L.F("core.bake.platform_incomplete", DisplayName(ForgeLegacy), name), []);
+            }
+        }
+        info = (JsonObject)info.DeepClone();
+        // The loader checks the profile is for 1.12.2 (inheritsFrom or id); the installer's versionInfo says so, made sure here.
+        if (info["inheritsFrom"] is null && !(info["id"]?.GetValue<string>() ?? "").StartsWith(ForgeLegacyMc + "-", StringComparison.Ordinal))
+            info["inheritsFrom"] = ForgeLegacyMc;
+        if (info["libraries"] is JsonArray libs)
+            for (var i = libs.Count - 1; i >= 0; i--)
+                if (libs[i]?["clientreq"] is JsonValue v && v.TryGetValue<bool>(out var client) && !client) libs.RemoveAt(i);
+
+        var missing = new List<string>();
+        foreach (var lib in info["libraries"] as JsonArray ?? [])
+        {
+            if (lib?["name"]?.GetValue<string>() is not { Length: > 0 } name) continue;
+            string relative;
+            try { relative = MavenCoordinate.Parse(name).RelativePath; }
+            catch (Exception e) when (e is FormatException or ArgumentException or InvalidDataException) { missing.Add(name); continue; }
+            if (!File.Exists(dir.LibraryPath(relative))) missing.Add(Path.GetFileName(relative));
+        }
+        if (missing.Count > 0)
+            throw new BakeException(L.F("core.bake.platform_incomplete", DisplayName(ForgeLegacy), string.Join(L.T("core.mp.format.listseparator"), missing.Take(5))), []);
+
+        var text = info.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
+        var versionJson = Path.Combine(root, "version.json");
+        if (!File.Exists(versionJson) || File.ReadAllText(versionJson) != text)
+        {
+            var temp = versionJson + ".tmp";
+            File.WriteAllText(temp, text, new UTF8Encoding(false));
+            File.Move(temp, versionJson, true);
+        }
+        LinkLibraries(Path.Combine(root, "libraries"), libraries);
+        return root;
+    }
+
     /// <summary>Writes an installer entry unless the same bytes are already there (keeps modification times stable).</summary>
     private static void Extract(ZipArchive zip, string entryName, string target)
     {
@@ -172,19 +252,32 @@ public static partial class BakePlatform
     /// Forge checks for updates online at every start unless <c>config/fml.toml</c> says <c>versionCheck = false</c>.
     /// The loader's interface asks the launcher to turn it off for baked Forge launches.
     /// </summary>
-    public static void DisableForgeUpdateCheck(string workDir)
-    {
-        var path = Path.Combine(workDir, "config", "fml.toml");
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        if (!File.Exists(path))
+    public static void DisableForgeUpdateCheck(string workDir) =>
+        // The game can write its own config folder: never read or write through a link it left there.
+        ContainedFiles.UpdateText(workDir, ["config"], "fml.toml", text =>
+            text.Length == 0 ? "versionCheck = false\n"
+            : VersionCheckLine().IsMatch(text) ? VersionCheckLine().Replace(text, "versionCheck = false")
+            : text.TrimEnd() + "\nversionCheck = false\n");
+
+    /// <summary>
+    /// Forge 1.12.2 asks its update server at every start unless <c>config/forge.cfg</c> turns version checking off
+    /// (<c>version_checking { B:Global=false }</c>). Jay turns it off for baked launches, as for Forge 1.20.1.
+    /// Other settings in the file are kept; Forge fills in the rest of its defaults on the first start.
+    /// </summary>
+    public static void DisableLegacyForgeUpdateCheck(string workDir) =>
+        ContainedFiles.UpdateText(workDir, ["config"], "forge.cfg", text =>
         {
-            File.WriteAllText(path, "versionCheck = false\n", new UTF8Encoding(false));
-            return;
-        }
-        var text = File.ReadAllText(path);
-        var updated = VersionCheckLine().IsMatch(text) ? VersionCheckLine().Replace(text, "versionCheck = false") : text.TrimEnd() + "\nversionCheck = false\n";
-        if (updated != text) File.WriteAllText(path, updated, new UTF8Encoding(false));
-    }
+            if (LegacyGlobalCheck().IsMatch(text)) return LegacyGlobalCheck().Replace(text, m => m.Groups[1].Value + "false");
+            if (LegacyCheckCategory().Match(text) is { Success: true } category)
+                return text.Insert(category.Index + category.Length, "\n    B:Global=false");
+            return (text.Length == 0 ? "" : text.TrimEnd() + "\n\n") + "version_checking {\n    B:Global=false\n}\n";
+        });
+
+    [GeneratedRegex(@"(?m)^([ \t]*B:Global[ \t]*=[ \t]*)[^\r\n]*")]
+    private static partial Regex LegacyGlobalCheck();
+
+    [GeneratedRegex(@"(?m)^[ \t]*version_checking[ \t]*\{[ \t]*\r?$")]
+    private static partial Regex LegacyCheckCategory();
 
     [GeneratedRegex(@"^[A-Za-z0-9._+-]+$")]
     private static partial Regex SafeName();

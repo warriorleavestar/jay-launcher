@@ -5,13 +5,13 @@
     {
       "id": "jay-loader",
       "name": "Jay universal loader package",
-      "version": "0.3.2",
-      "tag": "v0.3.2",
-      "file": "amber-ul-0.3.2.zip",
-      "urls": ["https://github.com/warriorleavestar/jay-loader/releases/download/v0.3.2/amber-ul-0.3.2.zip"],
+      "version": "0.4.0",
+      "tag": "v0.4.0",
+      "file": "amber-ul-0.4.0.zip",
+      "urls": ["https://github.com/warriorleavestar/jay-loader/releases/download/v0.4.0/amber-ul-0.4.0.zip"],
       "source": "https://github.com/warriorleavestar/jay-loader",
-      "sha256": "651c001cd8764395c04f8034814bab7ce89b1919c329de247d251fef35bebb25",
-      "size": 4929283,
+      "sha256": "381ba29bb63c2b9a7b61d310ce2b0648fba37ba09719a07f1581a4d390c5e211",
+      "size": 4971067,
       "usedBy": ["src/Amber.Core/Bake/BakeLoaderRelease.cs", "scripts/attach-loader.ps1"]
     },
     {
@@ -125,7 +125,7 @@
       "urls": ["https://piston-meta.mojang.com/v1/products/java-runtime/2ec0cc96c44e5a76b9c8b7c39df7210883d12871/all.json"],
       "source": "https://piston-meta.mojang.com",
       "sha1": "2ec0cc96c44e5a76b9c8b7c39df7210883d12871",
-      "note": "Content-addressed by Mojang (the SHA-1 is part of the address); every runtime file it lists is checked against the SHA-1 the manifest gives.",
+      "note": "A fixed address, but not content-addressed: Mojang updates all.json in place when a new Java build ships (the SHA-1 in the address is not the file's). It is fetched over HTTPS from Mojang. Each runtime's file list it points to is content-addressed and checked against the SHA-1 all.json gives, and every runtime file against the SHA-1 in that list.",
       "usedBy": ["src/Amber.Core/Java/JavaRuntimeInstaller.cs"]
     }
   ],
