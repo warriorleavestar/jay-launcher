@@ -28,6 +28,9 @@ public sealed class GateRecordPublisher : IAsyncDisposable
         network == PublicNetworkProfile.Jay().Id ? PublicNetworkProfile.Jay()
         : NetworkString.Parse(network, trusted: []).ToProfile();
 
+    /// <summary>Where this gate remembers directory keys: <see cref="DirectoryKeyMemory.FileName"/> in the gate's data folder.</summary>
+    public static DirectoryKeyMemory KeyMemory(GateStore store) => new(Path.Combine(store.Directory, DirectoryKeyMemory.FileName));
+
     /// <summary>One put of the current record. Throws the directory's rejection or the connection error.</summary>
     public static async Task PublishOnceAsync(RoomDirectoryClient directories, GateStore store, GateConfig config, DateTimeOffset now, CancellationToken ct)
     {
@@ -74,7 +77,8 @@ public sealed class GateRecordPublisher : IAsyncDisposable
                     Path.Combine(workDir, "record-network"));
             }
             await session.WaitForDirectoryAsync(TimeSpan.FromMinutes(2), ct);
-            var directories = new RoomDirectoryClient(session);
+            // The directory keys of networks that pin none are remembered in the gate's own folder (trust on first use).
+            var directories = new RoomDirectoryClient(session) { KeyMemory = KeyMemory(store) };
             while (!ct.IsCancellationRequested && !session.HasExited)
             {
                 await PublishOnceAsync(directories, store, config, DateTimeOffset.UtcNow, ct);

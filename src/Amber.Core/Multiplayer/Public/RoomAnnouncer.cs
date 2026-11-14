@@ -101,7 +101,23 @@ public sealed class RoomAnnouncer : IAsyncDisposable
                     }
                     return;
                 }
-                var warning = await _client.AnnounceAsync(listing, listing.Mode != RoomVisibility.Hidden, keys, ct, search, _account?.Invoke());
+                var behind = false;
+                AnnounceWarning? warning;
+                try { warning = await _client.AnnounceAsync(listing, listing.Mode != RoomVisibility.Hidden, keys, ct, search, _account?.Invoke(), Behind); }
+                catch (IOException) when (behind) { warning = null; }
+                // A directory found this computer's clock behind and the version too old for a room it doesn't hold yet:
+                // sign again after the directory's time and publish once more.
+                if (behind)
+                {
+                    listing = _signer.Sign(_listing() with { Ip = ip }, DateTimeOffset.UtcNow);
+                    warning = await _client.AnnounceAsync(listing, listing.Mode != RoomVisibility.Hidden, keys, ct, search, _account?.Invoke());
+                }
+
+                void Behind(long directoryNow)
+                {
+                    behind = true;
+                    _signer.AdvanceTo(directoryNow);
+                }
                 // A listed room carries its invite in its listing, so invites still find it without the hidden entry:
                 // nothing for the host to fix.
                 if (listing.Mode != RoomVisibility.Hidden) warning = null;

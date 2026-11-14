@@ -17,9 +17,10 @@ namespace Amber.Core.Multiplayer.Public;
 /// reviewed networks travel as files (.jaynet) or through the network list rather than being typed.
 /// <para>
 /// The first entry is the network owner's key: it identifies the network (a string with the same id and another owner
-/// key is a conflict). Further entries are co-signatures. A string counts as reviewed when the Jay trustees' quorum
-/// (<see cref="JayTrust"/>, for example 2 of 3) is among the signers. Trustees sign offline, one after another, with
-/// <c>jay-server network cosign</c>; no single trustee can review a network alone. Unreviewed strings need the user's
+/// key is a conflict). Further entries are co-signatures. A string counts as reviewed when <see cref="JayTrust.Need"/> of
+/// the Jay trust keys (<see cref="JayTrust.Keys"/>) are among the signers. The goal is 2 of 3 trustees; for now there are
+/// two keys, one trustee's own and their offline cold backup, and both must sign, so no single key can review a network
+/// alone. Keys sign offline, one after another, with <c>jay-server network cosign</c>. Unreviewed strings need the user's
 /// confirmation.
 /// </para>
 /// </summary>

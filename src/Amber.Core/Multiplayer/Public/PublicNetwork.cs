@@ -254,9 +254,12 @@ public sealed class PublicNetworkSession : IPublicNetwork, IDisposable
     public async Task<string?> PublicAddressAsync(CancellationToken ct = default) =>
         await EasyTierSession.NodeInfoAsync(_cliPath, Options.RpcPort, ct) is { } json ? VolunteerNodes.PublicAddressFromNodeInfo(json) : null;
 
-    /// <summary>Adds another peer to the running EasyTier (a volunteer node). Returns false when EasyTier refused it.</summary>
-    public Task<bool> AddPeerAsync(string url, CancellationToken ct = default) =>
-        VolunteerNodes.Normalize(url) is { } address ? EasyTierSession.AddConnectorAsync(_cliPath, Options.RpcPort, address, ct) : Task.FromResult(false);
+    /// <summary>
+    /// Adds another peer to the running EasyTier (a volunteer node), by address: a host name is resolved and checked first
+    /// (<see cref="VolunteerNodes.PinAsync"/>). Returns false when the address isn't usable or EasyTier refused it.
+    /// </summary>
+    public async Task<bool> AddPeerAsync(string url, CancellationToken ct = default) =>
+        await VolunteerNodes.PinAsync(url, ct) is { } address && await EasyTierSession.AddConnectorAsync(_cliPath, Options.RpcPort, address, ct);
 
     public async Task<string?> MyIpAsync(CancellationToken ct)
     {

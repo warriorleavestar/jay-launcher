@@ -22,7 +22,7 @@ If `device.key` is damaged and `identity.key` is still there, the handshake key 
 
 `identity.key` is only read, never written or moved. An older version that shares the data folder, or that the user goes back to, still finds its own identity and can't overwrite the new file. This also means that after resetting the identity, the old X25519 key stays in `identity.key`, and an older version would use it again. To retire it everywhere, delete `identity.key` by hand after the reset; Jay doesn't, because older versions may still need it. A reset also writes `identity.retired`, so this version never takes the old key back from `identity.key`, even when `device.key` is damaged or missing; the reset hint in the app says the same.
 
-The device code (`JAYF1-`, `DeviceFingerprint`) stays a separate key because the user must be able to rotate it on its own.
+The device code (`JAYF2-`, `DeviceFingerprint`) stays a separate key because the user must be able to rotate it on its own.
 
 ## Jay account keys and address
 

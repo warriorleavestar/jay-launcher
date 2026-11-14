@@ -23,7 +23,7 @@ Codes that must travel are either public by design (a public key) or never leave
 `JAYC1-` + Crockford Base32 of the X25519 identity public key and a 2-byte check (55 characters).
 `Contacts/ContactCode.cs`. Parsing ignores case, spaces and dashes, and refuses a code with a wrong check.
 
-The JAYF1 device fingerprint code (shown in the UI as the "friend code") is a different thing: it finds a friend's hidden
+The JAYF2 device fingerprint code (shown in the UI as the "friend code") is a different thing: it finds a friend's hidden
 room. The UI needs a name for JAYC1 that doesn't clash with it.
 
 ## Adding a contact: the emoji check
@@ -105,8 +105,9 @@ So **directory trust no longer decides whether a code leaks**. It only decides w
 
 ### Trustee keys for the built-in network (offline, one per person)
 
-The built-in network's directory certificates, and reviewed network strings, need enough Jay trustee keys (`JayTrust.Need`, today 2 of 2)
-(`src/Amber.Core/Multiplayer/Public/TrustQuorum.cs`). Each trustee makes their own key on their own offline machine:
+The built-in network's directory certificates, and reviewed network strings, need `JayTrust.Need` of the Jay trust keys
+(`src/Amber.Core/Multiplayer/Public/TrustQuorum.cs`). The goal is 2 of 3 trustees; for now there are two keys, one
+trustee's own key and their offline cold backup, and both must sign. Each key is made on its own offline machine:
 
 ```bash
 jay-server network root-key --out <usb>/jay-trustee.key --paper
@@ -117,16 +118,18 @@ jay-server network paper-check --key <usb>/jay-trustee.key   # check the hand-co
 # on each directory node: print its directory public key (makes directory.key on first use)
 jay-server network dir-key --dir <node data dir>
 
-# trustee 1, offline, with only that public key:
+# the first key, offline, with only that public key:
 jay-server network dir-cert --root <usb>/jay-trustee.key --network jay-public-v1 --dir-key <node's key> --out directory.cert --days 365
-# trustee 2, on their own offline machine, adds their signature to the same file:
+# the second key, on its own offline machine, adds its signature to the same file:
 jay-server network dir-cert --cosign directory.cert --root <usb>/jay-trustee.key
 # copy directory.cert into the node's data dir; the node logs "directory certificate" at start
 ```
 
 No trustee key goes on a server, CI, a cloud drive, a chat or the repository. Certificates are not secret. A new or
-re-keyed node needs only a new certificate, not a Jay release. If one trustee loses their key, the other two can still
-sign; replacing a trustee needs a release with the new public key.
+re-keyed node needs only a new certificate, not a Jay release. With two keys and both needed, losing either one stops
+new certificates and reviews until a release carries a replacement key (once there are three trustees, the other two can
+still sign); replacing a key always needs a release with the new public key. Until a third trustee joins, this guards
+against one stolen key, not against that one person.
 
 ## Direct links without an IP in any code (done)
 
@@ -206,22 +209,6 @@ For two people with no relay, no public network and no shared LAN. `Multiplayer/
 - **Jay server invites (JAYS2) bound to the player's identity key**, the same way room invites are.
 - **Flood limits**: per-sender limits once directories can see a stable sender (for example, a cheap proof of work per
   post).
-
-## One-shot rendezvous records
-
-`Public/Rendezvous.cs`, directory ops `rv.put` / `rv.take` in `Public/RoomDirectory.cs`. These let a code carry a random token
-instead of an address: the publisher puts a sealed record on the directories, the code's holder takes it once.
-
-- **Derivation**: from a token of at least 16 random bytes, id = `HKDF-SHA256(token, info "jay-rv-id-v1")` (32 bytes) and
-  seal key = `HKDF-SHA256(token, info "jay-rv-seal-v1")`. The record is ChaCha20-Poly1305 with a random nonce and the id as
-  associated data. The directory sees only the id and the opaque record, never the token.
-- **Single use**: `rv.take` removes the record in the same step that returns it. The client asks every directory at once,
-  so taking the record also clears the other copies.
-- **No overwrite**: `rv.put` on an id that is still waiting is refused with `exists`, so nobody can replace a record they
-  didn't publish.
-- **Encrypted channel**: like every directory op, only over `DirectoryChannel`.
-- **Limits**: 2 KB per record, at most 10 minutes, 4096 records per directory, 30 puts per source address per 10 minutes.
-  Nothing is written to disk. The node's `/metrics` shows only the number of waiting records (`jay_rendezvous_records`).
 
 ## Long-lived signed records
 

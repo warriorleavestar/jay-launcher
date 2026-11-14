@@ -191,7 +191,7 @@ public sealed class DirectorySnapshotTests : IAsyncDisposable
         // An entry pointing outside the public network is ignored.
         Assert.Null(HiddenEntry.Open(lobby, HiddenEntry.Seal(lobby, hit with { Ip = "203.0.113.5" })));
         Assert.Throws<ArgumentException>(() => HiddenEntry.Index(new byte[15]));
-        Assert.NotEqual(HiddenEntry.Index(lobby), Rendezvous.Id(lobby));
+        Assert.NotEqual(HiddenEntry.Index(lobby), SignedRecord.Lookup(lobby));
     }
 
     [Fact]
@@ -431,8 +431,9 @@ public sealed class DirectorySnapshotTests : IAsyncDisposable
     public void AWrongClockOnlyLeavesOutTheHiddenEntries()
     {
         var lobby = RandomNumberGenerator.GetBytes(16);
-        // A public room from a host whose clock is hours off: listed, its invite entry left out, the host told.
-        var skewed = new RoomSigner().Sign(Listing(RoomVisibility.Public), _now - TimeSpan.FromHours(3));
+        // A public room from a host whose clock is hours off: listed, its invite entry left out, the host told. (A clock that
+        // is behind first gets the directory's time and signs again: PublicNetworkTests.AHostWhoseClockIsBehindStillGetsListed.)
+        var skewed = new RoomSigner().Sign(Listing(RoomVisibility.Public), _now + TimeSpan.FromHours(3));
         var reply = Publish(lobby, lobby, skewed, null, listed: true);
         Assert.True(reply["ok"]!.GetValue<bool>());
         Assert.Equal("clock", reply["warn"]!.GetValue<string>());
@@ -534,6 +535,20 @@ public sealed class DirectorySnapshotTests : IAsyncDisposable
         await using var stream = client.GetStream();
         request["jay"] = "9.9.9";
         return await DirectoryChannel.CallAsync(stream, new DirectoryTrust { Network = "" }, "", "", request, default, snapshotLength: _ => { });
+    }
+
+    [Fact]
+    public async Task ASnapshotBeingSentHoldsNoGeneralSlot()
+    {
+        int? free = null;
+        using var client = new TcpClient();
+        await client.ConnectAsync(IPAddress.Loopback, _directory.Port);
+        await using var stream = client.GetStream();
+        var reply = await DirectoryChannel.CallAsync(stream, new DirectoryTrust { Network = "" }, "", "", new JsonObject { ["op"] = "snap", ["jay"] = "9.9.9" },
+            default, snapshotLength: _ => free = _directory.FreeSlots);
+        Assert.True(reply["ok"]!.GetValue<bool>());
+        // The length arrives once the send holds a snapshot slot: by then the connection's general slot is free again.
+        Assert.Equal(RoomDirectoryServer.MaxConcurrent, free);
     }
 
     /// <summary>Fills the directory with public rooms until a full snapshot is a large reply.</summary>

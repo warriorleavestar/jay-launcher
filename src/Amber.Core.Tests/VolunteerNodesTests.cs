@@ -225,20 +225,49 @@ public sealed class VolunteerNodesTests : IAsyncDisposable
     [Fact]
     public void CacheRemembersVolunteersPerNetwork()
     {
-        var cache = new VolunteerCache(Path.Combine(_dir, "volunteer-nodes.json"));
+        var cache = new VolunteerCache(Path.Combine(_dir, "volunteer-nodes.json")) { IsPublic = TestRangeIsPublic };
         Assert.Empty(cache.For("jay"));
-        cache.Remember("jay", ["tcp://node1.example.org:11010", "tcp://10.0.0.1:11010"]);
-        cache.Remember("jay", Enumerable.Range(0, 20).Select(i => $"tcp://n{i}.example.org:11010"));
-        cache.Remember("nz", ["tcp://node3.example.org:11010"]);
+        cache.Remember("jay", ["tcp://10.235.1.1:11010", "tcp://10.0.0.1:11010", "tcp://node1.example.org:11010"]);
+        cache.Remember("jay", Enumerable.Range(0, 20).Select(i => $"tcp://10.235.2.{i}:11010"));
+        cache.Remember("nz", ["tcp://10.235.3.1:11010"]);
         var jay = cache.For("jay");
         Assert.Equal(VolunteerNodes.Remember, jay.Count);
-        Assert.Equal("tcp://n0.example.org:11010", jay[0]);
+        Assert.Equal("tcp://10.235.2.0:11010", jay[0]);
         Assert.DoesNotContain("tcp://10.0.0.1:11010", jay);
-        Assert.Equal(["tcp://node3.example.org:11010"], cache.For("nz"));
-        cache.Forget("nz", "tcp://node3.example.org:11010");
+        // Only addresses are kept: a name would reach EasyTier unchecked at the next start.
+        Assert.DoesNotContain("tcp://node1.example.org:11010", jay);
+        Assert.Equal(["tcp://10.235.3.1:11010"], cache.For("nz"));
+        cache.Forget("nz", "tcp://10.235.3.1:11010");
         Assert.Empty(cache.For("nz"));
+        // A name an older Jay remembered is skipped too.
+        File.WriteAllText(Path.Combine(_dir, "volunteer-nodes.json"), """{ "nz": ["tcp://node3.example.org:11010", "tcp://10.235.3.2:11010"] }""");
+        Assert.Equal(["tcp://10.235.3.2:11010"], cache.For("nz"));
         File.WriteAllText(Path.Combine(_dir, "volunteer-nodes.json"), "{ broken");
         Assert.Empty(cache.For("jay"));
+    }
+
+    [Fact]
+    public async Task AMemberUsesAVolunteersNameOnlyWhenItResolvesToPublicAddresses()
+    {
+        static Func<string, CancellationToken, Task<IPAddress[]>> Resolves(params string[] ips) =>
+            (_, _) => Task.FromResult(ips.Select(IPAddress.Parse).ToArray());
+        Assert.Equal("tcp://10.235.4.4:11010",
+            await VolunteerNodes.PinAsync("tcp://node.example.org:11010", TestRangeIsPublic, Resolves("10.235.4.4"), default));
+        // IPv4 first, IPv6 in brackets when it is all there is.
+        Assert.Equal("tcp://10.235.4.4:11010",
+            await VolunteerNodes.PinAsync("tcp://node.example.org:11010", TestRangeIsPublic, Resolves("fd00::235", "10.235.4.4"), default));
+        Assert.Equal("tcp://[fd00::235]:11010",
+            await VolunteerNodes.PinAsync("tcp://node.example.org:11010", TestRangeIsPublic, Resolves("fd00::235"), default));
+        // A name now pointing (even partly) at a private or local address is not used.
+        Assert.Null(await VolunteerNodes.PinAsync("tcp://node.example.org:11010", TestRangeIsPublic, Resolves("192.168.1.5"), default));
+        Assert.Null(await VolunteerNodes.PinAsync("tcp://node.example.org:11010", TestRangeIsPublic, Resolves("10.235.4.4", "127.0.0.1"), default));
+        Assert.Null(await VolunteerNodes.PinAsync("tcp://node.example.org:11010", TestRangeIsPublic, Resolves(), default));
+        Assert.Null(await VolunteerNodes.PinAsync("tcp://node.example.org:11010", TestRangeIsPublic,
+            (_, _) => Task.FromException<IPAddress[]>(new System.Net.Sockets.SocketException()), default));
+        // Addresses aren't looked up.
+        Assert.Equal("tcp://10.235.5.5:11010", await VolunteerNodes.PinAsync("10.235.5.5:11010", TestRangeIsPublic,
+            (_, _) => throw new InvalidOperationException("no lookup for an address"), default));
+        Assert.Null(await VolunteerNodes.PinAsync("tcp://10.0.0.1:11010", TestRangeIsPublic, Resolves(), default));
     }
 
     private async Task<JayNetworkServer> StartAsync(Action<JayNetworkServerBuilder>? configure = null, bool admin = false)

@@ -24,6 +24,14 @@ jay-server directory --listen 11010
 
 第一次运行会下载固定版本的 EasyTier（校验 SHA-256）。在云服务商的安全组里放行 **TCP 和 UDP 11010**。玩家在 Jay 的「联机 → Jay 公共网络 → 公共节点」里填 `tcp://<公网地址>:11010`。
 
+内置的 Jay 公共网络只认有 Jay 信任钥匙签过证书（`directory.cert`）的目录，没有证书的目录 Jay 不用（房间列表、发布、捎话、登录都会失败）。没有证书的节点只能帮忙转发：
+
+```bash
+jay-server directory --listen 11010 --seed-only
+```
+
+要给内置网络跑目录，把 `jay-server network dir-key` 打印的目录公钥交给 Jay 信任人签证书（流程见 [security/zero-leak-codes.md](security/zero-leak-codes.md#trustee-keys-for-the-built-in-network-offline-one-per-person)），拷到节点数据目录的 `directory.cert`。想自己管目录，就建自己的公共网络（下一节）。
+
 ## 二、自己的公共网络（四步）
 
 ```bash

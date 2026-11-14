@@ -192,17 +192,6 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
     /// <summary>Mailbox id → sealed mail waiting there.</summary>
     private readonly Dictionary<string, List<SealedItem>> _mailboxes = new(StringComparer.Ordinal);
     private int _sealedCount;
-    /// <summary>Rendezvous id (hex) → sealed record, taken at most once (<see cref="Rendezvous"/>).</summary>
-    private readonly Dictionary<string, (string Blob, DateTimeOffset Expires)> _rendezvous = new(StringComparer.Ordinal);
-    /// <summary>Rendezvous puts per source address in the current window.</summary>
-    private readonly Dictionary<string, (int Count, DateTimeOffset Until)> _rendezvousPuts = new(StringComparer.Ordinal);
-
-    /// <summary>Live rendezvous records at most (about 11 MB of base64 at the largest size).</summary>
-    public const int MaxRendezvous = 4096;
-
-    /// <summary>Rendezvous puts one source address may make per <see cref="Rendezvous.MaxTtl"/>.</summary>
-    public const int MaxRendezvousPutsPerSource = 30;
-
     /// <summary>Lookup (hex) → signed record (<see cref="SignedRecord"/>), replaced only by its signer with a higher seq.</summary>
     private readonly Dictionary<string, SignedRecord> _records = new(StringComparer.Ordinal);
     /// <summary>Record puts per source address in the current hour.</summary>
@@ -277,12 +266,6 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
         _accept = AcceptLoopAsync();
     }
 
-    /// <summary>Rendezvous records waiting to be taken (a total, for metrics).</summary>
-    public int RendezvousCount
-    {
-        get { lock (_gate) { PruneRendezvous(); return _rendezvous.Count; } }
-    }
-
     /// <summary>Signed records held (a total, for metrics).</summary>
     public int RecordCount
     {
@@ -310,19 +293,34 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
                 client.Dispose();
                 continue;
             }
+            var slot = new SlotLease(_slots);
             _ = Task.Run(async () =>
             {
-                try { await HandleAsync(client); }
+                try { await HandleAsync(client, slot); }
                 finally
                 {
                     client.Dispose();
-                    _slots.Release();
+                    slot.Release();
                 }
             });
         }
     }
 
-    private async Task HandleAsync(TcpClient client)
+    /// <summary>General slots free right now (tests).</summary>
+    internal int FreeSlots => _slots.CurrentCount;
+
+    /// <summary>A connection's general slot, given back once: when the connection ends, or earlier (see <see cref="SnapshotAsync"/>).</summary>
+    private sealed class SlotLease(SemaphoreSlim slots)
+    {
+        private int _released;
+
+        public void Release()
+        {
+            if (Interlocked.Exchange(ref _released, 1) == 0) slots.Release();
+        }
+    }
+
+    private async Task HandleAsync(TcpClient client, SlotLease slot)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
         deadline.CancelAfter(RoomDirectoryProtocol.RequestTimeout);
@@ -337,7 +335,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             if (await DirectoryChannel.AcceptAsync(stream, first[0], Identity ?? _ephemeralIdentity.Value, NetworkSecret, deadline.Token, Certificate) is not { } secure) return;
             if (Text(secure.Request["op"]) == "snap")
             {
-                await SnapshotAsync(secure, Source(client));
+                await SnapshotAsync(secure, Source(client), slot);
                 return;
             }
             await secure.Reply(Handle(secure.Request, Source(client)), deadline.Token);
@@ -367,7 +365,12 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
     /// the reply is serialized once per version and sent in chunks, each of which must go out within
     /// <see cref="RoomDirectoryProtocol.RequestTimeout"/> (a reader that stops reading is dropped, one that reads slowly isn't).
     /// </summary>
-    private async Task SnapshotAsync((JsonObject Request, DirectoryReply Reply, DirectorySnapshotReply Snapshot) secure, string? source)
+    /// <param name="general">
+    /// The connection's general slot: given back once the send holds a snapshot slot, so slow readers (bounded by the
+    /// snapshot slots) don't also hold the slots every other op needs.
+    /// </param>
+    private async Task SnapshotAsync((JsonObject Request, DirectoryReply Reply, DirectorySnapshotReply Snapshot) secure, string? source,
+        SlotLease? general = null)
     {
         using var quick = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
         quick.CancelAfter(RoomDirectoryProtocol.RequestTimeout);
@@ -420,6 +423,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
                 await secure.Reply(Error("busy"), quick.Token);
                 return;
             }
+            general?.Release();
             SnapshotPlan plan;
             try { plan = PlanSnapshot(secure.Request); }
             finally { Flush(); }
@@ -519,8 +523,6 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
                 "post" => Post(request),
                 "fetch" => Fetch(request),
                 "drop" => Drop(request),
-                "rv.put" => RendezvousPut(request, source),
-                "rv.take" => RendezvousTake(request),
                 "rec.put" => RecordPut(request, source),
                 "rec.get" => RecordGet(request),
                 "volunteer" => Volunteers is { } v ? v.Register(request["url"]?.GetValue<string>(), request["operator"], source) : Error("off"),
@@ -547,13 +549,42 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             ? new JsonObject { ["ok"] = false, ["error"] = "version", ["min"] = min.ToString() }
             : null;
 
+    /// <summary>Logins checked at once. Each costs a slow password hash, so a flood of them can't take every core.</summary>
+    public const int MaxConcurrentLogins = 2;
+
+    /// <summary>Failed logins the whole directory takes per minute; after that every login gets "busy" until the minute ends.</summary>
+    public const int MaxFailedLoginsPerMinute = 60;
+
+    /// <summary><see cref="MaxFailedLoginsPerMinute"/>, or fewer in tests.</summary>
+    internal int FailedLoginsPerMinute { get; init; } = MaxFailedLoginsPerMinute;
+
+    private readonly SemaphoreSlim _loginSlots = new(MaxConcurrentLogins, MaxConcurrentLogins);
+    private readonly Lock _loginGate = new();
+    private DateTimeOffset _failedLoginsSince = DateTimeOffset.MinValue;
+    private int _failedLogins;
+
     private JsonObject LoginRequest(LoginAuthority login, JsonObject request)
     {
-        var reply = login.Handle(request);
-        var ok = reply["ok"]?.GetValue<bool>() == true;
-        var error = reply["error"]?.GetValue<string>();
-        lock (_gate) _events.Add(o => o.OnLogin(ok, error));
-        return reply;
+        // Callers over the network can't be told apart, so these limits are directory-wide. Names that exist and names
+        // that don't are treated the same, so "busy" says nothing about which accounts exist.
+        if (!_loginSlots.Wait(0)) return Error("busy");
+        try
+        {
+            lock (_loginGate)
+            {
+                var now = _now();
+                if (now - _failedLoginsSince >= TimeSpan.FromMinutes(1) || now < _failedLoginsSince) (_failedLoginsSince, _failedLogins) = (now, 0);
+                if (_failedLogins >= FailedLoginsPerMinute) return Error("busy");
+            }
+            var reply = login.Handle(request);
+            var ok = reply["ok"]?.GetValue<bool>() == true;
+            var error = reply["error"]?.GetValue<string>();
+            if (error is "wrong" or "locked" or "disabled")
+                lock (_loginGate) _failedLogins++;
+            lock (_gate) _events.Add(o => o.OnLogin(ok, error));
+            return reply;
+        }
+        finally { _loginSlots.Release(); }
     }
 
     private JsonObject Extend(IDirectoryExtension extension, JsonObject request)
@@ -727,6 +758,17 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             }
             else
             {
+                // A room this directory doesn't hold must come with a recent version: the version is the host's signing
+                // time, so a listing copied from an earlier snapshot can't bring a closed room back after it expired or
+                // after a restart. A host whose clock is behind is told this directory's time and signs again (see
+                // RoomDirectoryClient.AnnounceAsync); renewals of rooms already held aren't checked.
+                var nowMs = _now().ToUnixTimeMilliseconds();
+                if (listing.Seq < nowMs - (long)MaxNewListingAge.TotalMilliseconds)
+                {
+                    var old = Error("stale");
+                    old["now"] = nowMs;
+                    return old;
+                }
                 if (_rooms.Count >= MaxRooms) return Error("full");
                 if (_withdrawn.TryGetValue(listing.Id, out var gone) && listing.Seq <= gone) return Error("stale");
                 entry = new Entry { Listing = listing };
@@ -774,6 +816,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             entry.Listed = listed;
             entry.Account = account;
             entry.Expires = _now() + RoomDirectoryProtocol.Ttl;
+            if (entry.Expires < _nextRoomExpiry) _nextRoomExpiry = entry.Expires;
             _rooms[listing.Id] = entry;
             SetSnapshot("r:" + listing.Id, listed && listing.Mode != RoomVisibility.Hidden ? PublicItem(entry.Listing) : null);
             var published = entry.Listing;
@@ -784,6 +827,9 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             return reply;
         }
     }
+
+    /// <summary>How old a listing's version (its signing time) may be when it adds a room this directory doesn't hold.</summary>
+    public static readonly TimeSpan MaxNewListingAge = HiddenEntry.MaxClockSkew;
 
     private JsonObject Withdraw(JsonObject request)
     {
@@ -983,7 +1029,9 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             }
             if (items.Any(i => i.Blob == blob)) return new JsonObject { ["ok"] = true };
             if (items.Count >= RoomDirectoryProtocol.MaxMailPerBox || _sealedCount >= MaxSealedMail) return Error("full");
-            items.Add(new SealedItem(blob, drop!, _now() + RoomDirectoryProtocol.MailTtl));
+            var expires = _now() + RoomDirectoryProtocol.MailTtl;
+            items.Add(new SealedItem(blob, drop!, expires));
+            if (expires < _nextMailExpiry) _nextMailExpiry = expires;
             _sealedCount++;
             return new JsonObject { ["ok"] = true };
         }
@@ -1034,46 +1082,6 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
         }
     }
 
-    private JsonObject RendezvousPut(JsonObject request, string? source)
-    {
-        var id = request["id"]?.GetValue<string>()?.ToLowerInvariant();
-        var blob = request["blob"]?.GetValue<string>();
-        var ttl = request["ttl"]?.GetValue<int>() ?? (int)Rendezvous.MaxTtl.TotalSeconds;
-        if (!IsHex(id, Rendezvous.IdLength * 2) || blob is null || blob.Length > (Rendezvous.MaxSealed + 2) / 3 * 4) return Error("bad");
-        if (ttl <= 0 || ttl > Rendezvous.MaxTtl.TotalSeconds) return Error("bad");
-        try { if (Convert.FromBase64String(blob).Length is 0 or > Rendezvous.MaxSealed) return Error("bad"); }
-        catch (FormatException) { return Error("bad"); }
-        lock (_gate)
-        {
-            PruneRendezvous();
-            var now = _now();
-            if (source is not null)
-            {
-                var (count, until) = _rendezvousPuts.TryGetValue(source, out var used) && used.Until > now ? used : (0, now + Rendezvous.MaxTtl);
-                if (count >= MaxRendezvousPutsPerSource) return Error("rate");
-                _rendezvousPuts[source] = (count + 1, until);
-            }
-            // Never overwrite: whoever put first keeps the id until it is taken or expires.
-            if (_rendezvous.ContainsKey(id!)) return Error("exists");
-            if (_rendezvous.Count >= MaxRendezvous) return Error("full");
-            _rendezvous[id!] = (blob, now + TimeSpan.FromSeconds(ttl));
-            return new JsonObject { ["ok"] = true };
-        }
-    }
-
-    private JsonObject RendezvousTake(JsonObject request)
-    {
-        var id = request["id"]?.GetValue<string>()?.ToLowerInvariant();
-        if (!IsHex(id, Rendezvous.IdLength * 2)) return Error("bad");
-        lock (_gate)
-        {
-            PruneRendezvous();
-            // Single use: the record leaves the directory in the same step that hands it out.
-            if (!_rendezvous.Remove(id!, out var record)) return Error("not_found");
-            return new JsonObject { ["ok"] = true, ["blob"] = record.Blob };
-        }
-    }
-
     private JsonObject RecordPut(JsonObject request, string? source)
     {
         if (SignedRecord.FromJson(request["record"]) is not { } record) return Error("bad");
@@ -1098,6 +1106,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
                 _recordPuts[source] = (count + 1, until);
             }
             _records[lookup] = record;
+            if (record.Expires < _nextRecordExpiry) _nextRecordExpiry = record.Expires;
             return new JsonObject { ["ok"] = true };
         }
     }
@@ -1113,34 +1122,45 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
         }
     }
 
+    // The earliest expiry in each table (or later, never earlier): the prunes below only scan a table once something in it
+    // may have expired, instead of on every request. Exact under any clock, including the tests' fake ones.
+    private DateTimeOffset _nextRoomExpiry = DateTimeOffset.MaxValue;
+    private DateTimeOffset _nextRecordExpiry = DateTimeOffset.MaxValue;
+    private DateTimeOffset _nextMailExpiry = DateTimeOffset.MaxValue;
+
     private void PruneRecords()
     {
         var now = _now();
-        foreach (var (lookup, record) in _records.Where(p => p.Value.Expires <= now).ToList()) _records.Remove(lookup);
+        if (now >= _nextRecordExpiry)
+        {
+            foreach (var (lookup, record) in _records.Where(p => p.Value.Expires <= now).ToList()) _records.Remove(lookup);
+            _nextRecordExpiry = _records.Count == 0 ? DateTimeOffset.MaxValue : _records.Values.Min(r => r.Expires);
+        }
         foreach (var (source, used) in _recordPuts.Where(p => p.Value.Until <= now).ToList()) _recordPuts.Remove(source);
-    }
-
-    private void PruneRendezvous()
-    {
-        var now = _now();
-        foreach (var (id, record) in _rendezvous.Where(p => p.Value.Expires <= now).ToList()) _rendezvous.Remove(id);
-        foreach (var (source, used) in _rendezvousPuts.Where(p => p.Value.Until <= now).ToList()) _rendezvousPuts.Remove(source);
     }
 
     private void PruneMail()
     {
         var now = _now();
-        foreach (var (box, items) in _mailboxes.ToList())
+        if (now >= _nextMailExpiry)
         {
-            _sealedCount -= items.RemoveAll(i => i.Expires <= now);
-            if (items.Count == 0) _mailboxes.Remove(box);
+            var next = DateTimeOffset.MaxValue;
+            foreach (var (box, items) in _mailboxes.ToList())
+            {
+                _sealedCount -= items.RemoveAll(i => i.Expires <= now);
+                if (items.Count == 0) _mailboxes.Remove(box);
+                foreach (var item in items) if (item.Expires < next) next = item.Expires;
+            }
+            _nextMailExpiry = next;
         }
     }
 
     private void Prune()
     {
         var now = _now();
+        if (now < _nextRoomExpiry) return;
         foreach (var (id, entry) in _rooms.Where(p => p.Value.Expires <= now).ToList()) RemoveLocked(id, entry, RoomRemoval.Expired);
+        _nextRoomExpiry = _rooms.Count == 0 ? DateTimeOffset.MaxValue : _rooms.Values.Min(e => e.Expires);
     }
 
     private void RemoveLocked(string id, Entry entry, RoomRemoval reason)
@@ -1272,6 +1292,11 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
         return results;
     }
 
+    /// <summary>The directory's time from a "stale" reply that says the listing was too old, when it is ahead of <paramref name="seq"/>.</summary>
+    private static long? DirectoryTimeIfTooOld(JsonObject? reply, long seq) =>
+        reply is not null && !IsOk(reply) && reply["error"] is JsonValue e && e.TryGetValue<string>(out var code) && code == "stale"
+        && reply["now"] is JsonValue n && n.TryGetValue<long>(out var now) && now > seq ? now : null;
+
     /// <summary>至少一个目录收下就算成功；都不收时，有明确拒绝就报拒绝，否则报连不上。</summary>
     private static List<JsonObject> NeedOne(List<(JsonObject? Reply, Exception? Error)> results)
     {
@@ -1326,48 +1351,6 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
     }
 
     /// <summary>
-    /// Puts a sealed rendezvous record (<see cref="Rendezvous"/>) on every directory. Always over the authenticated
-    /// channel. True when at least one directory kept it; false when the id is already taken
-    /// everywhere that answered.
-    /// </summary>
-    public async Task<bool> PutRendezvousAsync(byte[] id, byte[] sealedRecord, TimeSpan ttl, CancellationToken ct)
-    {
-        if (id.Length != Rendezvous.IdLength) throw new ArgumentException("Rendezvous id length", nameof(id));
-        if (sealedRecord.Length is 0 or > Rendezvous.MaxSealed) throw new ArgumentException("Rendezvous record size", nameof(sealedRecord));
-        var seconds = (int)Math.Clamp(ttl.TotalSeconds, 1, Rendezvous.MaxTtl.TotalSeconds);
-        var request = new JsonObject { ["op"] = "rv.put", ["id"] = Convert.ToHexStringLower(id), ["blob"] = Convert.ToBase64String(sealedRecord), ["ttl"] = seconds };
-        var results = await FanOutAsync(request, ct);
-        if (results.Any(r => r.Reply is { } reply && IsOk(reply))) return true;
-        if (results.Any(r => r.Reply?["error"]?.GetValue<string>() == "exists")) return false;
-        NeedOne(results);
-        return false;
-    }
-
-    /// <summary>
-    /// Takes the rendezvous record under <paramref name="id"/>: the first directory that has it hands it over and drops
-    /// it, then the others are told to drop their copies too. Null when no directory has it (taken, expired, never put).
-    /// </summary>
-    public async Task<byte[]?> TakeRendezvousAsync(byte[] id, CancellationToken ct)
-    {
-        if (id.Length != Rendezvous.IdLength) throw new ArgumentException("Rendezvous id length", nameof(id));
-        var request = new JsonObject { ["op"] = "rv.take", ["id"] = Convert.ToHexStringLower(id) };
-        // Ask all of them at once: each copy is single-use, so taking every copy both finds the record and clears the rest.
-        var results = await FanOutAsync(request, ct);
-        foreach (var (reply, _) in results)
-        {
-            if (reply is null || !IsOk(reply) || reply["blob"]?.GetValue<string>() is not { } blob) continue;
-            try
-            {
-                var bytes = Convert.FromBase64String(blob);
-                if (bytes.Length is > 0 and <= Rendezvous.MaxSealed) return bytes;
-            }
-            catch (FormatException) { }
-        }
-        if (results.Any(r => r.Reply is not null)) return null;
-        throw results.Select(r => r.Error).OfType<Exception>().FirstOrDefault() ?? new IOException(L.T("core.mp.public.no_directory"));
-    }
-
-    /// <summary>
     /// Puts a signed record (<see cref="SignedRecord"/>) on every directory, over the authenticated channel only.
     /// Succeeds when at least one directory keeps it; otherwise throws the rejection (owner, stale, full, rate) or the
     /// connection error.
@@ -1380,7 +1363,12 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
     /// unexpired, under that lookup and whose signer <paramref name="acceptSigner"/> accepts (check it against what the
     /// code expects, so a directory can't hand over someone else's record). Null when none qualifies.
     /// </summary>
-    public async Task<SignedRecord?> GetRecordAsync(byte[] lookup, Func<byte[], bool> acceptSigner, CancellationToken ct, DateTimeOffset? now = null)
+    /// <param name="seen">
+    /// The highest seqs this computer accepted before: a record older than that for the lookup and its signer is not taken
+    /// (null), and a newer one is noted.
+    /// </param>
+    public async Task<SignedRecord?> GetRecordAsync(byte[] lookup, Func<byte[], bool> acceptSigner, CancellationToken ct, DateTimeOffset? now = null,
+        RecordSeqMemory? seen = null)
     {
         if (lookup.Length != SignedRecord.LookupLength) throw new ArgumentException("Lookup length", nameof(lookup));
         var results = await FanOutAsync(new JsonObject { ["op"] = "rec.get", ["lookup"] = Convert.ToHexStringLower(lookup) }, ct);
@@ -1390,6 +1378,12 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
             .OfType<SignedRecord>()
             .Where(r => r.LookupKey.AsSpan().SequenceEqual(lookup) && r.Expires > at && acceptSigner(r.Signer))
             .MaxBy(r => r.Seq);
+        // Older than a record this computer already took for the lookup: rolled back, so not used.
+        if (best is not null && seen is not null)
+        {
+            if (best.Seq < seen.Floor(lookup, best.Signer)) best = null;
+            else seen.Note(lookup, best.Signer, best.Seq);
+        }
         if (best is not null || results.Any(r => r.Reply is not null)) return best;
         throw results.Select(r => r.Error).OfType<Exception>().FirstOrDefault() ?? new IOException(L.T("core.mp.public.no_directory"));
     }
@@ -1439,9 +1433,14 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
     /// <param name="lobbyKeys">Lobby keys of the invites still open: each gets a sealed hidden entry, so holders of the invite find the room in their snapshot.</param>
     /// <param name="searchKey">本机的指纹密钥：给了就能用这台电脑的指纹码找到这个房间。</param>
     /// <param name="account">This network's login token, if logged in: lets networks that require login accept the room and tie it to the account.</param>
+    /// <param name="behind">
+    /// Called with a directory's time (Unix milliseconds) when it refused the listing as too old for a room it doesn't hold:
+    /// this computer's clock is behind. The caller moves its <see cref="RoomSigner"/> on (<see cref="RoomSigner.AdvanceTo"/>)
+    /// and publishes again.
+    /// </param>
     /// <returns>A warning to show the host (the room is listed but its invites can't be found), or null.</returns>
     public async Task<AnnounceWarning?> AnnounceAsync(RoomListing listing, bool listed, IEnumerable<byte[]> lobbyKeys, CancellationToken ct,
-        byte[]? searchKey = null, string? account = null)
+        byte[]? searchKey = null, string? account = null, Action<long>? behind = null)
     {
         var hit = new DirectoryHit(listing.Id, listing.Ip, listing.HostKey);
         var hidden = new JsonArray();
@@ -1468,7 +1467,12 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
         };
         if (searchKey is not null) request["fp"] = Convert.ToHexStringLower(searchKey);
         if (account is not null) request["account"] = account;
-        var replies = NeedOne(await FanOutAsync(request, ct));
+        var results = await FanOutAsync(request, ct);
+        // The earliest time any directory gave: honest directories agree within minutes, so signing after it satisfies them
+        // all, and one directory that names a far-off time can't push the room's versions there on its own (which would
+        // make the other directories leave out its hidden entries as a wrong clock).
+        if (behind is not null && results.Select(r => DirectoryTimeIfTooOld(r.Reply, listing.Seq)).Min() is { } directoryNow) behind(directoryNow);
+        var replies = NeedOne(results);
         if (replies.Any(r => r["warn"]?.GetValue<string>() == "clock")) return AnnounceWarning.Clock;
         return replies.Any(r => r["warn"]?.GetValue<string>() == "lookup") ? AnnounceWarning.Lookup : null;
     }
