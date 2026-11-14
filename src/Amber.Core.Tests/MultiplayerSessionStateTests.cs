@@ -63,4 +63,31 @@ public sealed class MultiplayerSessionStateTests
         Assert.True(vm.IsDirect);
         Assert.Equal("new room", vm.DirectHint);
     });
+
+    /// <summary>A public room listing names the Minecraft version (what the room list filters by), not the host's instance name.</summary>
+    [Fact]
+    public void APublicListingNamesTheGameVersionNotTheInstance() => UiTestThread.Run(() =>
+    {
+        var root = Path.Combine(Path.GetTempPath(), "jay-listing-game-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            void Version(string id, string json)
+            {
+                Directory.CreateDirectory(Path.Combine(root, "versions", id));
+                File.WriteAllText(Path.Combine(root, "versions", id, id + ".json"), json);
+            }
+            Version("1.21.1", """{"id":"1.21.1"}""");
+            Version("My world", """{"id":"My world","inheritsFrom":"1.21.1","libraries":[{"name":"net.fabricmc:fabric-loader:0.16.5"}]}""");
+            using var service = new LauncherService(new AppSettings { GameDirectory = root, PlayerName = "" });
+            var vm = new MultiplayerViewModel(service) { TargetInstance = "My world" };
+            Assert.Equal("1.21.1", vm.BuildListing().Game);
+            // An instance that can't be read: no version rather than its name.
+            vm.TargetInstance = "Gone";
+            Assert.Equal("", vm.BuildListing().Game);
+        }
+        finally
+        {
+            try { Directory.Delete(root, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        }
+    });
 }

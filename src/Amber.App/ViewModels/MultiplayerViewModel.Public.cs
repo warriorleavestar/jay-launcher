@@ -368,7 +368,17 @@ public sealed partial class MultiplayerViewModel
     /// </summary>
     private IReadOnlyList<byte[]> LobbyKeys() => _lobby?.Book.CurrentLobbyKey() is { } key ? [key] : [];
 
-    private RoomListing BuildListing()
+    /// <summary>The Minecraft version of a local instance, or null when it can't be read.</summary>
+    private string? TryMcVersion(string id)
+    {
+        try { return _service.GetInstance(id).McVersion; }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Text.Json.JsonException or InvalidOperationException or KeyNotFoundException)
+        {
+            return null;
+        }
+    }
+
+    internal RoomListing BuildListing()
     {
         var mode = CurrentVisibility;
         var standing = _standing;
@@ -380,7 +390,8 @@ public sealed partial class MultiplayerViewModel
             Mode = standing is null && mode != RoomVisibility.Hidden ? RoomVisibility.Hidden : mode,
             // 隐藏房间开了指纹查找：带一张要房主批准的长期邀请，只有拿着指纹码的人能从目录里拿到。
             HostKey = Identity.PublicKey,
-            Game = TargetInstance ?? "",
+            // The Minecraft version (what the room list shows and filters by), not the local instance's name.
+            Game = TargetInstance is { } id && TryMcVersion(id) is { } mcVersion ? mcVersion : "",
             Version = Amber.Core.Launch.UpdateChecker.CurrentVersion,
             Players = 1 + Members.Count,
             Approval = !(standing?.AutoApprove ?? false),
