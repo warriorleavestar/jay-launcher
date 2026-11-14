@@ -186,6 +186,8 @@ public class DirectoryIdentityTests
         // Requests that got through the handshake and were answered with the rogue reply: each call must reach one,
         // or a handshake failure would let the test pass without the client ever reading the reply.
         var answered = new int[1];
+        // Every connection handler, so the test can wait for all of them before disposing what they use.
+        var handlers = new System.Collections.Concurrent.ConcurrentQueue<Task>();
         var rogue = Task.Run(async () =>
         {
             while (!stop.IsCancellationRequested)
@@ -193,7 +195,7 @@ public class DirectoryIdentityTests
                 TcpClient c;
                 try { c = await listener.AcceptTcpClientAsync(stop.Token); }
                 catch (Exception e) when (e is OperationCanceledException or SocketException or ObjectDisposedException) { return; }
-                _ = Task.Run(async () =>
+                handlers.Enqueue(Task.Run(async () =>
                 {
                     using (c)
                     {
@@ -210,34 +212,43 @@ public class DirectoryIdentityTests
                         }
                         catch (Exception e) when (e is IOException or OperationCanceledException or InvalidDataException) { }
                     }
-                });
+                }));
             }
         });
-        var client = new RoomDirectoryClient(new Loopback(port, Pinned(identity.PublicKey)));
-        var calls = new (string Name, Func<Task> Run)[]
+        try
         {
-            ("list", () => client.ListAsync(default)),
-            ("lookup", () => client.LookupAsync(new byte[32], default)),
-            ("find", () => client.FindAsync("JAYF1-TEST", default)),
-            ("nodes", () => client.NodesAsync(default)),
-            ("probe", () => client.ProbeAsync("tcp://relay.example.org:11010", default)),
-            ("volunteer", () => client.VolunteerAsync("tcp://relay.example.org:11010", null, default)),
-            ("fetch", () => client.FetchMailAsync(["box"], default)),
-            ("take", () => client.TakeRendezvousAsync(new byte[Rendezvous.IdLength], default)),
-            ("put", () => client.PutRendezvousAsync(new byte[Rendezvous.IdLength], new byte[8], TimeSpan.FromMinutes(1), default)),
-            ("get", () => client.GetRecordAsync(new byte[SignedRecord.LookupLength], _ => true, default)),
-        };
-        foreach (var (name, run) in calls)
-        {
-            var before = Volatile.Read(ref answered[0]);
-            try { await run(); }
-            catch (Exception e) when (e is IOException or InvalidDataException) { }
-            catch (Exception e) { Assert.Fail($"{name}: {e.GetType().Name}: {e.Message}"); }
-            Assert.True(Volatile.Read(ref answered[0]) > before, $"{name}: the rogue reply was never sent");
+            var client = new RoomDirectoryClient(new Loopback(port, Pinned(identity.PublicKey)));
+            var calls = new (string Name, Func<Task> Run)[]
+            {
+                ("list", () => client.ListAsync(default)),
+                ("lookup", () => client.LookupAsync(new byte[32], default)),
+                ("find", () => client.FindAsync("JAYF1-TEST", default)),
+                ("nodes", () => client.NodesAsync(default)),
+                ("probe", () => client.ProbeAsync("tcp://relay.example.org:11010", default)),
+                ("volunteer", () => client.VolunteerAsync("tcp://relay.example.org:11010", null, default)),
+                ("fetch", () => client.FetchMailAsync(["box"], default)),
+                ("take", () => client.TakeRendezvousAsync(new byte[Rendezvous.IdLength], default)),
+                ("put", () => client.PutRendezvousAsync(new byte[Rendezvous.IdLength], new byte[8], TimeSpan.FromMinutes(1), default)),
+                ("get", () => client.GetRecordAsync(new byte[SignedRecord.LookupLength], _ => true, default)),
+            };
+            foreach (var (name, run) in calls)
+            {
+                var before = Volatile.Read(ref answered[0]);
+                try { await run(); }
+                catch (Exception e) when (e is IOException or InvalidDataException) { }
+                catch (Exception e) { Assert.Fail($"{name}: {e.GetType().Name}: {e.Message}"); }
+                Assert.True(Volatile.Read(ref answered[0]) > before, $"{name}: the rogue reply was never sent");
+            }
         }
-        stop.Cancel();
-        listener.Stop();
-        await rogue;
+        finally
+        {
+            // Even after a failed assertion: end the accept loop first (stopping the listener under a pending accept
+            // would make it throw), then stop listening and wait for every handler before the usings dispose.
+            stop.Cancel();
+            await rogue;
+            listener.Stop();
+            await Task.WhenAll(handlers);
+        }
     }
 
     [Theory]

@@ -367,6 +367,30 @@ public sealed class ReleaseSignatureTests : IDisposable
     }
 
     [Fact]
+    public async Task AVerifiedReleaseWhoseNumberCannotBeSavedEndsTheManualCheckAsAFailure()
+    {
+        // The data folder can't be written (here a file stands where it should be): the release verifies, saving its
+        // seq throws, and Settings › About reports a failed check with no page to open instead of the command faulting.
+        var dataDir = Path.Combine(_dir, "data-blocked");
+        File.WriteAllText(dataDir, "not a folder");
+        var (http, _) = FeedFor("v1.0.0", Files());
+        var checker = new UpdateCheck(new HttpClient(http), dataDir, Own);
+        var (status, page) = await Amber.App.ViewModels.ToolsViewModel.RunUpdateCheckAsync(checker, Feed, "0.9.0");
+        Assert.StartsWith(Amber.Core.Localization.L.F("tools.update.failed", ""), status);
+        Assert.Null(page);
+        // The signatures were fetched, so the failure came after the check, from saving.
+        Assert.Contains(http.Requests, r => r.Url.EndsWith(ReleaseSignature.SignatureFileName, StringComparison.Ordinal));
+        Assert.Equal(0, checker.HighestSeq);
+
+        // The same release with a writable folder is offered, so only the save made the difference.
+        var (fine, _) = FeedFor("v1.0.0", Files());
+        var (okStatus, okPage) = await Amber.App.ViewModels.ToolsViewModel.RunUpdateCheckAsync(
+            new UpdateCheck(new HttpClient(fine), Path.Combine(_dir, "data-writable"), Own), Feed, "0.9.0");
+        Assert.False(okStatus.StartsWith(Amber.Core.Localization.L.F("tools.update.failed", ""), StringComparison.Ordinal), okStatus);
+        Assert.Equal("https://releases.example.test/v1.0.0", okPage);
+    }
+
+    [Fact]
     public async Task UpdateCheckFollowsTheTrustChain()
     {
         var chain = ReleaseSignature_Chain(Own, Next, 6, T[1], T[2]);
