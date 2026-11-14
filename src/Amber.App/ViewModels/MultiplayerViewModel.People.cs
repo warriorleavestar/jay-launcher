@@ -376,18 +376,41 @@ public sealed partial class MultiplayerViewModel
 
     private static string PersonKey(Contact contact) => contact.JayAccount ?? Convert.ToHexStringLower(contact.PublicKey);
 
-    internal ObservableCollection<FriendLine> ConversationWith(ContactItem friend) => Conversation(PersonKey(friend.Contact));
+    internal ObservableCollection<FriendLine> ConversationWith(ContactItem friend) => Conversation(friend.Contact, friend.Devices);
 
-    private ObservableCollection<FriendLine> Conversation(string person)
+    /// <summary>
+    /// The conversation with the person <paramref name="contact"/> belongs to. A friend whose Jay account was linked after
+    /// we talked had their lines kept under a device key: they move (the same collection, so a page showing it keeps
+    /// it) or are put in front of the account's.
+    /// </summary>
+    private ObservableCollection<FriendLine> Conversation(Contact contact, IEnumerable<Contact>? devices = null)
     {
-        if (!_conversations.TryGetValue(person, out var lines)) _conversations[person] = lines = [];
+        var person = PersonKey(contact);
+        _conversations.TryGetValue(person, out var lines);
+        if (contact.JayAccount is not null)
+            foreach (var device in devices ?? [contact])
+            {
+                var earlierKey = Convert.ToHexStringLower(device.PublicKey);
+                if (earlierKey == person || !_conversations.Remove(earlierKey, out var earlier)) continue;
+                if (lines is null) lines = earlier;
+                else for (var i = 0; i < earlier.Count; i++) lines.Insert(i, earlier[i]);
+            }
+        lines ??= [];
+        _conversations[person] = lines;
+        TrimConversation(lines);
         return lines;
     }
 
     private FriendLine AddFriendLine(Contact friend, FriendLine line)
     {
-        var lines = Conversation(PersonKey(friend));
+        var lines = Conversation(friend);
         lines.Add(line);
+        TrimConversation(lines);
+        return line;
+    }
+
+    private void TrimConversation(ObservableCollection<FriendLine> lines)
+    {
         while (lines.Count > MaxFriendLines)
         {
             var dropped = lines[0];
@@ -396,7 +419,6 @@ public sealed partial class MultiplayerViewModel
             if (dropped.Delivery != DeliveryState.None)
                 foreach (var key in _inviteLines.Where(p => ReferenceEquals(p.Value, dropped)).Select(p => p.Key).ToList()) _inviteLines.Remove(key);
         }
-        return line;
     }
 
     /// <summary>The verified friend who owns this device key, if any.</summary>
@@ -423,7 +445,7 @@ public sealed partial class MultiplayerViewModel
     private void NoteInvitedBy(MailedInvite invite, string roomKey, string room)
     {
         if (FriendByKey(invite.From.PublicKey) is not { } friend) return;
-        if (Conversation(PersonKey(friend)).Any(l => l.RoomKey == roomKey)) return;
+        if (Conversation(friend).Any(l => l.RoomKey == roomKey)) return;
         AddFriendLine(friend, new FriendLine(FriendLineKind.Note, () => L.F("people.line.invited_me", room), DateTimeOffset.Now) { RoomKey = roomKey });
     }
 
@@ -438,9 +460,13 @@ public sealed partial class MultiplayerViewModel
     }
 
     /// <summary>Sends a message to a friend who is in the room with me. False when they are not, or it could not be sent.</summary>
+    /// <summary>Tests: stands in for sending a message to a friend.</summary>
+    internal Func<ContactItem, string, Task<bool>>? SendToFriendForTest { get; set; }
+
     internal async Task<bool> SendToFriendAsync(ContactItem friend, string text)
     {
         if (string.IsNullOrWhiteSpace(text)) return false;
+        if (SendToFriendForTest is { } send) return await send(friend, text);
         if (PeerOf(friend) is not { } peer)
         {
             SetStatus(StatusMessage.Warning("people.chat.needs_room"));
