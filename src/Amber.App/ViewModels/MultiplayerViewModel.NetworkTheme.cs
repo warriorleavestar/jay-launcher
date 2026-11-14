@@ -65,8 +65,8 @@ public sealed partial class MultiplayerViewModel
             try
             {
                 pack = await NetworkTheme.GetAsync(_service.Http, spec, NetworkThemeDir);
-                // Keep only the theme of the network in use.
-                NetworkTheme.Prune(NetworkThemeDir, spec.Sha256);
+                // Keep only the theme of the network in use (none, when network themes were turned off during the download).
+                NetworkTheme.Prune(NetworkThemeDir, ThemeService.NetworkThemesWanted ? spec.Sha256 : null);
             }
             catch (Exception e) when (e is ThemePackException or HttpRequestException or IOException or InvalidDataException or TaskCanceledException)
             {
@@ -91,6 +91,12 @@ public sealed partial class MultiplayerViewModel
     internal void NetworkThemesAllowedChanged()
     {
         if (_networkConfig is not null) ApplyNetworkTheme(_networkConfig);
+        // Turned off: clear the cache even when no network (or one without a theme) is in use right now.
+        if (!ThemeService.NetworkThemesWanted && ThemeService.SafeModeReason != "requested")
+        {
+            var dir = NetworkThemeDir;
+            _ = Task.Run(() => NetworkTheme.Prune(dir, null));
+        }
     }
 
     [RelayCommand]
