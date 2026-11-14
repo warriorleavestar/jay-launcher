@@ -1755,6 +1755,8 @@
   "core.gate.relay.heartbeat_down": "Heartbeat channel lost, retrying: {0}",
   "core.gate.log.relay_wrong_key": "Refused: relay {0} has a different identity ({1}). If you reinstalled it, issue a new code with jay-server relays code.",
   "core.gate.log.epoch": "Relay revoked (epoch {0}): dropped all {1} connections so everyone reconnects with new keys",
+  "core.gate.log.state_unreadable": "Can't read the member list (state.json): {0}. New connections are refused until it can be read again.",
+  "core.gate.log.health_unwritable": "Can't write the gate status file (health.json): {0}. jay-server status may show old values until it can be written again.",
   "core.gate.log.relay_up": "Relay up: {0}",
   "core.gate.log.relay_down": "Relay stopped sending heartbeats: {0}",
   "core.gate.log.breaker_open": "Privacy++ emergency disconnect: unavailable relays {0}; dropped {1} connections and paused new ones",

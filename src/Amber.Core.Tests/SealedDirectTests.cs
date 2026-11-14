@@ -54,7 +54,7 @@ public sealed class SealedDirectTests
             Assert.DoesNotMatch(@"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}", code);
             foreach (var hidden in new[] { "203.0.113.5", "198.51.100.7", "192.168.1.5", "2408:8000", "51234", "40001", Host.Session, Guest.Session, DirectTestKeys.Invite.ToString(), "JAY2-", "Punch" })
                 Assert.DoesNotContain(hidden, code, StringComparison.OrdinalIgnoreCase);
-            Assert.False(OldDirectCodes.Contains(code));
+            Assert.NotEqual(PastedCodeKind.OldDirect, PastedCode.Detect(code));
         }
         Assert.DoesNotContain(offer.Passphrase, offer.ToString());
         Assert.DoesNotContain(offer.Code, offer.ToString());
