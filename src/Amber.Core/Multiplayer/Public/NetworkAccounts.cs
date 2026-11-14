@@ -86,10 +86,6 @@ public sealed record AccountPolicy(string Network, byte[] SignKey)
 }
 
 /// <summary>
-/// 节点上的账号表（jay-server 用）：账号名 → PBKDF2-SHA256 的盐和哈希。密码本身不存。
-/// 每个账号连续猜错 5 次锁 5 分钟，在线猜密码很慢。
-/// </summary>
-/// <summary>
 /// 账号库。内置的 <see cref="AccountStore"/> 存在节点的一个 JSON 文件里；第三方网络可以换成自己的（数据库、论坛账号、会员系统……）。
 /// 实现要自己防在线猜密码（比如连续错几次就锁一会儿），账号不存在和密码错要回答一样的 <see cref="LoginResult.Wrong"/>。
 /// </summary>
@@ -104,6 +100,10 @@ public interface IAccountStore
     byte[]? TotpSecret(string name);
 }
 
+/// <summary>
+/// 节点上的账号表（jay-server 用）：账号名 → PBKDF2-SHA256 的盐和哈希。密码本身不存。
+/// 每个账号连续猜错 5 次锁 5 分钟，在线猜密码很慢。
+/// </summary>
 public sealed class AccountStore : IAccountStore
 {
     public const int Iterations = 600_000;
