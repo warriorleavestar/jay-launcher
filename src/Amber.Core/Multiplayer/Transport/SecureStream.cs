@@ -42,8 +42,20 @@ public sealed class SecureStream : Stream, IAuthenticatedStream
 
     /// <summary>对方发来了加密认证过的结束记录（不是被半路掐断）。</summary>
     public bool ClosedCleanly { get; private set; }
+    // The data of the record being read: _readBuffer[_readOffset.._readEnd].
     private byte[] _readBuffer = [];
     private int _readOffset;
+    private int _readEnd;
+
+    // Buffers this stream reuses for its records, so the game-traffic hot path doesn't allocate per record. They belong to
+    // this stream only (never a shared pool): a cancelled write or read can't touch another connection's bytes. Records
+    // larger than ReusedRecord get a buffer of their own, so a burst of bulk data doesn't keep 64 KB per stream alive.
+    private const int ReusedRecord = 16 * 1024 + HeaderLength + CipherState.TagLength;
+    private readonly byte[] _header = new byte[2];
+    private byte[]? _receiveCipher;
+    private byte[]? _receivePlain;
+    private byte[]? _sendPlain;
+    private byte[]? _sendRecord;
     private long _sentSinceRekey;
     private long _lastRekeyTicks = Stopwatch.GetTimestamp();
     private long _lastWriteTicks = Stopwatch.GetTimestamp();
@@ -98,35 +110,34 @@ public sealed class SecureStream : Stream, IAuthenticatedStream
 
     private async ValueTask<int> ReadCoreAsync(Memory<byte> buffer, CancellationToken ct)
     {
-        while (_readOffset >= _readBuffer.Length)
-        {
-            var record = await ReadRecordAsync(ct);
-            if (record is null) return 0;
-            _readBuffer = record;
-            _readOffset = 0;
-        }
-        var n = Math.Min(buffer.Length, _readBuffer.Length - _readOffset);
+        while (_readOffset >= _readEnd)
+            if (!await ReadRecordAsync(ct)) return 0;
+        var n = Math.Min(buffer.Length, _readEnd - _readOffset);
         _readBuffer.AsSpan(_readOffset, n).CopyTo(buffer.Span);
         _readOffset += n;
         return n;
     }
 
-    /// <summary>读一条记录的数据部分；连接正常结束返回 null；掩护记录跳过。认证失败抛 CryptographicException。</summary>
-    private async Task<byte[]?> ReadRecordAsync(CancellationToken ct)
+    /// <summary>
+    /// 读一条记录，数据部分放进 _readBuffer[_readOffset.._readEnd]；连接正常结束返回 false；掩护记录跳过。认证失败抛 CryptographicException。
+    /// </summary>
+    private async Task<bool> ReadRecordAsync(CancellationToken ct)
     {
         while (true)
         {
-            if (ClosedCleanly) return null;
-            var header = new byte[2];
-            if (!await ReadExactAsync(_inner, header, ct)) throw new EndOfStreamException(L.T("core.mp.transport.stream.abruptdisconnect"));
-            _receiveMask?.Apply(header);
-            var length = BinaryPrimitives.ReadUInt16BigEndian(header);
+            if (ClosedCleanly) return false;
+            if (!await ReadExactAsync(_inner, _header, ct)) throw new EndOfStreamException(L.T("core.mp.transport.stream.abruptdisconnect"));
+            _receiveMask?.Apply(_header);
+            var length = BinaryPrimitives.ReadUInt16BigEndian(_header);
             if (length < CipherState.TagLength + HeaderLength) throw new CryptographicException(L.T("core.mp.transport.stream.recordshort"));
-            var cipher = new byte[length];
+            var cipherBuffer = Reused(ref _receiveCipher, length);
+            var cipher = cipherBuffer.AsMemory(0, length);
             if (!await ReadExactAsync(_inner, cipher, ct)) throw new EndOfStreamException(L.T("core.mp.transport.stream.recordtruncated"));
-            var plain = _receive.DecryptWithAd([], cipher);
+            var plainBuffer = Reused(ref _receivePlain, length);
+            var plainLength = _receive.DecryptWithAd([], cipher.Span, plainBuffer);
+            var plain = plainBuffer.AsSpan(0, plainLength);
             var flags = plain[0];
-            var dataLength = BinaryPrimitives.ReadUInt16BigEndian(plain.AsSpan(1));
+            var dataLength = BinaryPrimitives.ReadUInt16BigEndian(plain[1..]);
             if (HeaderLength + dataLength > plain.Length) throw new CryptographicException(L.T("core.mp.transport.stream.recordlength"));
             if ((flags & FlagRekey) != 0)
             {
@@ -143,11 +154,21 @@ public sealed class SecureStream : Stream, IAuthenticatedStream
             if ((flags & FlagClose) != 0)
             {
                 ClosedCleanly = true;
-                return null;
+                return false;
             }
             if ((flags & FlagCover) != 0) continue;
-            return plain.AsSpan(HeaderLength, dataLength).ToArray();
+            _readBuffer = plainBuffer;
+            _readOffset = HeaderLength;
+            _readEnd = HeaderLength + dataLength;
+            return true;
         }
+    }
+
+    /// <summary>This stream's reusable buffer when <paramref name="length"/> fits in it, otherwise a buffer just for this record.</summary>
+    private static byte[] Reused(ref byte[]? buffer, int length)
+    {
+        if (length > ReusedRecord) return new byte[length];
+        return buffer ??= new byte[ReusedRecord];
     }
 
     public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken ct = default)
@@ -159,7 +180,7 @@ public sealed class SecureStream : Stream, IAuthenticatedStream
             for (var offset = 0; offset < buffer.Length || buffer.Length == 0 && offset == 0; offset += MaxData)
             {
                 var chunk = buffer.Slice(offset, Math.Min(MaxData, buffer.Length - offset));
-                await WriteRecordAsync(chunk.Span.ToArray(), 0, ct);
+                await WriteRecordAsync(chunk, 0, ct);
                 if (buffer.Length == 0) break;
             }
             await _inner.FlushAsync(ct);
@@ -170,19 +191,22 @@ public sealed class SecureStream : Stream, IAuthenticatedStream
         }
     }
 
-    private async Task WriteRecordAsync(byte[] data, byte flags, CancellationToken ct)
+    /// <summary>Writes one record. Called with the write lock held, so the send buffers are this call's alone.</summary>
+    private async Task WriteRecordAsync(ReadOnlyMemory<byte> data, byte flags, CancellationToken ct)
     {
         var plainLength = PaddedLength(HeaderLength + data.Length);
-        var plain = new byte[plainLength];
+        var plain = Reused(ref _sendPlain, plainLength).AsSpan(0, plainLength);
         if (NeedsRekey()) flags |= FlagRekey;
         plain[0] = flags;
-        BinaryPrimitives.WriteUInt16BigEndian(plain.AsSpan(1), (ushort)data.Length);
-        data.CopyTo(plain, HeaderLength);
-        var cipher = _send.EncryptWithAd([], plain);
-        var record = new byte[2 + cipher.Length];
-        BinaryPrimitives.WriteUInt16BigEndian(record, (ushort)cipher.Length);
-        _sendMask?.Apply(record.AsSpan(0, 2));
-        cipher.CopyTo(record, 2);
+        BinaryPrimitives.WriteUInt16BigEndian(plain[1..], (ushort)data.Length);
+        data.Span.CopyTo(plain[HeaderLength..]);
+        // Padding is zeros, never what an earlier record left in the buffer.
+        plain[(HeaderLength + data.Length)..].Clear();
+        var recordBuffer = Reused(ref _sendRecord, 2 + plainLength + CipherState.TagLength);
+        var cipherLength = _send.EncryptWithAd([], plain, recordBuffer.AsSpan(2));
+        var record = recordBuffer.AsMemory(0, 2 + cipherLength);
+        BinaryPrimitives.WriteUInt16BigEndian(record.Span, (ushort)cipherLength);
+        _sendMask?.Apply(record.Span[..2]);
         await _inner.WriteAsync(record, ct);
         RecordsSent++;
         BytesOnWire += record.Length;
@@ -205,7 +229,11 @@ public sealed class SecureStream : Stream, IAuthenticatedStream
     internal int PaddedLength(int length)
     {
         if (_profile.PadBuckets is { } buckets)
-            return buckets.FirstOrDefault(b => b >= length, MaxPlaintext);
+        {
+            foreach (var b in buckets)
+                if (b >= length) return b;
+            return MaxPlaintext;
+        }
         var pad = _profile.PadTo;
         return pad <= 1 ? length : Math.Min(MaxPlaintext, (length + pad - 1) / pad * pad);
     }
@@ -224,7 +252,7 @@ public sealed class SecureStream : Stream, IAuthenticatedStream
                 try
                 {
                     if (_closeSent) return;
-                    await WriteRecordAsync([], FlagCover, ct);
+                    await WriteRecordAsync(ReadOnlyMemory<byte>.Empty, FlagCover, ct);
                     await _inner.FlushAsync(ct);
                 }
                 finally
@@ -252,7 +280,7 @@ public sealed class SecureStream : Stream, IAuthenticatedStream
                     if (_closeSent) return;
                     if (Stopwatch.GetElapsedTime(_lastRekeyTicks) >= _profile.RekeyEvery)
                     {
-                        await WriteRecordAsync([], FlagCover, ct);
+                        await WriteRecordAsync(ReadOnlyMemory<byte>.Empty, FlagCover, ct);
                         await _inner.FlushAsync(ct);
                     }
                 }
@@ -273,7 +301,7 @@ public sealed class SecureStream : Stream, IAuthenticatedStream
         {
             if (_closeSent) return;
             _closeSent = true;
-            await WriteRecordAsync([], FlagClose, ct);
+            await WriteRecordAsync(ReadOnlyMemory<byte>.Empty, FlagClose, ct);
             await _inner.FlushAsync(ct);
         }
         finally

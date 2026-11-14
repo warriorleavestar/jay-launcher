@@ -44,43 +44,76 @@ public sealed class CipherState : IDisposable
     /// <summary>测试用：直接设 nonce（比如测接近上限的情况）。</summary>
     internal void SetNonce(ulong n) => _n = n;
 
-    private static byte[] NonceBytes(ulong n)
+    private static void NonceBytes(ulong n, Span<byte> nonce)
     {
-        var nonce = new byte[12];
-        BinaryPrimitives.WriteUInt64LittleEndian(nonce.AsSpan(4), n);
-        return nonce;
+        nonce[..4].Clear();
+        BinaryPrimitives.WriteUInt64LittleEndian(nonce[4..], n);
     }
 
     public byte[] EncryptWithAd(ReadOnlySpan<byte> ad, ReadOnlySpan<byte> plaintext)
+    {
+        var output = new byte[plaintext.Length + TagLength];
+        var written = EncryptWithAd(ad, plaintext, output);
+        return written == output.Length ? output : output[..written];
+    }
+
+    /// <summary>
+    /// Encrypts into <paramref name="output"/> (at least plaintext + <see cref="TagLength"/> bytes, not overlapping the
+    /// plaintext) and returns how many bytes were written. Without a key the plaintext is copied as it is.
+    /// </summary>
+    public int EncryptWithAd(ReadOnlySpan<byte> ad, ReadOnlySpan<byte> plaintext, Span<byte> output)
     {
         // 先把密钥和 AEAD 读到局部变量：别的线程同时清掉它们时，这里要么用完整的旧密钥，要么报错，不会退回“不加密”。
         var aead = _aead;
         var hasKey = _k is not null;
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (!hasKey) return plaintext.ToArray();
+        if (!hasKey)
+        {
+            plaintext.CopyTo(output);
+            return plaintext.Length;
+        }
         ObjectDisposedException.ThrowIf(aead is null, this);
         // 2^64-1 留给 Rekey 用，不能拿来加密。
         if (_n == ulong.MaxValue) throw new CryptographicException(L.T("core.mp.noise.nonceexhausted"));
-        var output = new byte[plaintext.Length + TagLength];
-        aead.Encrypt(NonceBytes(_n), plaintext, output.AsSpan(0, plaintext.Length), output.AsSpan(plaintext.Length), ad);
+        Span<byte> nonce = stackalloc byte[12];
+        NonceBytes(_n, nonce);
+        aead.Encrypt(nonce, plaintext, output[..plaintext.Length], output.Slice(plaintext.Length, TagLength), ad);
         _n++;
-        return output;
+        return plaintext.Length + TagLength;
     }
 
     /// <summary>认证失败抛 CryptographicException，nonce 不前进。</summary>
     public byte[] DecryptWithAd(ReadOnlySpan<byte> ad, ReadOnlySpan<byte> ciphertext)
     {
+        var plain = new byte[ciphertext.Length];
+        var length = DecryptWithAd(ad, ciphertext, plain);
+        return length == plain.Length ? plain : plain[..length];
+    }
+
+    /// <summary>
+    /// Decrypts into <paramref name="plaintext"/> (at least ciphertext − <see cref="TagLength"/> bytes, not overlapping the
+    /// ciphertext) and returns the plaintext length. Throws CryptographicException when authentication fails; the nonce
+    /// then stays where it was.
+    /// </summary>
+    public int DecryptWithAd(ReadOnlySpan<byte> ad, ReadOnlySpan<byte> ciphertext, Span<byte> plaintext)
+    {
         var aead = _aead;
         var hasKey = _k is not null;
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (!hasKey) return ciphertext.ToArray();
+        if (!hasKey)
+        {
+            ciphertext.CopyTo(plaintext);
+            return ciphertext.Length;
+        }
         ObjectDisposedException.ThrowIf(aead is null, this);
         if (_n == ulong.MaxValue) throw new CryptographicException(L.T("core.mp.noise.nonceexhausted"));
         if (ciphertext.Length < TagLength) throw new CryptographicException(L.T("core.mp.noise.ciphertextshort"));
-        var plain = new byte[ciphertext.Length - TagLength];
-        aead.Decrypt(NonceBytes(_n), ciphertext[..plain.Length], ciphertext[plain.Length..], plain, ad);
+        var length = ciphertext.Length - TagLength;
+        Span<byte> nonce = stackalloc byte[12];
+        NonceBytes(_n, nonce);
+        aead.Decrypt(nonce, ciphertext[..length], ciphertext[length..], plaintext[..length], ad);
         _n++;
-        return plain;
+        return length;
     }
 
     /// <summary>Noise 规范 11.3 的 Rekey：k = ENCRYPT(k, 2^64-1, 空, 32 个零) 的前 32 字节。nonce 不变。</summary>
@@ -95,7 +128,9 @@ public sealed class CipherState : IDisposable
             var tag = new byte[TagLength];
             var aead = _aead;
             ObjectDisposedException.ThrowIf(aead is null, this);
-            aead.Encrypt(NonceBytes(ulong.MaxValue), zeros, output, tag);
+            Span<byte> nonce = stackalloc byte[12];
+            NonceBytes(ulong.MaxValue, nonce);
+            aead.Encrypt(nonce, zeros, output, tag);
             CryptographicOperations.ZeroMemory(_k);
             var n = _n;
             InitializeKey(output);
