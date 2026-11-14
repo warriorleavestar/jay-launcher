@@ -73,12 +73,32 @@ public partial class PeoplePage : UserControl
         _hooked = false;
     }
 
-    /// <summary>The question about removing a friend takes the focus on [Keep], the safe answer.</summary>
+    /// <summary>
+    /// The question about removing a friend takes the focus on [Keep], the safe answer; opening a friend's safety codes
+    /// while a new device waits puts it on that device's [Not them? Remove].
+    /// </summary>
     private void OnViewModelChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(PeopleViewModel.IsConfirmingRemove) && _vm?.IsConfirmingRemove == true)
             Dispatcher.UIThread.Post(() => KeepFriendButton.Focus(), DispatcherPriority.Loaded);
+        else if (e.PropertyName is nameof(PeopleViewModel.ShowSafety) or nameof(PeopleViewModel.Selected) && _vm?.ShowSafety == true)
+            Dispatcher.UIThread.Post(FocusNewDevice, DispatcherPriority.Loaded);
     }
+
+    private Contact? _focusedNewDevice;
+
+    /// <summary>A new-device panel that just showed takes the focus once, on its safe answer.</summary>
+    private void FocusNewDevice()
+    {
+        if (NewDeviceSafeButton() is not { DataContext: ContactDeviceItem item } safe || ReferenceEquals(item.Device, _focusedNewDevice)
+            || _focusedNewDevice is { } was && was.PublicKey.AsSpan().SequenceEqual(item.Device.PublicKey)) return;
+        _focusedNewDevice = item.Device;
+        safe.Focus();
+    }
+
+    /// <summary>The safe answer of the first new-device panel, if one shows.</summary>
+    internal Amber.App.Controls.Safety.SafetyButton? NewDeviceSafeButton() =>
+        NewDeviceList.GetVisualDescendants().OfType<Amber.App.Controls.Safety.SafetyButton>().FirstOrDefault(b => b.Classes.Contains("device-new-remove") && b.IsEffectivelyVisible);
 
     /// <summary>The least the add panel gets, however short the window: its header, my code and the box for theirs.</summary>
     internal const double MinAddPanelHeight = 150;

@@ -168,21 +168,22 @@ public sealed partial class InstanceViewModel
     }
 
     /// <summary>Downloads and installs the pinned loader through Settings (which owns the loader path); returns its status line.</summary>
-    public Func<IProgress<(double Percent, long Bytes)>, Task<string>>? DownloadLoader { get; set; }
+    public Func<IProgress<(double Percent, long Bytes)>, CancellationToken, Task<string>>? DownloadLoader { get; set; }
 
     /// <summary>[Download] on the card: the same download as in Settings › Game, with its progress on this page.</summary>
     [RelayCommand]
     private async Task DownloadUniversalLoaderAsync()
     {
         if (DownloadLoader is not { } download || !BakeLoaderRelease.Pinned.IsPublished) return;
-        await RunWorkAsync(async _ =>
+        await RunWorkAsync(async ct =>
         {
             SetStatus(StatusMessage.Info("instance.ul.downloading"));
+            // [Cancel] on this page's progress row stops the download and the install too.
             var result = await download(new Progress<(double Percent, long Bytes)>(p =>
             {
                 Work.Bytes(p.Bytes);
                 Progress = p.Percent;
-            }));
+            }), ct);
             Status = result;
         });
         RefreshUniversalLoader();

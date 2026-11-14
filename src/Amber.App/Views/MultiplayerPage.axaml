@@ -840,7 +840,7 @@
                     <TextBlock Text="{l:T multiplayer.room.who_find}" FontWeight="SemiBold" />
                     <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.room.who_find_body}" />
                     <Button x:Name="PublishRoomButton" Classes="ghost small" Content="{l:T multiplayer.room.publish}" Command="{Binding ShowTabCommand}" CommandParameter="public"
-                            IsVisible="{Binding ShowPublicNetworks}" HorizontalAlignment="Left" Padding="0,2" />
+                            IsVisible="{Binding ShowPublishRoom}" HorizontalAlignment="Left" Padding="0,2" />
                     <TextBlock Text="{l:T multiplayer.room.wait}" FontWeight="SemiBold" />
                     <ComboBox x:Name="RoomKnockWaitBox" ItemsSource="{Binding KnockWaitChoices}" SelectedItem="{Binding SelectedRoomKnockWait}" MinWidth="160">
                       <ComboBox.ItemTemplate>

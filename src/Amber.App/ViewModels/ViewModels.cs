@@ -373,9 +373,9 @@ public sealed partial class MainViewModel : ObservableObject
         };
         content.DownloadBakeLoader = home.DownloadBakeLoader;
         // The instance card downloads in place (no trip to Settings); Settings keeps the one copy of the loader path.
-        Pages.OfType<InstanceViewModel>().Single().DownloadLoader = async report =>
+        Pages.OfType<InstanceViewModel>().Single().DownloadLoader = async (report, ct) =>
         {
-            await settingsPage.DownloadBakeLoaderAsync(report);
+            await settingsPage.DownloadBakeLoaderAsync(report, ct);
             return settingsPage.BakeLoaderStatus;
         };
         Help.Navigate = r => shell.Navigate(r);
@@ -502,7 +502,7 @@ public sealed partial class MainViewModel : ObservableObject
             JoinJayServer = code =>
             {
                 shell.Navigate("play");
-                multiplayer.JayServers.InviteText = code;
+                multiplayer.FillServerInvite(code, join: false);
             },
         };
         multiplayer.Navigate = r => shell.Navigate(r);
@@ -602,11 +602,12 @@ public sealed partial class SettingsViewModel : PageViewModel
     /// accepted only with the pinned SHA-256, then installed like a zip the player picked. Cancel keeps the partial
     /// file so the next try resumes.
     /// </summary>
-    public async Task DownloadBakeLoaderAsync(IProgress<(double Percent, long Bytes)>? report = null)
+    public async Task DownloadBakeLoaderAsync(IProgress<(double Percent, long Bytes)>? report = null, CancellationToken ct = default)
     {
         if (IsDownloadingBakeLoader || IsInstallingBakeLoader) return;
         if (!BakeLoaderPublished) { BakeLoaderStatus = L.T("core.bake.download_unpublished"); return; }
-        using var cts = new CancellationTokenSource();
+        // Cancelled from here ([Cancel] in Settings) or by the caller (the progress row on the instance page).
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         _bakeLoaderDownload = cts;
         IsDownloadingBakeLoader = true;
         IsInstallingBakeLoader = true;
@@ -847,7 +848,13 @@ public sealed partial class SettingsViewModel : PageViewModel
         try { _service.Settings.Save(); } catch (IOException) { }
     }
 
-    protected override void OnFirstActivated() => _ = LoadJavaAsync(false);
+    protected override void OnFirstActivated()
+    {
+        // Settings › Multiplayer and › Network edit the multiplayer page's lists (relay nodes, trusted people): load them
+        // first, or saving from here would write an empty list over what was saved.
+        Multiplayer?.Activate();
+        _ = LoadJavaAsync(false);
+    }
 
     protected override void OnBecameCurrent() { Recycle.Refresh(); RefreshPrivacy(); RefreshUniversalLoader(); }
 

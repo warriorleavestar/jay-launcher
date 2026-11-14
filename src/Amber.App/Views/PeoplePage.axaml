@@ -107,6 +107,8 @@
           </Button.Flyout>
         </Button>
       </Grid>
+      <!-- What adding, backing up or restoring just did (a wrong code, a send that failed, where the backup went). -->
+      <c:StatusBar x:Name="PageStatus" Message="{Binding StatusInfo}" />
 
       <Grid x:Name="RequestsLine" ColumnDefinitions="*,Auto" ColumnSpacing="8" IsVisible="{Binding ShowRequestsLine}">
         <TextBlock x:Name="RequestsText" Text="{Binding RequestsText}" TextWrapping="Wrap" VerticalAlignment="Center" />
@@ -327,8 +329,6 @@
                         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8" Margin="0,2">
                           <SelectableTextBlock Text="{Binding Fingerprint}" FontFamily="Consolas,Menlo,monospace" FontSize="12" TextWrapping="Wrap" VerticalAlignment="Center" />
                           <WrapPanel Grid.Column="1" ItemSpacing="6" LineSpacing="4" VerticalAlignment="Center">
-                            <Button Classes="small device-confirm" Content="{l:T multiplayer.contacts.new_device_ok}" IsVisible="{Binding IsNew}"
-                                    Command="{Binding $parent[ItemsControl].((vm:PeopleViewModel)DataContext).ConfirmDeviceCommand}" CommandParameter="{Binding}" />
                             <Button Classes="small device-remove" Content="{l:T multiplayer.contacts.remove_device}" IsVisible="{Binding Person.HasSeveralDevices}"
                                     Command="{Binding $parent[ItemsControl].((vm:PeopleViewModel)DataContext).RemoveDeviceCommand}" CommandParameter="{Binding}" />
                           </WrapPanel>
@@ -338,15 +338,38 @@
                   </ItemsControl>
                   <Button x:Name="RemoveFriendButton" Classes="small" Content="{l:T people.safety.remove}" Command="{Binding RemoveFriendCommand}" HorizontalAlignment="Left"
                           IsVisible="{Binding !IsConfirmingRemove}" />
-                  <StackPanel x:Name="RemoveFriendConfirm" Spacing="6" IsVisible="{Binding IsConfirmingRemove}">
-                    <TextBlock TextWrapping="Wrap" Text="{Binding RemoveQuestion}" />
-                    <WrapPanel ItemSpacing="8" LineSpacing="6">
-                      <safety:SafetyButton x:Name="KeepFriendButton" Kind="Safe" Content="{l:T people.safety.remove_keep}" Command="{Binding KeepFriendCommand}" />
-                      <safety:SafetyButton x:Name="ConfirmRemoveFriendButton" Kind="Confirm" Content="{l:T people.safety.remove_yes}" Command="{Binding ConfirmRemoveFriendCommand}" />
-                    </WrapPanel>
-                  </StackPanel>
                 </StackPanel>
               </Border>
+
+              <!-- Locked safety panels (theme packs can't restyle them), the safe answer focused: a device their account
+                   vouched for that I haven't looked at ("Not them? Remove" is the safe one), and removing a friend ("Keep"). -->
+              <ItemsControl x:Name="NewDeviceList" ItemsSource="{Binding Selected.NewDeviceItems}" IsVisible="{Binding ShowSafety}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate DataType="vm:ContactDeviceItem">
+                    <safety:SafetyPanel Classes="new-device-panel" Title="{Binding NewDeviceTitle}" Margin="0,0,0,6">
+                      <safety:SafetyPanel.Body>
+                        <StackPanel Spacing="6">
+                          <SelectableTextBlock Text="{Binding NewDeviceBody}" TextWrapping="Wrap" />
+                          <WrapPanel ItemSpacing="8" LineSpacing="6">
+                            <safety:SafetyButton Classes="device-new-remove" Kind="Safe" Content="{l:T multiplayer.contacts.new_device_remove}"
+                                                 Command="{Binding $parent[ItemsControl].((vm:PeopleViewModel)DataContext).RemoveDeviceCommand}" CommandParameter="{Binding}" />
+                            <safety:SafetyButton Classes="device-confirm" Kind="Confirm" Content="{l:T multiplayer.contacts.new_device_ok}"
+                                                 Command="{Binding $parent[ItemsControl].((vm:PeopleViewModel)DataContext).ConfirmDeviceCommand}" CommandParameter="{Binding}" />
+                          </WrapPanel>
+                        </StackPanel>
+                      </safety:SafetyPanel.Body>
+                    </safety:SafetyPanel>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+              <safety:SafetyPanel x:Name="RemoveFriendConfirm" Title="{Binding RemoveQuestion}" IsVisible="{Binding IsConfirmingRemove}">
+                <safety:SafetyPanel.Body>
+                  <WrapPanel ItemSpacing="8" LineSpacing="6">
+                    <safety:SafetyButton x:Name="KeepFriendButton" Kind="Safe" Content="{l:T people.safety.remove_keep}" Command="{Binding KeepFriendCommand}" />
+                    <safety:SafetyButton x:Name="ConfirmRemoveFriendButton" Kind="Confirm" Content="{l:T people.safety.remove_yes}" Command="{Binding ConfirmRemoveFriendCommand}" />
+                  </WrapPanel>
+                </safety:SafetyPanel.Body>
+              </safety:SafetyPanel>
 
               <WrapPanel ItemSpacing="8" LineSpacing="8">
                 <Button x:Name="JoinFriendRoomButton" Classes="play" Command="{Binding JoinRoomCommand}" IsVisible="{Binding CanJoinRoom}">
