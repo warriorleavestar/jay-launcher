@@ -69,6 +69,22 @@ public sealed class GateRecordTests : IAsyncLifetime
         new(new Loopback(_directory.Port, new PublicNetworkProfile("test", "Test", "jay-net-test", Secret, ["tcp://127.0.0.1:1"]) { DirectoryKeys = [_dirKey.PublicKey] }),
             ["10.235.0.1"]);
 
+    [Fact]
+    public async Task TheGateRemembersTheDirectoryKeyOfANetworkThatPinsNone()
+    {
+        _store.EnableRecords("jay");
+        var memory = GateRecordPublisher.KeyMemory(_store);
+        Assert.StartsWith(_store.Directory, Path.GetFullPath(Path.Combine(_store.Directory, DirectoryKeyMemory.FileName)));
+        RoomDirectoryClient Unpinned(int port) =>
+            new(new Loopback(port, new PublicNetworkProfile("test", "Test", "jay-net-test", Secret, ["tcp://127.0.0.1:1"])), ["10.235.0.1"]) { KeyMemory = memory };
+        await GateRecordPublisher.PublishOnceAsync(Unpinned(_directory.Port), _store, _store.LoadConfig(), DateTimeOffset.UtcNow, default);
+        Assert.True(File.Exists(Path.Combine(_store.Directory, DirectoryKeyMemory.FileName)));
+        // Another directory key at the same address is refused from then on.
+        using var otherKey = X25519KeyPair.Generate();
+        await using var other = new RoomDirectoryServer(IPAddress.Loopback, 0) { Identity = otherKey, NetworkSecret = Secret };
+        await Assert.ThrowsAnyAsync<IOException>(() => GateRecordPublisher.PublishOnceAsync(Unpinned(other.Port), _store, _store.LoadConfig(), DateTimeOffset.UtcNow, default));
+    }
+
     private GateInvite Invite() => _store.CreateInvite("Steve", TimeSpan.FromHours(1), 1, _gateKey.PublicKey);
 
     [Fact]
