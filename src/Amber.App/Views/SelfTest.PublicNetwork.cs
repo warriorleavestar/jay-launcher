@@ -484,7 +484,7 @@ internal sealed partial class SelfTest
         var first = host.MyFingerprintCode;
         host.NewFingerprintCodeCommand.Execute(null);
         var code = host.MyFingerprintCode;
-        Check("设备指纹：打开后生成指纹码，每次都不一样", host.DeviceEnabled && first.StartsWith("JAYF1-") && code.StartsWith("JAYF1-") && first != code, first + " / " + code);
+        Check("设备指纹：打开后生成指纹码，每次都不一样", host.DeviceEnabled && first.StartsWith("JAYF2-") && code.StartsWith("JAYF2-") && first != code, first + " / " + code);
         var page = await FindAsync<MultiplayerPage>(_ => true);
         if (page?.GetVisualDescendants().OfType<Expander>().FirstOrDefault(e => Equals(e.Header, L.T("multiplayer.device.title"))) is { } expander)
         {
