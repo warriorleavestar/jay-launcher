@@ -2664,7 +2664,7 @@
   "settings.mp.reset_confirm": "上の各グループの設定をすべて既定に戻しますか？ 設定 › ネットワーク のネットワークと中継はそのままです。",
   "settings.mp.reset_do": "既定に戻す",
   "settings.mp.reset_done": "マルチプレイの設定をすべて既定に戻しました。",
-  "settings.mp.reset_done_room": "マルチプレイの設定を既定に戻しました。いまのルームは開いたときの設定のままです。",
+  "settings.mp.reset_done_room": "マルチプレイの設定を既定に戻しました。いまのルームは閉じるまで開いたときの設定のままで、次のルームから既定になります。",
   "settings.mp.all_default": "ここはすべて既定値です。",
   "settings.group.experimental": "実験的",
   "settings.group.experimental.summary": "テーマ開発",

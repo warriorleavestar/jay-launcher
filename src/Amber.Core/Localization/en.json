@@ -2725,7 +2725,7 @@
   "settings.mp.reset_confirm": "Put every setting in the groups above back to its default? Networks and relays in Settings › Network stay as they are.",
   "settings.mp.reset_do": "Reset",
   "settings.mp.reset_done": "Multiplayer settings are back to their defaults.",
-  "settings.mp.reset_done_room": "Multiplayer settings are back to their defaults. The room you're in keeps what it opened with.",
+  "settings.mp.reset_done_room": "Multiplayer settings are back to their defaults. The room you're in keeps what it opened with until it closes; the next room uses the defaults.",
   "settings.mp.all_default": "Everything here is at its default.",
   "settings.group.experimental": "Experimental",
   "settings.group.experimental.summary": "Theme development",

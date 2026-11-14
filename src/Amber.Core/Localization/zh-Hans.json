@@ -2664,7 +2664,7 @@
   "settings.mp.reset_confirm": "把上面各组的设置都改回默认吗？设置 › 网络里的网络和中转不变。",
   "settings.mp.reset_do": "恢复默认",
   "settings.mp.reset_done": "联机设置已全部恢复默认。",
-  "settings.mp.reset_done_room": "联机设置已恢复默认，现在这个房间保持开房间时的设置。",
+  "settings.mp.reset_done_room": "联机设置已恢复默认。现在这个房间在关闭前保持开房间时的设置，下一个房间起用默认设置。",
   "settings.mp.all_default": "这里现在都是默认值。",
   "settings.group.experimental": "实验",
   "settings.group.experimental.summary": "主题开发",

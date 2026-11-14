@@ -370,9 +370,9 @@ public sealed partial class MainViewModel : ObservableObject
         };
         content.DownloadBakeLoader = home.DownloadBakeLoader;
         // The instance card downloads in place (no trip to Settings); Settings keeps the one copy of the loader path.
-        Pages.OfType<InstanceViewModel>().Single().DownloadLoader = async report =>
+        Pages.OfType<InstanceViewModel>().Single().DownloadLoader = async (report, ct) =>
         {
-            await settingsPage.DownloadBakeLoaderAsync(report);
+            await settingsPage.DownloadBakeLoaderAsync(report, ct);
             return settingsPage.BakeLoaderStatus;
         };
         Help.Navigate = r => shell.Navigate(r);
@@ -589,11 +589,12 @@ public sealed partial class SettingsViewModel : PageViewModel
     /// accepted only with the pinned SHA-256, then installed like a zip the player picked. Cancel keeps the partial
     /// file so the next try resumes.
     /// </summary>
-    public async Task DownloadBakeLoaderAsync(IProgress<(double Percent, long Bytes)>? report = null)
+    public async Task DownloadBakeLoaderAsync(IProgress<(double Percent, long Bytes)>? report = null, CancellationToken ct = default)
     {
         if (IsDownloadingBakeLoader || IsInstallingBakeLoader) return;
         if (!BakeLoaderPublished) { BakeLoaderStatus = L.T("core.bake.download_unpublished"); return; }
-        using var cts = new CancellationTokenSource();
+        // Cancelled from here ([Cancel] in Settings) or by the caller (the progress row on the instance page).
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         _bakeLoaderDownload = cts;
         IsDownloadingBakeLoader = true;
         IsInstallingBakeLoader = true;

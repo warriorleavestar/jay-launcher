@@ -2559,7 +2559,7 @@
   "settings.mp.reset_confirm": "上諸組之設皆復默認乎？設置 › 網中之網與轉不易。",
   "settings.mp.reset_do": "復默認",
   "settings.mp.reset_done": "聯機之設皆已復默認。",
-  "settings.mp.reset_done_room": "聯機之設已復默認，今房仍守開時之設。",
+  "settings.mp.reset_done_room": "聯機之設已復默認。今房未閉，仍守開時之設；後房始用默認。",
   "settings.mp.all_default": "此皆默認。",
   "settings.group.experimental": "試",
   "settings.group.experimental.summary": "主題之製",

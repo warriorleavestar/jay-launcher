@@ -2664,7 +2664,7 @@
   "settings.mp.reset_confirm": "把上面各組的設定都改回預設嗎？設定 › 網路裡的網路和中轉不變。",
   "settings.mp.reset_do": "恢復預設",
   "settings.mp.reset_done": "連線設定已全部恢復預設。",
-  "settings.mp.reset_done_room": "連線設定已恢復預設，現在這個房間保持開房間時的設定。",
+  "settings.mp.reset_done_room": "連線設定已恢復預設。現在這個房間在關閉前保持開房間時的設定，下一個房間起用預設設定。",
   "settings.mp.all_default": "這裡現在都是預設值。",
   "settings.group.experimental": "實驗",
   "settings.group.experimental.summary": "主題開發",
