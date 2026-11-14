@@ -106,7 +106,7 @@ public sealed class AccountService(HttpClient http, AccountStore store, string d
             }
             return path;
         }
-        catch (Exception e) when (e is HttpRequestException or OperationCanceledException or IOException or InvalidOperationException
+        catch (Exception e) when (e is HttpRequestException or OperationCanceledException or IOException or UnauthorizedAccessException or InvalidOperationException
                                        or FormatException or InvalidDataException or System.Text.Json.JsonException && !ct.IsCancellationRequested)
         {
             return null;

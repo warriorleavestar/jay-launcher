@@ -120,7 +120,9 @@ public sealed class ContentSafetyTests : IDisposable
             .On("https://example.org/a.jar", "jar");
         var cache = Path.Combine(_root, "cache");
         Directory.CreateDirectory(Path.Combine(cache, "authlib-injector-1.2.5.jar"));
-        await Assert.ThrowsAnyAsync<IOException>(() => new AuthlibInjector(new HttpClient(http), cache).EnsureJarAsync());
+        // Windows reports a folder in the way as access denied, other systems as an I/O error.
+        var e = await Assert.ThrowsAnyAsync<Exception>(() => new AuthlibInjector(new HttpClient(http), cache).EnsureJarAsync());
+        Assert.True(e is IOException or UnauthorizedAccessException, e.ToString());
         Assert.Empty(Directory.EnumerateFiles(cache, "*.tmp"));
     }
 
