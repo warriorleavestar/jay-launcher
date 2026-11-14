@@ -212,6 +212,51 @@ public sealed class NetworkAccountsTests : IAsyncDisposable
         Assert.StartsWith("otpauth://totp/net1%3Aalice?secret=", TotpFactor.Uri("net1", "alice", TotpFactor.NewSecret()));
     }
 
+    /// <summary>
+    /// The login reply comes from a directory node: wrongly typed fields, bad base64 or a sealed body that isn't the
+    /// expected JSON end as a failed login (<see cref="InvalidDataException"/>), while a good reply, a wrong password
+    /// and a second-factor request read as before.
+    /// </summary>
+    [Fact]
+    public void AMalformedLoginReplyIsAFailedLogin()
+    {
+        var store = new AccountStore(Path.Combine(_dir, "accounts.json"));
+        var (key, signer) = LoginAuthority.LoadOrCreateKeys(Path.Combine(_dir, "login.key"));
+        var authority = new LoginAuthority(store, key, signer, "net1") { Factors = [new PinFactor("4321")] };
+        var login = new NetworkLogin(true, key.PublicKey, signer.PublicKey);
+        store.Set("free", "password1");
+        store.Set("alice", "password1");
+        var now = DateTimeOffset.UtcNow;
+        JsonObject Ask(string user, string password, Dictionary<string, string>? factors = null) =>
+            authority.Handle(NetworkLoginClient.Request(_guest, login, user, password, now, factors));
+
+        Assert.Equal("free", NetworkLoginClient.Read(Ask("free", "password1"), _guest, login, "net1", now).Parsed.User);
+        var need = Assert.Throws<SecondFactorRequiredException>(() => NetworkLoginClient.Read(Ask("alice", "password1"), _guest, login, "net1", now));
+        Assert.Equal("pin", Assert.Single(need.Need).Name);
+        var withPin = Ask("alice", "password1", new() { ["pin"] = "4321" });
+        Assert.Equal("alice", NetworkLoginClient.Read(withPin, _guest, login, "net1", now).Parsed.User);
+        var wrong = Assert.Throws<InvalidDataException>(() => NetworkLoginClient.Read(Ask("alice", "nope"), _guest, login, "net1", now));
+        Assert.Equal(Amber.Core.Localization.L.T("core.mp.account.wrong"), wrong.Message);
+
+        string Sealed(string json) => Convert.ToBase64String(PrivateSeal.Seal(key, _guest.PublicKey, System.Text.Encoding.UTF8.GetBytes(json)));
+        JsonObject[] bad =
+        [
+            new() { ["ok"] = "yes" },
+            new() { ["ok"] = false, ["error"] = 5 },
+            new() { ["ok"] = true, ["b"] = 7 },
+            new() { ["ok"] = true, ["b"] = "%%% not base64" },
+            new() { ["ok"] = true, ["b"] = Sealed("not json") },
+            new() { ["ok"] = true, ["b"] = Sealed("""{"token":5}""") },
+            new() { ["ok"] = false, ["error"] = "factor", ["b"] = Sealed("""{"need":[{"name":5,"prompt":"x"}]}""") },
+            new() { ["ok"] = false, ["error"] = "factor", ["b"] = Sealed("""{"need":[{"name":"pin","prompt":"x"}],"wrong":"yes"}""") },
+        ];
+        foreach (var reply in bad)
+        {
+            var e = Record.Exception(() => NetworkLoginClient.Read(reply, _guest, login, "net1", now));
+            Assert.True(e is not null && e.GetType() == typeof(InvalidDataException), $"{reply.ToJsonString()}: {e?.GetType().Name}");
+        }
+    }
+
     private sealed class PinFactor(string pin) : ILoginFactor
     {
         public string Name => "pin";

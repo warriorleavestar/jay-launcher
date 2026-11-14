@@ -183,6 +183,9 @@ public class DirectoryIdentityTests
         listener.Start();
         var port = ((IPEndPoint)listener.LocalEndpoint).Port;
         using var stop = new CancellationTokenSource();
+        // Requests that got through the handshake and were answered with the rogue reply: each call must reach one,
+        // or a handshake failure would let the test pass without the client ever reading the reply.
+        var answered = new int[1];
         var rogue = Task.Run(async () =>
         {
             while (!stop.IsCancellationRequested)
@@ -200,7 +203,10 @@ public class DirectoryIdentityTests
                             var first = new byte[1];
                             if (!await SecureStream.ReadExactAsync(s, first, stop.Token)) return;
                             if (await DirectoryChannel.AcceptAsync(s, first[0], identity, Secret, stop.Token) is { } accepted)
+                            {
+                                Interlocked.Increment(ref answered[0]);
                                 await accepted.Reply((JsonObject)JsonNode.Parse(replyJson)!, stop.Token);
+                            }
                         }
                         catch (Exception e) when (e is IOException or OperationCanceledException or InvalidDataException) { }
                     }
@@ -223,9 +229,11 @@ public class DirectoryIdentityTests
         };
         foreach (var (name, run) in calls)
         {
+            var before = Volatile.Read(ref answered[0]);
             try { await run(); }
             catch (Exception e) when (e is IOException or InvalidDataException) { }
             catch (Exception e) { Assert.Fail($"{name}: {e.GetType().Name}: {e.Message}"); }
+            Assert.True(Volatile.Read(ref answered[0]) > before, $"{name}: the rogue reply was never sent");
         }
         stop.Cancel();
         listener.Stop();
