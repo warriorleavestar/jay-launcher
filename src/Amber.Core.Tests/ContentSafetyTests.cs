@@ -37,9 +37,19 @@ public sealed class ContentSafetyTests : IDisposable
         var data = header + 30 + BitConverter.ToUInt16(bytes, header + 26) + BitConverter.ToUInt16(bytes, header + 28);
         bytes[data] = 0x07;
         File.WriteAllBytes(outer, bytes);
-        var before = TempPackFolders();
-        Assert.ThrowsAny<InvalidDataException>(() => ModpackService.Inspect(outer));
-        Assert.Empty(TempPackFolders().Except(before));
+        // Its own temp root: other tests unpack packs into the system temp folder at the same time.
+        var temp = Path.Combine(_root, "temp");
+        Directory.CreateDirectory(temp);
+        ModpackService.PackSource.TempRootOverride = temp;
+        try
+        {
+            Assert.ThrowsAny<InvalidDataException>(() => ModpackService.Inspect(outer));
+        }
+        finally
+        {
+            ModpackService.PackSource.TempRootOverride = null;
+        }
+        Assert.Empty(Directory.EnumerateFileSystemEntries(temp));
     }
 
     [Theory]
@@ -251,9 +261,6 @@ public sealed class ContentSafetyTests : IDisposable
         Assert.Contains("-Xmx2G", redacted);
         Assert.Equal(redacted, ErrorReport.Redact(redacted, "alice", "/home/alice"));
     }
-
-    private static HashSet<string> TempPackFolders() =>
-        [.. Directory.EnumerateDirectories(Path.GetTempPath(), "amber-pack-*")];
 
     private static int IndexOf(byte[] haystack, byte[] needle)
     {

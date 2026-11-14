@@ -27,6 +27,20 @@ public sealed partial class ModpackService
 
         private PackSource(ZipArchive zip, string? tempDir) => (Zip, _tempDir) = (zip, tempDir);
 
+        private static readonly AsyncLocal<string?> TempRootHere = new();
+
+        /// <summary>
+        /// Where inner packs are unpacked. Defaults to the system temp folder; a test sets it for the calls in its own
+        /// async flow, so it can check the folders it owns without seeing other tests' temp folders.
+        /// </summary>
+        internal static string? TempRootOverride
+        {
+            get => TempRootHere.Value;
+            set => TempRootHere.Value = value;
+        }
+
+        private static string TempRoot => TempRootHere.Value ?? Path.GetTempPath();
+
         public static PackSource Open(string path)
         {
             RejectOtherArchives(path);
@@ -35,7 +49,7 @@ public sealed partial class ModpackService
             try
             {
                 if (InnerPack(zip) is not { } inner) return new PackSource(zip, null);
-                tempDir = Path.Combine(Path.GetTempPath(), "amber-pack-" + Guid.NewGuid().ToString("N"));
+                tempDir = Path.Combine(TempRoot, "amber-pack-" + Guid.NewGuid().ToString("N"));
                 Directory.CreateDirectory(tempDir);
                 var innerPath = Path.Combine(tempDir, inner.Name);
                 inner.ExtractToFile(innerPath);
