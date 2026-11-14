@@ -22,7 +22,7 @@ jobs:
       matrix:
         os: [windows-latest, ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 45
     defaults:
       run:
         working-directory: src
@@ -43,10 +43,19 @@ jobs:
             echo "AMBER_ADDED_TEST_LOOPBACK=true" >> "$GITHUB_ENV"
           fi
 
+      # Windows runs the whole suite in build.yml (validate); here it repeats only the security classes.
       - name: Security boundary regression tests
+        if: runner.os == 'Windows'
         run: >-
           dotnet test Amber.Core.Tests -c Release
           --filter "FullyQualifiedName~ProcessBoundarySecurityTests|FullyQualifiedName~InputParsingSecurityTests|FullyQualifiedName~WorldImportTests|FullyQualifiedName~ServerStatusTests|FullyQualifiedName~SpeedTestServerTests|FullyQualifiedName~SpeedTestSecurityTests|FullyQualifiedName~NbtBudgetTests|FullyQualifiedName~TestMatrixTests"
+          --logger "trx;LogFileName=security.trx" --results-directory ../out/security-tests
+
+      # Linux and macOS run the whole suite: tests with Unix-only bodies run nowhere else in CI.
+      - name: Full test suite
+        if: runner.os != 'Windows'
+        run: >-
+          dotnet test Amber.Core.Tests -c Release
           --logger "trx;LogFileName=security.trx" --results-directory ../out/security-tests
 
       - name: Upload security test results
