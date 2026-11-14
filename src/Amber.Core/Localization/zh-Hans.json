@@ -1892,7 +1892,7 @@
   "core.mp.public.err_mail_rate": "你短时间内通过这个网络发了太多好友请求或邀请，等十分钟左右再试",
   "core.mp.public.err_mail_busy": "现在通过这个网络发好友请求和邀请的人很多，过一分钟再试",
   "core.mp.public.budget_full": "目录：“{0}”这一分钟的全目录额度用完了，请求会收到 rate。如果一直这样，可能有人在刷目录。",
-  "core.mp.public.callers_unmapped": "目录：到现在为止所有调用方都从本机地址进来（没有一个来自 127.235.x.y），所以先不按调用方限制，只用全目录的额度。这里运行的 EasyTier 没有按各自地址把调用方交过来，请用随 Jay 发布的 EasyTier。",
+  "core.mp.public.callers_unmapped": "目录：到现在为止所有调用方都从本机地址进来（没有一个来自 127.235.x.y），所以先不按调用方限制，只用全目录的额度。目前这是正常的：只有用 Jay 的 EasyTier jay-v2.6.4-5 及以上、并走安全连接时，调用方才各有自己的地址，这个网络还没有用上。这里不需要改什么。",
   "core.mp.public.err_busy": "目录现在太忙，Jay 稍后会自动再试。",
   "core.mp.public.err_clock": "这台电脑的时间和目录差得太多，请校准系统时间后再试。",
   "core.mp.public.warn_lookup": "目录里用这个房间邀请的别的房间太多了。关掉房间再开一次，就会换成新的邀请",

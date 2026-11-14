@@ -295,6 +295,41 @@ public sealed class VolunteerNodesTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task AFailingAddressDoesntHoldBackItsNeighbours()
+    {
+        // q (answers) and bad (doesn't) share one IPv6 /64 and port; bad2 is another name for bad's exact address.
+        var dialled = new List<string>();
+        Task<IPAddress?> Resolve(string url, CancellationToken _) => Task.FromResult<IPAddress?>(new Uri(url).Host switch
+        {
+            "q.example.org" => IPAddress.Parse("fd00:1:2:3::5"),
+            _ => IPAddress.Parse("fd00:1:2:3::6"),
+        });
+        var registry = new VolunteerRegistry((url, _) => { lock (dialled) dialled.Add(url); return Task.FromResult(url.Contains("//q.")); },
+            () => _now, Resolve);
+        // A neighbour's failure right before: q is still dialled and listed.
+        registry.Register("tcp://bad.example.org:11010");
+        await registry.LastProbe;
+        _now += TimeSpan.FromSeconds(1.1);
+        Assert.True(Ok(registry.Register("tcp://q.example.org:11010")));
+        await registry.LastProbe;
+        Assert.Contains("tcp://q.example.org:11010", dialled);
+        Assert.Equal(["tcp://q.example.org:11010"], registry.Listed());
+        // Another name for the address that just failed waits out its cooldown without being dialled.
+        Assert.True(Ok(registry.Register("tcp://bad2.example.org:11010")));
+        await registry.LastProbe;
+        Assert.DoesNotContain("tcp://bad2.example.org:11010", dialled);
+        // When q is due to be checked again, a neighbour failing just before doesn't drop it.
+        _now += VolunteerRegistry.ReprobeEvery + TimeSpan.FromSeconds(1);
+        registry.Register("tcp://bad3.example.org:11010");
+        await registry.LastProbe;
+        _now += TimeSpan.FromSeconds(1.1);
+        Assert.True(Ok(registry.Register("tcp://q.example.org:11010")));
+        await registry.LastProbe;
+        Assert.Equal(2, dialled.Count(u => u == "tcp://q.example.org:11010"));
+        Assert.Equal(["tcp://q.example.org:11010"], registry.Listed());
+    }
+
+    [Fact]
     public async Task ANodeOfTheNetworkMustAnswer()
     {
         // A fake node: reads the handshake and answers with its own under the given network name.
@@ -327,6 +362,19 @@ public sealed class VolunteerNodesTests : IAsyncDisposable
         await serve;
         // Not a public address: never dialled.
         Assert.False(await VolunteerNodes.IsNetworkNodeAsync(IPAddress.Loopback, port, "jay-net-test", default));
+    }
+
+    [Fact]
+    public void AReplyFromJaysEasyTierIsRead()
+    {
+        // Captured from Jay's EasyTier (jay/v2.6.4 branch, a volunteer-style node of network "jay-net-probe", TCP
+        // listener) answering the request NodeHandshake.Request sends: the length, then this body.
+        var body = Convert.FromHexString(
+            "b0ba976500000000020001003f00000008e1cb868f0d10b0f5deac0618012a0d6a61792d6e65742d70726f6265322000000000" +
+            "00000000000000000000000000000000000000000000000000000000");
+        Assert.Equal(79, body.Length);
+        Assert.True(NodeHandshake.IsReply(body, "jay-net-probe"));
+        Assert.False(NodeHandshake.IsReply(body, "jay-net-other"));
     }
 
     [Fact]

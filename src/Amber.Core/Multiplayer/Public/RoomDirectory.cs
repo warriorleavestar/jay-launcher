@@ -1520,11 +1520,17 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
 
     private static void Check(JsonObject reply)
     {
-        if (reply["ok"]?.GetValue<bool>() == true) return;
+        if (Rejection(reply) is { } rejected) throw rejected;
+    }
+
+    /// <summary>What a directory's refusal means to the user, or null when <paramref name="reply"/> is ok (GUI self-check).</summary>
+    public static DirectoryRejectedException? Rejection(JsonObject reply)
+    {
+        if (reply["ok"]?.GetValue<bool>() == true) return null;
         var code = reply["error"]?.GetValue<string>() ?? "";
         // 网络节点自己的审核规则拒绝时会带一句原因（节点写的，只当文字显示）。
         var reason = reply["reason"]?.GetValue<string>() is { } r ? RoomChat.Clean(r, DirectoryExtensions.MaxReason) : null;
-        throw new DirectoryRejectedException(code, code switch
+        return new DirectoryRejectedException(code, code switch
         {
             "owner" or "lookup" or "stale" => L.T("core.mp.public.err_owner"),
             "full" => L.T("core.mp.public.err_full"),

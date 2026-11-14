@@ -3,6 +3,7 @@ using Amber.App.ViewModels;
 using Amber.Core.Identity;
 using Amber.Core.Localization;
 using Amber.Core.Multiplayer;
+using Amber.Core.Multiplayer.Public;
 using Amber.Core.Multiplayer.Transport;
 using Avalonia.Controls;
 using Avalonia.Threading;
@@ -280,6 +281,23 @@ internal sealed partial class SelfTest
         await Dispatcher.UIThread.InvokeAsync(() => vm.RestoreFriendsCommand.ExecuteAsync(null));
         Check("好友：被改过的备份不认", vm.Status == L.T("multiplayer.friends.wrong_account"), vm.Status);
         await ShotAsync("Jay账户-好友备份");
+
+        // Friend requests and invites the network holds back: sending too fast yourself vs. the network being busy, each
+        // with its own text in the status bar, also in a narrow window.
+        var (width, height) = (window.Width, window.Height);
+        window.Width = 600;
+        window.Height = 420;
+        await Task.Delay(300);
+        foreach (var (what, key) in new[] { ("mail", "core.mp.public.err_mail_rate"), ("mail-busy", "core.mp.public.err_mail_busy") })
+        {
+            var refused = RoomDirectoryClient.Rejection(new System.Text.Json.Nodes.JsonObject { ["ok"] = false, ["error"] = "rate", ["what"] = what })!;
+            Dispatcher.UIThread.Invoke(() => vm.MailFailed(refused));
+            Check($"好友：信箱限流（{what}）的提示写清楚原因", vm.Status.Contains(L.T(key), StringComparison.Ordinal), vm.Status);
+            await ShotAsync($"Jay账户-信箱限流-{what}-窄");
+        }
+        window.Width = width;
+        window.Height = height;
+        await Task.Delay(200);
 
         Dispatcher.UIThread.Invoke(() =>
         {

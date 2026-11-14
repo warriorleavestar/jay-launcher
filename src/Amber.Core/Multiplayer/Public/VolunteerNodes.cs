@@ -448,9 +448,10 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
     public const int MaxPerHost = 2;
 
     /// <summary>
-    /// After a probe fails, that port on the machine it resolved to isn't dialled again for this long, under any name.
+    /// After a probe fails, the address and port it resolved to aren't dialled again for this long, under any name.
     /// The failed entry is dropped at once, so without this a caller could register the same target again and again
-    /// under many names. Keyed by port, so failing ports of a host can't keep its real node off the list.
+    /// under many names. Keyed by exact address and port, so a failing port, or a failing address in the same IPv6 /64,
+    /// can't keep a real node off the list.
     /// </summary>
     public static readonly TimeSpan FailedCooldown = TimeSpan.FromMinutes(2);
     private readonly Dictionary<string, DateTimeOffset> _failedAt = new(StringComparer.Ordinal);
@@ -459,7 +460,9 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
 
     private static string HostOf(string normalized) => new Uri(normalized).Host;
     private static string Endpoint(string ip, int port) => $"{ip}|{port}";
-    private static string DialKey(string machine, string address) => $"dial:{machine}:{new Uri(address).Port}";
+    /// <summary>The listener a failed dial cools down: the exact address and port (not the machine's /64, so one address
+    /// that fails can't hold back another one next to it).</summary>
+    private static string DialKey(IPAddress ip, string address) => "dial:" + Endpoint(ip.ToString(), new Uri(address).Port);
     private readonly Dictionary<string, DateTimeOffset> _lastCheck = new(StringComparer.Ordinal);
 
     /// <summary>
@@ -689,7 +692,7 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
                     var others = _entries.Where(p => p.Key != address && p.Value.Machine == machine).ToList();
                     int Listeners(bool verified) => others.Where(p => (p.Value.VerifiedAt is not null) == verified && p.Value.Ip is not null)
                         .Select(p => Endpoint(p.Value.Ip!, new Uri(p.Key).Port)).Where(e => e != endpoint).Distinct().Count();
-                    crowded = Listeners(true) >= MaxPerHost || Listeners(false) >= MaxPerHost || CoolingDown(DialKey(machine, address), _now());
+                    crowded = Listeners(true) >= MaxPerHost || Listeners(false) >= MaxPerHost || CoolingDown(DialKey(ip, address), _now());
                     // A listener checked under another name since this one was needn't be dialled again: the name takes
                     // that check's time, so the listener is still dialled once its newest check is too old.
                     _entries.TryGetValue(address, out var mine);
@@ -725,7 +728,7 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
             {
                 // Dialled and failed: cool down that port of the machine, whatever happens to the entry (the address
                 // itself waits as any failed address does).
-                if (ip is not null) _failedAt[DialKey(VolunteerNodes.MachineOf(ip), address)] = _now();
+                if (ip is not null) _failedAt[DialKey(ip, address)] = _now();
             }
         }
         Probed?.Invoke(address, ok);

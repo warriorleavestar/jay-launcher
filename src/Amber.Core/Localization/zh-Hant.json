@@ -1892,7 +1892,7 @@
   "core.mp.public.err_mail_rate": "你短時間內透過這個網路發了太多好友請求或邀請，等十分鐘左右再試",
   "core.mp.public.err_mail_busy": "現在透過這個網路發好友請求和邀請的人很多，過一分鐘再試",
   "core.mp.public.budget_full": "目錄：「{0}」這一分鐘的全目錄額度用完了，請求會收到 rate。如果一直這樣，可能有人在刷目錄。",
-  "core.mp.public.callers_unmapped": "目錄：到現在為止所有呼叫方都從本機位址進來（沒有一個來自 127.235.x.y），所以先不按呼叫方限制，只用全目錄的額度。這裡執行的 EasyTier 沒有按各自位址把呼叫方交過來，請用隨 Jay 發佈的 EasyTier。",
+  "core.mp.public.callers_unmapped": "目錄：到現在為止所有呼叫方都從本機位址進來（沒有一個來自 127.235.x.y），所以先不按呼叫方限制，只用全目錄的額度。目前這是正常的：只有用 Jay 的 EasyTier jay-v2.6.4-5 以上、並走安全連線時，呼叫方才各有自己的位址，這個網路還沒有用上。這裡不需要改什麼。",
   "core.mp.public.err_busy": "目錄現在太忙，Jay 稍後會自動再試。",
   "core.mp.public.err_clock": "這台電腦的時間和目錄差得太多，請校準系統時間後再試。",
   "core.mp.public.warn_lookup": "目錄裡用這個房間邀請的別的房間太多了。關掉房間再開一次，就會換成新的邀請",
