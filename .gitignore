@@ -13,3 +13,15 @@ attest.index
 
 # Local code index (tools/build-code-index.py)
 .code-index/
+
+# Test logs written by tools/multiplayer-test.ps1
+测试日志/
+
+# Keys and tokens never belong in the repository: the data folders of a network node run from the working tree
+# (samples/MyJayNetwork, jay-server), key files and keystores.
+*.key
+*.token
+*.p12
+*.pfx
+*.keystore
+my-network-data/

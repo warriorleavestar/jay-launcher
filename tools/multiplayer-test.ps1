@@ -110,7 +110,8 @@ function Test-Through([string]$address, [int]$seconds) {
 function Save-Output($proc) {
     Write-Log "----- $($proc.Name) 输出 -----"
     foreach ($f in @($proc.Out, $proc.Err)) {
-        if (Test-Path $f) { Get-Content $f -Encoding UTF8 | ForEach-Object { Add-Content -Path $log -Value ("  " + $_) -Encoding UTF8 } }
+        # The room code carries the room's key: keep only its start, as the result line does.
+        if (Test-Path $f) { Get-Content $f -Encoding UTF8 | ForEach-Object { Add-Content -Path $log -Value ("  " + ($_ -replace '^(ROOM .{13}).*$', '$1…')) -Encoding UTF8 } }
     }
 }
 
