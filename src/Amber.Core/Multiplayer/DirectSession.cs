@@ -160,7 +160,9 @@ public sealed class DirectSession : IAsyncDisposable
         }
         else
         {
-            _gathered = await DirectGatherer.GatherAsync(socket, Options.StunServers, Options.TryPortMapping, Log, ct);
+            // No bridge owns the socket yet: when gathering is cancelled or fails, close it here, or its port stays bound.
+            try { _gathered = await DirectGatherer.GatherAsync(socket, Options.StunServers, Options.TryPortMapping, Log, ct); }
+            catch { socket.Dispose(); throw; }
         }
         Log(L.F("core.mp.session.nat", DirectText.Nat(_gathered.Nat)));
         if (IsHost)
@@ -1255,7 +1257,7 @@ public sealed class DirectSession : IAsyncDisposable
                 await remove().WaitAsync(TimeSpan.FromSeconds(3));
                 Log(L.T("core.mp.mapping.removed"));
             }
-            catch (Exception e) when (e is HttpRequestException or SocketException or TimeoutException or OperationCanceledException) { }
+            catch (Exception e) when (e is HttpRequestException or SocketException or TimeoutException or OperationCanceledException or IOException or InvalidDataException) { }
         }
     }
 }

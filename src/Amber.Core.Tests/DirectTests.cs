@@ -30,6 +30,24 @@ public class StunParseTests
         Assert.Null(Stun.ParseResponse(response, other));
     }
 
+    /// <summary>A reply whose last attribute lacks its padding is read up to there; it must not throw (the bridge's receive loop reads these).</summary>
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(5)]
+    public void AnAttributeWithoutItsPaddingEndsTheList(int length)
+    {
+        var id = new byte[12];
+        var response = new byte[20 + 4 + length];
+        BinaryPrimitives.WriteUInt16BigEndian(response, 0x0101);
+        BinaryPrimitives.WriteUInt16BigEndian(response.AsSpan(2), (ushort)(4 + length));
+        BinaryPrimitives.WriteUInt32BigEndian(response.AsSpan(4), 0x2112A442);
+        BinaryPrimitives.WriteUInt16BigEndian(response.AsSpan(20), 0x8022);
+        BinaryPrimitives.WriteUInt16BigEndian(response.AsSpan(22), (ushort)length);
+        Assert.Null(Stun.ParseResponse(response, id));
+    }
+
     [Fact]
     public void ParsesXorMappedIPv6()
     {

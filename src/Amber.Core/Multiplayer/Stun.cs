@@ -70,7 +70,10 @@ public static class Stun
             {
                 plain = new IPEndPoint(new IPAddress(value.Slice(4, 4).ToArray()), BinaryPrimitives.ReadUInt16BigEndian(value[2..]));
             }
-            attrs = attrs[(4 + ((len + 3) & ~3))..];
+            // Attributes are padded to 4 bytes; a last attribute without its padding ends the list.
+            var next = 4 + ((len + 3) & ~3);
+            if (next > attrs.Length) break;
+            attrs = attrs[next..];
         }
         return plain;
     }

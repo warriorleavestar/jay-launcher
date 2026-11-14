@@ -205,6 +205,22 @@ public class PortMappingSecurityTests
         $"<root xmlns='urn:schemas-upnp-org:device-1-0'><service><serviceType>urn:schemas-upnp-org:service:WANIPConnection:1</serviceType><controlURL>{SecurityElement.Escape(control)}</controlURL></service></root>";
     private static HttpResponseMessage Ok(string text) => new(HttpStatusCode.OK) { Content = new StringContent(text, Encoding.UTF8, "text/xml") };
 
+    /// <summary>A NAT-PMP reply counts only when it answers the request that was sent: version 0, the request's opcode + 128, result 0, full length.</summary>
+    [Theory]
+    [InlineData(new byte[] { 0, 128, 0, 0, 0, 0, 0, 1, 203, 0, 113, 5 }, (byte)0, 12, true)]
+    [InlineData(new byte[] { 0, 129, 0, 0, 0, 0, 0, 1, 0x9c, 0x40, 0x9c, 0x40, 0, 0, 0x1c, 0x20 }, (byte)1, 16, true)]
+    // The gateway refused (result code 2, "not authorized").
+    [InlineData(new byte[] { 0, 129, 0, 2, 0, 0, 0, 1, 0x9c, 0x40, 0, 0, 0, 0, 0, 0 }, (byte)1, 16, false)]
+    // Not an answer to this request: another version, the answer to the other opcode, a request echoed back, too short.
+    [InlineData(new byte[] { 1, 128, 0, 0, 0, 0, 0, 1, 203, 0, 113, 5 }, (byte)0, 12, null)]
+    [InlineData(new byte[] { 0, 128, 0, 0, 0, 0, 0, 1, 203, 0, 113, 5, 0, 0, 0, 0 }, (byte)1, 16, null)]
+    [InlineData(new byte[] { 0, 1, 0, 0, 0x9c, 0x40, 0x9c, 0x40, 0, 0, 0x1c, 0x20, 0, 0, 0, 0 }, (byte)1, 16, null)]
+    [InlineData(new byte[] { 0, 128, 0, 0, 0, 0, 0, 1 }, (byte)0, 12, null)]
+    [InlineData(new byte[] { 0, 128, 0 }, (byte)0, 12, null)]
+    [InlineData(new byte[0], (byte)0, 12, null)]
+    public void NatPmpRepliesMustAnswerTheRequest(byte[] reply, byte opcode, int expected, bool? accepted) =>
+        Assert.Equal(accepted, PortMapping.CheckPmpReply(reply, opcode, expected));
+
     private sealed class RecordingHandler(Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) => Task.FromResult(respond(request));

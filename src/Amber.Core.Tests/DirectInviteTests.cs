@@ -71,6 +71,46 @@ public sealed class DirectInviteTests
         Assert.Equal(new Candidate(PathKind.Punch, IPEndPoint.Parse("198.51.100.7:40001")), parsed.Candidates[0]);
     }
 
+    /// <summary>With more local addresses than fit, the STUN and mapped-port candidates (gathered last) still go out.</summary>
+    [Fact]
+    public void TheCandidateCapKeepsThePunchAndMappedCandidates()
+    {
+        var candidates = Enumerable.Range(1, 20).Select(i => new Candidate(PathKind.Lan, IPEndPoint.Parse($"192.168.1.{i}:40000"))).ToList();
+        var punch = new Candidate(PathKind.Punch, IPEndPoint.Parse("198.51.100.7:40001"));
+        var mapped = new Candidate(PathKind.Mapped, IPEndPoint.Parse("198.51.100.7:40002"));
+        candidates.Add(punch);
+        candidates.Add(mapped);
+        Assert.True(DirectAddresses.TryParse(new DirectAddresses("abcdef0123456789", NatKind.Cone, candidates).ToJson(), out var parsed));
+        Assert.Equal(DirectAddresses.MaxCandidates, parsed.Candidates.Count);
+        Assert.Contains(punch, parsed.Candidates);
+        Assert.Contains(mapped, parsed.Candidates);
+        // The others keep their order, and a list that fits is sent as it is.
+        Assert.Equal(candidates.Take(DirectAddresses.MaxCandidates - 2), parsed.Candidates.Skip(2));
+        var few = candidates.Skip(10).ToList();
+        Assert.True(DirectAddresses.TryParse(new DirectAddresses("abcdef0123456789", NatKind.Cone, few).ToJson(), out var same));
+        Assert.Equal(few, same.Candidates);
+    }
+
+    /// <summary>Preparing is cancelled while the addresses are gathered: no bridge was built, so the session closes the socket itself.</summary>
+    [Fact]
+    public async Task ACancelledPrepareReleasesItsSocket()
+    {
+        var log = new DiagnosticLog();
+        var options = new DirectOptions(["127.0.0.1:9"], false, [], false, false, false);
+        await using var guest = new DirectSession(null!, Path.Combine(Path.GetTempPath(), "amber-direct-" + Guid.NewGuid().ToString("N")), null, false, options, log)
+        {
+            BridgeKey = DirectTestKeys.Bridge,
+        };
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => guest.PrepareAsync(cancelled.Token));
+        Assert.Null(guest.Bridge);
+        // The first log line names the port the socket was bound to; binding it again only works once that socket is closed.
+        var port = int.Parse(System.Text.RegularExpressions.Regex.Match(log.Snapshot()[0].Text, @"\d{4,5}").Value, System.Globalization.CultureInfo.InvariantCulture);
+        using var again = DirectBridge.CreateSocket(port);
+        Assert.Equal(port, ((IPEndPoint)again.LocalEndPoint!).Port);
+    }
+
     /// <summary>A direct room hands out a plain JAY2 invite: no IP, no port, no room secret, no member key.</summary>
     [Fact]
     public void DirectRoomInviteCarriesNoAddressOrSecret()

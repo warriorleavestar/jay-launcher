@@ -75,8 +75,15 @@ public sealed record DirectAddresses(string Session, NatKind Nat, IReadOnlyList<
     {
         ["s"] = Session,
         ["n"] = Nat.ToString(),
-        ["c"] = new JsonArray(Candidates.Take(MaxCandidates).Select(c => (JsonNode?)new JsonArray(c.Kind.ToString(), c.EndPoint.ToString())).ToArray()),
+        ["c"] = new JsonArray(Sent().Select(c => (JsonNode?)new JsonArray(c.Kind.ToString(), c.EndPoint.ToString())).ToArray()),
     };
+
+    /// <summary>
+    /// The candidates that go into the knock. With more than <see cref="MaxCandidates"/> (many local addresses) the STUN and
+    /// mapped-port ones are kept first: they are gathered last and are the ones a peer behind another router needs.
+    /// </summary>
+    private IEnumerable<Candidate> Sent() =>
+        (Candidates.Count <= MaxCandidates ? Candidates.AsEnumerable() : Candidates.OrderBy(c => c.Kind is PathKind.Punch or PathKind.Mapped ? 0 : 1)).Take(MaxCandidates);
 
     /// <summary>Reads <see cref="ToJson"/>. A session id of the wrong shape is refused; unknown or broken candidates are skipped.</summary>
     public static bool TryParse(JsonObject? json, out DirectAddresses addresses)
@@ -571,12 +578,12 @@ public sealed class DirectBridge : IAsyncDisposable
             var packet = buffer.AsSpan(0, r.ReceivedBytes);
             if (packet.Length == 0) continue;
             var type = packet[0];
-            if (HandleKeepAliveResponse(packet)) continue;
 
             // 对方发来的内容不可信：处理一个包时出任何错（坏 JSON、字段类型不对、事件处理抛异常、转发出错）都只丢掉这个包、记一笔，
-            // 不能让共用的接收循环停掉。数据包也在里面。
+            // 不能让共用的接收循环停掉。数据包也在里面。The keep-alive reply is read inside the same guard: it comes from a STUN server.
             try
             {
+                if (HandleKeepAliveResponse(packet)) continue;
                 if (type == Data)
                 {
                     // Forward straight from the receive buffer: it is only reused after this await completes.
