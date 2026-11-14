@@ -66,20 +66,37 @@ public sealed class AccountService(HttpClient http, AccountStore store, string d
     }
 
     /// <summary>下载并缓存皮肤，返回 PNG 路径。没有皮肤或下载失败时返回 null（预览退回默认头像）。</summary>
+    private const int MaxSkinBytes = 4 * 1024 * 1024;
+    private static ReadOnlySpan<byte> PngSignature => [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+
     public async Task<string?> GetSkinFileAsync(Account account, CancellationToken ct = default)
     {
         try
         {
             if (account is { Kind: AccountKind.External, SkinUrl: null }) await External.LoadSkinAsync(account, ct);
             if (account.SkinUrl is not { } url) return null;
+            // A third-party login server names the skin address: only plain web addresses, a capped size, and a real PNG.
+            if (!WebLinks.TryGetHttpUrl(url, out var uri)) return null;
             var folder = Path.Combine(dataDir, "skins");
             Directory.CreateDirectory(folder);
             var path = Path.Combine(folder, Convert.ToHexStringLower(System.Security.Cryptography.SHA1.HashData(System.Text.Encoding.UTF8.GetBytes(url))) + ".png");
-            if (!File.Exists(path)) await File.WriteAllBytesAsync(path, await http.GetByteArrayAsync(url, ct), ct);
+            if (File.Exists(path)) return path;
+            byte[] bytes;
+            using (NetworkPolicy.Scope(NetworkCategory.Login))
+            {
+                using var response = await http.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, ct);
+                response.EnsureSuccessStatusCode();
+                await using var stream = await response.Content.ReadAsStreamAsync(ct);
+                bytes = ArchiveMetadata.ReadBytes(stream, MaxSkinBytes);
+            }
+            if (!bytes.AsSpan().StartsWith(PngSignature)) return null;
+            var temp = path + ".tmp";
+            await File.WriteAllBytesAsync(temp, bytes, ct);
+            File.Move(temp, path, overwrite: true);
             return path;
         }
         catch (Exception e) when (e is HttpRequestException or TaskCanceledException or IOException or InvalidOperationException
-                                       or FormatException or System.Text.Json.JsonException && !ct.IsCancellationRequested)
+                                       or FormatException or InvalidDataException or System.Text.Json.JsonException && !ct.IsCancellationRequested)
         {
             return null;
         }

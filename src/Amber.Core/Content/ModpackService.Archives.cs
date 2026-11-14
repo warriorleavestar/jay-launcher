@@ -31,27 +31,22 @@ public sealed partial class ModpackService
         {
             RejectOtherArchives(path);
             var zip = ZipFile.OpenRead(path);
+            string? tempDir = null;
             try
             {
                 if (InnerPack(zip) is not { } inner) return new PackSource(zip, null);
-                var tempDir = Path.Combine(Path.GetTempPath(), "amber-pack-" + Guid.NewGuid().ToString("N"));
+                tempDir = Path.Combine(Path.GetTempPath(), "amber-pack-" + Guid.NewGuid().ToString("N"));
                 Directory.CreateDirectory(tempDir);
                 var innerPath = Path.Combine(tempDir, inner.Name);
                 inner.ExtractToFile(innerPath);
                 zip.Dispose();
-                try
-                {
-                    return new PackSource(ZipFile.OpenRead(innerPath), tempDir);
-                }
-                catch
-                {
-                    TryDelete(tempDir);
-                    throw;
-                }
+                return new PackSource(ZipFile.OpenRead(innerPath), tempDir);
             }
             catch
             {
                 zip.Dispose();
+                // Also when unpacking the inner pack failed, not only when opening it.
+                if (tempDir is not null) TryDelete(tempDir);
                 throw;
             }
         }
