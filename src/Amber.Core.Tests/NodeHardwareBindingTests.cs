@@ -211,6 +211,35 @@ public sealed class NodeHardwareBindingTests : IDisposable
     }
 
     [Fact]
+    public void ACertificateForAnotherNetworkIsRefusedWithoutWiping()
+    {
+        var hw = Machine();
+        var tpm = new FakeTpm();
+        Bind(hw, tpm); // issued for "jay-net-test"
+        var guard = new NodeHardwareGuard(_dir) { Hardware = hw, Tpm = tpm, Integrity = new FakeIntegrity(), Trust = Trustees, Networks = ["other", "other-et"] };
+        var e = Assert.Throws<NodeIntegrityException>(() => guard.Enforce());
+        Assert.Contains("jay-net-test", e.Problems[0]);
+        Assert.True(Has("directory.key.hw"));
+        Assert.False(Has(NodeWiper.LogFile));
+        Assert.NotNull(new NodeHardwareGuard(_dir) { Hardware = hw, Tpm = tpm, Integrity = new FakeIntegrity(), Trust = Trustees, Networks = ["jay-net-test", "x"] }.Enforce());
+    }
+
+    [Fact]
+    public void InstallRefusesACertificateForAnotherNetwork()
+    {
+        var hw = Machine();
+        var tpm = new FakeTpm();
+        using (DirectoryChannel.LoadOrCreateIdentity(Path.Combine(_dir, "directory.key"))) { }
+        var request = HardwareBinding.CreateRequest(_dir, hw, tpm);
+        var cert = HardwareCertificate.Cosign(HardwareCertificate.Issue(_rootKey, request, "jay-net-test"), _rootKey2);
+        Assert.Throws<InvalidDataException>(() => HardwareBinding.Install(_dir, cert, hw, tpm, Trustees, ["other", "other-et"]));
+        Assert.True(Has("directory.key"));
+        Assert.False(HardwareBinding.IsBound(_dir));
+        HardwareBinding.Install(_dir, cert, hw, tpm, Trustees, ["jay-net-test"]);
+        Assert.False(Has("directory.key"));
+    }
+
+    [Fact]
     public void CopiedFilesOnAnotherMachineAreWiped()
     {
         Bind(Machine(), new FakeTpm());

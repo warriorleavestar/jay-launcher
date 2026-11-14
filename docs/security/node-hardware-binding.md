@@ -43,6 +43,7 @@ A node operator can bind a node to the machine it runs on. All of it happens off
 | Runtime integrity: debugger/tracer attached (`TracerPid`, `IsDebuggerPresent`), code-injection variables (`LD_PRELOAD`, `LD_AUDIT`, `DYLD_INSERT_LIBRARIES`, `DOTNET_STARTUP_HOOKS`, profiler variables), program, its folder or the data dir writable by group/others, Secure Boot off when the certificate requires it | **Refuse to run**, exit 78. Nothing is deleted. |
 | TPM refuses to unseal while its endorsement key still matches (boot state changed) | **Refuse to run**, exit 78. Nothing is deleted. |
 | Certificate validly signed but short of the network's root quorum (e.g. the node was started with the wrong `--network`) | **Refuse to run**, exit 78. Nothing is deleted. |
+| Certificate names a network (`hw-cert --network`, the network's id or EasyTier network name) that isn't this node's | **Refuse to run**, exit 78. Nothing is deleted. `node bind --install` refuses it too. |
 | Certificate missing, or any signature on it invalid | **Wipe**, exit 77 |
 | An identifier can't be read at all (a tool failed or timed out, the service user isn't in `tss`), and the ones that were read would pass on their own; or the certificate requires a TPM and none is usable | **Refuse to run**, exit 78. Nothing is deleted. |
 | Fewer than `need` identifiers match, or a mandatory one (TPM) was read and doesn't match | **Wipe**, exit 77 |

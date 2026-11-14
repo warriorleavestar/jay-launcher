@@ -76,12 +76,16 @@ public static class HardwareBinding
     /// Step 3, on the node: checks the certificate against this hardware and this node's key, then encrypts the key files.
     /// Returns the files now kept only in sealed form.
     /// </summary>
-    public static IReadOnlyList<string> Install(string dataDir, byte[] certificate, IHardwareSource hardware, ITpmSealer tpm, TrustQuorum trust)
+    /// <param name="networks">The names this node's network goes by (its id and EasyTier network name); a certificate that
+    /// names another network is refused. Null skips the check.</param>
+    public static IReadOnlyList<string> Install(string dataDir, byte[] certificate, IHardwareSource hardware, ITpmSealer tpm, TrustQuorum trust,
+        IReadOnlyCollection<string>? networks = null)
     {
         if (File.Exists(Path.Combine(dataDir, WrapFile))) throw new InvalidOperationException("This node is already bound to its hardware.");
         var cert = HardwareCertificate.Parse(certificate) ?? throw new InvalidDataException("hardware.cert isn't a valid hardware certificate.");
         if (!trust.IsMet(cert.Signers))
             throw new InvalidDataException($"hardware.cert has {trust.Count(cert.Signers)} of the {trust.Need} root signatures this network needs ({trust.Keys.Count} roots listed).");
+        if (cert.WrongNetwork(networks) is { } wrong) throw new InvalidDataException(wrong);
         var directoryKeyPath = Path.Combine(dataDir, "directory.key");
         using (var key = DirectoryChannel.LoadOrCreateIdentity(directoryKeyPath))
             if (!CryptographicOperations.FixedTimeEquals(key.PublicKey, cert.DirectoryKey)) throw new InvalidDataException("hardware.cert was issued for another directory key.");
@@ -381,6 +385,15 @@ public sealed record HardwareCertificate(
         return !mustDiffers && match.Matched + unreadable.Length >= Need ? unreadable : [];
     }
 
+    /// <summary>
+    /// Why this certificate doesn't belong to a node of the network named <paramref name="networks"/> (its id and EasyTier
+    /// network name), or null when it does, when it names no network, or when <paramref name="networks"/> is null.
+    /// </summary>
+    public string? WrongNetwork(IReadOnlyCollection<string>? networks) =>
+        Network is { } net && networks is { Count: > 0 } && !networks.Contains(net, StringComparer.Ordinal)
+            ? $"hardware.cert was issued for the network \"{net}\", not this node's network ({string.Join(" / ", networks)}); check --network"
+            : null;
+
     /// <summary>Compares this machine's identifiers with the certificate.</summary>
     public HardwareMatch Match(IReadOnlyList<HardwareFactor> hardware)
     {
@@ -427,6 +440,11 @@ public sealed class NodeHardwareGuard(string dataDir)
     /// run (a wrong --network flag must not wipe a node); a missing or badly signed one is treated as tampering.
     /// </summary>
     public TrustQuorum Trust { get; init; } = TrustQuorum.None;
+    /// <summary>
+    /// The names this node's network goes by (its id and EasyTier network name). A certificate issued for another network
+    /// makes the node refuse to run (nothing is wiped). Null or empty skips the check.
+    /// </summary>
+    public IReadOnlyCollection<string>? Networks { get; init; }
     /// <summary>Only list what a failed check would wipe; delete nothing.</summary>
     public bool DryRun { get; init; }
     public Action<string> Log { get; init; } = _ => { };
@@ -455,6 +473,7 @@ public sealed class NodeHardwareGuard(string dataDir)
         if (cert is null) Fail("hardware.cert is missing or its signature is invalid");
         if (!Trust.IsMet(cert!.Signers))
             throw new NodeIntegrityException([$"hardware.cert has {Trust.Count(cert.Signers)} of the {Trust.Need} root signatures this network needs; check --network"]);
+        if (cert.WrongNetwork(Networks) is { } wrong) throw new NodeIntegrityException([wrong]);
         var read = Hardware.Read();
         var match = cert!.Match(read);
         if (!match.Ok)

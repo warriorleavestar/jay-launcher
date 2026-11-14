@@ -109,6 +109,7 @@ public static class Program
               （根钥匙和节点在同一台电脑时也可以用 --dir <节点数据目录> 直接写进去，但根钥匙不该放在服务器上）
           jay-server network hw-cert --root <根钥匙文件> --request <hardware.request.json> --out <hardware.cert> [--need N] [--secure-boot] [--no-tpm] [--network <网络名>]
               在离线电脑上给节点的硬件签证书（默认：只允许一项硬件标识变化，有 TPM 就必须对上 TPM）。先逐项显示内容和核对码，手打目录节点公钥最后 6 位才签
+              写了 --network（网络 id 或 EasyTier 网络名）时，别的网络的节点不认这张证书
           jay-server network hw-cert --cosign <hardware.cert> --root <根钥匙文件>
               另一位信任人在自己的离线电脑上加签（Jay 公共网络要三人中两人；自己的网络看 dirRootsNeed），同样先显示再手打确认
           jay-server node bind --install <证书> [--network <连接串或文件>]  只认签名够数的证书（不加 --network 就是 Jay 信任人）
@@ -871,6 +872,13 @@ public static class Program
         return new TrustQuorum(profile.DirectoryRoots, profile.DirectoryRootsNeed);
     }
 
+    /// <summary>The names the node's network goes by (id and EasyTier network name), to compare with a hardware certificate's network.</summary>
+    private static string[] NodeNetworkNames(Options options)
+    {
+        var profile = options.Get("network") is { } text ? NetworkString.Parse(File.Exists(text) ? File.ReadAllText(text) : text).ToProfile() : PublicNetworkProfile.Jay();
+        return [profile.Id, profile.NetworkName];
+    }
+
     /// <summary>The node's directory public key: from hardware.cert once the node is bound (the key itself is sealed), else directory.key.</summary>
     private static byte[] DirectoryPublicKey(string dataDir)
     {
@@ -909,7 +917,7 @@ public static class Program
         }
         if (options.Get("install") is { } certFile)
         {
-            var sealedFiles = HardwareBinding.Install(root, File.ReadAllBytes(certFile), hardware, tpm, NodeTrust(options));
+            var sealedFiles = HardwareBinding.Install(root, File.ReadAllBytes(certFile), hardware, tpm, NodeTrust(options), NodeNetworkNames(options));
             output.WriteLine($"已绑定硬件。{string.Join("、", sealedFiles)} 现在只以加密形式存在（{string.Join("、", sealedFiles.Select(f => f + HardwareBinding.SealedSuffix))}），只有这台机器能打开。");
             output.WriteLine("硬件对不上时节点会删除数据目录里的 Jay 文件；换硬件或迁移虚拟机之前先跑 jay-server node bind --check。");
             return 0;
