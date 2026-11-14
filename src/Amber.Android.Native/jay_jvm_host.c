@@ -471,7 +471,18 @@ void jay_input_read(jay_input_snapshot *snapshot) {
     for (uint32_t i = 0; i < g_key_count; i++) snapshot->keys[i] = g_keys[i];
     g_text_count = 0;
     g_key_count = 0;
-    snapshot->pointer_generation = atomic_load(&g_pointer_generation);
-    snapshot->generation = atomic_load(&g_generation);
+    // Writers store a value first and bump the counters after it. A look delta, click or tap drained
+    // above can belong to a write whose bump has not happened yet, and GLFW skips a snapshot whose
+    // generation it has seen. Claim a fresh generation whenever something was drained so it is
+    // always delivered; an extra bump later only causes one empty poll.
+    if (snapshot->pointer_clicks != 0)
+        snapshot->pointer_generation = atomic_fetch_add(&g_pointer_generation, 1) + 1;
+    else
+        snapshot->pointer_generation = atomic_load(&g_pointer_generation);
+    if (snapshot->look_x != 0.f || snapshot->look_y != 0.f ||
+        snapshot->pointer_clicks != 0 || snapshot->action_taps != 0)
+        snapshot->generation = atomic_fetch_add(&g_generation, 1) + 1;
+    else
+        snapshot->generation = atomic_load(&g_generation);
     pthread_mutex_unlock(&g_event_mutex);
 }
