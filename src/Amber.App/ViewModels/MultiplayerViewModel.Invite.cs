@@ -833,6 +833,7 @@ public sealed partial class MultiplayerViewModel
         "expired" => "multiplayer.invite.reason.expired",
         "invalid" => "multiplayer.invite.reason.expired",
         "full" => "multiplayer.invite.reason.full",
+        "busy" => "multiplayer.invite.reason.busy",
         "removed" => "multiplayer.invite.reason.removed",
         "closed" => "multiplayer.invite.reason.closed",
         "mismatch" => "multiplayer.public.reason.mismatch",
