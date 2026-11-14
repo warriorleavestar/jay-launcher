@@ -3308,6 +3308,7 @@
   "core.bake.problem.mixin_target_changed": "one of its Mixins changes a part of the game that moved on this platform, and the universal loader could not move the change with it, so the game may fail to start. If it does, remove or update this mod",
   "core.launch.sandbox.on": "The game runs in the sandbox: it sees only its own instance folder and the game files.",
   "core.launch.sandbox.on_standard": "The game runs in the standard sandbox (low integrity): it cannot read Jay's data or open Jay's process.",
+  "core.launch.sandbox.on_mac": "The game runs in the macOS sandbox: it cannot read Jay's data, your keychain, browser profiles, mail, messages or SSH keys. Other files in your home folder stay visible to it on macOS.",
   "core.launch.sandbox.on_strong": "The game runs in the strong sandbox (AppContainer): it sees only its own folders, not Jay's data, your browsers or other files.",
   "core.launch.sandbox.relative": "The sandbox needs a full path, not \"{0}\". The game was not started.",
   "core.launch.sandbox.grants_data": "The game would be given \"{0}\", which is Jay's data folder or holds it. Move the game folder out of Jay's data folder. The game was not started.",

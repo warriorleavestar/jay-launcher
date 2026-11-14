@@ -3233,6 +3233,7 @@
   "core.bake.problem.mixin_target_changed": "它有 Mixin 要改的那段遊戲程式碼在這個平台上挪了位置，通用載入器沒能跟著調整，遊戲可能啟動不了。如果啟動失敗，請移除或更新這個模組",
   "core.launch.sandbox.on": "遊戲在沙盒裡執行：只看得到自己的實例資料夾和遊戲檔案。",
   "core.launch.sandbox.on_standard": "遊戲在標準沙盒裡執行（低完整性）：讀不到 Jay 的資料，也打不開 Jay 的處理程序。",
+  "core.launch.sandbox.on_mac": "遊戲在 macOS 沙盒裡執行：讀不到 Jay 的資料、鑰匙圈、瀏覽器資料、郵件、訊息和 SSH 金鑰。在 macOS 上，個人資料夾裡的其他檔案遊戲仍然看得到。",
   "core.launch.sandbox.on_strong": "遊戲在強沙盒裡執行（AppContainer）：只看得到自己的資料夾，看不到 Jay 的資料、瀏覽器和其他檔案。",
   "core.launch.sandbox.relative": "沙盒需要完整路徑，「{0}」不是。遊戲沒有啟動。",
   "core.launch.sandbox.grants_data": "遊戲會拿到「{0}」，那是 Jay 的資料資料夾或者包含它。請把遊戲資料夾移出 Jay 的資料資料夾。遊戲沒有啟動。",

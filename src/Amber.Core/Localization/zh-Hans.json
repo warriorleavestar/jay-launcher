@@ -3233,6 +3233,7 @@
   "core.bake.problem.mixin_target_changed": "它有 Mixin 要改的那段游戏代码在这个平台上挪了位置，通用加载器没能跟着调整，游戏可能启动不了。如果启动失败，请移除或更新这个模组",
   "core.launch.sandbox.on": "游戏在沙盒里运行：只看得到自己的实例文件夹和游戏文件。",
   "core.launch.sandbox.on_standard": "游戏在标准沙盒里运行（低完整性）：读不到 Jay 的数据，也打不开 Jay 的进程。",
+  "core.launch.sandbox.on_mac": "游戏在 macOS 沙盒里运行：读不到 Jay 的数据、钥匙串、浏览器资料、邮件、信息和 SSH 密钥。在 macOS 上，主文件夹里的其他文件游戏仍然看得到。",
   "core.launch.sandbox.on_strong": "游戏在强沙盒里运行（AppContainer）：只看得到自己的文件夹，看不到 Jay 的数据、浏览器和其他文件。",
   "core.launch.sandbox.relative": "沙盒需要完整路径，“{0}”不是。游戏没有启动。",
   "core.launch.sandbox.grants_data": "游戏会拿到“{0}”，那是 Jay 的数据文件夹或者包含它。请把游戏文件夹移出 Jay 的数据文件夹。游戏没有启动。",

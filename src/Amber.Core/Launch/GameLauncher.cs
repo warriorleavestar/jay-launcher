@@ -388,6 +388,8 @@ public sealed class GameLauncher(GameDirectory dir)
                 {
                     WindowsSandboxLevel.Strong => L.T("core.launch.sandbox.on_strong"),
                     WindowsSandboxLevel.Standard => L.T("core.launch.sandbox.on_standard"),
+                    // The macOS profile only hides named folders; it must not promise what the Linux sandbox does.
+                    _ when OperatingSystem.IsMacOS() => L.T("core.launch.sandbox.on_mac"),
                     _ => L.T("core.launch.sandbox.on"),
                 });
             }

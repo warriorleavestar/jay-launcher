@@ -3089,6 +3089,7 @@
   "core.bake.problem.mixin_target_changed": "其 Mixin 所改之戲碼，於此平臺已遷其處，通用載器未能隨而調之，戲或不能啟。若不能啟，請去或更此模組",
   "core.launch.sandbox.on": "戲行於沙盒：唯見其例之夾與戲之檔。",
   "core.launch.sandbox.on_standard": "戲行於常沙盒（低整全）：不得讀 Jay 之資，不得啟 Jay 之程。",
+  "core.launch.sandbox.on_mac": "戲行於 macOS 沙盒：不得讀 Jay 之資、鑰匙圈、瀏覽器之檔、郵、訊與 SSH 之鑰。於 macOS，家夾他檔戲猶見之。",
   "core.launch.sandbox.on_strong": "戲行於固沙盒（AppContainer）：唯見其夾，不見 Jay 之資、覽器與他檔。",
   "core.launch.sandbox.relative": "沙盒須全徑，「{0}」非也。戲未啟。",
   "core.launch.sandbox.grants_data": "戲將得「{0}」，乃 Jay 之資夾或含之。請移戲夾出 Jay 之資夾。戲未啟。",
