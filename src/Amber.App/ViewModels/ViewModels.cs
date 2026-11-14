@@ -390,10 +390,11 @@ public sealed partial class MainViewModel : ObservableObject
         Call = call;
         multiplayer.Call = call;
         Pages.OfType<PeopleViewModel>().Single().Call = call;
-        // Leaving the room (or the room closing) ends room voice and anything shared in it.
+        // Leaving the room (or the room closing) ends every call: room voice, sharing, and a friend's call too, which
+        // rides on the same room link as messages do.
         multiplayer.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName == nameof(MultiplayerViewModel.IsIdle) && multiplayer.IsIdle && call.IsRoomCall) call.End("call.ended_room");
+            if (e.PropertyName == nameof(MultiplayerViewModel.IsIdle) && multiplayer.IsIdle) call.RoomClosed();
         };
         settingsPage.ChildModeChanged = () => { multiplayer.ApplyChildMode(); call.ApplyChildMode(); about.Refresh(); };
         Drop = new DropViewModel(service)

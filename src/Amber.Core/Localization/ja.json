@@ -2675,7 +2675,6 @@
   "call.camera": "カメラ",
   "call.control": "操作を許可",
   "call.hangup": "通話を終了",
-  "call.popout": "別ウィンドウ",
   "call.me": "自分",
   "call.screen_of": "{0} の画面",
   "call.route.direct": "直接接続：相手からあなたの IP が見えます。中身はエンドツーエンドで暗号化されます。",

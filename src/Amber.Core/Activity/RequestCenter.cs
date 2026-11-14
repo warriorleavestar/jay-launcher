@@ -9,7 +9,11 @@ public sealed record RequestChoice(string Id, string Label, bool IsDefault = fal
 /// 同一个 DedupeKey 只有一条：再发返回原来那条。
 /// </summary>
 public sealed record RequestSpec(string Kind, string Title, string? Body, IReadOnlyList<RequestChoice> Choices,
-    bool IsSafety = false, TimeSpan? Timeout = null, string? DedupeKey = null, string? TimeoutChoice = null);
+    bool IsSafety = false, TimeSpan? Timeout = null, string? DedupeKey = null, string? TimeoutChoice = null)
+{
+    /// <summary>Also opens the always-on-top popup while Jay is in the background (safety requests always do; a call rings there too).</summary>
+    public bool Popup { get; init; }
+}
 
 /// <summary>请求是在哪处理的：请求条、房间卡、置顶小窗、系统通知、超时、程序自己（对方撤回之类）。</summary>
 public enum RequestSource { Bar, Panel, Popup, SystemNotification, Timeout, Program }

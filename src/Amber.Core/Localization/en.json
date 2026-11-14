@@ -2736,7 +2736,6 @@
   "call.camera": "Camera",
   "call.control": "Let them control",
   "call.hangup": "Hang up",
-  "call.popout": "Pop out",
   "call.me": "Me",
   "call.screen_of": "{0}'s screen",
   "call.route.direct": "Direct: they can see your IP address. Encrypted end to end.",
