@@ -409,9 +409,11 @@ public sealed partial class AccountsViewModel : PageViewModel, ISnapshotDemo
 
     private void TryOpen(string url)
     {
+        // The device-code address comes from the network: hand only https web links to the shell.
+        if (!Amber.Core.Net.WebLinks.TryGetHttpUrl(url, out var uri) || uri!.Scheme != Uri.UriSchemeHttps) return;
         try
         {
-            OpenUrl(url);
+            OpenUrl(uri.AbsoluteUri);
         }
         catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException)
         {

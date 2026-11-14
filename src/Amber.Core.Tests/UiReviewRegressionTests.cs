@@ -108,3 +108,30 @@ public sealed class SettingsThemeLanguageTests
         }
     });
 }
+
+/// <summary>The Microsoft sign-in panel opens only https web links in the browser.</summary>
+public sealed class AccountsLinkTests
+{
+    [Theory]
+    [InlineData("https://www.microsoft.com/link", true)]
+    [InlineData("http://www.microsoft.com/link", false)]
+    [InlineData("file:///etc/passwd", false)]
+    [InlineData("C:\\Windows\\System32\\calc.exe", false)]
+    [InlineData("ms-settings:privacy", false)]
+    public void DeviceCodeAddressMustBeHttps(string address, bool opens) => UiTestThread.Run(() =>
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "jay-accounts-" + Guid.NewGuid().ToString("N")[..8]);
+        try
+        {
+            using var service = new LauncherService(new AppSettings { GameDirectory = dir, PlayerName = "", SavePathForTest = Path.Combine(dir, "settings.json") });
+            var opened = new List<string>();
+            var accounts = new AccountsViewModel(service) { OpenUrl = opened.Add, DeviceUri = address };
+            accounts.OpenDeviceUriCommand.Execute(null);
+            Assert.Equal(opens, opened.Count == 1);
+        }
+        finally
+        {
+            try { Directory.Delete(dir, true); } catch (IOException) { }
+        }
+    });
+}
