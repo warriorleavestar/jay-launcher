@@ -339,6 +339,32 @@ public sealed class GateTests : IAsyncLifetime
         Assert.Equal(["Steve"], _store.AllowedNames(a.KeyPair.PublicKey));
     }
 
+    /// <summary>The gate's keys are only readable by this user: 0700 / 0600, or on Windows a protected ACL on the data folder.</summary>
+    [Fact]
+    public void DataFolderAndKeysArePrivate()
+    {
+        var dir = _store.Directory;
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute, File.GetUnixFileMode(dir));
+            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(Path.Combine(dir, GateStore.KeyFile)));
+            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(Path.Combine(dir, GateStore.StateFile)));
+            return;
+        }
+        var me = System.Security.Principal.WindowsIdentity.GetCurrent().User!.Value;
+        foreach (var file in new[] { GateStore.KeyFile, GateStore.StateFile })
+        {
+            var acl = new FileInfo(Path.Combine(dir, file)).GetAccessControl();
+            var rules = acl.GetAccessRules(true, true, typeof(System.Security.Principal.SecurityIdentifier))
+                .OfType<System.Security.AccessControl.FileSystemAccessRule>().ToList();
+            foreach (var r in rules) Assert.Contains(r.IdentityReference.Value, new[] { me, "S-1-5-18", "S-1-5-32-544" });
+        }
+        Assert.True(new DirectoryInfo(dir).GetAccessControl().AreAccessRulesProtected);
+        var relayKey = Path.Combine(_root, "relay", "relay.key");
+        GateRelay.LoadOrCreateKey(relayKey).Dispose();
+        Assert.True(new FileInfo(relayKey).GetAccessControl().AreAccessRulesProtected);
+    }
+
     [Fact]
     public void HandshakeLimitCountsAnIpv6SlashSixtyFourAsOneAddress()
     {

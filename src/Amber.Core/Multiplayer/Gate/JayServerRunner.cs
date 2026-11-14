@@ -46,6 +46,7 @@ public sealed class JayServerRunner : IAsyncDisposable
     {
         if (!IsInitialized(root)) throw new InvalidOperationException(L.T("core.gate.run.not_initialized"));
         var store = new GateStore(GateDirectory(root));
+        GateStore.ProtectOnWindows(store.Directory);
         var config = store.LoadConfig();
         var host = new McServerHost(root);
         if (withMc)

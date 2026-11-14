@@ -160,6 +160,12 @@ public sealed class GateRelay : IAsyncDisposable
     {
         if (File.Exists(path))
         {
+            // Windows: also tightens a key file written before files were created locked (best effort).
+            if (OperatingSystem.IsWindows())
+            {
+                try { new FileInfo(path).SetAccessControl(Launch.PrivateFolder.LockedFile()); }
+                catch (SystemException e) when (e is UnauthorizedAccessException or IOException or PlatformNotSupportedException) { }
+            }
             var raw = File.ReadAllBytes(path);
             try { return X25519KeyPair.FromPrivateKey(raw); }
             finally { CryptographicOperations.ZeroMemory(raw); }
@@ -169,9 +175,15 @@ public sealed class GateRelay : IAsyncDisposable
         var bytes = key.ExportPrivateKey();
         try
         {
-            var options = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write, Share = FileShare.None };
-            if (!OperatingSystem.IsWindows()) options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
-            using var stream = new FileStream(path, options);
+            // Only this user can read the key: 0600, or on Windows an ACL for this user, SYSTEM and Administrators.
+            using var stream = OperatingSystem.IsWindows()
+                ? new FileInfo(path).Create(FileMode.CreateNew, System.Security.AccessControl.FileSystemRights.Write, FileShare.None, 4096, FileOptions.None,
+                    Launch.PrivateFolder.LockedFile())
+                : new FileStream(path, new FileStreamOptions
+                {
+                    Mode = FileMode.CreateNew, Access = FileAccess.Write, Share = FileShare.None,
+                    UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite,
+                });
             stream.Write(bytes);
         }
         finally

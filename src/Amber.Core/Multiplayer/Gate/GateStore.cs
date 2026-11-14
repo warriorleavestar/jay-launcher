@@ -146,7 +146,7 @@ internal sealed partial class GateJsonContext : JsonSerializerContext;
 public enum RedeemOutcome { Ok, InviteGone, DeviceLimit, Disabled, Revoked }
 
 /// <summary>
-/// 网关数据目录（默认 /var/lib/jay-gate）：server.key（网关长期私钥，0600）、state.json（名单和邀请）、gate.json（设置）。
+/// 网关数据目录（默认 /var/lib/jay-gate）：server.key（网关长期私钥，0600；Windows 上数据目录只给当前用户、SYSTEM 和管理员）、state.json（名单和邀请）、gate.json（设置）。
 /// 守护进程和管理命令会同时改 state.json：每次修改都先拿 state.lock 的独占锁，重新读一遍，改完原子替换（写临时文件再改名），不会互相覆盖。
 /// </summary>
 public sealed class GateStore
@@ -178,6 +178,7 @@ public sealed class GateStore
         if (!GateInvite.IsValidHost(publicHost)) throw new ArgumentException(L.T("core.gate.admin.badhost"));
         System.IO.Directory.CreateDirectory(dir);
         if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(dir, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        else ProtectOnWindows(dir);
         var store = new GateStore(dir);
         var keyPath = Path.Combine(dir, KeyFile);
         if (!File.Exists(keyPath))
@@ -200,6 +201,15 @@ public sealed class GateStore
                 return 0;
             });
         return store;
+    }
+
+    /// <summary>
+    /// Windows: only this user, SYSTEM and Administrators may open the data folder and the keys in it (the Windows side of
+    /// 0700 / 0600). Done at init and again when a gate starts, so folders made before this was added are covered too.
+    /// </summary>
+    public static void ProtectOnWindows(string dir)
+    {
+        if (OperatingSystem.IsWindows()) Launch.PrivateFolder.Lock(dir);
     }
 
     public X25519KeyPair LoadServerKey()
