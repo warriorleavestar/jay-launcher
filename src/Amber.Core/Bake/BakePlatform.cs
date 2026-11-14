@@ -82,14 +82,21 @@ public static partial class BakePlatform
         Directory.CreateDirectory(Path.Combine(inst, "data"));
 
         JsonObject profile;
-        using (var zip = ZipFile.OpenRead(installer))
+        try
         {
+            using var zip = ZipFile.OpenRead(installer);
             Extract(zip, "install_profile.json", Path.Combine(inst, "install_profile.json"));
             profile = JsonNode.Parse(File.ReadAllText(Path.Combine(inst, "install_profile.json")))?.AsObject()
                       ?? throw new InvalidDataException(L.T("core.install.forge.missingprofile"));
             var versionEntry = (profile["json"]?.GetValue<string>() ?? "/version.json").TrimStart('/');
             Extract(zip, versionEntry, Path.Combine(inst, "version.json"));
             if (zip.GetEntry("data/client.lzma") is not null) Extract(zip, "data/client.lzma", Path.Combine(inst, "data", "client.lzma"));
+        }
+        catch (Exception e) when (e is InvalidDataException or JsonException or InvalidOperationException)
+        {
+            // A broken or truncated installer: drop the cached copy so the next attempt downloads it again.
+            try { File.Delete(installer); } catch (Exception d) when (d is IOException or UnauthorizedAccessException) { }
+            throw;
         }
 
         LinkLibraries(Path.Combine(root, "libraries"), libraries);

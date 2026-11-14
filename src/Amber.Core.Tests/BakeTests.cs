@@ -1043,6 +1043,17 @@ public sealed class BakeTests : IDisposable
     }
 
     [Fact]
+    public async Task ABrokenCachedInstallerIsRemovedSoTheNextAttemptDownloadsItAgain()
+    {
+        var installer = Path.Combine(Data, "platforms", "installers", "neoforge-21.1.265-installer.jar");
+        Directory.CreateDirectory(Path.GetDirectoryName(installer)!);
+        File.WriteAllText(installer, "not a zip");
+        var instance = Instance("neoforge", "1.21.1", "21.1.265", "neoforge-1.21.1");
+        await Assert.ThrowsAsync<InvalidDataException>(() => BakePlatform.PrepareAsync(new GameDirectory(Game), instance, Data, null, null, CancellationToken.None));
+        Assert.False(File.Exists(installer));
+    }
+
+    [Fact]
     public void ForgeUpdateCheckIsTurnedOff()
     {
         var work = Directory.CreateDirectory(Path.Combine(_root, "forge-work")).FullName;
