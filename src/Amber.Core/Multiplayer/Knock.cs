@@ -479,6 +479,12 @@ public sealed class PendingInvite
     /// </summary>
     public byte[]? BoundTo { get; init; }
 
+    /// <summary>
+    /// The host answers every knock on this invite, even from someone on the "let straight in" list (a friend's device or
+    /// Jay account). Used for invites that say so to the host, like "friends can knock".
+    /// </summary>
+    public bool AskEachTime { get; init; }
+
     public bool IsUsable(DateTimeOffset now) => !Revoked && UsesLeft > 0 && (ExpiresAt is not { } at || now < at);
 }
 
@@ -525,8 +531,9 @@ public sealed class InviteBook(Func<DateTimeOffset>? clock = null)
     public InviteGame? Game { get; set; }
 
     /// <param name="boundTo">Only this identity key may use the invite (see <see cref="PendingInvite.BoundTo"/>).</param>
-    public PendingInvite Create(int uses, TimeSpan? lifetime, bool autoApprove, TunnelSettings tunnel, byte[]? boundTo = null)
+    public PendingInvite Create(int uses, TimeSpan? lifetime, bool autoApprove, TunnelSettings tunnel, byte[]? boundTo = null, bool askEachTime = false)
     {
+        if (askEachTime && autoApprove) throw new ArgumentException(null, nameof(askEachTime));
         if (uses is < 1 or > 20) throw new ArgumentOutOfRangeException(nameof(uses));
         if (boundTo is { Length: not X25519KeyPair.Length }) throw new ArgumentException(null, nameof(boundTo));
         PendingInvite invite;
@@ -537,6 +544,7 @@ public sealed class InviteBook(Func<DateTimeOffset>? clock = null)
             invite = new PendingInvite(JayInvite.Create(_lobbyKey, tunnel, Game), uses, lifetime is { } l ? _now() + l : null, autoApprove)
             {
                 BoundTo = boundTo is null ? null : (byte[])boundTo.Clone(),
+                AskEachTime = askEachTime,
             };
             _invites.Add(invite);
         }
@@ -1040,7 +1048,7 @@ public sealed class KnockServer : IAsyncDisposable
                 if (!_book.TryConsume(invite)) reply = Reject("expired");
                 // 安全策略要求设备验证、对方却不支持（旧版或改过的客户端）：不放进来。旧版客户端只认识 denied。
                 else if (_members.RequireAttestation && (!guestAttests || _members.Attestation is null)) reply = Reject("denied");
-                else if ((AlwaysAsk?.Invoke() != true && (request.Trusted || invite.AutoApprove)) || await AskAsync(request, ct))
+                else if ((AlwaysAsk?.Invoke() != true && !invite.AskEachTime && (request.Trusted || invite.AutoApprove)) || await AskAsync(request, ct))
                 {
                     member = _members.Issue(guestPub, request.Name, invite: invite);
                     var attestation = guestAttests ? _members.Attestation : null;

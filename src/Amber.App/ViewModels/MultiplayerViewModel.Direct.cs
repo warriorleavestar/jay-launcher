@@ -184,10 +184,9 @@ public sealed partial class MultiplayerViewModel
             RoomCodeText = "";
             RestoreChatHistory(room);
             StartHub(room);
-            // Guests knock through the relays (or the LAN) like in any invite room; the host's addresses go only to approved
-            // guests, inside the encrypted knock reply, and never into the invite code.
+            // Guests knock over the direct bridge (no relays: see ServerlessLobbyPeers); the host's addresses go only to
+            // approved guests, inside the encrypted knock reply, and never into a readable code. The room isn't announced.
             StartHostLobby(credentials, members, book, direct.LobbyUdpPort, direct: direct);
-            StartAnnouncerIfHosting();
             DirectHint = L.F("multiplayer.direct.host_hint", DirectText.Nat(addresses.Nat));
             if (await IssueInviteAsync(1, InviteExpiryChoices[0].Lifetime, false) is null) return;
             SetStatus(HasGameRelay ? StatusMessage.Success("multiplayer.relay.created") : StatusMessage.Success("multiplayer.direct.created"));
