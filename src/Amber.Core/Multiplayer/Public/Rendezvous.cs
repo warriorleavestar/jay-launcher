@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using Amber.Core.Multiplayer.Transport;
 
 namespace Amber.Core.Multiplayer.Public;
 
@@ -45,7 +46,7 @@ public static class Rendezvous
         var key = HKDF.DeriveKey(HashAlgorithmName.SHA256, token.ToArray(), 32, [], SealInfo);
         try
         {
-            using var aead = new ChaCha20Poly1305(key);
+            using var aead = new ChaChaPoly(key);
             var output = new byte[NonceLength + plaintext.Length + TagLength];
             RandomNumberGenerator.Fill(output.AsSpan(0, NonceLength));
             aead.Encrypt(output.AsSpan(0, NonceLength), plaintext, output.AsSpan(NonceLength, plaintext.Length), output.AsSpan(NonceLength + plaintext.Length), id);
@@ -65,7 +66,7 @@ public static class Rendezvous
         var key = HKDF.DeriveKey(HashAlgorithmName.SHA256, token.ToArray(), 32, [], SealInfo);
         try
         {
-            using var aead = new ChaCha20Poly1305(key);
+            using var aead = new ChaChaPoly(key);
             var length = sealedRecord.Length - NonceLength - TagLength;
             var plaintext = new byte[length];
             aead.Decrypt(sealedRecord[..NonceLength], sealedRecord.Slice(NonceLength, length), sealedRecord[(NonceLength + length)..], plaintext, id);
