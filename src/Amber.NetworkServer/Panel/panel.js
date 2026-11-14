@@ -145,14 +145,17 @@ function storeToken(value) {
 }
 
 async function api(method, path, body) {
+  // The session this request belongs to: an answer that comes back after that session ended changes nothing.
+  const asked = token;
   const response = await fetch(path, {
     method,
-    headers: { Authorization: "Bearer " + token, ...(body ? { "Content-Type": "application/json" } : {}) },
+    headers: { Authorization: "Bearer " + asked, ...(body ? { "Content-Type": "application/json" } : {}) },
     body: body ? JSON.stringify(body) : undefined,
     cache: "no-store",
     credentials: "omit",
   });
   const data = await response.json().catch(() => ({ ok: false, error: "bad" }));
+  if (token !== asked) throw new Error("ended");
   if (response.status === 401) { signOut(T("bad_token")); throw new Error("token"); }
   return data;
 }

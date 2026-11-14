@@ -140,10 +140,14 @@ public sealed class AdminPanelTests : IAsyncDisposable
         // A refresh still on its way when the session ends must not bring the old data back.
         var refresh = FunctionBody(js, "async function refresh(");
         Assert.Contains("const asked = token;", refresh);
-        Assert.True(refresh.IndexOf("if (!asked || token !== asked) return;", StringComparison.Ordinal)
-                    < refresh.IndexOf("$(\"app\").hidden = false", StringComparison.Ordinal));
+        AssertInOrder(refresh, "if (!asked || token !== asked) return;", "$(\"app\").hidden = false");
         Assert.Contains("$(\"logout\").addEventListener(\"click\", () => signOut())", js);
-        Assert.Matches(@"response\.status === 401\) \{ signOut\(", FunctionBody(js, "async function api("));
+        // Every request belongs to the session that sent it: a late answer (a 401 among them) from a session that has
+        // already ended must not sign out again, which would wipe the token the user is typing for the next one.
+        var api = FunctionBody(js, "async function api(");
+        Assert.Contains("const asked = token;", api);
+        Assert.Contains("\"Bearer \" + asked", api);
+        AssertInOrder(api, "if (token !== asked) throw", "response.status === 401) { signOut(");
         Assert.Contains("if (initial) signIn(initial); else showLogin();", js);
         // Only those two functions flip these elements, so no other path can show the app while signed out.
         foreach (var id in SignInToggled)
@@ -157,6 +161,16 @@ public sealed class AdminPanelTests : IAsyncDisposable
         Assert.Single(Regex.Matches(css, "!important"));
         Assert.DoesNotMatch(@":not\(\[hidden\]\)", css);
         Assert.Matches(@"#app\s*\{[^}]*display:\s*grid", css);
+    }
+
+    /// <summary><paramref name="first"/> and <paramref name="second"/> are both in <paramref name="code"/>, in that order.</summary>
+    private static void AssertInOrder(string code, string first, string second)
+    {
+        var a = code.IndexOf(first, StringComparison.Ordinal);
+        var b = code.IndexOf(second, StringComparison.Ordinal);
+        Assert.True(a >= 0, "missing: " + first);
+        Assert.True(b >= 0, "missing: " + second);
+        Assert.True(a < b, $"\"{first}\" should come before \"{second}\"");
     }
 
     private static bool HasHiddenAttribute(string html, string id)
