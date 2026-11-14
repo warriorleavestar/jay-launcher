@@ -246,8 +246,6 @@ public static class BuiltInThemes
     public static ThemePack? Load(string id) =>
         Files.Value.TryGetValue(id, out var files) ? ThemePackReader.ParseFiles(files) : null;
 
-    public static IReadOnlyDictionary<string, byte[]>? FilesOf(string id) => Files.Value.GetValueOrDefault(id);
-
     private static Dictionary<string, Dictionary<string, byte[]>> LoadFiles()
     {
         var result = new Dictionary<string, Dictionary<string, byte[]>>();

@@ -9,7 +9,10 @@ public enum NetworkAddResult
     Updated,
     /// <summary>已经有这个版本（或者更新的）了，没变。</summary>
     AlreadyHave,
-    /// <summary>不是 Jay 审核的网络，要用户确认才加（再调用一次，带 confirmed）。</summary>
+    /// <summary>
+    /// 不是 Jay 审核的网络，要用户确认才加（再调用一次，带 confirmed）。Also returned when an update of a reviewed network
+    /// is no longer reviewed.
+    /// </summary>
     NeedsConfirm,
     /// <summary>同一个编号已经有另一把钥匙签的网络了：要先删掉旧的（防止冒用）。</summary>
     Conflict,
@@ -46,6 +49,7 @@ public sealed class PublicNetworkList
     /// <summary>
     /// 加一个连接串。格式或签名不对抛 <see cref="InvalidDataException"/>（消息给用户看）。
     /// 没审核过的网络第一次返回 <see cref="NetworkAddResult.NeedsConfirm"/>，用户确认后带 <paramref name="confirmed"/> 再调一次。
+    /// The same holds for a new version of a reviewed network that only its owner signed.
     /// </summary>
     public NetworkAddResult Add(string text, bool confirmed, out SignedNetwork network, DateTimeOffset? now = null)
     {
@@ -58,7 +62,8 @@ public sealed class PublicNetworkList
             var old = _networks[index];
             if (!old.SignerKey.AsSpan().SequenceEqual(network.SignerKey)) return NetworkAddResult.Conflict;
             if (!old.IsReplacedBy(network)) return NetworkAddResult.AlreadyHave;
-            // 同一把钥匙签的新版本：原来确认过就不用再确认。
+            // A newer version signed by the same key needs no new confirmation, unless it lost the review the old version had.
+            if (old.Reviewed && !network.Reviewed && !confirmed) return NetworkAddResult.NeedsConfirm;
             _networks[index] = network;
             return NetworkAddResult.Updated;
         }

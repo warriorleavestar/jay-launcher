@@ -52,12 +52,25 @@ public static class RuntimeArchiveInstaller
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> InstallLocks = new(
         OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
 
-    public static async Task<RuntimeBundleManifest> InstallAsync(
+    public static Task<RuntimeBundleManifest> InstallAsync(
         string destination,
         RuntimeArchiveDescriptor descriptor,
         Func<RuntimeArchiveDescriptor, CancellationToken, Task<Stream>> openArchive,
         IProgress<RuntimeInstallProgress>? progress = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default) =>
+        InstallCoreAsync(destination, descriptor, openArchive, progress, ct, beforeExtractEntry: null);
+
+    /// <param name="beforeExtractEntry">
+    /// Test seam: runs on the extraction thread before each archive entry is written, so tests can
+    /// hold extraction and observe where it runs. Production passes null.
+    /// </param>
+    internal static async Task<RuntimeBundleManifest> InstallCoreAsync(
+        string destination,
+        RuntimeArchiveDescriptor descriptor,
+        Func<RuntimeArchiveDescriptor, CancellationToken, Task<Stream>> openArchive,
+        IProgress<RuntimeInstallProgress>? progress,
+        CancellationToken ct,
+        Action? beforeExtractEntry)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(destination);
         ArgumentNullException.ThrowIfNull(descriptor);
@@ -88,7 +101,9 @@ public static class RuntimeArchiveInstaller
                 await WriteArchiveAsync(input, archivePath, descriptor, progress, ct);
 
             progress?.Report(new(RuntimeInstallPhase.Extracting, 0, descriptor.MaximumExtractedSize));
-            var files = ExtractVerifiedFiles(archivePath, staging, descriptor, progress, ct);
+            // Decompressing and hashing the runtime takes a while; keep it off the caller's (UI) thread.
+            var files = await Task.Run(
+                () => ExtractVerifiedFiles(archivePath, staging, descriptor, progress, beforeExtractEntry, ct), ct);
             progress?.Report(new(RuntimeInstallPhase.Verifying, 0, files.Count));
             RequireRuntimeFiles(files);
             var manifest = new RuntimeBundleManifest(
@@ -209,6 +224,7 @@ public static class RuntimeArchiveInstaller
         string staging,
         RuntimeArchiveDescriptor descriptor,
         IProgress<RuntimeInstallProgress>? progress,
+        Action? beforeExtractEntry,
         CancellationToken ct)
     {
         var files = new List<RuntimeBundleFile>();
@@ -222,6 +238,7 @@ public static class RuntimeArchiveInstaller
             var relative = (entry.Key ?? "").Replace('\\', '/');
             while (relative.StartsWith("./", StringComparison.Ordinal)) relative = relative[2..];
             if (relative.Length == 0 || entry.IsDirectory) continue;
+            beforeExtractEntry?.Invoke();
             if (!RuntimeBundleManifest.IsSafeRelativePath(relative) || !names.Add(relative))
                 throw new InvalidDataException($"Unsafe or duplicate runtime archive path: {entry.Key}");
             if (entry.LinkTarget is not null)

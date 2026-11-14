@@ -38,7 +38,6 @@ public static class EasyTierRelease
     public const string SourceUrl = "https://github.com/Yumao-Feather/jay-easytier";
     private const string BaseUrl = SourceUrl + "/releases/download/" + ReleaseTag + "/";
     public const string License = "LGPL-3.0";
-    public const string ProjectUrl = "https://github.com/EasyTier/EasyTier";
 
     public sealed record Asset(string Platform, string Name, string Sha256, long Size, string CoreName, string CliName)
     {

@@ -2,6 +2,7 @@ using Android.App;
 using Android.Content;
 using Android.Content.PM;
 using Android.Graphics;
+using Android.Graphics.Drawables;
 using Android.OS;
 using Android.Text;
 using Android.Views;
@@ -25,6 +26,7 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
     public const string ServerAddressExtra = "nz.work.minecraft.jay.SERVER_ADDRESS";
     private MobileSetupAttempt? _runtimeSetup;
     private MobileSetupAttempt? _gameSetup;
+    private TouchControlOverlay? _touchOverlay;
 
     protected override void OnCreate(Bundle? savedInstanceState)
     {
@@ -35,7 +37,12 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
         var surface = new SurfaceView(this);
         surface.Holder!.AddCallback(this);
         root.AddView(surface, MatchParent());
-        root.AddView(new TouchControlOverlay(this), MatchParent());
+        _touchOverlay = new TouchControlOverlay(this)
+        {
+            Visibility = ViewStates.Gone,
+            Alpha = 0
+        };
+        root.AddView(_touchOverlay, MatchParent());
 
         if (!AndroidRuntimeStore.IsInstalled(this))
             AddRuntimeSetup(root);
@@ -50,7 +57,17 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
     {
         base.OnWindowFocusChanged(hasFocus);
         if (hasFocus) EnterImmersiveMode();
+        _touchOverlay?.UpdateHardwareCapture(hasFocus);
     }
+
+    public override bool DispatchKeyEvent(KeyEvent? e) =>
+        _touchOverlay?.HandleHardwareKey(e) == true || base.DispatchKeyEvent(e);
+
+    public override bool DispatchGenericMotionEvent(MotionEvent? e) =>
+        _touchOverlay?.HandleHardwareMotion(e) == true || base.DispatchGenericMotionEvent(e);
+
+    public override bool DispatchTouchEvent(MotionEvent? e) =>
+        _touchOverlay?.HandleHardwareMotion(e) == true || base.DispatchTouchEvent(e);
 
     private void EnterImmersiveMode()
     {
@@ -86,6 +103,12 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
         base.OnDestroy();
     }
 
+    protected override void OnPause()
+    {
+        _touchOverlay?.ReleaseHardwareInput();
+        base.OnPause();
+    }
+
     /// <summary>App folders that error logs and messages name by placeholder instead of their full path.</summary>
     private (string Directory, string Placeholder)[] LocalFolders() =>
     [
@@ -98,35 +121,14 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
 
     private void AddRuntimeSetup(FrameLayout root)
     {
-        var status = new TextView(this) { Text = L.T("mobile.runtime.missing"), Gravity = GravityFlags.Center };
-        status.SetTextColor(Color.White);
-
-        var progress = new ProgressBar(this, null, 0, Resource.Style.JayProgressBarHorizontal)
-        {
-            Max = 100,
-            Visibility = ViewStates.Gone
-        };
-        var install = new Button(this) { Text = L.T("mobile.runtime.install") };
-        var cancel = new Button(this) { Text = L.T("mobile.runtime.cancel"), Visibility = ViewStates.Gone };
-        var buttons = new LinearLayout(this) { Orientation = Orientation.Horizontal };
-        buttons.SetGravity(GravityFlags.Center);
-        buttons.AddView(install);
-        buttons.AddView(cancel);
-
-        var content = new LinearLayout(this) { Orientation = Orientation.Vertical };
-        content.SetGravity(GravityFlags.Center);
-        content.SetBackgroundColor(Color.Argb(225, 20, 24, 30));
-        content.SetPadding(40, 32, 40, 32);
-        content.AddView(status, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent));
-        content.AddView(progress, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent));
-        content.AddView(buttons, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent));
-
-        var panel = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent, GravityFlags.Center)
-        {
-            LeftMargin = 64,
-            RightMargin = 64
-        };
-        root.AddView(content, panel);
+        var (backdrop, content, status) = AddSetupShell(root, L.T("mobile.runtime.missing"));
+        var progress = CreateSetupProgress();
+        content.AddView(progress, SetupRow(Dp(6), Dp(18), Dp(4)));
+        var install = CreateSetupButton(L.T("mobile.runtime.install"), true);
+        var cancel = CreateSetupButton(L.T("mobile.runtime.cancel"), false);
+        cancel.Visibility = ViewStates.Gone;
+        var buttons = CreateButtonRow(install, cancel);
+        content.AddView(buttons, SetupRow(ViewGroup.LayoutParams.WrapContent, Dp(20), 0));
 
         var acceptingProgress = false;
         var attempt = new MobileSetupAttempt(new MobileSetupPage(
@@ -186,6 +188,8 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
                 progress.Progress = 100;
                 status.Text = L.T("mobile.runtime.ready");
                 install.Visibility = ViewStates.Gone;
+                await FadeOutAsync(backdrop, content);
+                root.RemoveView(backdrop);
                 root.RemoveView(content);
                 AddGameSetup(root);
             });
@@ -196,8 +200,7 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
     private void AddGameSetup(FrameLayout root)
     {
         var preferences = GetPreferences(FileCreationMode.Private)!;
-        var status = new TextView(this) { Text = L.T("mobile.game.setup"), Gravity = GravityFlags.Center };
-        status.SetTextColor(Color.White);
+        var (backdrop, content, status) = AddSetupShell(root, L.T("mobile.game.setup"));
         var playerName = new EditText(this)
         {
             Hint = L.T("mobile.game.player_name"),
@@ -206,45 +209,29 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
         playerName.SetTextColor(Color.White);
         playerName.SetHintTextColor(Color.LightGray);
         playerName.SetSingleLine(true);
-        var progress = new ProgressBar(this, null, 0, Resource.Style.JayProgressBarHorizontal)
-        {
-            Max = 100,
-            Visibility = ViewStates.Gone
-        };
-        var play = new Button(this) { Text = L.F("mobile.game.install_play", AndroidEmbeddedGame.FirstPlayableVersion) };
-        var cancel = new Button(this) { Text = L.T("mobile.runtime.cancel"), Visibility = ViewStates.Gone };
-        var buttons = new LinearLayout(this) { Orientation = Orientation.Horizontal };
-        buttons.SetGravity(GravityFlags.Center);
-        buttons.AddView(play);
-        buttons.AddView(cancel);
-
-        var content = new LinearLayout(this) { Orientation = Orientation.Vertical };
-        content.SetGravity(GravityFlags.Center);
-        content.SetBackgroundColor(Color.Argb(225, 20, 24, 30));
-        content.SetPadding(40, 32, 40, 32);
-        content.AddView(status, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent));
-        content.AddView(playerName, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent));
-        content.AddView(progress, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent));
-        content.AddView(buttons, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent));
-        var panel = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent, GravityFlags.Center)
-        {
-            LeftMargin = 64,
-            RightMargin = 64
-        };
-        root.AddView(content, panel);
+        playerName.TextSize = 16;
+        playerName.SetPadding(Dp(16), 0, Dp(16), 0);
+        playerName.Background = Rounded(Color.Argb(238, 37, 41, 47), Dp(8), Color.Argb(170, 94, 102, 112));
+        content.AddView(playerName, SetupRow(Dp(54), Dp(18), 0));
+        var progress = CreateSetupProgress();
+        content.AddView(progress, SetupRow(Dp(6), Dp(16), Dp(4)));
+        var play = CreateSetupButton(L.F("mobile.game.install_play", AndroidEmbeddedGame.FirstPlayableVersion), true);
+        var cancel = CreateSetupButton(L.T("mobile.runtime.cancel"), false);
+        cancel.Visibility = ViewStates.Gone;
+        var buttons = CreateButtonRow(play, cancel);
+        content.AddView(buttons, SetupRow(ViewGroup.LayoutParams.WrapContent, Dp(20), 0));
 
         var attempt = new MobileSetupAttempt(new MobileSetupPage(
             setBusy: busy =>
             {
                 play.Enabled = !busy;
                 playerName.Enabled = !busy;
+                play.Visibility = busy ? ViewStates.Gone : ViewStates.Visible;
+                playerName.Visibility = busy ? ViewStates.Gone : ViewStates.Visible;
                 cancel.Visibility = busy ? ViewStates.Visible : ViewStates.Gone;
-                if (busy) progress.Visibility = ViewStates.Visible;
+                progress.Visibility = busy ? ViewStates.Visible : ViewStates.Gone;
             },
-            showPanel: () =>
-            {
-                if (content.Parent is null) root.AddView(content, panel);
-            },
+            showPanel: () => RestoreSetup(backdrop, content),
             showCancelled: () => status.Text = L.T("mobile.game.setup"),
             showFailed: message => status.Text = L.F("mobile.game.failed", message),
             logError: line => global::Android.Util.Log.Error("JayGame", line)), LocalFolders());
@@ -275,14 +262,176 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
                 editor?.PutString("offline-player", name);
                 editor?.Apply();
                 current.Stage = MobileSetupStage.GameLaunch;
-                root.RemoveView(content);
-                await Task.Run(() => AndroidEmbeddedGame.Run(prepared), token);
+                progress.Progress = 100;
+                status.Text = L.T("mobile.game.preparing");
+                var runTask = Task.Run(() => AndroidEmbeddedGame.Run(prepared), token);
+                await Task.Delay(900);
+                await RevealGameAsync(backdrop, content);
+                await runTask;
+                _touchOverlay?.Animate().Cancel();
+                if (_touchOverlay is not null)
+                {
+                    _touchOverlay.Visibility = ViewStates.Gone;
+                    _touchOverlay.Alpha = 0;
+                }
                 status.Text = L.T("mobile.game.exited");
-                root.AddView(content, panel);
+                backdrop.Visibility = ViewStates.Visible;
+                content.Visibility = ViewStates.Visible;
+                backdrop.Alpha = 0;
+                content.Alpha = 0;
+                backdrop.Animate().Alpha(1).SetDuration(240).Start();
+                content.Animate().Alpha(1).SetDuration(240).Start();
             });
         };
         cancel.Click += (_, _) => attempt.Cancel();
     }
+
+    private (View Backdrop, LinearLayout Content, TextView Status) AddSetupShell(
+        FrameLayout root, string initialStatus)
+    {
+        var backdrop = new GameLoadingBackdrop(this);
+        root.AddView(backdrop, MatchParent());
+
+        var content = new LinearLayout(this)
+        {
+            Orientation = Orientation.Vertical
+        };
+        content.SetGravity(GravityFlags.CenterHorizontal);
+        content.Background = Rounded(Color.Argb(238, 24, 27, 31), Dp(14),
+            Color.Argb(175, 105, 113, 122));
+        content.Elevation = Dp(12);
+        content.SetPadding(Dp(28), Dp(24), Dp(28), Dp(24));
+
+        var mark = new TextView(this) { Text = "J", Gravity = GravityFlags.Center };
+        mark.SetTextColor(Color.Rgb(31, 24, 13));
+        mark.TextSize = 26;
+        mark.SetTypeface(Typeface.Default, TypefaceStyle.Bold);
+        mark.Background = Rounded(Color.Rgb(217, 138, 30), Dp(8));
+        content.AddView(mark, new LinearLayout.LayoutParams(Dp(52), Dp(52)));
+
+        var brand = new TextView(this) { Text = "JAY", Gravity = GravityFlags.Center };
+        brand.SetTextColor(Color.White);
+        brand.TextSize = 24;
+        brand.LetterSpacing = 0.12f;
+        brand.SetTypeface(Typeface.Default, TypefaceStyle.Bold);
+        content.AddView(brand, SetupRow(ViewGroup.LayoutParams.WrapContent, Dp(10), 0));
+
+        var status = new TextView(this) { Text = initialStatus, Gravity = GravityFlags.Center };
+        status.SetTextColor(Color.Rgb(218, 222, 227));
+        status.TextSize = 15;
+        status.SetLineSpacing(0, 1.12f);
+        content.AddView(status, SetupRow(ViewGroup.LayoutParams.WrapContent, Dp(8), 0));
+
+        var metrics = Resources?.DisplayMetrics;
+        var width = Math.Min((metrics?.WidthPixels ?? Dp(600)) - Dp(48), Dp(560));
+        var panel = new FrameLayout.LayoutParams(width, ViewGroup.LayoutParams.WrapContent, GravityFlags.Center);
+        root.AddView(content, panel);
+        return (backdrop, content, status);
+    }
+
+    private ProgressBar CreateSetupProgress()
+    {
+        var progress = new ProgressBar(this, null, 0, Resource.Style.JayProgressBarHorizontal)
+        {
+            Max = 100,
+            Visibility = ViewStates.Gone,
+            Progress = 0
+        };
+        if (Build.VERSION.SdkInt >= BuildVersionCodes.Lollipop)
+        {
+            progress.ProgressTintList = global::Android.Content.Res.ColorStateList.ValueOf(Color.Rgb(217, 138, 30));
+            progress.ProgressBackgroundTintList = global::Android.Content.Res.ColorStateList.ValueOf(Color.Rgb(55, 60, 67));
+        }
+        return progress;
+    }
+
+    private Button CreateSetupButton(string text, bool primary)
+    {
+        var button = new Button(this)
+        {
+            Text = text,
+            StateListAnimator = null
+        };
+        button.SetAllCaps(false);
+        button.SetMinHeight(Dp(50));
+        button.SetMinWidth(Dp(148));
+        button.SetPadding(Dp(18), 0, Dp(18), 0);
+        button.SetTextColor(primary ? Color.Rgb(31, 24, 13) : Color.White);
+        button.TextSize = 15;
+        button.SetTypeface(Typeface.Default, TypefaceStyle.Bold);
+        button.Background = Rounded(primary ? Color.Rgb(217, 138, 30) : Color.Rgb(48, 53, 60),
+            Dp(8), primary ? Color.Rgb(245, 184, 83) : Color.Rgb(105, 113, 122));
+        return button;
+    }
+
+    private LinearLayout CreateButtonRow(params Button[] buttons)
+    {
+        var row = new LinearLayout(this) { Orientation = Orientation.Horizontal };
+        row.SetGravity(GravityFlags.Center);
+        foreach (var button in buttons)
+        {
+            var parameters = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, Dp(50));
+            parameters.SetMargins(Dp(5), 0, Dp(5), 0);
+            row.AddView(button, parameters);
+        }
+        return row;
+    }
+
+    private LinearLayout.LayoutParams SetupRow(int height, int topMargin, int bottomMargin)
+    {
+        var parameters = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, height);
+        parameters.SetMargins(0, topMargin, 0, bottomMargin);
+        return parameters;
+    }
+
+    private async Task RevealGameAsync(View backdrop, View content)
+    {
+        if (_touchOverlay is not null)
+        {
+            _touchOverlay.Visibility = ViewStates.Visible;
+            _touchOverlay.Alpha = 0;
+            _touchOverlay.Animate().Alpha(1).SetDuration(320).Start();
+            _touchOverlay.UpdateHardwareCapture(HasWindowFocus);
+        }
+        await FadeOutAsync(backdrop, content);
+        backdrop.Visibility = ViewStates.Gone;
+        content.Visibility = ViewStates.Gone;
+    }
+
+    private void RestoreSetup(View backdrop, View content)
+    {
+        _touchOverlay?.Animate().Cancel();
+        if (_touchOverlay is not null)
+        {
+            _touchOverlay.UpdateHardwareCapture(false);
+            _touchOverlay.Visibility = ViewStates.Gone;
+            _touchOverlay.Alpha = 0;
+        }
+
+        backdrop.Animate().Cancel();
+        content.Animate().Cancel();
+        backdrop.Visibility = ViewStates.Visible;
+        content.Visibility = ViewStates.Visible;
+        backdrop.Alpha = 1;
+        content.Alpha = 1;
+    }
+
+    private static async Task FadeOutAsync(params View[] views)
+    {
+        foreach (var view in views) view.Animate().Alpha(0).SetDuration(260).Start();
+        await Task.Delay(280);
+    }
+
+    private static GradientDrawable Rounded(Color fill, int radius, Color? stroke = null)
+    {
+        var drawable = new GradientDrawable();
+        drawable.SetColor(fill);
+        drawable.SetCornerRadius(radius);
+        if (stroke is { } border) drawable.SetStroke(1, border);
+        return drawable;
+    }
+
+    private int Dp(float value) => (int)Math.Round(value * (Resources?.DisplayMetrics?.Density ?? 1));
 
     public void SurfaceCreated(ISurfaceHolder holder) => NativeJvmHost.SetSurface(holder.Surface);
 
@@ -296,6 +445,48 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
         ViewGroup.LayoutParams.MatchParent);
 }
 
+/// <summary>A lightweight, original loading scene that avoids showing a blank surface or stock Android chrome.</summary>
+internal sealed class GameLoadingBackdrop(Context context) : View(context)
+{
+    private readonly Paint _paint = new() { AntiAlias = false };
+    private readonly Paint _glow = new() { AntiAlias = true };
+    private long _startedAt = SystemClock.UptimeMillis();
+
+    protected override void OnDraw(Canvas canvas)
+    {
+        base.OnDraw(canvas);
+        var width = Width;
+        var height = Height;
+        if (width <= 0 || height <= 0) return;
+
+        _paint.SetShader(new LinearGradient(0, 0, width, height,
+            Color.Rgb(19, 23, 29), Color.Rgb(38, 31, 24), Shader.TileMode.Clamp));
+        canvas.DrawRect(0, 0, width, height, _paint);
+        _paint.SetShader(null);
+
+        var cell = Math.Max(22, Math.Min(width, height) / 18);
+        var elapsed = (SystemClock.UptimeMillis() - _startedAt) / 1000f;
+        for (var row = 0; row <= height / cell + 1; row++)
+        for (var col = 0; col <= width / cell + 1; col++)
+        {
+            var wave = Math.Sin(col * 0.72 + row * 0.51 + elapsed * 0.35);
+            if (wave < 0.60) continue;
+            var alpha = (int)(8 + (wave - 0.60) * 22);
+            _paint.Color = Color.Argb(alpha, 217, 138, 30);
+            var left = col * cell;
+            var top = row * cell;
+            canvas.DrawRect(left + 1, top + 1, left + cell - 2, top + cell - 2, _paint);
+        }
+
+        _glow.SetShader(new RadialGradient(width * 0.5f, height * 0.48f,
+            Math.Min(width, height) * 0.58f,
+            Color.Argb(55, 217, 138, 30), Color.Transparent, Shader.TileMode.Clamp));
+        canvas.DrawCircle(width * 0.5f, height * 0.48f, Math.Min(width, height) * 0.58f, _glow);
+        _glow.SetShader(null);
+        PostInvalidateDelayed(66);
+    }
+}
+
 internal sealed class TouchControlOverlay : View, ITouchInputSink
 {
     private const long LongPressDelayMs = 340;
@@ -304,7 +495,10 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     private readonly Paint _activeFill = new() { AntiAlias = true, Color = Color.Argb(218, 105, 112, 120) };
     private readonly Paint _buttonFace = new() { AntiAlias = false, Color = Color.Argb(82, 76, 82, 86) };
     private readonly Paint _buttonPressed = new() { AntiAlias = false, Color = Color.Argb(145, 142, 146, 150) };
+    private readonly Paint _buttonShadow = new() { AntiAlias = false, Color = Color.Argb(155, 8, 10, 12) };
+    private readonly Paint _buttonHighlight = new() { AntiAlias = false, Color = Color.Argb(150, 238, 241, 244), StrokeWidth = 2 };
     private readonly Paint _buttonBorder = new() { AntiAlias = false, Color = Color.Argb(145, 225, 228, 232), StrokeWidth = 2 };
+    private readonly Paint _joystickMark = new() { AntiAlias = true, Color = Color.Argb(145, 235, 238, 242), StrokeWidth = 3, StrokeCap = Paint.Cap.Round };
     private readonly Paint _stroke = new() { AntiAlias = true, Color = Color.Argb(210, 235, 238, 242), StrokeWidth = 2, StrokeCap = Paint.Cap.Square, StrokeJoin = Paint.Join.Miter };
     private readonly Paint _glyph = new() { AntiAlias = true, Color = Color.Argb(235, 255, 255, 255), StrokeWidth = 5, StrokeCap = Paint.Cap.Round, StrokeJoin = Paint.Join.Round };
     private readonly Paint _hint = new() { AntiAlias = true, Color = Color.Argb(230, 255, 255, 255), TextAlign = Paint.Align.Center };
@@ -317,11 +511,17 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     private readonly ISharedPreferences _preferences;
     private readonly Dictionary<int, LongPressIndicator> _longPressIndicators = [];
     private readonly HashSet<int> _hotbarPointers = [];
+    private readonly HashSet<Keycode> _hardwareKeys = [];
+    private readonly HashSet<TouchControlAction> _hardwareActions = [];
     private bool _settingsOpen;
     private bool _layoutEditing;
     private int? _editingPointer;
     private TouchControlAction? _editingAction;
     private float _controlOpacity = 0.62f;
+    private float _lastMouseX;
+    private float _lastMouseY;
+    private bool _hasMousePosition;
+    private bool? _lastGameplayControlsActive;
 
     public TouchControlOverlay(Context context) : base(context)
     {
@@ -346,7 +546,17 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     protected override void OnDraw(Canvas canvas)
     {
         base.OnDraw(canvas);
+        // This view is composited over a SurfaceView. Clear its transparent layer on every frame;
+        // otherwise some Android GPU drivers retain the previous joystick knob position.
+        canvas.DrawColor(Color.Transparent, PorterDuff.Mode.Clear);
         var gameplayControlsActive = NativeJvmHost.GameplayControlsActive;
+        if (_lastGameplayControlsActive != gameplayControlsActive)
+        {
+            if (_lastGameplayControlsActive == true && !gameplayControlsActive)
+                ReleaseHardwareInput();
+            _lastGameplayControlsActive = gameplayControlsActive;
+            UpdateHardwareCapture(HasWindowFocus);
+        }
         _stroke.SetStyle(Paint.Style.Stroke);
         ApplyControlOpacity();
         foreach (var control in _profile.Controls)
@@ -381,14 +591,25 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
             return;
         }
         var fill = _router.IsPressed(TouchControlAction.Move) ? _activeFill : _fill;
+        canvas.DrawCircle(x + radius * 0.045f, y + radius * 0.075f, radius * 1.03f, _buttonShadow);
         canvas.DrawCircle(x, y, radius, fill);
+        _stroke.StrokeWidth = Math.Max(2, radius * 0.025f);
         canvas.DrawCircle(x, y, radius, _stroke);
+        canvas.DrawCircle(x, y, radius * 0.72f, _stroke);
+        _joystickMark.StrokeWidth = Math.Max(2, radius * 0.025f);
+        var mark = radius * 0.14f;
+        canvas.DrawLine(x, y - radius * 0.86f, x, y - radius * 0.86f + mark, _joystickMark);
+        canvas.DrawLine(x, y + radius * 0.86f, x, y + radius * 0.86f - mark, _joystickMark);
+        canvas.DrawLine(x - radius * 0.86f, y, x - radius * 0.86f + mark, y, _joystickMark);
+        canvas.DrawLine(x + radius * 0.86f, y, x + radius * 0.86f - mark, y, _joystickMark);
         var (moveX, moveY) = _router.Movement;
         var knobX = x + (float)moveX * radius * 0.56f;
         var knobY = y + (float)moveY * radius * 0.56f;
+        canvas.DrawCircle(knobX + radius * 0.025f, knobY + radius * 0.045f, radius * 0.36f, _buttonShadow);
         canvas.DrawCircle(knobX, knobY, radius * 0.34f,
-            _router.IsPressed(TouchControlAction.Move) ? _activeFill : _fill);
+            _router.IsPressed(TouchControlAction.Move) ? _buttonPressed : _activeFill);
         canvas.DrawCircle(knobX, knobY, radius * 0.34f, _stroke);
+        canvas.DrawCircle(knobX, knobY, radius * 0.075f, _joystickMark);
     }
 
     private void DrawDirectionPad(Canvas canvas, float x, float y, float radius)
@@ -455,12 +676,13 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         canvas.DrawRect(left, Height * 0.08f, right, Height * 0.96f, _panel);
         _hint.TextSize = Math.Max(17, Math.Min(Width, Height) * 0.021f);
         canvas.DrawText("触控设置", (left + right) / 2, Height * 0.14f, _hint);
-        DrawSettingRow(canvas, "摇杆 + 点击互动", 0.23f, _profile.Mode == TouchControlMode.JoystickAndTap);
-        DrawSettingRow(canvas, "方向键 + 点击互动", 0.33f, _profile.Mode == TouchControlMode.DPadAndTap);
-        DrawSettingRow(canvas, "摇杆 + 准星", 0.43f, _profile.Mode == TouchControlMode.JoystickAndCrosshair);
-        DrawStepper(canvas, $"按键大小  {Math.Round(_profile.Scale * 100):0}%", 0.56f);
-        DrawStepper(canvas, $"透明度  {Math.Round(_controlOpacity * 100):0}%", 0.66f);
-        DrawSettingRow(canvas, _profile.ForcedSprint ? "强制疾跑：开" : "强制疾跑：关", 0.75f,
+        DrawSettingRow(canvas, "摇杆 + 点击互动", 0.20f, _profile.Mode == TouchControlMode.JoystickAndTap);
+        DrawSettingRow(canvas, "方向键 + 点击互动", 0.29f, _profile.Mode == TouchControlMode.DPadAndTap);
+        DrawSettingRow(canvas, "摇杆 + 准星", 0.38f, _profile.Mode == TouchControlMode.JoystickAndCrosshair);
+        DrawSettingRow(canvas, "外接键盘鼠标", 0.47f, _profile.Mode == TouchControlMode.ExternalKeyboardMouse);
+        DrawStepper(canvas, $"按键大小  {Math.Round(_profile.Scale * 100):0}%", 0.58f);
+        DrawStepper(canvas, $"透明度  {Math.Round(_controlOpacity * 100):0}%", 0.67f);
+        DrawSettingRow(canvas, _profile.ForcedSprint ? "强制疾跑：开" : "强制疾跑：关", 0.76f,
             _profile.ForcedSprint);
         DrawPanelButton(canvas, "恢复默认", 0.615f, 0.83f, 0.77f, 0.90f);
         DrawPanelButton(canvas, "编辑布局", 0.80f, 0.83f, 0.955f, 0.90f);
@@ -498,7 +720,10 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         _activeFill.Color = WithAlpha(Color.Argb(218, 105, 112, 120), _controlOpacity);
         _buttonFace.Color = WithAlpha(Color.Argb(82, 76, 82, 86), _controlOpacity);
         _buttonPressed.Color = WithAlpha(Color.Argb(145, 142, 146, 150), _controlOpacity);
+        _buttonShadow.Color = WithAlpha(Color.Argb(155, 8, 10, 12), Math.Max(0.55f, _controlOpacity));
+        _buttonHighlight.Color = WithAlpha(Color.Argb(150, 238, 241, 244), Math.Max(0.45f, _controlOpacity));
         _buttonBorder.Color = WithAlpha(Color.Argb(145, 225, 228, 232), Math.Max(0.45f, _controlOpacity));
+        _joystickMark.Color = WithAlpha(Color.Argb(145, 235, 238, 242), Math.Max(0.45f, _controlOpacity));
     }
 
     private void DrawLongPressIndicators(Canvas canvas)
@@ -536,12 +761,22 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
             TouchControlAction.Inventory or TouchControlAction.Drop;
         var halfWidth = radius * (compact ? 0.78f : utility ? 0.82f : 0.92f);
         var halfHeight = radius * (compact ? 0.78f : utility ? 0.82f : 0.92f);
+        var pressed = _router.IsPressed(control.Action);
+        var pressOffset = pressed ? Math.Max(1, radius * 0.08f) : 0;
         var bounds = new RectF((float)Math.Round(x - halfWidth), (float)Math.Round(y - halfHeight),
             (float)Math.Round(x + halfWidth), (float)Math.Round(y + halfHeight));
+        bounds.Offset(0, pressOffset);
+        var shadow = new RectF(bounds);
+        shadow.Offset(Math.Max(2, radius * 0.08f), Math.Max(3, radius * 0.12f));
+        canvas.DrawRect(shadow, _buttonShadow);
         _buttonBorder.SetStyle(Paint.Style.Stroke);
-        canvas.DrawRect(bounds, _router.IsPressed(control.Action) ? _buttonPressed : _buttonFace);
+        canvas.DrawRect(bounds, pressed ? _buttonPressed : _buttonFace);
         canvas.DrawRect(bounds, _buttonBorder);
-        DrawGlyph(canvas, control.Action, x, y, Math.Min(halfWidth, halfHeight) * 0.68f, label);
+        _buttonHighlight.StrokeWidth = Math.Max(1, radius * 0.045f);
+        canvas.DrawLine(bounds.Left + 2, bounds.Top + 2, bounds.Right - 2, bounds.Top + 2, _buttonHighlight);
+        canvas.DrawLine(bounds.Left + 2, bounds.Top + 2, bounds.Left + 2, bounds.Bottom - 2, _buttonHighlight);
+        DrawGlyph(canvas, control.Action, x, y + pressOffset,
+            Math.Min(halfWidth, halfHeight) * 0.68f, label);
     }
 
     private void DrawGlyph(Canvas canvas, TouchControlAction action, float x, float y, float size, string fallback)
@@ -725,14 +960,16 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         var x = e.GetX(e.ActionIndex) / Width;
         var y = e.GetY(e.ActionIndex) / Height;
         if (x < 0.60f) return true;
-        if (y is > 0.19f and < 0.27f) _profile.Mode = TouchControlMode.JoystickAndTap;
-        else if (y is > 0.29f and < 0.37f) _profile.Mode = TouchControlMode.DPadAndTap;
-        else if (y is > 0.39f and < 0.47f) _profile.Mode = TouchControlMode.JoystickAndCrosshair;
-        else if (y is > 0.52f and < 0.60f && x < 0.70f) _profile.Scale = Math.Max(0.70, _profile.Scale - 0.05);
-        else if (y is > 0.52f and < 0.60f && x > 0.87f) _profile.Scale = Math.Min(1.35, _profile.Scale + 0.05);
-        else if (y is > 0.62f and < 0.70f && x < 0.70f) _controlOpacity = Math.Max(0.30f, _controlOpacity - 0.05f);
-        else if (y is > 0.62f and < 0.70f && x > 0.87f) _controlOpacity = Math.Min(1f, _controlOpacity + 0.05f);
-        else if (y is > 0.71f and < 0.79f) _profile.ForcedSprint = !_profile.ForcedSprint;
+        var previousMode = _profile.Mode;
+        if (y is > 0.16f and < 0.24f) _profile.Mode = TouchControlMode.JoystickAndTap;
+        else if (y is > 0.25f and < 0.33f) _profile.Mode = TouchControlMode.DPadAndTap;
+        else if (y is > 0.34f and < 0.42f) _profile.Mode = TouchControlMode.JoystickAndCrosshair;
+        else if (y is > 0.43f and < 0.51f) _profile.Mode = TouchControlMode.ExternalKeyboardMouse;
+        else if (y is > 0.54f and < 0.62f && x < 0.70f) _profile.Scale = Math.Max(0.70, _profile.Scale - 0.05);
+        else if (y is > 0.54f and < 0.62f && x > 0.87f) _profile.Scale = Math.Min(1.35, _profile.Scale + 0.05);
+        else if (y is > 0.63f and < 0.71f && x < 0.70f) _controlOpacity = Math.Max(0.30f, _controlOpacity - 0.05f);
+        else if (y is > 0.63f and < 0.71f && x > 0.87f) _controlOpacity = Math.Min(1f, _controlOpacity + 0.05f);
+        else if (y is > 0.72f and < 0.80f) _profile.ForcedSprint = !_profile.ForcedSprint;
         else if (y is > 0.83f and < 0.90f && x < 0.78f)
         {
             _profile.ResetPositions();
@@ -747,6 +984,13 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         }
         else if (y > 0.90f)
             _settingsOpen = false;
+        if (_profile.Mode != previousMode &&
+            (previousMode == TouchControlMode.ExternalKeyboardMouse ||
+             _profile.Mode == TouchControlMode.ExternalKeyboardMouse))
+        {
+            ReleaseHardwareInput();
+            UpdateHardwareCapture(HasWindowFocus);
+        }
         SaveProfile();
         Invalidate();
         return true;
@@ -796,6 +1040,9 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     public override bool OnTouchEvent(MotionEvent? e)
     {
         if (e is null) return false;
+        // Real USB/Bluetooth mice are not consistent on Android: some vendors deliver mouse
+        // button and drag packets through the touch channel instead of generic motion.
+        if (IsHardwarePointer(e)) return HandleHardwareMotion(e);
         if (HandleSettingsTouch(e) || HandleLayoutEditTouch(e)) return true;
         var actionIndex = e.ActionIndex;
         switch (e.ActionMasked)
@@ -806,14 +1053,18 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
                 var x = e.GetX(actionIndex) / Width;
                 var y = e.GetY(actionIndex) / Height;
                 var gameplay = NativeJvmHost.GameplayControlsActive;
-                if (gameplay && TryGetHotbarSlot(x, y, out var slot))
+                // The inventory button intentionally sits flush against the hotbar. Its circular
+                // touch target slightly overlaps the ninth-slot rectangle on some aspect ratios,
+                // so visible overlay controls must win before we fall back to hotbar selection.
+                var control = _profile.HitTest(x, y, gameplay);
+                if (gameplay && control is null && TryGetHotbarSlot(x, y, out var slot))
                 {
                     _hotbarPointers.Add(pointerId);
                     NativeJvmHost.AddKey(49 + slot);
                     return true;
                 }
                 var handled = _router.Press(pointerId, x, y, gameplay);
-                if (handled && gameplay && _profile.HitTest(x, y) is null)
+                if (handled && gameplay && control is null)
                 {
                     _longPressIndicators[pointerId] = new(x, y, SystemClock.UptimeMillis());
                     PostDelayed(() =>
@@ -855,6 +1106,24 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         }
     }
 
+    public override bool OnGenericMotionEvent(MotionEvent? e) =>
+        HandleHardwareMotion(e) || base.OnGenericMotionEvent(e);
+
+    public override bool OnHoverEvent(MotionEvent? e) =>
+        HandleHardwareMotion(e) || base.OnHoverEvent(e);
+
+    public override bool OnCapturedPointerEvent(MotionEvent? e) =>
+        HandleHardwareMotion(e) || base.OnCapturedPointerEvent(e);
+
+    public override bool OnKeyPreIme(Keycode keyCode, KeyEvent? e) =>
+        HandleHardwareKey(e) || base.OnKeyPreIme(keyCode, e);
+
+    public override bool OnKeyDown(Keycode keyCode, KeyEvent? e) =>
+        HandleHardwareKey(e) || base.OnKeyDown(keyCode, e);
+
+    public override bool OnKeyUp(Keycode keyCode, KeyEvent? e) =>
+        HandleHardwareKey(e) || base.OnKeyUp(keyCode, e);
+
     public void SetAction(TouchControlAction action, bool pressed)
     {
         if (action == TouchControlAction.Settings)
@@ -878,6 +1147,218 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     public void AddLook(double x, double y) => AndroidGameInputBridge.AddLook(x, y);
 
     public void SetPointer(double x, double y, bool click) => AndroidGameInputBridge.SetPointer(x, y, click);
+
+    public bool HandleHardwareKey(KeyEvent? e)
+    {
+        // Physical keys stay available in every touch layout. The dedicated external-input
+        // profile controls visibility of touch buttons; it must not gate keyboard events.
+        if (e is null || Visibility != ViewStates.Visible) return false;
+        var pressed = e.Action == KeyEventActions.Down;
+        if (e.Action is not (KeyEventActions.Down or KeyEventActions.Up)) return false;
+
+        // Menu and chat screens need ordinary key/character delivery before gameplay
+        // bindings. Otherwise W/A/S/D and E/Q/T disappear from typed text.
+        if (!NativeJvmHost.GameplayControlsActive)
+        {
+            if (!pressed) return GlfwKey(e.KeyCode) is not null || e.UnicodeChar > 0;
+            var handled = false;
+            if (GlfwKey(e.KeyCode) is { } menuKey)
+            {
+                NativeJvmHost.AddKey(menuKey);
+                handled = true;
+            }
+            if (e.UnicodeChar > 0)
+            {
+                NativeJvmHost.AddCodePoint(e.UnicodeChar);
+                handled = true;
+            }
+            return handled;
+        }
+
+        if (pressed) _hardwareKeys.Add(e.KeyCode); else _hardwareKeys.Remove(e.KeyCode);
+
+        if (IsMovementKey(e.KeyCode))
+        {
+            UpdateHardwareMovement();
+            return true;
+        }
+
+        if (HardwareAction(e.KeyCode) is { } action)
+        {
+            if (pressed) _hardwareActions.Add(action); else _hardwareActions.Remove(action);
+            AndroidGameInputBridge.SetAction(action, pressed);
+            return true;
+        }
+
+        if (GlfwKey(e.KeyCode) is not { } glfw) return false;
+        if (pressed && e.RepeatCount == 0) NativeJvmHost.AddKey(glfw);
+        return true;
+    }
+
+    public bool HandleHardwareMotion(MotionEvent? e)
+    {
+        if (e is null || Visibility != ViewStates.Visible || !IsHardwarePointer(e)) return false;
+
+        if (e.ActionMasked == MotionEventActions.Scroll)
+        {
+            if (!NativeJvmHost.GameplayControlsActive) return false;
+            var scroll = e.GetAxisValue(Axis.Vscroll);
+            if (Math.Abs(scroll) > 0.01f)
+            {
+                var action = scroll > 0 ? TouchControlAction.PreviousSlot : TouchControlAction.NextSlot;
+                AndroidGameInputBridge.SetAction(action, true);
+                AndroidGameInputBridge.SetAction(action, false);
+            }
+            return true;
+        }
+
+        if (e.ActionMasked is MotionEventActions.ButtonPress or MotionEventActions.ButtonRelease or
+            MotionEventActions.Down or MotionEventActions.Up)
+        {
+            var pressed = e.ActionMasked is MotionEventActions.ButtonPress or MotionEventActions.Down;
+            // Several Android mouse drivers leave ActionButton empty for DOWN/UP. Those
+            // actions represent the primary button.
+            var actionButton = e.ActionMasked is MotionEventActions.Down or MotionEventActions.Up
+                ? MotionEventButtonState.Primary : e.ActionButton;
+            var action = actionButton switch
+            {
+                MotionEventButtonState.Primary => TouchControlAction.PrimaryAction,
+                MotionEventButtonState.Secondary => TouchControlAction.SecondaryAction,
+                MotionEventButtonState.Tertiary => TouchControlAction.Inventory,
+                _ => (TouchControlAction?)null
+            };
+            // DOWN/UP can arrive without a preceding HOVER_MOVE (trackpads and ADB both do
+            // this). Synchronize the menu cursor before delivering the click.
+            if (!NativeJvmHost.GameplayControlsActive && Width > 0 && Height > 0)
+                AndroidGameInputBridge.SetPointer(e.GetX() / Width, e.GetY() / Height, false);
+            if (action is { } mapped)
+            {
+                if (pressed) _hardwareActions.Add(mapped); else _hardwareActions.Remove(mapped);
+                AndroidGameInputBridge.SetAction(mapped, pressed);
+            }
+            return true;
+        }
+
+        if (e.ActionMasked is not (MotionEventActions.HoverMove or MotionEventActions.Move)) return true;
+        if (NativeJvmHost.GameplayControlsActive)
+        {
+            var dx = e.GetAxisValue(Axis.RelativeX);
+            var dy = e.GetAxisValue(Axis.RelativeY);
+            if (Math.Abs(dx) < 0.001f && Math.Abs(dy) < 0.001f && _hasMousePosition)
+            {
+                dx = e.GetX() - _lastMouseX;
+                dy = e.GetY() - _lastMouseY;
+            }
+            if (Width > 0 && Height > 0 && (Math.Abs(dx) > 0.001f || Math.Abs(dy) > 0.001f))
+                AndroidGameInputBridge.AddLook(dx / Width, dy / Height);
+        }
+        else if (Width > 0 && Height > 0)
+        {
+            AndroidGameInputBridge.SetPointer(e.GetX() / Width, e.GetY() / Height, false);
+        }
+        _lastMouseX = e.GetX();
+        _lastMouseY = e.GetY();
+        _hasMousePosition = true;
+        return true;
+    }
+
+    private static bool IsHardwarePointer(MotionEvent e) =>
+        e.IsFromSource(InputSourceType.Mouse) ||
+        e.IsFromSource(InputSourceType.MouseRelative) ||
+        e.IsFromSource(InputSourceType.Touchpad);
+
+    public void UpdateHardwareCapture(bool hasWindowFocus)
+    {
+        if (Build.VERSION.SdkInt < BuildVersionCodes.O) return;
+#pragma warning disable CA1416
+        if (hasWindowFocus && Visibility == ViewStates.Visible &&
+            _profile.Mode == TouchControlMode.ExternalKeyboardMouse &&
+            NativeJvmHost.GameplayControlsActive)
+        {
+            RequestFocus();
+            RequestPointerCapture();
+        }
+        else if (HasPointerCapture)
+            ReleasePointerCapture();
+#pragma warning restore CA1416
+    }
+
+    public void ReleaseHardwareInput()
+    {
+        _hardwareKeys.Clear();
+        AndroidGameInputBridge.SetMovement(0, 0);
+        foreach (var action in _hardwareActions.ToArray())
+            AndroidGameInputBridge.SetAction(action, false);
+        _hardwareActions.Clear();
+        _hasMousePosition = false;
+    }
+
+    private static bool IsMovementKey(Keycode key) => key is Keycode.W or Keycode.A or Keycode.S or Keycode.D
+        or Keycode.DpadUp or Keycode.DpadLeft or Keycode.DpadDown or Keycode.DpadRight;
+
+    private void UpdateHardwareMovement()
+    {
+        var left = _hardwareKeys.Contains(Keycode.A) || _hardwareKeys.Contains(Keycode.DpadLeft);
+        var right = _hardwareKeys.Contains(Keycode.D) || _hardwareKeys.Contains(Keycode.DpadRight);
+        var forward = _hardwareKeys.Contains(Keycode.W) || _hardwareKeys.Contains(Keycode.DpadUp);
+        var back = _hardwareKeys.Contains(Keycode.S) || _hardwareKeys.Contains(Keycode.DpadDown);
+        AndroidGameInputBridge.SetMovement((right ? 1 : 0) - (left ? 1 : 0),
+            (back ? 1 : 0) - (forward ? 1 : 0));
+    }
+
+    private static TouchControlAction? HardwareAction(Keycode key) => key switch
+    {
+        Keycode.Space => TouchControlAction.Jump,
+        Keycode.ShiftLeft or Keycode.ShiftRight => TouchControlAction.Sneak,
+        Keycode.CtrlLeft or Keycode.CtrlRight => TouchControlAction.Sprint,
+        Keycode.E => TouchControlAction.Inventory,
+        Keycode.Escape => TouchControlAction.Menu,
+        Keycode.T => TouchControlAction.Keyboard,
+        Keycode.Q => TouchControlAction.Drop,
+        _ => null
+    };
+
+    private static int? GlfwKey(Keycode key) => key switch
+    {
+        >= Keycode.Num0 and <= Keycode.Num9 => 48 + key - Keycode.Num0,
+        >= Keycode.A and <= Keycode.Z => 65 + key - Keycode.A,
+        Keycode.Enter => 257,
+        Keycode.Tab => 258,
+        Keycode.Del => 259,
+        Keycode.Insert => 260,
+        Keycode.ForwardDel => 261,
+        Keycode.DpadRight => 262,
+        Keycode.DpadLeft => 263,
+        Keycode.DpadDown => 264,
+        Keycode.DpadUp => 265,
+        Keycode.PageUp => 266,
+        Keycode.PageDown => 267,
+        Keycode.MoveHome => 268,
+        Keycode.MoveEnd => 269,
+        Keycode.F1 => 290,
+        Keycode.F2 => 291,
+        Keycode.F3 => 292,
+        Keycode.F4 => 293,
+        Keycode.F5 => 294,
+        Keycode.F6 => 295,
+        Keycode.F7 => 296,
+        Keycode.F8 => 297,
+        Keycode.F9 => 298,
+        Keycode.F10 => 299,
+        Keycode.F11 => 300,
+        Keycode.F12 => 301,
+        Keycode.Slash => 47,
+        Keycode.Minus => 45,
+        Keycode.Equals => 61,
+        Keycode.Comma => 44,
+        Keycode.Period => 46,
+        Keycode.Semicolon => 59,
+        Keycode.Apostrophe => 39,
+        Keycode.LeftBracket => 91,
+        Keycode.RightBracket => 93,
+        Keycode.Backslash => 92,
+        _ => null
+    };
 
     private void ShowKeyboard()
     {

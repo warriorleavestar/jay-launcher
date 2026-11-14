@@ -219,22 +219,10 @@ public sealed class RedFrameWindows : IDisposable
     }
 }
 
-/// <summary>窗口点击穿透（红框窗口用）：加上 WS_EX_TRANSPARENT | WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE。</summary>
+/// <summary>Window styles for Jay's own windows during remote control.</summary>
 [SupportedOSPlatform("windows")]
 public static class WindowStyles
 {
-    public static void MakeClickThrough(nint hwnd)
-    {
-        var style = Native.GetWindowLongPtr(hwnd, Native.GWL_EXSTYLE);
-        Native.SetWindowLongPtr(hwnd, Native.GWL_EXSTYLE, style | Native.WS_EX_TRANSPARENT | Native.WS_EX_LAYERED | Native.WS_EX_TOOLWINDOW | Native.WS_EX_NOACTIVATE);
-    }
-
-    /// <summary>
-    /// 按像素放到指定位置并置顶（不激活）。Avalonia 给窗口设的最小尺寸比红框的一条边粗，这里直接用系统接口定尺寸。
-    /// </summary>
-    public static void Place(nint hwnd, int x, int y, int width, int height) =>
-        Native.SetWindowPos(hwnd, -1, x, y, width, height, Native.SWP_NOACTIVATE | Native.SWP_SHOWWINDOW);
-
     /// <summary>不抢焦点、不出现在任务栏（顶部小条用）。</summary>
     public static void MakeToolWindow(nint hwnd)
     {
