@@ -1,4 +1,7 @@
 using System.Collections.Concurrent;
+using System.Net;
+using System.Net.Sockets;
+using System.Runtime.CompilerServices;
 using Amber.Core.Multiplayer;
 using Amber.Core.Multiplayer.Transport;
 using Amber.Core.RemoteControl;
@@ -525,5 +528,493 @@ public sealed class RemoteControlTests
         var (who, back) = await declined.Task.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.Same(entry, who);
         Assert.Equal(sid, back);
+    }
+
+    // ---- Session clean-up and stop handling (direct sharer <-> viewer over loopback TCP) ----
+
+    private static async Task<(Stream Sharer, Stream Viewer)> LoopbackPairAsync()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        try
+        {
+            var client = new TcpClient();
+            var connect = client.ConnectAsync(IPAddress.Loopback, ((IPEndPoint)listener.LocalEndpoint).Port);
+            var server = await listener.AcceptTcpClientAsync();
+            await connect;
+            return (server.GetStream(), client.GetStream());
+        }
+        finally
+        {
+            listener.Stop();
+        }
+    }
+
+    /// <summary>
+    /// Wraps a stream and records every frame that goes out. With SplitAt set, the next write longer than that sends its first SplitAt bytes and then waits for Release
+    /// before the rest, like a record layer that writes a large frame record by record.
+    /// </summary>
+    private sealed class GatedWriteStream(Stream inner) : Stream
+    {
+        private readonly TaskCompletionSource _gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public volatile int SplitAt;
+        private int _blockedWrites;
+        private long _bytesAfterStop;
+        public int BlockedWrites => Volatile.Read(ref _blockedWrites);
+        /// <summary>Bytes that reached the inner stream after StopRequested was set.</summary>
+        public long BytesAfterStop => Interlocked.Read(ref _bytesAfterStop);
+        public volatile bool Disposed;
+        public void Release() => _gate.TrySetResult();
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => true;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() => inner.Flush();
+        public override Task FlushAsync(CancellationToken ct) => inner.FlushAsync(ct);
+        public override int Read(byte[] buffer, int offset, int count) => inner.Read(buffer, offset, count);
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default) => inner.ReadAsync(buffer, ct);
+        public override void Write(byte[] buffer, int offset, int count) => inner.Write(buffer, offset, count);
+        /// <summary>Set by a test at the moment it requests stop.</summary>
+        public volatile bool StopRequested;
+        /// <summary>Type of every frame that went out whole, and whether stop had been requested by then.</summary>
+        public readonly ConcurrentQueue<(RemoteFrameType Type, bool AfterStop)> Written = new();
+        public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken ct = default)
+        {
+            var split = SplitAt;
+            if (split > 0 && buffer.Length > split)
+            {
+                SplitAt = 0;
+                await WriteInnerAsync(buffer[..split], ct);
+                Interlocked.Increment(ref _blockedWrites);
+                await _gate.Task.WaitAsync(ct);
+                await WriteInnerAsync(buffer[split..], ct);
+            }
+            else await WriteInnerAsync(buffer, ct);
+            // Each send writes one whole frame: 4-byte length, then the type.
+            if (buffer.Length >= 5) Written.Enqueue(((RemoteFrameType)buffer.Span[4], StopRequested));
+        }
+        private async ValueTask WriteInnerAsync(ReadOnlyMemory<byte> part, CancellationToken ct)
+        {
+            if (StopRequested) Interlocked.Add(ref _bytesAfterStop, part.Length);
+            await inner.WriteAsync(part, ct);
+        }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        protected override void Dispose(bool disposing)
+        {
+            Disposed = true;
+            if (disposing) inner.Dispose();
+            base.Dispose(disposing);
+        }
+    }
+
+    [Fact]
+    public async Task Stop_DropsInputWhileStopFrameIsStillQueued()
+    {
+        var (sharerSide, viewerSide) = await LoopbackPairAsync();
+        var gated = new GatedWriteStream(sharerSide);
+        var input = new FakeInput();
+        var sharer = new RemoteSharer(gated, new FakeScreen(), input, new RawTileCodec(), allowControl: true, "Viewer", "");
+        var run = Task.Run(sharer.RunAsync);
+        await using var viewer = new RemoteViewer(viewerSide, new RawTileCodec(), "Sharer", "");
+        Assert.NotNull(await viewer.StartAsync());
+        await WaitUntil(() => viewer.BatchesReceived > 0);
+        Assert.True(await viewer.SendKeyAsync(new RemoteKey(0x1E, false, false)));
+        await WaitUntil(() => sharer.InputsInjected == 1);
+
+        // Something else holds the sharer's write lock (as a slow write would), so Stop cannot go out yet.
+        await sharer.WriteLockForTest.WaitAsync();
+        var held = true;
+        try
+        {
+            var stop = sharer.StopAsync(RemoteStopReason.StoppedByUser);
+            Assert.False(sharer.ControlAllowed);
+            // The key held before the stop was released.
+            Assert.Contains("key 30 True False", input.Calls);
+
+            await viewer.SendRawForTest(RemoteWire.Key(new RemoteKey(0x1F, false, false)));
+            await WaitUntil(() => sharer.InputsDropped > 0 || sharer.InputsInjected > 1, 5);
+            Assert.Equal(1, sharer.InputsInjected);
+            Assert.Equal(1, sharer.InputsDropped);
+
+            sharer.WriteLockForTest.Release();
+            held = false;
+            await stop.WaitAsync(TimeSpan.FromSeconds(5));
+            await run.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.True(sharer.HasEnded);
+        }
+        finally
+        {
+            if (held) sharer.WriteLockForTest.Release();
+            sharer.Abort(RemoteEnd.Local);
+        }
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Stop_QueuedScreenFramesAreDroppedOnceTheyGetTheWriteLock(bool allowControl)
+    {
+        var gated = new GatedWriteStream(new MemoryStream());
+        // View-only sessions have no input sink at all.
+        var sharer = new RemoteSharer(gated, new FakeScreen(), allowControl ? new FakeInput() : null, new RawTileCodec(), allowControl, "Viewer", "");
+        var ended = new ConcurrentQueue<RemoteEnd>();
+        sharer.Ended += ended.Enqueue;
+        var tile = new RawTileCodec().Encode(new byte[16 * 16 * 4], 16, 16, 16 * 4, 0);
+
+        // A slow write holds the lock. A tile batch and a cursor update pass their first check and queue behind it.
+        await sharer.WriteLockForTest.WaitAsync();
+        var held = true;
+        try
+        {
+            var tiles = sharer.SendRawForTest(RemoteWire.Tiles(new RemoteTileBatch(1, 64, 64, [new RemoteTile(0, 0, 16, 16, tile)])));
+            var cursor = sharer.SendRawForTest(RemoteWire.Cursor(3, 4, true));
+            await WaitUntil(() => sharer.WritesWaitingForLock == 2);
+
+            gated.StopRequested = true;
+            var stop = sharer.StopAsync(RemoteStopReason.StoppedByUser);
+            await WaitUntil(() => sharer.WritesWaitingForLock == 3);
+            Assert.False(tiles.IsCompleted);
+            Assert.False(cursor.IsCompleted);
+
+            // The lock comes free: the queued frames get it first, then Stop.
+            sharer.WriteLockForTest.Release();
+            held = false;
+            Assert.False(await tiles.WaitAsync(TimeSpan.FromSeconds(5)));
+            Assert.False(await cursor.WaitAsync(TimeSpan.FromSeconds(5)));
+            await stop.WaitAsync(TimeSpan.FromSeconds(5));
+
+            Assert.Equal([RemoteFrameType.Stop], gated.Written.Where(w => w.AfterStop).Select(w => w.Type));
+            Assert.Equal([RemoteEnd.Local], ended);
+        }
+        finally
+        {
+            if (held) sharer.WriteLockForTest.Release();
+            sharer.Abort(RemoteEnd.Local);
+        }
+    }
+
+    [Fact]
+    public async Task Stop_CutsOffAFrameThatIsBeingWrittenAndClosesWithoutStop()
+    {
+        var gated = new GatedWriteStream(new MemoryStream());
+        var sharer = new RemoteSharer(gated, new FakeScreen(), null, new RawTileCodec(), false, "Viewer", "");
+        var ended = new ConcurrentQueue<RemoteEnd>();
+        sharer.Ended += ended.Enqueue;
+        // Noise does not compress, so the batch is several kilobytes long.
+        var pixels = new byte[32 * 32 * 4];
+        new Random(7).NextBytes(pixels);
+        var tile = new RawTileCodec().Encode(pixels, 32, 32, 32 * 4, 0);
+        Task<bool>? tiles = null;
+        try
+        {
+            // A large batch is half written when the peer stops reading.
+            gated.SplitAt = 100;
+            tiles = sharer.SendRawForTest(RemoteWire.Tiles(new RemoteTileBatch(1, 64, 64, [new RemoteTile(0, 0, 32, 32, tile)])));
+            await WaitUntil(() => gated.BlockedWrites > 0);
+
+            gated.StopRequested = true;
+            var stop = sharer.StopAsync(RemoteStopReason.StoppedByUser);
+            // The peer reads again: whatever was still waiting to be written may now go out.
+            gated.Release();
+            await stop.WaitAsync(TimeSpan.FromSeconds(5));
+
+            Assert.False(await tiles.WaitAsync(TimeSpan.FromSeconds(5)));
+            // Nothing more went out: not the rest of the batch, and no Stop glued onto half a frame.
+            Assert.Equal(0, gated.BytesAfterStop);
+            Assert.Empty(gated.Written);
+            // The connection was closed instead, and the session ended as stopped here.
+            Assert.True(gated.Disposed);
+            Assert.Equal([RemoteEnd.Local], ended);
+        }
+        finally
+        {
+            gated.Release();
+            sharer.Abort(RemoteEnd.Local);
+            if (tiles is not null) await Task.WhenAny(tiles, Task.Delay(TimeSpan.FromSeconds(5)));
+        }
+    }
+
+    /// <summary>A desktop that changes on every capture; while Hold is set a capture waits inside TryCapture until Resume.</summary>
+    private sealed class HeldScreen : IScreenSource
+    {
+        private readonly ManualResetEventSlim _resume = new(false);
+        private byte _shade;
+        public volatile bool Hold;
+        public volatile bool Holding;
+        public ScreenBounds Bounds { get; } = new(0, 0, 160, 96);
+        public void Resume() => _resume.Set();
+
+        public bool TryCapture(ScreenFrame frame)
+        {
+            if (Hold)
+            {
+                Holding = true;
+                _resume.Wait(TimeSpan.FromSeconds(30));
+            }
+            frame.Resize(Bounds.Width, Bounds.Height);
+            Array.Fill(frame.Pixels, ++_shade);
+            return true;
+        }
+
+        public (int X, int Y)? CursorPosition() => (10, 10);
+        public void Dispose() { }
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Stop_CaptureFinishingAfterStopIsNeverSent(bool allowControl)
+    {
+        var (sharerSide, peerSide) = await LoopbackPairAsync();
+        await using var peerStream = peerSide;
+        var gated = new GatedWriteStream(sharerSide);
+        var screen = new HeldScreen();
+        // View-only sessions have no input sink at all.
+        var sharer = new RemoteSharer(gated, screen, allowControl ? new FakeInput() : null, new RawTileCodec(), allowControl, "Viewer", "");
+        var ended = new ConcurrentQueue<RemoteEnd>();
+        sharer.Ended += ended.Enqueue;
+        var run = Task.Run(sharer.RunAsync);
+
+        // A modified peer: acks frames and answers heartbeats, but ignores Stop and keeps reading.
+        var received = new ConcurrentQueue<RemoteFrameType>();
+        var peerWrite = new SemaphoreSlim(1, 1);
+        async Task PeerSendAsync(byte[] frame)
+        {
+            await peerWrite.WaitAsync();
+            try { await peerSide.WriteAsync(frame); }
+            finally { peerWrite.Release(); }
+        }
+        Task? peer = null;
+        var held = false;
+        try
+        {
+            await PeerSendAsync(RemoteWire.Hello());
+            peer = Task.Run(async () =>
+            {
+                try
+                {
+                    while (await RemoteWire.ReadAsync(peerSide, CancellationToken.None) is { } f)
+                    {
+                        received.Enqueue(f.Type);
+                        if (f.Type == RemoteFrameType.Tiles) await PeerSendAsync(RemoteWire.FrameAck(RemoteWire.ParseTiles(f.Payload).Sequence));
+                        else if (f.Type == RemoteFrameType.Ping) await PeerSendAsync(RemoteWire.Pong(f.Payload));
+                    }
+                }
+                catch (Exception e) when (e is IOException or ObjectDisposedException or SocketException or InvalidDataException) { }
+            });
+            await WaitUntil(() => received.Contains(RemoteFrameType.Tiles));
+
+            // The next capture is in progress (held) when stop is requested.
+            screen.Hold = true;
+            await WaitUntil(() => screen.Holding);
+            // Something holds the write lock (as a slow write would), so Stop has to wait.
+            await sharer.WriteLockForTest.WaitAsync();
+            held = true;
+
+            gated.StopRequested = true;
+            var stop = sharer.StopAsync(RemoteStopReason.StoppedByUser);
+            Assert.False(stop.IsCompleted);
+
+            // Ordinary traffic from the peer while stopping: a heartbeat and input are not protocol errors.
+            await PeerSendAsync(RemoteWire.Ping(1));
+            await PeerSendAsync(RemoteWire.Key(new RemoteKey(0x1E, false, false)));
+            await WaitUntil(() => sharer.InputsDropped > 0);
+            Assert.Equal(0, sharer.InputsInjected);
+
+            // The capture finishes after stop was requested and is thrown away before it reaches the send queue.
+            screen.Resume();
+            await WaitUntil(() => sharer.CapturesDiscarded > 0);
+
+            sharer.WriteLockForTest.Release();
+            held = false;
+            await stop.WaitAsync(TimeSpan.FromSeconds(5));
+            await run.WaitAsync(TimeSpan.FromSeconds(10));
+            await peer.WaitAsync(TimeSpan.FromSeconds(10));
+
+            Assert.Equal([RemoteEnd.Local], ended);
+            Assert.Equal(1, sharer.CapturesDiscarded);
+            Assert.Equal([RemoteFrameType.Stop], gated.Written.Where(w => w.AfterStop).Select(w => w.Type));
+            // What the peer saw: Stop arrived, and no screen data after it.
+            var seen = received.ToList();
+            var stopAt = seen.IndexOf(RemoteFrameType.Stop);
+            Assert.True(stopAt >= 0);
+            Assert.DoesNotContain(seen.Skip(stopAt + 1), t => t is RemoteFrameType.Tiles or RemoteFrameType.Cursor);
+        }
+        finally
+        {
+            screen.Resume();
+            if (held) sharer.WriteLockForTest.Release();
+            gated.Release();
+            sharer.Abort(RemoteEnd.Local);
+            await peerStream.DisposeAsync();
+            await Task.WhenAny(run, Task.Delay(TimeSpan.FromSeconds(5)));
+            if (peer is not null) await Task.WhenAny(peer, Task.Delay(TimeSpan.FromSeconds(5)));
+        }
+    }
+
+    [Theory]
+    [InlineData(RemoteFrameType.Tiles)]
+    [InlineData(RemoteFrameType.Ping)]
+    public async Task Stop_ViewerFramesArrivingWhileStoppingDoNotEndItAsProtocolError(RemoteFrameType incoming)
+    {
+        var (viewerSide, peerSide) = await LoopbackPairAsync();
+        await using var peerStream = peerSide;
+        var gated = new GatedWriteStream(viewerSide);
+        var viewer = new RemoteViewer(gated, new RawTileCodec(), "Sharer", "");
+        var ended = new ConcurrentQueue<RemoteEnd>();
+        viewer.Ended += ended.Enqueue;
+        var codec = new RawTileCodec();
+        var received = new ConcurrentQueue<RemoteFrameType>();
+        Task? peer = null;
+        Task? stop = null;
+        var held = false;
+        try
+        {
+            // A sharer written by hand: accept, then send whatever the test asks for.
+            var starting = viewer.StartAsync();
+            Assert.Equal(RemoteFrameType.Hello, (await RemoteWire.ReadAsync(peerSide, CancellationToken.None))?.Type);
+            await peerSide.WriteAsync(RemoteWire.Accept(new RemoteAccept(false, 64, 64, codec.Id)));
+            Assert.NotNull(await starting.WaitAsync(TimeSpan.FromSeconds(10)));
+            peer = Task.Run(async () =>
+            {
+                try
+                {
+                    // Read what the viewer sends; close like a normal sharer once Stop arrives.
+                    while (await RemoteWire.ReadAsync(peerSide, CancellationToken.None) is { } f)
+                    {
+                        received.Enqueue(f.Type);
+                        if (f.Type == RemoteFrameType.Stop) return;
+                    }
+                }
+                catch (Exception e) when (e is IOException or ObjectDisposedException or SocketException or InvalidDataException) { }
+            });
+
+            // The viewer's writes are blocked: something holds its write lock, as a slow write would.
+            await viewer.WriteLockForTest.WaitAsync();
+            held = true;
+            gated.StopRequested = true;
+            stop = viewer.StopAsync();
+            Assert.False(stop.IsCompleted);
+            await WaitUntil(() => viewer.WritesWaitingForLock >= 1);
+
+            // Ordinary traffic keeps arriving while Stop waits. Its reply is dropped because the viewer is stopping.
+            var tile = codec.Encode(new byte[16 * 16 * 4], 16, 16, 16 * 4, 0);
+            await peerSide.WriteAsync(incoming == RemoteFrameType.Tiles
+                ? RemoteWire.Tiles(new RemoteTileBatch(1, 64, 64, [new RemoteTile(0, 0, 16, 16, tile)]))
+                : RemoteWire.Ping(2));
+            // A marker after it shows the frame was handled and the read loop kept going.
+            await peerSide.WriteAsync(RemoteWire.Cursor(5, 6, true));
+            await WaitUntil(() => viewer.Cursor == (5, 6, true) || viewer.HasEnded);
+            Assert.False(viewer.HasEnded);
+
+            // Writes unblock: Stop goes out and the session ends as stopped here.
+            viewer.WriteLockForTest.Release();
+            held = false;
+            await stop.WaitAsync(TimeSpan.FromSeconds(5));
+            await peer.WaitAsync(TimeSpan.FromSeconds(10));
+
+            Assert.Equal([RemoteEnd.Local], ended);
+            Assert.Equal([RemoteFrameType.Stop], gated.Written.Where(w => w.AfterStop).Select(w => w.Type));
+            Assert.Contains(RemoteFrameType.Stop, received);
+        }
+        finally
+        {
+            if (held) viewer.WriteLockForTest.Release();
+            viewer.Abort(RemoteEnd.Local);
+            await peerStream.DisposeAsync();
+            if (stop is not null) await Task.WhenAny(stop, Task.Delay(TimeSpan.FromSeconds(5)));
+            if (peer is not null) await Task.WhenAny(peer, Task.Delay(TimeSpan.FromSeconds(5)));
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static WeakReference EndedViewerTiedTo(CancellationToken token)
+    {
+        var viewer = new RemoteViewer(new MemoryStream(), new RawTileCodec(), "Host", "");
+        viewer.EndWith(token);
+        viewer.Abort(RemoteEnd.Local);
+        return new WeakReference(viewer);
+    }
+
+    [Fact]
+    public void EndWith_DoesNotKeepFinishedSessionAlive()
+    {
+        using var room = new CancellationTokenSource();
+        var weak = EndedViewerTiedTo(room.Token);
+        for (var i = 0; i < 3 && weak.IsAlive; i++)
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+        }
+        Assert.False(weak.IsAlive);
+        // The room ending later must still be harmless.
+        room.Cancel();
+    }
+
+    [Fact]
+    public void EndWith_StillEndsSessionWhenTokenFires()
+    {
+        using var room = new CancellationTokenSource();
+        var viewer = new RemoteViewer(new MemoryStream(), new RawTileCodec(), "Host", "");
+        var ended = new List<RemoteEnd>();
+        viewer.Ended += ended.Add;
+        viewer.EndWith(room.Token);
+        room.Cancel();
+        Assert.True(viewer.HasEnded);
+        Assert.Equal([RemoteEnd.Disconnected], ended);
+    }
+
+    /// <summary>A desktop whose size can change during the session (a monitor is added or the resolution changes).</summary>
+    private sealed class ResizingScreen : IScreenSource
+    {
+        private readonly Lock _gate = new();
+        private (int W, int H) _size = (1920, 1080);
+        private byte _shade;
+
+        public void SetSize(int width, int height)
+        {
+            lock (_gate) _size = (width, height);
+        }
+
+        public ScreenBounds Bounds
+        {
+            get { lock (_gate) return new ScreenBounds(0, 0, _size.W, _size.H); }
+        }
+
+        public bool TryCapture(ScreenFrame frame)
+        {
+            var b = Bounds;
+            frame.Resize(b.Width, b.Height);
+            frame.Pixels[0] = ++_shade;
+            return true;
+        }
+
+        public (int X, int Y)? CursorPosition() => null;
+        public void Dispose() { }
+    }
+
+    [Fact]
+    public async Task DesktopGrowingPastDownscaleThreshold_KeepsStreaming()
+    {
+        var (sharerSide, viewerSide) = await LoopbackPairAsync();
+        var screen = new ResizingScreen();
+        var sharer = new RemoteSharer(sharerSide, screen, new FakeInput(), new RawTileCodec(), allowControl: false, "Viewer", "");
+        var run = Task.Run(sharer.RunAsync);
+        await using var viewer = new RemoteViewer(viewerSide, new RawTileCodec(), "Sharer", "");
+        var accept = await viewer.StartAsync();
+        Assert.Equal((1920, 1080), (accept!.Value.Width, accept.Value.Height));
+        await WaitUntil(() => viewer.BatchesReceived > 0);
+
+        screen.SetSize(5120, 2880);
+        (int, int) Size() { lock (viewer.FrameLock) return (viewer.Frame.Width, viewer.Frame.Height); }
+        await WaitUntil(() => Size() == (2560, 1440) || run.IsCompleted, 15);
+        Assert.False(run.IsFaulted, run.Exception?.ToString());
+        Assert.Equal((2560, 1440), Size());
+        Assert.False(sharer.HasEnded);
+
+        await sharer.StopAsync();
+        await run.WaitAsync(TimeSpan.FromSeconds(10));
     }
 }
