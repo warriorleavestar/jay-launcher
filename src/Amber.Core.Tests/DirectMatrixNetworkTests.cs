@@ -109,10 +109,9 @@ public sealed class DirectMatrixNetworkTests
 
         // 若本步留下未取消的延迟恢复，它会在返回之后重新放开这些路径。
         host.Bridge.DropPeers();
-        host.Bridge.AllowedPaths.Clear();
-        host.Bridge.AllowedPaths.Add(PathKind.IPv6);
+        host.Bridge.SetAllowedPaths([PathKind.IPv6]);
         await Task.Delay(600);
-        Assert.Equal([PathKind.IPv6], host.Bridge.AllowedPaths);
+        Assert.Equal(new[] { PathKind.IPv6 }, host.Bridge.AllowedPaths);
     }
 
     [Fact]

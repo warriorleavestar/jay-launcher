@@ -1041,7 +1041,7 @@ public sealed class DirectSession : IAsyncDisposable
         {
             ct.ThrowIfCancellationRequested();
             if (Bridge is not { } bridge) return;
-            bridge.AllowedPaths.UnionWith(Enum.GetValues<PathKind>());
+            bridge.SetAllowedPaths(Enum.GetValues<PathKind>());
             bridge.SprayPorts = 256;
         }
     }
@@ -1068,9 +1068,9 @@ public sealed class DirectSession : IAsyncDisposable
             ct.ThrowIfCancellationRequested();
             if (step.Route == RouteKind.Direct)
             {
-                bridge.AllowedPaths.Clear();
-                bridge.AllowedPaths.Add(step.Path!.Value);
-                if (step.Path == PathKind.PunchSpray) bridge.AllowedPaths.Add(PathKind.Punch);
+                bridge.SetAllowedPaths(step.Path == PathKind.PunchSpray
+                    ? [PathKind.PunchSpray, PathKind.Punch]
+                    : [step.Path!.Value]);
                 bridge.SprayPorts = step.Path == PathKind.PunchSpray ? 256 : 0;
                 bridge.DropPeers(preserveLocalTransport: true);
             }

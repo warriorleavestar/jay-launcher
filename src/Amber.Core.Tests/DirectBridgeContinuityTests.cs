@@ -72,7 +72,7 @@ public class DirectBridgeContinuityTests
         var local = Assert.Single(host.Peers).Local!;
         host.DropPeers(preserveLocalTransport: true);
         guest.DropPeers(preserveLocalTransport: true);
-        host.AllowedPaths.Clear();
+        host.SetAllowedPaths([]);
         await hostApp.SendAsync("blocked"u8.ToArray(), initial.RemoteEndPoint, limit.Token);
         using (var noData = new CancellationTokenSource(TimeSpan.FromMilliseconds(200)))
             await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await guestApp.ReceiveAsync(noData.Token));
