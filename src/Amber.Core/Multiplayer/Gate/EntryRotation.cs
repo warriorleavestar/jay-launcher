@@ -95,7 +95,9 @@ internal sealed class EntryListeners : IAsyncDisposable
     private readonly Action<string>? _log;
     private readonly Lock _gate = new();
     private readonly Dictionary<int, Slot> _rotating = [];
+    private readonly HashSet<int> _failed = [];
     private Slot? _fixed;
+    private bool _fixedFailed;
     private bool _disposed;
 
     public int FixedPort { get; private set; }
@@ -126,7 +128,12 @@ internal sealed class EntryListeners : IAsyncDisposable
         lock (_gate)
         {
             if (_disposed) return;
-            if (open && _fixed is null) _fixed = Open(FixedPort);
+            if (open && _fixed is null)
+            {
+                // Retried on every call; logged only on the first failure in a row.
+                _fixed = Open(FixedPort, quiet: _fixedFailed);
+                _fixedFailed = _fixed is null;
+            }
             else if (!open && _fixed is not null)
             {
                 closing = _fixed;
@@ -148,16 +155,25 @@ internal sealed class EntryListeners : IAsyncDisposable
                 closing.Add(_rotating[port]);
                 _rotating.Remove(port);
             }
+            // A port that cannot be bound is retried on every call but logged once, until it opens or leaves the set.
+            _failed.IntersectWith(ports);
             foreach (var port in ports)
-                if (!_rotating.ContainsKey(port) && port != FixedPort && Open(port) is { } slot)
+            {
+                if (_rotating.ContainsKey(port) || port == FixedPort) continue;
+                if (Open(port, quiet: _failed.Contains(port)) is { } slot)
+                {
                     _rotating[port] = slot;
+                    _failed.Remove(port);
+                }
+                else _failed.Add(port);
+            }
         }
         foreach (var slot in closing) Close(slot);
     }
 
-    private Slot? Open(int port)
+    private Slot? Open(int port, bool quiet = false)
     {
-        TcpListener listener;
+        TcpListener? listener = null;
         try
         {
             try
@@ -169,13 +185,15 @@ internal sealed class EntryListeners : IAsyncDisposable
             catch (SocketException) when (_address.Equals(IPAddress.IPv6Any))
             {
                 // 有的 VPS / 容器关掉了 IPv6：退回只听 IPv4。
+                listener?.Stop();
                 listener = new TcpListener(IPAddress.Any, port);
                 listener.Start();
             }
         }
         catch (SocketException e)
         {
-            _log?.Invoke($"{port}: {e.Message}");
+            listener?.Stop();
+            if (!quiet) _log?.Invoke($"{port}: {e.Message}");
             return null;
         }
         var cts = new CancellationTokenSource();

@@ -135,6 +135,27 @@ public sealed class EntryRotationTests : IAsyncLifetime
         Assert.Null(plain.Rotation);
     }
 
+    /// <summary>A rotating port that is taken is retried on every sync but logged only once, and opens once it is free.</summary>
+    [Fact]
+    public async Task BusyRotatingPortIsLoggedOnceAndRetried()
+    {
+        var log = new List<string>();
+        await using var listeners = new EntryListeners("127.0.0.1", 0, client => client.Dispose(), line => { lock (log) log.Add(line); });
+        var blocker = new TcpListener(IPAddress.Loopback, 0);
+        blocker.Start();
+        var port = ((IPEndPoint)blocker.LocalEndpoint).Port;
+        try
+        {
+            for (var i = 0; i < 3; i++) listeners.SetRotating([port]);
+            Assert.Single(log);
+            Assert.Empty(listeners.RotatingPorts);
+        }
+        finally { blocker.Stop(); }
+        listeners.SetRotating([port]);
+        Assert.Equal([port], listeners.RotatingPorts);
+        Assert.Single(log);
+    }
+
     [Fact]
     public void AddressBookCarriesSeedsPerEntry()
     {
