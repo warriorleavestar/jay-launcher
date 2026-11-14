@@ -313,6 +313,8 @@ public sealed class GateServer : IAsyncDisposable
     public bool BreakerOpen => _breakerOpen;
     /// <summary>Relays whose heartbeat the last check counted as healthy.</summary>
     public int HealthyRelays => _healthyLast.Count;
+    /// <summary>The last check counted enough healthy relays for privacy++ (false before the first check).</summary>
+    public bool RelaysCounted => _relaysCounted;
 
     /// <summary>New game connections are refused: the breaker is open, or privacy++ has not yet counted enough healthy relays.</summary>
     private bool Refusing(GateState state) => _breakerOpen || state.Privacy == PrivacyLevel.PlusPlus && !_relaysCounted;

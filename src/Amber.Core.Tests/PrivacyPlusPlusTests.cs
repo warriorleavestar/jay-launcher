@@ -34,16 +34,24 @@ public sealed class PrivacyPlusPlusTests : IAsyncLifetime
         config.ListenAddress = "127.0.0.1";
         config.BackendPort = ((IPEndPoint)_backend.LocalEndpoint).Port;
         _serverKey = _store.LoadServerKey();
+        _store.SaveConfig(config);
+        StartServer(TimeSpan.FromMilliseconds(100));
+        await Task.CompletedTask;
+    }
+
+    /// <summary>Starts the gate server; its first relay check runs one <paramref name="checkInterval"/> after the start.</summary>
+    private void StartServer(TimeSpan checkInterval)
+    {
+        var config = _store.LoadConfig();
         _server = new GateServer(_store, config, _serverKey, _ => { })
         {
             HeartbeatTimeoutOverride = HeartbeatTimeout,
             RecoverDelay = TimeSpan.FromMilliseconds(300),
-            CheckInterval = TimeSpan.FromMilliseconds(100),
+            CheckInterval = checkInterval,
         };
         _server.Start();
         config.PublicPort = _server.Port;
         _store.SaveConfig(config);
-        await Task.CompletedTask;
     }
 
     public async Task DisposeAsync()
@@ -87,7 +95,8 @@ public sealed class PrivacyPlusPlusTests : IAsyncLifetime
     }
 
     /// <summary>Every relay's heartbeat is up and the server itself has counted them, with the breaker closed.</summary>
-    private Task UntilReady() => Until(() => _relays.All(r => r.Relay.HeartbeatConnected) && _server.HealthyRelays == _relays.Count && !_server.BreakerOpen, "ready");
+    private Task UntilReady() => Until(() => _relays.All(r => r.Relay.HeartbeatConnected) && _server.HealthyRelays == _relays.Count
+        && _server.RelaysCounted && !_server.BreakerOpen, "ready");
 
     private MemberIdentity Identity(string name) => MemberIdentity.LoadOrCreate(Path.Combine(_root, "client-" + name));
 
@@ -249,9 +258,9 @@ public sealed class PrivacyPlusPlusTests : IAsyncLifetime
     [Fact]
     public async Task NobodyGetsInBeforeTheServerHasCountedItsRelays()
     {
-        // The server checks rarely from now on: the check that may already be waiting runs once, with no relays yet.
-        _server.CheckInterval = TimeSpan.FromHours(1);
-        await Task.Delay(400);
+        // A server whose first relay check is an hour away: everything below happens before any check has run.
+        await _server.DisposeAsync();
+        StartServer(TimeSpan.FromHours(1));
         AddRelay();
         AddRelay();
         _store.SetPrivacy(PrivacyLevel.PlusPlus);
