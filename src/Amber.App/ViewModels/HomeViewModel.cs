@@ -7,6 +7,7 @@ using Amber.Core.Auth;
 using Amber.Core.Content;
 using Amber.Core.Diagnostics;
 using Amber.Core.Install;
+using Amber.Core.Activity;
 using Amber.Core.Launch;
 using Amber.Core.Localization;
 using Amber.Core.Game;
@@ -95,6 +96,8 @@ public sealed partial class HomeViewModel : PageViewModel
         public List<Amber.Core.Bake.BakeRuntimeProblem> BakeProblems { get; } = [];
         /// <summary>Where the loader writes this run's problems (interface 1.3); null for an older loader, whose text lines are read instead.</summary>
         public string? BakeProblemsFile { get; set; }
+        /// <summary>A world maintenance run: the game prepares a world and quits; progress goes to the Activity task.</summary>
+        public MaintenanceRun? Maintenance { get; set; }
 
         /// <summary>Adds a runtime problem once (the same one comes on stdout and in the problems file). True when it is new.</summary>
         public bool AddBakeProblem(Amber.Core.Bake.BakeRuntimeProblem problem)
@@ -521,18 +524,28 @@ public sealed partial class HomeViewModel : PageViewModel
     private async Task RunAsync(LaunchRequest request, bool allowSecond = false)
     {
         Toasts.DismissBakeFailures();
+        // World maintenance is an Activity task: a start refused here ends that task with the reason.
+        var maintenance = request.Maintenance;
         if (!BakeRetryDirectoryMatches(_service, request))
         {
             Toasts.Show(L.T("home.bake.retry_directory_changed"));
+            maintenance?.Finish(TaskOutcome.Failure(L.T("home.bake.retry_directory_changed")));
             return;
         }
         // 手抖连点：600ms 内只算一次（多开确认后的“仍然开始”是另一次点击，不受影响）。
         // Checked after the directory check: a request refused for another reason must not swallow the next one.
-        if (!allowSecond && !_gate.TryPass(DateTimeOffset.Now)) return;
+        if (!allowSecond && maintenance is null && !_gate.TryPass(DateTimeOffset.Now)) return;
         if (_runs.Any(r => r.Game is null))
         {
             // Said in a toast: the start may have come from a library card or the command palette, where no status line is near.
-            Toasts.Show(L.T("home.status.preparing_other"), Avalonia.Controls.Notifications.NotificationType.Warning);
+            if (maintenance is null) Toasts.Show(L.T("home.status.preparing_other"), Avalonia.Controls.Notifications.NotificationType.Warning);
+            maintenance?.Finish(TaskOutcome.Failure(L.T("home.status.preparing_other")));
+            return;
+        }
+        // Maintenance changes the world on disk: never while a game runs (it may be that world).
+        if (maintenance is not null && _runs.Count > 0)
+        {
+            maintenance.Finish(TaskOutcome.Failure(L.T("maintenance.game_running")));
             return;
         }
         if (!allowSecond && _runs.FirstOrDefault(r => r.Game is not null) is { } other)
@@ -546,6 +559,7 @@ public sealed partial class HomeViewModel : PageViewModel
         }
         if (SelectedAccount is not { } account)
         {
+            maintenance?.Finish(TaskOutcome.Failure(L.T("home.status.account_required")));
             Toasts.WithAction(L.T("home.status.account_required"), L.T("home.button.need_account"), () => NavigateToAccounts?.Invoke(),
                 Avalonia.Controls.Notifications.NotificationType.Warning);
             return;
@@ -559,7 +573,15 @@ public sealed partial class HomeViewModel : PageViewModel
         // 这一局全程用开始时的游戏目录、安装器和 Java：准备到一半换了目录，也还是在原目录里补文件、启动。
         var ctx = request.ExpectedContext ?? _service.Context;
         var workDir = _service.WorkDirFor(ctx, id);
-        var run = new GameRun(id) { WorkDir = workDir };
+        // The world was backed up in this folder: an instance that now runs from another one (shared folder switched)
+        // would upgrade a world nobody backed up.
+        if (maintenance?.WorkDir is { } backedUp && !SameFolder(backedUp, workDir))
+        {
+            maintenance.Finish(TaskOutcome.Failure(L.T("maintenance.directory_changed")));
+            return;
+        }
+        var run = new GameRun(id) { WorkDir = workDir, Maintenance = maintenance };
+        maintenance?.WhilePreparing(() => { try { run.Cts.Cancel(); } catch (ObjectDisposedException) { } });
         // 每局一份日志：多开时第二局不会清掉第一局的，也不会混在一起。
         // 从准备阶段就开始记：补文件、Java、登录这些步骤出错时，日志页也看得到原因。
         run.Log = _log.BeginRun(id, DateTimeOffset.Now);
@@ -611,7 +633,8 @@ public sealed partial class HomeViewModel : PageViewModel
             var session = await _service.Accounts.ResolveAsync(account, ct);
 
             // "Start and go to…": the world or server this start was asked for, else the instance's choice.
-            var (quickPlay, quickPlayNote) = QuickPlay.Choose(request.JoinWorld, request.JoinServer, settings, _service.RoomGameAddress,
+            // Maintenance opens its own world and quits: no quick play.
+            var (quickPlay, quickPlayNote) = maintenance is not null ? (null, null) : QuickPlay.Choose(request.JoinWorld, request.JoinServer, settings, _service.RoomGameAddress,
                 _service.GetInstance(ctx, id).SavesDir);
             if (quickPlayNote is not null) SayQuickPlay(run, quickPlayNote);
             var options = _service.BaseLaunchOptions(ctx, id, javaPath, session.Session, session.ExtraJvmArgs) with
@@ -625,6 +648,11 @@ public sealed partial class HomeViewModel : PageViewModel
             await using var relay = relayClient;
             var memory = options.MaxMemoryMb;
 
+            if (maintenance is not null && (!_service.UsesUniversalLoader(ctx, id) || request.SkipBake))
+            {
+                EndMaintenance(run, TaskOutcome.Failure(L.T("maintenance.needs_loader")));
+                return;
+            }
             if (_service.UsesUniversalLoader(ctx, id) && !request.SkipBake)
             {
                 SetStatus(StatusMessage.Info("home.status.baking"));
@@ -636,7 +664,12 @@ public sealed partial class HomeViewModel : PageViewModel
                     {
                         Status = e.Message;
                         if (e.IsProblem) _log.AddRaw(run.Log, "[Bake] " + e.Message);
-                    }), ct, quickPlay: bakeQuickPlay);
+                    }), ct, quickPlay: bakeQuickPlay, maintenance: maintenance?.Spec);
+                    if (maintenance is not null && baked?.Maintenance is null)
+                    {
+                        EndMaintenance(run, TaskOutcome.Failure(reason.Length > 0 && reason != L.T("core.bake.reused") ? reason : L.T("core.bake.maintenance_unsupported")));
+                        return;
+                    }
                     if (reason.Length > 0) _log.AddRaw(run.Log, "[Bake] " + reason);
                     // Baking is on but no loader is installed: offer the download right where the launch status is.
                     // Before the loader is published there is nothing to download: the notice just says why baking was skipped.
@@ -661,8 +694,14 @@ public sealed partial class HomeViewModel : PageViewModel
                 catch (Exception e) when (e is Amber.Core.Bake.BakeException or IOException or InvalidDataException or System.ComponentModel.Win32Exception or System.Text.Json.JsonException
                                            or InvalidOperationException or FormatException)
                 {
-                    // 实验功能失败时不挡住游戏：记下原因，按普通方式启动。
                     _log.AddRaw(run.Log, "[Bake] " + L.F("home.bake.fallback", e.Message));
+                    // Maintenance has no normal start to fall back to.
+                    if (maintenance is not null)
+                    {
+                        EndMaintenance(run, TaskOutcome.Failure(e.Message));
+                        return;
+                    }
+                    // 实验功能失败时不挡住游戏：记下原因，按普通方式启动。
                     Toasts.Show(L.T("home.bake.fallback_toast"));
                     // The reason (a missing dependency, an unsupported platform, a loader that is too old) in the launch status box too.
                     Toasts.BakeProblem(L.F("home.bake.fallback", e.Message));
@@ -699,6 +738,7 @@ public sealed partial class HomeViewModel : PageViewModel
             var parser = new GameLogParser();
             var launcher = new GameLauncher(ctx.Directory);
             using var running = _service.MarkRunning(workDir);
+            ct.ThrowIfCancellationRequested();
             var game = launcher.Launch(options, line =>
             {
                 lock (parser)
@@ -709,11 +749,13 @@ public sealed partial class HomeViewModel : PageViewModel
                         && run.AddBakeProblem(bakeProblem))
                         _log.AddRaw(run.Log, "[Bake] " + bakeProblem.Describe());
                 }
+                if (run.Maintenance is { } m && Amber.Core.Bake.MaintenanceProgress.Parse(line) is { } step) m.Report(step);
                 if (!run.InGame && IsEnterGameLine(line)) Dispatcher.UIThread.Post(() => EnterGame(run, guessed: false));
                 _service.NotifyGameOutput(id, line);
             });
             run.Started = DateTime.UtcNow;
             run.Game = game;
+            if (maintenance is not null && options.Baked?.Maintenance is { } maintenanceLaunch) maintenance.Launched(maintenanceLaunch, workDir);
             run.Session.ProcessUp(DateTimeOffset.Now);
             // 同一个游戏目录里同时开着两局：两局的崩溃报告、latest.log 分不清，崩溃分析只用各自的输出。
             foreach (var sibling in _runs.Where(r => r != run && r.Game is not null && string.Equals(r.WorkDir, workDir, StringComparison.OrdinalIgnoreCase)))
@@ -726,10 +768,13 @@ public sealed partial class HomeViewModel : PageViewModel
 
             var code = game.ExitCode;
             if (run.Baked) MergeBakeProblemsFile(run);
+            // Maintenance said how it ended and quit normally: no crash check.
+            var maintained = maintenance?.End is not null && code == 0;
+            if (maintenance is not null) EndMaintenance(run, MaintenanceOutcome(maintenance, code), quiet: true);
             // 退出码 0 但没进主界面：比如没有 OpenGL 时游戏弹个框就“正常”退出了，也要看一眼日志。
             CrashInput? input = null;
             CrashAnalysis? analysis = null;
-            if (!run.StoppedByUser && (code != 0 || ExitedBeforeGame(run.StoppedByUser, code, run.InGame, run.InGameGuessed)))
+            if (!run.StoppedByUser && !maintained && (code != 0 || ExitedBeforeGame(run.StoppedByUser, code, run.InGame, run.InGameGuessed)))
             {
                 lock (parser) input = CrashInputFor(run, SafePid(game));
                 var pending = input;
@@ -795,12 +840,14 @@ public sealed partial class HomeViewModel : PageViewModel
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
+            maintenance?.Finish(new TaskOutcome(TaskState.Cancelled));
             run.Session.Cancel(DateTimeOffset.Now);
             SetStatus(StatusMessage.Warning("common.cancelled"));
         }
         // 其他的取消异常不是玩家点的：多半是连接超时（HttpClient 的 ConnectTimeout 也抛 TaskCanceledException），按失败显示原因。
         catch (Exception e)
         {
+            maintenance?.Finish(TaskOutcome.Failure(ErrorText.Describe(e)));
             run.Session.Fail(DateTimeOffset.Now, ErrorText.Describe(e));
             SetStatus(StatusMessage.Failure("home.status.launch_failed", e, ErrorText.Of(e)));
             _log.AddRaw(run.Log, "[Jay] " + e);
@@ -809,6 +856,7 @@ public sealed partial class HomeViewModel : PageViewModel
         }
         finally
         {
+            maintenance?.Finish(TaskOutcome.Failure(L.T("maintenance.ended")));
             FinishStore(run, crashed);
             _runs.Remove(run);
             run.Cts.Dispose();
@@ -817,6 +865,38 @@ public sealed partial class HomeViewModel : PageViewModel
             if (gameStarted && _runs.Count == 0) GameExited?.Invoke(crashed);
         }
     }
+
+    /// <summary>A maintenance start that stops before the game: the task gets the reason, the hero goes back to ready.</summary>
+    private void EndMaintenance(GameRun run, TaskOutcome outcome, bool quiet = false)
+    {
+        if (run.Maintenance is not { } m) return;
+        if (outcome.Message is { } message) _log.AddRaw(run.Log, "[Jay] " + message);
+        m.Finish(outcome);
+        if (quiet) return;
+        run.Session.Cancel(DateTimeOffset.Now);
+        SetStatus(StatusMessage.Plain(outcome.Message ?? ""));
+    }
+
+    private static bool SameFolder(string a, string b) =>
+        string.Equals(Path.TrimEndingDirectorySeparator(Path.GetFullPath(a)), Path.TrimEndingDirectorySeparator(Path.GetFullPath(b)),
+            OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+
+    /// <summary>
+    /// How a maintenance run ended: its last word (done, cancelled, failed; the "quit" after it does not count) and the
+    /// exit code. A non-zero exit after "done" is still a failure.
+    /// </summary>
+    internal static TaskOutcome MaintenanceOutcome(MaintenanceRun run, int exitCode) => exitCode != 0 && run.End?.Step == "done"
+        ? TaskOutcome.Failure(L.F("maintenance.exited", exitCode))
+        : run.End?.Step switch
+    {
+        "done" => TaskOutcome.Success((run.Spec.PregenRadius > 0
+            ? L.F("maintenance.done_pregen", run.Name, Amber.Core.Bake.WorldMaintenance.Chunks(run.Spec.PregenRadius).ToString("N0"))
+            : L.F("maintenance.done_upgrade", run.Name)) + (run.Backup is not null ? " " + L.T("maintenance.backup_note") : "")),
+        "cancelled" => new TaskOutcome(TaskState.Cancelled, L.T("maintenance.cancelled")),
+        "failed" => TaskOutcome.Failure(run.End.Message is { Length: > 0 } why ? L.F("maintenance.failed_because", why) : L.T("maintenance.failed")),
+        _ when run.CancelRequested => new TaskOutcome(TaskState.Cancelled, L.T("maintenance.cancelled")),
+        _ => TaskOutcome.Failure(L.F("maintenance.exited", exitCode)),
+    };
 
     /// <summary>A run began (its saved log exists from now on): the Logs tab lists it.</summary>
     public event Action<string>? RunStarted;

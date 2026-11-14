@@ -92,7 +92,26 @@ public sealed partial class ModItem(LocalMod mod) : LocalizedObservable
 
 public sealed record WorldItem(WorldInfo World) : LocalizedRecord
 {
+    private string? _busy;
+
     public string Name => World.Name;
+
+    /// <summary>A maintenance run on this world (准备中, 预生成 12%); null when none.</summary>
+    public string? Busy
+    {
+        get => _busy;
+        set
+        {
+            if (_busy == value) return;
+            _busy = value;
+            OnPropertyChanged(nameof(Busy));
+            OnPropertyChanged(nameof(IsBusy));
+            OnPropertyChanged(nameof(IsIdle));
+        }
+    }
+
+    public bool IsBusy => _busy is not null;
+    public bool IsIdle => _busy is null;
     public string Meta => $"{World.GameMode} · {World.Version ?? L.T("instance.worlds.unknown_version")} · {World.LastPlayed?.LocalDateTime:yyyy-MM-dd HH:mm} · {World.FolderName}";
 }
 
@@ -242,7 +261,9 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
         service.UniversalLoaderChanged += id => Dispatcher.UIThread.Post(() =>
         {
             if (Current?.Id == id) RefreshUniversalLoader();
+            RefreshMaintenanceState();
         });
+        service.SettingsChangedElsewhere += () => Dispatcher.UIThread.Post(RefreshMaintenanceState);
     }
 
     private bool _active;
@@ -1002,6 +1023,7 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
         // 撤销删除世界时实例可能已经被删了、或者选中的是读不了的实例。
         if (Current is not { } c) return;
         foreach (var w in WorldManager.List(c.SavesDir)) Worlds.Add(new WorldItem(w));
+        RestoreWorldBusy();
     }
 
     [RelayCommand]

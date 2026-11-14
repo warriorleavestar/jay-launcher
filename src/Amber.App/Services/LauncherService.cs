@@ -712,7 +712,7 @@ public sealed class LauncherService : IDisposable
     /// switches to that Java and the launch must use it too.
     /// </remarks>
     public async Task<(Amber.Core.Bake.BakedLaunch? Launch, string Reason, string JavaPath)> PrepareBakeAsync(GameContext ctx, string id, string javaPath, IProgress<Amber.Core.Bake.BakeEvent>? progress, CancellationToken ct, bool warm = false,
-        Amber.Core.Launch.QuickPlay? quickPlay = null)
+        Amber.Core.Launch.QuickPlay? quickPlay = null, Amber.Core.Bake.WorldMaintenance? maintenance = null)
     {
         if (!UsesUniversalLoader(ctx, id)) return (null, "", javaPath);
         if (BakeFor(ctx) is not { } bake) return (null, Amber.Core.Localization.L.T("core.bake.loader_missing"), javaPath);
@@ -723,7 +723,7 @@ public sealed class LauncherService : IDisposable
             var versionMajor = ctx.Directory.ResolveVersion(id).JavaVersion?.MajorVersion ?? Amber.Core.Bake.BakeService.DefaultJavaMin;
             var major = bake.JavaMajorFor(instance, versionMajor);
             if (major != versionMajor) javaPath = await ctx.Java.ForMajorAsync(major, ct);
-            var done = await bake.PrepareAsync(javaPath, major, ctx.Directory, instance, warm, progress, ct, quickPlay);
+            var done = await bake.PrepareAsync(javaPath, major, ctx.Directory, instance, warm, progress, ct, quickPlay, maintenance);
             return (done.Launch, done.Reason, javaPath);
         }
         finally
@@ -885,6 +885,109 @@ public sealed record LaunchRequest(string VersionId, string? JoinServer = null, 
 {
     // 只供本机烘焙重试使用；排队或等待多开确认期间切换目录后，原请求不能落到同名实例。
     internal GameContext? ExpectedContext { get; init; }
+
+    /// <summary>Not a game to play: the universal loader prepares one world and the game quits by itself.</summary>
+    public MaintenanceRun? Maintenance { get; init; }
+}
+
+/// <summary>
+/// A world maintenance run (upgrade, pre-generate) as the Activity task sees it: progress from the game's output,
+/// cancel through the loader's cancel file, and how it ended.
+/// </summary>
+public sealed class MaintenanceRun(Amber.Core.Bake.WorldMaintenance spec)
+{
+    private readonly TaskCompletionSource<Amber.Core.Activity.TaskOutcome> _done = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly object _gate = new();
+    private Amber.Core.Bake.MaintenanceLaunch? _launch;
+    private string _instanceDir = "";
+    private Action? _cancelPreparing;
+
+    public Amber.Core.Bake.WorldMaintenance Spec { get; } = spec;
+
+    /// <summary>The world's name as the world list shows it (its folder when not given).</summary>
+    public string Name { get; init; } = spec.World;
+
+    /// <summary>The backup made before the run (its path), or null before it is made.</summary>
+    public string? Backup { get; internal set; }
+    public Task<Amber.Core.Activity.TaskOutcome> Done => _done.Task;
+    public bool CancelRequested { get; private set; }
+    public Amber.Core.Bake.MaintenanceProgress? Last { get; private set; }
+
+    /// <summary>The run's last word (done, cancelled or failed), kept when "quit" follows it.</summary>
+    public Amber.Core.Bake.MaintenanceProgress? End { get; private set; }
+
+    /// <summary>The instance folder the backup was made in; the launch must use the same one.</summary>
+    public string? WorkDir { get; init; }
+
+    /// <summary>A progress line (on the game's output thread).</summary>
+    public event Action<Amber.Core.Bake.MaintenanceProgress>? Progressed;
+
+    /// <summary>
+    /// The game is about to start with this maintenance in <paramref name="instanceDir"/>; a cancel asked for before now
+    /// reaches it.
+    /// </summary>
+    internal void Launched(Amber.Core.Bake.MaintenanceLaunch launch, string instanceDir)
+    {
+        bool cancel;
+        lock (_gate)
+        {
+            _launch = launch;
+            _instanceDir = instanceDir;
+            cancel = CancelRequested;
+        }
+        if (cancel) launch.RequestCancel(instanceDir);
+    }
+
+    public void Cancel()
+    {
+        Amber.Core.Bake.MaintenanceLaunch? launch;
+        string instanceDir;
+        Action? preparing;
+        lock (_gate)
+        {
+            CancelRequested = true;
+            launch = _launch;
+            instanceDir = _instanceDir;
+            preparing = launch is null ? _cancelPreparing : null;
+        }
+        // Still preparing (files, Java, the bake): stop that. Once the game runs, it stops at its next batch and saves.
+        if (launch is not null) launch.RequestCancel(instanceDir);
+        else preparing?.Invoke();
+    }
+
+    /// <summary>How to stop the start while it is still preparing.</summary>
+    internal void WhilePreparing(Action cancel)
+    {
+        bool now;
+        lock (_gate)
+        {
+            _cancelPreparing = cancel;
+            now = CancelRequested && _launch is null;
+        }
+        if (now) cancel();
+    }
+
+    internal void Report(Amber.Core.Bake.MaintenanceProgress progress)
+    {
+        Last = progress;
+        if (progress.IsEnd) End = progress;
+        // The loader deletes a stale cancel file when maintenance starts: a cancel asked for before that is sent again.
+        if (progress.Step == "start" && CancelRequested)
+        {
+            Amber.Core.Bake.MaintenanceLaunch? launch;
+            string instanceDir;
+            lock (_gate)
+            {
+                launch = _launch;
+                instanceDir = _instanceDir;
+            }
+            launch?.RequestCancel(instanceDir);
+        }
+        Progressed?.Invoke(progress);
+    }
+
+    /// <summary>Only the first result counts.</summary>
+    internal bool Finish(Amber.Core.Activity.TaskOutcome outcome) => _done.TrySetResult(outcome);
 }
 
 /// <summary>一个游戏目录，以及建在它上面的下载器、安装器、Java、加载器和资源安装（一起创建，之后不变）。</summary>
