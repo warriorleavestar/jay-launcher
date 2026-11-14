@@ -310,44 +310,72 @@ public sealed class ExternalAuth(HttpClient http)
     }
 }
 
-/// <summary>下载 authlib-injector，并生成启动外置账号需要的 JVM 参数。</summary>
+/// <summary>
+/// Fetches authlib-injector and builds the JVM arguments an external account needs. The jar is loaded into the game as
+/// a Java agent, so only the build pinned in <c>build/pins.json</c> is used: its SHA-256 is checked on every download
+/// from every source, and a cached copy that still matches is used without asking the network.
+/// </summary>
 public sealed class AuthlibInjector(HttpClient http, string cacheDir)
 {
-    private const string LatestUrl = "https://authlib-injector.yushi.moe/artifact/latest.json";
-    private const string MirrorLatestUrl = "https://bmclapi2.bangbang93.com/mirrors/authlib-injector/artifact/latest.json";
+    /// <summary>The pin id in build/pins.json.</summary>
+    public const string PinId = "authlib-injector";
+
+    private readonly Pins.Pin _pin = Pins.Get(PinId);
+
+    /// <summary>Tests: use another pin.</summary>
+    internal AuthlibInjector(HttpClient http, string cacheDir, Pins.Pin pin) : this(http, cacheDir) => _pin = pin;
 
     public async Task<string> EnsureJarAsync(CancellationToken ct = default)
     {
-        using var scope = Amber.Core.Net.NetworkPolicy.Scope(Amber.Core.Net.NetworkCategory.Download);
         Directory.CreateDirectory(cacheDir);
-        var existing = Directory.EnumerateFiles(cacheDir, "authlib-injector-*.jar").OrderDescending().FirstOrDefault();
-        JsonNode? latest = null;
-        foreach (var url in new[] { LatestUrl, MirrorLatestUrl })
+        var target = Path.Combine(cacheDir, _pin.File ?? $"{PinId}-{_pin.Version}.jar");
+        if (File.Exists(target))
         {
-            try
-            {
-                latest = JsonNode.Parse(await http.GetStringAsync(url, ct));
-                break;
-            }
-            catch (HttpRequestException) { }
-            catch (TaskCanceledException) when (!ct.IsCancellationRequested) { }
-        }
-        if (latest is null)
-        {
-            // 联不上更新地址时，手里有哪个版本就用哪个。
-            return existing ?? throw new InvalidOperationException(L.T("core.auth.injector.downloadfailed"));
+            await using var cached = File.OpenRead(target);
+            if (Matches(await SHA256.HashDataAsync(cached, ct))) return target;
         }
 
-        var version = latest["version"]!.GetValue<string>();
-        var target = Path.Combine(cacheDir, $"authlib-injector-{version}.jar");
-        if (File.Exists(target)) return target;
+        using var scope = Amber.Core.Net.NetworkPolicy.Scope(Amber.Core.Net.NetworkCategory.Download);
+        var wrongBytes = false;
+        foreach (var url in _pin.Urls)
+        {
+            byte[] bytes;
+            try { bytes = await DownloadAsync(url, ct); }
+            catch (HttpRequestException) { continue; }
+            catch (InvalidDataException) { wrongBytes = true; continue; }
+            catch (TaskCanceledException) when (!ct.IsCancellationRequested) { continue; }
+            // Every source must serve exactly the pinned bytes; a mirror that serves anything else is skipped.
+            if (!Matches(SHA256.HashData(bytes))) { wrongBytes = true; continue; }
+            // Written next to it and moved into place, so a cancelled write never leaves a truncated jar under the final name.
+            var temp = target + ".tmp";
+            await File.WriteAllBytesAsync(temp, bytes, ct);
+            File.Move(temp, target, overwrite: true);
+            return target;
+        }
+        throw wrongBytes
+            ? new InvalidDataException(L.T("core.auth.injector.checksumfailed"))
+            : new InvalidOperationException(L.T("core.auth.injector.downloadfailed"));
+    }
 
-        var bytes = await http.GetByteArrayAsync(latest["download_url"]!.GetValue<string>(), ct);
-        var expected = latest["checksums"]?["sha256"]?.GetValue<string>();
-        if (expected is not null && !Convert.ToHexStringLower(SHA256.HashData(bytes)).Equals(expected, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidDataException(L.T("core.auth.injector.checksumfailed"));
-        await File.WriteAllBytesAsync(target, bytes, ct);
-        return target;
+    private bool Matches(byte[] sha256) =>
+        _pin.Sha256 is { } expected && Convert.ToHexStringLower(sha256).Equals(expected, StringComparison.Ordinal);
+
+    private async Task<byte[]> DownloadAsync(string url, CancellationToken ct)
+    {
+        var max = _pin.Size ?? 16 * 1024 * 1024;
+        using var response = await http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
+        response.EnsureSuccessStatusCode();
+        if (response.Content.Headers.ContentLength > max) throw new InvalidDataException(url);
+        await using var stream = await response.Content.ReadAsStreamAsync(ct);
+        using var buffer = new MemoryStream();
+        var chunk = new byte[81920];
+        int read;
+        while ((read = await stream.ReadAsync(chunk, ct)) > 0)
+        {
+            if (buffer.Length + read > max) throw new InvalidDataException(url);
+            buffer.Write(chunk, 0, read);
+        }
+        return buffer.ToArray();
     }
 
     public static IReadOnlyList<string> JvmArgs(string jarPath, string apiRoot, string metadataJson) =>
