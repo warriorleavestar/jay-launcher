@@ -30,6 +30,18 @@ public class ContentTests : IDisposable
     }
 
     [Fact]
+    public void CountEnabled_CountsEveryEnabledModFileType()
+    {
+        // The library card and the instance hero both show this count, so it must match what the game loads.
+        var mods = Path.Combine(_root, "mods");
+        Directory.CreateDirectory(mods);
+        foreach (var name in new[] { "a.jar", "b.zip", "c.litemod", "d.jar.disabled", "notes.txt" })
+            File.WriteAllText(Path.Combine(mods, name), "");
+        Assert.Equal(3, new ModManager(mods).CountEnabled());
+        Assert.Equal(0, new ModManager(Path.Combine(_root, "missing")).CountEnabled());
+    }
+
+    [Fact]
     public void Fingerprint_IgnoresWhitespace()
     {
         Assert.Equal(CurseForgeProvider.Fingerprint("helloworld"u8), CurseForgeProvider.Fingerprint("hello \r\n\tworld"u8));

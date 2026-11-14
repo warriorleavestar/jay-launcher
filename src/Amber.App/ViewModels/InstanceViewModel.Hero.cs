@@ -211,7 +211,7 @@ public sealed partial class InstanceViewModel
     private void CountModsForHero(GameInstance c)
     {
         _heroModCount = (c.Id, 0);
-        _ = Task.Run(() => new ModManager(c.ModsDir).List().Count).ContinueWith(t =>
+        _ = Task.Run(() => new ModManager(c.ModsDir).CountEnabled()).ContinueWith(t =>
         {
             if (!t.IsCompletedSuccessfully) return;
             Dispatcher.UIThread.Post(() =>
