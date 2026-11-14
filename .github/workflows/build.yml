@@ -104,7 +104,7 @@ jobs:
           -p:DebugType=none
           -o ../out/server-${{ matrix.rid }}
 
-      # 发布包自带 EasyTier 官方安装包（校验固定的 SHA-256），网络不好也能直接用联机。
+      # 发布包自带 EasyTier 的 Jay 加固版（校验固定的 SHA-256），网络不好也能直接用联机。
       - name: Bundle EasyTier
         shell: bash
         run: bash ../scripts/bundle-easytier.sh ${{ matrix.rid }} ../out/${{ matrix.rid }}/easytier
