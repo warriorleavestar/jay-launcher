@@ -55,9 +55,9 @@ internal sealed partial class SelfTest
             await ShotAsync("recycle-1440");
 
             // [Restore]: the mod goes back; the instance keeps its name.
-            recycle.RestoreCommand.Execute(recycle.Rows.First(r => r.Item.Kind == RecycledKind.Mod));
+            await recycle.RestoreCommand.ExecuteAsync(recycle.Rows.First(r => r.Item.Kind == RecycledKind.Mod));
             Check("【恢复】模组：回到原来的 mods，行没了", File.Exists(Path.Combine(dir, "mods", "iris.jar")) && recycle.Rows.Count == 2);
-            recycle.RestoreCommand.Execute(recycle.Rows.First(r => r.Item.Kind == RecycledKind.Instance));
+            await recycle.RestoreCommand.ExecuteAsync(recycle.Rows.First(r => r.Item.Kind == RecycledKind.Instance));
             Check("【恢复】实例：名字不变，又出现在游戏库", Directory.Exists(Path.Combine(game, "versions", "1.19.4")) && service.InstalledVersions().Contains("1.19.4"));
 
             // Retention.
@@ -65,11 +65,11 @@ internal sealed partial class SelfTest
             Check("保留天数改成 30 天：存进设置，剩余天数跟着变", service.Settings.TrashRetentionDays == 30 && recycle.Rows[0].When.Contains("30"), recycle.Rows[0].When);
 
             // [Delete forever] (confirmed) and [Empty].
-            recycle.DeleteForeverCommand.Execute(recycle.Rows[0]);
+            await recycle.DeleteForeverCommand.ExecuteAsync(recycle.Rows[0]);
             Check("【永久删除】：从最近删除里清掉", recycle.IsEmpty);
             TrashService.MoveToTrash(Path.Combine(dir, "mods", "iris.jar"), game);
             recycle.Refresh();
-            recycle.EmptyAllCommand.Execute(null);
+            await recycle.EmptyAllCommand.ExecuteAsync(null);
             Check("【清空】：全部清掉，显示空状态", recycle.IsEmpty && recycle.EmptyText.Contains("30"), recycle.EmptyText);
             await Task.Delay(300);
             window.Width = 600;

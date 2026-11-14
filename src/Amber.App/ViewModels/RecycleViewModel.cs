@@ -96,12 +96,14 @@ public sealed partial class RecycleViewModel(LauncherService service) : Observab
 
     /// <summary>[Restore]: back where it was. An instance keeps its name (its files must match the folder).</summary>
     [RelayCommand]
-    private void Restore(RecycledRow? row)
+    private async Task RestoreAsync(RecycledRow? row)
     {
         if (row is null) return;
         try
         {
-            var path = TrashService.Restore(row.Item.Entry, keepName: row.Item.Kind == RecycledKind.Instance);
+            // Moving a whole instance back can take a while on a slow disk: off the UI thread.
+            Message = StatusMessage.Info("activity.task.working");
+            var path = await Task.Run(() => TrashService.Restore(row.Item.Entry, keepName: row.Item.Kind == RecycledKind.Instance));
             Message = StatusMessage.Success("recycle.restored", Path.GetFileName(path));
             if (row.Item.Kind == RecycledKind.Instance) service.NotifyInstalledChanged();
             else service.NotifyContentChanged();
@@ -124,12 +126,13 @@ public sealed partial class RecycleViewModel(LauncherService service) : Observab
 
     /// <summary>[Delete forever] (already confirmed in the locked dialog).</summary>
     [RelayCommand]
-    private void DeleteForever(RecycledRow? row)
+    private async Task DeleteForeverAsync(RecycledRow? row)
     {
         if (row is null) return;
         try
         {
-            RecycleIndex.DeleteForever(row.Item.Entry);
+            Message = StatusMessage.Info("activity.task.working");
+            await Task.Run(() => RecycleIndex.DeleteForever(row.Item.Entry));
             Message = StatusMessage.Success("recycle.deleted", row.Name);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
@@ -143,10 +146,12 @@ public sealed partial class RecycleViewModel(LauncherService service) : Observab
 
     /// <summary>[Empty] (already confirmed in the locked dialog).</summary>
     [RelayCommand(CanExecute = nameof(CanEmptyAll))]
-    private void EmptyAll()
+    private async Task EmptyAllAsync()
     {
         var count = Rows.Count;
-        var removed = RecycleIndex.Empty(Rows.Select(r => r.Item).ToList());
+        var items = Rows.Select(r => r.Item).ToList();
+        Message = StatusMessage.Info("activity.task.working");
+        var removed = await Task.Run(() => RecycleIndex.Empty(items));
         Message = removed == count
             ? new StatusMessage("recycle.emptied", [removed], StatusKind.Success) { Count = removed }
             : StatusMessage.Warning("recycle.emptied_partly", removed, count - removed);

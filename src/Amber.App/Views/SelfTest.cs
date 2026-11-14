@@ -1290,7 +1290,7 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
             using (var w = new StreamWriter(archive.CreateEntry("pack.mcmeta").Open())) w.Write("""{"pack":{"pack_format":48,"description":"自检数据包"}}""");
             using (var w = new StreamWriter(archive.CreateEntry("data/selftest/function/hi.mcfunction").Open())) w.Write("say hi");
         }
-        instance.AddDatapacks([zip]);
+        await instance.AddDatapacksAsync([zip]);
         var item = instance.Datapacks.FirstOrDefault(d => d.Name == "selftest-datapack.zip");
         Check("添加数据包", item is { Enabled: true } && item.Meta.Contains("自检数据包"), instance.Status);
         if (item is not null)
