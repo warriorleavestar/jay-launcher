@@ -26,7 +26,7 @@
       <StackPanel x:Name="StepDots" Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Center" Spacing="10" Margin="0,4,0,8">
         <TextBlock Text="{Binding AccountDot}" Foreground="{DynamicResource Accent}" VerticalAlignment="Center" />
         <TextBlock Text="{l:T firstrun.step.account}" Foreground="{DynamicResource TextPrimary}" VerticalAlignment="Center" />
-        <Border Width="80" Height="1" Background="{DynamicResource Divider}" VerticalAlignment="Center" />
+        <Border Width="80" Height="1" Background="{DynamicResource BorderSubtle}" VerticalAlignment="Center" />
         <TextBlock Text="{Binding StartDot}" Foreground="{DynamicResource Accent}" VerticalAlignment="Center" />
         <TextBlock Text="{l:T firstrun.step.start}" Foreground="{DynamicResource TextPrimary}" VerticalAlignment="Center" />
       </StackPanel>
@@ -162,7 +162,7 @@
       </ScrollViewer>
 
       <!-- The button bar sticks to the bottom (compact and short windows keep it in reach). -->
-      <Border x:Name="ButtonBar" Grid.Row="3" Padding="24,10" BorderThickness="0,1,0,0" BorderBrush="{DynamicResource Divider}">
+      <Border x:Name="ButtonBar" Grid.Row="3" Padding="24,10" BorderThickness="0,1,0,0" BorderBrush="{DynamicResource BorderSubtle}">
         <Grid x:Name="ButtonGrid" ColumnDefinitions="Auto,*,Auto">
           <Button x:Name="BackButton" Classes="ghost" Content="{l:T firstrun.back}" Command="{Binding BackCommand}" IsVisible="{Binding IsStartStep}" />
           <Button x:Name="ContinueButton" Grid.Column="2" Classes="primary" Content="{l:T firstrun.continue}" Command="{Binding ContinueCommand}" HorizontalContentAlignment="Center"
