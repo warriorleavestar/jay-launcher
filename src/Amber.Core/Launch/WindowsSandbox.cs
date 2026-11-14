@@ -90,7 +90,7 @@ public static unsafe class WindowsSandbox
         }
         foreach (var path in grants.ReadOnly.Where(Exists))
         {
-            if (grants.Hidden.Any(h => GameSandbox.IsInside(path, h))) SetLabel(path, writable: false, hidden: false, mustWork: true);
+            if (NeedsOwnLabel(path, grants) is { } mustWork) SetLabel(path, writable: false, hidden: false, mustWork);
             if (container is not null) Grant(path, container, write: false);
         }
         foreach (var path in grants.Hidden.Where(Exists))
@@ -105,6 +105,20 @@ public static unsafe class WindowsSandbox
     }
 
     private static bool Exists(string path) => Directory.Exists(path) || File.Exists(path);
+
+    /// <summary>
+    /// Whether a read-only grant needs its own (non-writable) label, and whether that label must be set for the launch
+    /// to go ahead; null when what it inherits is already right. A grant inside a writable one (Java, versions or
+    /// libraries in a game folder that is itself the instance) would otherwise inherit the writable label. Inside a
+    /// hidden folder the label is what lets the game read it at all, so it must work; inside a writable one a volume
+    /// without labels leaves it as writable as the folder around it, the same as before.
+    /// </summary>
+    internal static bool? NeedsOwnLabel(string path, SandboxGrants grants)
+    {
+        if (grants.Hidden.Any(h => GameSandbox.IsInside(path, h))) return true;
+        if (grants.ReadWrite.Any(w => GameSandbox.IsInside(path, w) && !GameSandbox.SamePath(path, w))) return false;
+        return null;
+    }
 
     /// <summary>The label SDDL now on a path, for diagnostics.</summary>
     public static string? CurrentLabelPublic(string path) => CurrentLabel(path);
