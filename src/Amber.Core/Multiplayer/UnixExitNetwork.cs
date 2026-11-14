@@ -297,7 +297,7 @@ internal sealed class UnixExitNetwork
     }
 
     /// <summary>Linux 上能不能做出口：要 ip 和 nft 两个命令（iproute2、nftables）。</summary>
-    public static bool Supported => OperatingSystem.IsMacOS() || OperatingSystem.IsLinux() && Exists("ip") && Exists("nft");
+    public static bool Supported => RunForTest is not null || OperatingSystem.IsMacOS() || OperatingSystem.IsLinux() && Exists("ip") && Exists("nft");
 
     private static bool Exists(string tool) =>
         tool.StartsWith('/') ? File.Exists(tool) : new[] { "/usr/sbin", "/usr/bin", "/sbin", "/bin" }.Any(d => File.Exists(Path.Combine(d, tool)));

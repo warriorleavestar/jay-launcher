@@ -102,6 +102,70 @@ public sealed class PlatformPortingTests : IDisposable
         Assert.Empty(Directory.EnumerateFiles(_root, ".jay-easytier-*.pid"));
     }
 
+    /// <summary>
+    /// A start time read by a later Jay run differs by a few milliseconds on Linux: the leftover is still recognised
+    /// and stopped, while a start time seconds apart (a reused PID) is not the same process.
+    /// </summary>
+    [Fact]
+    public void ALeftoverIsRecognisedDespiteASlightlyDifferentStartTime()
+    {
+        Assert.True(EasyTierProcessTracker.SameStart(1_000_000_000, 1_000_030_000));
+        Assert.False(EasyTierProcessTracker.SameStart(1_000_000_000, 1_000_000_000 + 10 * TimeSpan.TicksPerSecond));
+        if (OperatingSystem.IsWindows()) return;
+        using var process = Process.Start(new ProcessStartInfo("/bin/sleep", "30") { UseShellExecute = false })!;
+        try
+        {
+            var executable = process.MainModule!.FileName!;
+            var record = EasyTierProcessTracker.Track(process, _root, executable, Environment.ProcessId, ownerStartTicks: 1)!;
+            // A record from before the exact start mark: only the start time to go by.
+            var lines = File.ReadAllLines(record).Take(5).ToArray();
+            lines[1] = (long.Parse(lines[1]) + 30_000).ToString();
+            File.WriteAllLines(record, lines);
+
+            EasyTierProcessTracker.Cleanup(_root, executable);
+
+            Assert.True(process.WaitForExit(5000));
+            Assert.Empty(Directory.EnumerateFiles(_root, ".jay-easytier-*.pid"));
+        }
+        finally
+        {
+            if (!process.HasExited) process.Kill();
+        }
+    }
+
+    /// <summary>
+    /// Another EasyTier (same program) that took over a recorded PID within a second or two has a start time close to
+    /// the recorded one, but not the same exact start mark: it is not stopped.
+    /// </summary>
+    [Fact]
+    public void ASameProgramThatReusedThePidSoonAfterIsLeftAlone()
+    {
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS()) return;
+        using var process = Process.Start(new ProcessStartInfo("/bin/sleep", "30") { UseShellExecute = false })!;
+        try
+        {
+            var executable = process.MainModule!.FileName!;
+            var record = EasyTierProcessTracker.Track(process, _root, executable, Environment.ProcessId, ownerStartTicks: 1)!;
+            var lines = File.ReadAllLines(record);
+            Assert.Equal(6, lines.Length);
+            Assert.Equal(EasyTierProcessTracker.StartMark(process.Id), lines[5]);
+            // The recorded process started a moment earlier: same PID, same program, start time within the tolerance.
+            lines[5] = OperatingSystem.IsLinux()
+                ? string.Join(':', lines[5].Split(':')[..^1]) + ":" + (ulong.Parse(lines[5].Split(':')[^1]) - 50)
+                : "mac:" + (long.Parse(lines[5]["mac:".Length..]) - 500);
+            File.WriteAllLines(record, lines);
+
+            EasyTierProcessTracker.Cleanup(_root, executable);
+
+            Assert.False(process.WaitForExit(500));
+            Assert.Empty(Directory.EnumerateFiles(_root, ".jay-easytier-*.pid"));
+        }
+        finally
+        {
+            if (!process.HasExited) process.Kill();
+        }
+    }
+
     [Fact]
     public void ThisJaysOwnRunningEasyTierIsLeftAlone()
     {
