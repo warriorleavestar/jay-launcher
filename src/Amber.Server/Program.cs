@@ -733,6 +733,7 @@ public static class Program
             return JayNetworkServer.NodeIntegrityExitCode;
         }
         await using var server = built;
+        PrintLoginSection(server, Console.Out);
         await server.StartAsync();
         server.EasyTierOutput += line => { if (options.Has("verbose")) log(line); };
         var listen = options.GetInt("listen", 11010);
@@ -820,7 +821,13 @@ public static class Program
         if (options.Has("signed-volunteers")) builder.RequireSignedVolunteers();
         if (options.Has("no-admin")) builder.WithoutAdmin();
         else builder.UseAdmin(options.GetInt("admin-port", JayNetworkServer.DefaultAdminPort));
-        if (!options.Has("seed-only") && LoginFor(root, options, networkId, output) is { } login) builder.UseLogin(login);
+        if (!options.Has("seed-only") && LoginFactorsFor(options, networkId) is { } factors)
+        {
+            // The server opens the login key itself after its hardware check, so a node bound to its hardware uses
+            // its sealed key (and never writes a plaintext one); see JayNetworkServer.
+            builder.UseAccounts(null, options.Has("require-2fa"));
+            foreach (var factor in factors) builder.AddLoginFactor(factor);
+        }
         return builder;
     }
 
@@ -970,13 +977,14 @@ public static class Program
         return reply["ok"]?.GetValue<bool>() == true ? 0 : 1;
     }
 
-    /// <summary>directory --accounts：账号表 + 登录钥匙 + 第二步验证。没开就是 null。</summary>
-    internal static LoginAuthority? LoginFor(string root, Options options, string network, TextWriter output)
+    /// <summary>
+    /// directory --accounts / --require-2fa / --factor: the extra login factors (after the built-in TOTP), or null when
+    /// account login is off. Only checks the options; the login key and accounts are opened by the server.
+    /// </summary>
+    internal static List<ILoginFactor>? LoginFactorsFor(Options options, string network)
     {
         if (!options.Has("accounts") && !options.Has("require-2fa") && options.Get("factor") is null) return null;
-        var (key, signer) = LoginAuthority.LoadOrCreateKeys(Path.Combine(root, "login.key"));
-        var accounts = new AccountStore(Path.Combine(root, "accounts.json"));
-        var factors = new List<ILoginFactor> { new TotpFactor(accounts) };
+        var factors = new List<ILoginFactor>();
         foreach (var spec in (options.Get("factor") ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
             var parts = spec.Split(':', 3);
@@ -984,18 +992,16 @@ public static class Program
                 throw new ArgumentException($"--factor 格式是 <名字>:<提示>:<程序>，名字只用小写字母、数字、横线：{spec}");
             factors.Add(new CommandFactor(parts[0], parts[1], parts[2], [], network));
         }
-        var require = options.Has("require-2fa");
-        var section = new System.Text.Json.Nodes.JsonObject
-        {
-            ["required"] = true,
-            ["key"] = Convert.ToBase64String(key.PublicKey),
-            ["signKey"] = Convert.ToBase64String(signer.PublicKey),
-            ["factors"] = new System.Text.Json.Nodes.JsonArray([.. factors.Select(f => (System.Text.Json.Nodes.JsonNode)f.Name)]),
-            ["requireFactor"] = require,
-        };
-        output.WriteLine($"账号登录已开启（{accounts.List().Count} 个账号）。把这段写进网络配置文件的 \"login\"（required 改成 false 就是登录可选）：");
+        return factors;
+    }
+
+    /// <summary>After the server is built: tells the operator the "login" section to put in the network config.</summary>
+    internal static void PrintLoginSection(JayNetworkServer server, TextWriter output)
+    {
+        if (server.LoginSection is not { } section) return;
+        var count = server.Builtin is { } accounts ? accounts.List().Count : 0;
+        output.WriteLine($"账号登录已开启（{count} 个账号）。把这段写进网络配置文件的 \"login\"（required 改成 false 就是登录可选）：");
         output.WriteLine(section.ToJsonString());
-        return new LoginAuthority(accounts, key, signer, network) { Factors = factors, RequireSecondFactor = require };
     }
 
     /// <summary>公共网络账号：加、改密码、删、停用、两步验证。</summary>

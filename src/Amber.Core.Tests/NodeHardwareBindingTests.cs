@@ -416,4 +416,20 @@ public sealed class NodeHardwareBindingTests : IDisposable
         Assert.Equal(2, Program.NodeBind(_dir, Options.Parse(["node", "bind", "--check"]), output, hw, tpm));
         Assert.True(Has("directory.key.hw")); // --check never wipes
     }
+
+    [Fact]
+    public async Task AccountLoginOnABoundNodeUsesTheSealedKey()
+    {
+        var hw = Machine();
+        var tpm = new FakeTpm();
+        var (_, login) = Bind(hw, tpm);
+        File.Delete(Path.Combine(_dir, "bans.json")); // Bind's placeholder isn't a ban list
+        var builder = Program.DirectoryBuilder(_dir, Options.Parse(["directory", "--accounts", "--no-admin"]), new StringWriter(), _ => { });
+        builder.UseHardwareGuard(Guard(hw, tpm));
+        await using var server = builder.Build();
+        Assert.False(Has("login.key"));
+        var (key, signer) = LoginAuthority.ParseKeys(login)!.Value;
+        Assert.Equal(key.PublicKey, server.Login!.PublicKey);
+        Assert.Equal(signer.PublicKey, server.Login.SignKey);
+    }
 }
