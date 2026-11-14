@@ -3380,6 +3380,7 @@
   "multiplayer.open.server": "開一個一直在線的伺服器…",
   "multiplayer.room.created_relay_only": "房間已建立（只走中轉：Jay 不讓房間裡的人互相直連）。點「邀請」產生邀請傳給朋友。",
   "multiplayer.split.relay_only_strict": "「只走中轉」開不了這個房間：開發者開關 AMBER_SPLIT 要求嚴格分流，嚴格分流要求主路徑是直連。換一種連線方式，或把 AMBER_SPLIT 改成 auto。",
+  "multiplayer.split.relay_only_mine": "沒有加入：這個房間有一部分流量只走直連，而你開了「預設只走中轉」，加入會讓房主看到你的位址。要加入的話，先到 設定 › 連線 裡把它關掉。",
   "multiplayer.lobby.join.server": "加入並存下",
   "multiplayer.lobby.join.friend": "加朋友",
   "multiplayer.lobby.join.network": "新增網路",

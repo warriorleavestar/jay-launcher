@@ -3380,6 +3380,7 @@
   "multiplayer.open.server": "常時オンラインのサーバーを開く…",
   "multiplayer.room.created_relay_only": "ルームを作成しました（中継のみ：Jay はルームの人どうしを直接つなぎません）。「招待」で招待を作って送ってください。",
   "multiplayer.split.relay_only_strict": "「中継のみ」ではこのルームを開けません。開発者スイッチ AMBER_SPLIT が厳格な分割を求めていて、厳格な分割にはホストへの直接のメイン経路が必要です。別のつなぎ方を選ぶか、AMBER_SPLIT を auto にしてください。",
+  "multiplayer.split.relay_only_mine": "参加しませんでした：このルームは一部の通信を直接接続だけで送ります。「いつも中継のみにする」がオンなので、参加するとホストにあなたのアドレスが見えます。参加するには、先に 設定 › マルチプレイ でオフにしてください。",
   "multiplayer.lobby.join.server": "参加して保存",
   "multiplayer.lobby.join.friend": "フレンドを追加",
   "multiplayer.lobby.join.network": "ネットワークを追加",

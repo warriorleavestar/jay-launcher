@@ -68,7 +68,7 @@ public sealed partial class MultiplayerViewModel
     }
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsDirectHost), nameof(ShowCreateInvite))]
+    [NotifyPropertyChangedFor(nameof(IsDirectHost), nameof(ShowCreateInvite), nameof(ShowPublishRoom))]
     public partial bool IsDirect { get; set; }
 
     public bool IsDirectHost => IsDirect && IsHosting;
