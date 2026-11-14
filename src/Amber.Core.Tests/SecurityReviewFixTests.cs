@@ -67,16 +67,6 @@ public class SecurityReviewFixTests
         }
     }
 
-    // 3. 本机不支持 ML-KEM 时极端加密报明确的 CryptographicException。
-    [Fact]
-    public void Extreme_WithoutMlKem_FailsClearly()
-    {
-        if (NoiseHandshake.HybridSupported) return;
-        using var hs = new NoiseHandshake(NoisePattern.NNhfspsk0, true, [], RandomNumberGenerator.GetBytes(32));
-        var e = Assert.ThrowsAny<CryptographicException>(() => hs.WriteMessage([]));
-        Assert.Contains("ML-KEM", e.Message);
-    }
-
     // 4. 不建网卡时只放行这台电脑真正提供的端口；完整局域网模式不限制。
     [Fact]
     public void EasyTier_WhitelistsOnlyServedPorts()

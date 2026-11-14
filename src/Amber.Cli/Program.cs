@@ -232,11 +232,6 @@ try
                          (Amber.Core.Multiplayer.Transport.TransportMode.High, false), (Amber.Core.Multiplayer.Transport.TransportMode.High, true),
                          (Amber.Core.Multiplayer.Transport.TransportMode.Extreme, false), (Amber.Core.Multiplayer.Transport.TransportMode.Extreme, true) })
             {
-                if (mode == Amber.Core.Multiplayer.Transport.TransportMode.Extreme && !Amber.Core.Multiplayer.Transport.NoiseHandshake.HybridSupported)
-                {
-                    Console.WriteLine("Extreme：这台电脑不支持 ML-KEM，跳过");
-                    continue;
-                }
                 Console.WriteLine(await TransportBench.RunAsync(mode, disguise, cts.Token));
             }
             break;
@@ -473,8 +468,6 @@ try
                 ? int.TryParse(tm, out var tmValue) && tmValue is >= 0 and <= 3 ? (Amber.Core.Multiplayer.Transport.TransportMode)tmValue : throw new ArgumentException("--transport 只能是 0–3")
                 : Amber.Core.Multiplayer.Transport.TransportMode.General;
             var disguise = argList.Remove("--disguise");
-            if (transportMode == Amber.Core.Multiplayer.Transport.TransportMode.Extreme && !Amber.Core.Multiplayer.Transport.NoiseHandshake.HybridSupported)
-                throw new PlatformNotSupportedException("极端加密需要系统支持 ML-KEM（较新的 Windows 11），这台电脑不支持");
             var allowProxy = argList.Remove("--allow-proxy");
             var proxyExit = TakeOption(argList, "--proxy-exit");
             // 测试用：--extra-forward 本机端口:房主端口，模拟有人自己加转发去连房主的别的端口（应该被白名单挡住）。
@@ -492,8 +485,6 @@ try
             {
                 if (!RoomCode.TryParse(argList[1], out room)) throw new ArgumentException("房间码格式不对");
                 if (room.IsUnjoinableLegacy) throw new ArgumentException("这个房间码来自旧版本，无法加入：请房主更新后重新发一个");
-                if (room.Tunnel.Mode == Amber.Core.Multiplayer.Transport.TransportMode.Extreme && !Amber.Core.Multiplayer.Transport.NoiseHandshake.HybridSupported)
-                    throw new PlatformNotSupportedException("这个房间用的是极端加密，需要系统支持 ML-KEM，这台电脑不支持");
                 local = EasyTierArgs.FreeTcpPort();
             }
             var et = new EasyTierInstaller(downloader, AmberDataDir());

@@ -55,7 +55,6 @@ public sealed class MemberKeyTests : IDisposable
     [MemberData(nameof(Modes))]
     public async Task TunnelUsesTheMembersOwnKey(TransportMode mode, bool disguise)
     {
-        if (mode == TransportMode.Extreme && !NoiseHandshake.HybridSupported) return;
         var (host, _, guest, _) = Rooms(new TunnelSettings(mode, disguise), _alice, "Alice");
         var (c, s, a, b) = await PairAsync();
         using (a)
