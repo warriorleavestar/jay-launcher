@@ -218,10 +218,31 @@ public sealed class EasyTierInstaller
     /// <summary>下载来源，按尝试顺序排列。</summary>
     public IReadOnlyList<(string Name, string Url)> Sources => _sources ?? EasyTierRelease.Sources(Asset, SourceChain.PrefersMirrors());
 
+    /// <summary>
+    /// One lock per install folder, shared by every installer in this process: installers are created per use, and two
+    /// first-time installs would otherwise share the same download file and temporary extract folder.
+    /// </summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, SemaphoreSlim> InstallLocks = new(StringComparer.Ordinal);
+
+    private SemaphoreSlim InstallLock => InstallLocks.GetOrAdd(Path.GetFullPath(InstallDir), _ => new SemaphoreSlim(1, 1));
+
     /// <summary>progress 的 CurrentFile 是正在尝试的来源名。</summary>
     public async Task EnsureAsync(IProgress<DownloadProgress>? progress = null, CancellationToken ct = default)
     {
         if (IsInstalled) return;
+        var gate = InstallLock;
+        await gate.WaitAsync(ct);
+        try
+        {
+            // Another install may have finished while this one waited.
+            if (IsInstalled) return;
+            await InstallAsync(progress, ct);
+        }
+        finally { gate.Release(); }
+    }
+
+    private async Task InstallAsync(IProgress<DownloadProgress>? progress, CancellationToken ct)
+    {
         var failures = new List<EasyTierSourceFailure>();
 
         if (File.Exists(BundledPath))
@@ -270,7 +291,13 @@ public sealed class EasyTierInstaller
     }
 
     /// <summary>用户手动选的安装包：同样要求大小和 SHA-256 与固定值一致。</summary>
-    public Task ImportAsync(string zipPath, CancellationToken ct = default) => InstallFromZipAsync(zipPath, ct);
+    public async Task ImportAsync(string zipPath, CancellationToken ct = default)
+    {
+        var gate = InstallLock;
+        await gate.WaitAsync(ct);
+        try { await InstallFromZipAsync(zipPath, ct); }
+        finally { gate.Release(); }
+    }
 
     private async Task InstallFromZipAsync(string zip, CancellationToken ct)
     {

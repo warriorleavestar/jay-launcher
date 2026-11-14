@@ -58,12 +58,12 @@ public sealed class EasyTierInstallTests : IDisposable
 
     private static HttpResponseMessage Bytes(byte[] data) => new(HttpStatusCode.OK) { Content = new ByteArrayContent(data) };
 
-    private (EasyTierInstaller Installer, Handler Handler) Create(Func<string, HttpResponseMessage> respond, string? bundledDir = null)
+    private (EasyTierInstaller Installer, Handler Handler) Create(Func<string, HttpResponseMessage> respond, string? bundledDir = null, string? dataDir = null)
     {
         var handler = new Handler(respond);
         var downloader = new Downloader(new HttpClient(handler), new SourceChain([new OfficialSource()])) { RetriesPerSource = 1 };
         IReadOnlyList<(string, string)> sources = [("A", "https://a.test/et.zip"), ("B", "https://b.test/et.zip"), ("C", "https://c.test/et.zip")];
-        var installer = new EasyTierInstaller(downloader, Path.Combine(_root, "data"), bundledDir ?? Path.Combine(_root, "no-bundle"), _asset, sources);
+        var installer = new EasyTierInstaller(downloader, dataDir ?? Path.Combine(_root, "data"), bundledDir ?? Path.Combine(_root, "no-bundle"), _asset, sources);
         return (installer, handler);
     }
 
@@ -132,6 +132,27 @@ public sealed class EasyTierInstallTests : IDisposable
         File.WriteAllBytes(good, _good);
         await installer.ImportAsync(good);
         Assert.True(installer.IsInstalled);
+    }
+
+    [Fact]
+    public async Task ConcurrentFirstInstallsDoNotCollide()
+    {
+        var bundle = Path.Combine(_root, "bundle");
+        Directory.CreateDirectory(bundle);
+        File.WriteAllBytes(Path.Combine(bundle, _asset.Name), _good);
+        // Several rounds over a fresh data folder each: every round is a first-time install raced by several installers.
+        for (var round = 0; round < 10; round++)
+        {
+            var data = Path.Combine(_root, "data-" + round);
+            var installers = Enumerable.Range(0, 6)
+                .Select(_ => Create(_ => throw new InvalidOperationException("must not download"), bundle, data).Installer)
+                .ToList();
+
+            await Task.WhenAll(installers.Select(i => Task.Run(() => i.EnsureAsync())));
+
+            Assert.All(installers, i => Assert.True(i.IsInstalled));
+            Assert.False(Directory.Exists(installers[0].InstallDir + ".tmp"));
+        }
     }
 
     [Fact]
