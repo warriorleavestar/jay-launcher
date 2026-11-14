@@ -190,6 +190,7 @@ public sealed class LauncherService : IDisposable
         try { Settings.Save(); }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { SettingsSaveFailed?.Invoke(e); }
         Reload();
+        SettingsChangedElsewhere?.Invoke();
     }
 
     public void Reload()

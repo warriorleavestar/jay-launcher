@@ -1,4 +1,8 @@
 using Amber.App.Services;
+using Amber.App.ViewModels;
+using Amber.Core.Localization;
+using Amber.Core.Themes;
+using Avalonia.Threading;
 
 namespace Amber.Core.Tests;
 
@@ -65,4 +69,42 @@ public sealed class UiReviewRegressionTests : IDisposable
         Assert.Empty(Directory.GetFiles(_dir, "*.tmp"));
     }
 
+    [Fact]
+    public void DownloadSourceSwitchedElsewhereSurvivesTheNextSettingsChange() => UiTestThread.Run(() =>
+    {
+        using var service = new LauncherService(new AppSettings { GameDirectory = _dir, PlayerName = "", SavePathForTest = Path.Combine(_dir, "settings.json") });
+        var settings = new SettingsViewModel(service);
+        service.SetDownloadSource("mirror");
+        Dispatcher.UIThread.RunJobs();
+        settings.Fullscreen = !settings.Fullscreen;
+        Assert.Equal("mirror", service.Settings.DownloadSource);
+    });
+}
+
+/// <summary>The Appearance theme list is written in the current language.</summary>
+[Collection("GlobalLanguage")]
+public sealed class SettingsThemeLanguageTests
+{
+    [Fact]
+    public void BuiltInThemeNamesFollowTheLanguage() => UiTestThread.Run(() =>
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "jay-theme-lang-" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(dir);
+        var language = L.Language;
+        try
+        {
+            L.SetLanguage("zh-Hans");
+            using var service = new LauncherService(new AppSettings { GameDirectory = dir, PlayerName = "", SavePathForTest = Path.Combine(dir, "settings.json") });
+            var settings = new SettingsViewModel(service);
+            L.SetLanguage("en");
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(L.T("settings.themepack.default"), settings.ThemePacks[0].Label);
+            Assert.Equal(L.T("settings.themepack.builtin.jay-high-contrast"), settings.ThemePacks.Single(o => o.Id == BuiltInThemes.HighContrast).Label);
+        }
+        finally
+        {
+            L.SetLanguage(language);
+            try { Directory.Delete(dir, true); } catch (IOException) { }
+        }
+    });
 }

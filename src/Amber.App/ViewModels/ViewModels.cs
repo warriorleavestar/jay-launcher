@@ -782,10 +782,14 @@ public sealed partial class SettingsViewModel : PageViewModel
         SourceIndex = Math.Max(0, Array.IndexOf(SourceKeys, s.DownloadSource));
         service.SettingsChangedElsewhere += () => Dispatcher.UIThread.Post(() =>
         {
+            // Every mirrored field another page can change: the next Persist writes these back, so a stale copy would undo it.
             _loading = true;
             GameDirectory = service.Settings.GameDirectory;
             SourceIndex = Math.Max(0, Array.IndexOf(SourceKeys, service.Settings.DownloadSource));
+            ExperimentalBake = service.Settings.ExperimentalBake;
+            BakeLoaderPath = service.Settings.BakeLoaderPath ?? "";
             _loading = false;
+            SyncLanguageIndex();
         });
         Concurrency = s.DownloadConcurrency.ToString();
         AutoJavaDownload = s.AutoJavaDownload;
@@ -819,14 +823,26 @@ public sealed partial class SettingsViewModel : PageViewModel
         // 开发模式下主题文件改了会重新套用，提示跟着更新。
         ThemeService.Changed += UpdateThemePackStatus;
         // 启动时只把选单对上已经生效的语言，不再重新应用、不写设置文件。
-        _initializing = true;
-        SelectedLanguageIndex = Math.Max(0, Array.IndexOf(LanguageKeys, Amber.Core.Localization.L.Resolve(s.Language) ?? "system"));
-        _initializing = false;
+        SyncLanguageIndex();
+        // Built-in theme names and the upgraded tag are translated, and the language can also change on the first-run page.
+        L.Changed += () => Dispatcher.UIThread.Post(() =>
+        {
+            ReloadThemePacks(SelectedThemePack?.Id);
+            SyncLanguageIndex();
+        });
         InitGroups();
         _loading = false;
     }
 
     private bool _initializing;
+
+    /// <summary>Points the language picker at the saved language without applying or saving it again.</summary>
+    private void SyncLanguageIndex()
+    {
+        _initializing = true;
+        SelectedLanguageIndex = Math.Max(0, Array.IndexOf(LanguageKeys, Amber.Core.Localization.L.Resolve(_service.Settings.Language) ?? "system"));
+        _initializing = false;
+    }
 
     /// <summary>正在把设置文件里的值填进界面：这期间的改动不是用户改的，不保存。</summary>
     private bool _loading;
