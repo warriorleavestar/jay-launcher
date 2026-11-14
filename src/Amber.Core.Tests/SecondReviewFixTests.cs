@@ -24,7 +24,7 @@ public class SecondReviewFixTests
     [Fact]
     public async Task DelayedConnect_RechecksAtRequestTime()
     {
-        var newIp = IPAddress.Parse("203.0.114.9");
+        var newIp = IPAddress.Parse("9.9.9.9");
         var clock = new ManualTimeProvider();
         using var policy = new ExitPolicy([], []) { MaxPublicIpAge = TimeSpan.FromMilliseconds(100), StaleGrace = TimeSpan.FromMilliseconds(50), Time = clock };
         var calls = 0;

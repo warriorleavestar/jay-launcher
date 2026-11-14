@@ -157,7 +157,7 @@ public sealed class NetworkServerFrameworkTests : IAsyncDisposable
         Assert.Contains(reloaded.List(), b => b.Kind == "host" && b.Value == fingerprint && b.Reason == "刷屏");
         Assert.True(server.Bans!.Remove("host", fingerprint));
         Assert.True(Ok(server.Directory.Handle(Announce(new RoomSigner(), Listing(host)))));
-        Assert.Throws<ArgumentException>(() => server.Bans.Add("ip", "1.2.3.4", null, _now));
+        Assert.Throws<ArgumentException>(() => server.Bans.Add("ip", "198.51.100.4", null, _now));
     }
 
     [Fact]

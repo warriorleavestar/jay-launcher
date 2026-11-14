@@ -62,7 +62,7 @@ public sealed class DirectInviteTests
         Assert.False(DirectAddresses.TryParse(new JsonObject { ["s"] = 5 }, out _));
         // Unknown kinds, broken endpoints, port 0 and wrong shapes are skipped; the count is capped.
         var items = new JsonArray(
-            new JsonArray("Nope", "1.2.3.4:5"), new JsonArray("Punch", "not-an-address"), new JsonArray("Punch", "1.2.3.4:0"),
+            new JsonArray("Nope", "198.51.100.4:5"), new JsonArray("Punch", "not-an-address"), new JsonArray("Punch", "198.51.100.4:0"),
             new JsonArray(1, 2), JsonValue.Create("x"), new JsonArray("Punch", "198.51.100.7:40001"));
         for (var i = 0; i < 40; i++) items.Add(new JsonArray("Lan", $"192.168.1.{i + 1}:40000"));
         Assert.True(DirectAddresses.TryParse(new JsonObject { ["s"] = "abcdef0123456789", ["n"] = "Weird", ["c"] = items }, out var parsed));

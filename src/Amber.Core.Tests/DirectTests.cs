@@ -309,7 +309,7 @@ public class DiagnosticsTests
     public void RedactsSecretsCodesAndPublicIps()
     {
         var text = "secret 4HZP8RW2N6TC room AMB-K7Q2M9XD-4HZP8RW2N6TC-25565 code AMBDIRECT1-eyJhIjoxfQ args --network-secret abc " +
-                   "stun 203.0.113.77:53115 lan 192.168.1.5 v6 2408:8207:1234:5678::1 time 12:00:01";
+                   "stun 203.0.113.77:53115 lan 192.168.1.5 v6 2001:db8:1234:5678::1 time 12:00:01";
         var redacted = NetDiagnostics.Redact(text, ["4HZP8RW2N6TC"], includePublicIps: false);
         Assert.DoesNotContain("4HZP8RW2N6TC", redacted);
         Assert.Contains("AMB-K7Q2M9XD-<密钥>-25565", redacted);
@@ -317,7 +317,7 @@ public class DiagnosticsTests
         Assert.Contains("--network-secret <房间密钥>", redacted);
         Assert.Contains("203.0.*.*:53115", redacted);
         Assert.Contains("192.168.1.5", redacted);
-        Assert.Contains("2408:8207:*", redacted);
+        Assert.Contains("2001:db8:*", redacted);
         Assert.Contains("12:00:01", redacted);
 
         var withIps = NetDiagnostics.Redact(text, ["4HZP8RW2N6TC"], includePublicIps: true);
