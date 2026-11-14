@@ -141,6 +141,32 @@ public sealed class CodeHygieneTests
         Assert.False(vm.InviteShown);
     });
 
+    /// <summary>Leaving the page re-masks the thirty-day invite codes too.</summary>
+    [Fact]
+    public void LongInviteCodesRemaskOnLeavingThePage() => UiTestThread.Run(() =>
+    {
+        var (service, vm) = Create();
+        using var _ = service;
+        var dir = Path.Combine(Path.GetTempPath(), "jay-long-mask-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var file = Path.Combine(dir, "long-invites.json");
+            new LongLivedInvites(file).Create("Robin");
+            vm.LongInvitesFile = file;
+            var item = Assert.Single(vm.LongInviteItems);
+            vm.IsCurrent = true;
+            vm.ToggleLongInviteShownCommand.Execute(item);
+            Assert.True(item.Shown);
+            vm.IsCurrent = false;
+            Assert.False(item.Shown);
+        }
+        finally
+        {
+            try { Directory.Delete(dir, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        }
+    });
+
     [Fact]
     public void PendingInviteListIsMaskedWithAToggle()
     {

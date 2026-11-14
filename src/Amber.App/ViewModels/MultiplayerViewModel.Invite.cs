@@ -631,6 +631,7 @@ public sealed partial class MultiplayerViewModel
         InviteShown = false;
         JoinCodeShown = false;
         foreach (var item in PendingInvites) item.Shown = false;
+        foreach (var item in LongInviteItems) item.Shown = false;
         OnPropertyChanged(nameof(InviteDisplay));
     }
 
