@@ -743,7 +743,12 @@ internal sealed partial class SelfTest
         var request = main.Service.Requests.Pending.FirstOrDefault(r => r.Spec.Kind == "contact-invite");
         if (request is not null) main.Service.Requests.Resolve(request, "ignore", Amber.Core.Activity.RequestSource.Bar);
         await Task.Delay(200);
-        Check("去哪玩：在请求条里点“先不”后这一行还在（之后还能进）", vm.FriendRooms.Count == 1);
+        Check("去哪玩：在请求条里点“先不”后这一行和请求一起收掉，同一张邀请再来也不出现", Dispatcher.UIThread.Invoke(() =>
+        {
+            var gone = vm.FriendRooms.Count == 0 && vm.HeldFriendInvites == 0 && !main.Service.Requests.Pending.Any(r => r.Spec.Kind == "contact-invite");
+            vm.ShowMailedInvites([new Amber.Core.Multiplayer.Contacts.MailedInvite(contact, invite, hostKey.PublicKey, "Robin's world", DateTimeOffset.UtcNow.AddMinutes(30))]);
+            return gone && vm.FriendRooms.Count == 0;
+        }));
         Dispatcher.UIThread.Invoke(() => vm.FriendRooms.Clear());
         await Task.Delay(100);
     }
