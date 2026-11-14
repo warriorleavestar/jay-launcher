@@ -3356,7 +3356,7 @@
   "tip.mods_toggle": "點開關能暫時關掉一個模組，不用刪。",
   "tip.first_crash": "Jay 猜了當機的原因，修復按鈕就在旁邊，做錯了能復原。",
   "tip.first_knock": "先和 TA 核對安全碼，一樣再讓進。",
-  "tip.theme_import": "主題讓 Jay 打不開了？啟動時按住 Shift。",
+  "tip.theme_import": "主題讓 Jay 打不開了？下次啟動會自動換回預設外觀；也可以用 --default-theme 參數啟動。",
   "tip.narrow_window": "側欄收起來了，視窗拉寬一些就會展開。",
   "tip.reset": "重新看所有提示",
   "tip.reset_done": "所有提示會重新出現。",

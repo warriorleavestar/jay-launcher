@@ -202,6 +202,23 @@ public partial class LocalizationTests
         Assert.DoesNotContain(name, table["multiplayer.public.setup_body"], StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// The theme recovery tip names the recovery that exists (automatic fallback on the next start and
+    /// --default-theme, see ThemeService.ApplyAtStartup); nothing reads a held key at startup.
+    /// </summary>
+    [Theory]
+    [InlineData("zh-Hans")]
+    [InlineData("zh-Hant")]
+    [InlineData("en")]
+    [InlineData("ja")]
+    [InlineData("lzh")]
+    public void ThemeRecoveryTipNamesTheRealRecovery(string code)
+    {
+        var tip = L.Load(code)["tip.theme_import"];
+        Assert.DoesNotContain("Shift", tip, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("--default-theme", tip, StringComparison.Ordinal);
+    }
+
     /// <summary>占位符的完整写法（包括 :F1 这类格式），译文要和原文一模一样。</summary>
     private static HashSet<string> Placeholders(string text) => Placeholder().Matches(text).Select(m => m.Value).ToHashSet();
 
