@@ -121,7 +121,7 @@ public sealed class OptiFineInstaller(LoaderContext ctx) : ILoaderInstaller
         return id;
     }
 
-    private static async Task RunPatcherAsync(string java, string installer, string vanillaJar, string output, CancellationToken ct)
+    internal static async Task RunPatcherAsync(string java, string installer, string vanillaJar, string output, CancellationToken ct)
     {
         var psi = new ProcessStartInfo(java)
         {
@@ -132,9 +132,12 @@ public sealed class OptiFineInstaller(LoaderContext ctx) : ILoaderInstaller
         };
         foreach (var a in new[] { "-cp", installer, "optifine.Patcher", vanillaJar, installer, output }) psi.ArgumentList.Add(a);
         using var process = Process.Start(psi) ?? throw new InvalidOperationException(L.T("core.install.optifine.patchstartfailed"));
-        var stdout = process.StandardOutput.ReadToEndAsync(ct);
-        var stderr = process.StandardError.ReadToEndAsync(ct);
-        await process.WaitForExitAsync(ct);
+        // On cancel, stop the patcher too: otherwise it keeps running and writes into libraries/ after the install was cancelled.
+        await using var cancel = ct.Register(() => { try { process.Kill(true); } catch { /* already exited */ } });
+        var stdout = process.StandardOutput.ReadToEndAsync(CancellationToken.None);
+        var stderr = process.StandardError.ReadToEndAsync(CancellationToken.None);
+        await process.WaitForExitAsync(CancellationToken.None);
+        ct.ThrowIfCancellationRequested();
         if (process.ExitCode != 0 || !File.Exists(output))
             throw new InvalidOperationException(L.F("core.install.optifine.patchfailed", process.ExitCode, await stderr, await stdout));
     }
