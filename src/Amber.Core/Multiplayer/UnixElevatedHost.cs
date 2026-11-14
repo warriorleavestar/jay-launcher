@@ -106,6 +106,12 @@ public static class UnixElevatedGuardHost
         private void StartCore(UnixGuardCommand cmd)
         {
             StopCore();
+            // A guard killed during an exit session may have left Jay's temporary resolv.conf in place: put the original back.
+            if (OperatingSystem.IsLinux() && UnixIds.EffectiveUserId() == 0)
+            {
+                try { UnixExitNetwork.RestoreResolvConf(); }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Send("error " + B64(e.Message)); }
+            }
             CheckCore(corePath);
             // 经别人上网：承载地址的主机路由要在 EasyTier 加 /1 路由之前查好、加好。
             if (cmd.Network is { } plan)

@@ -76,6 +76,10 @@ public sealed class UnixExitNetworkTests
             if (args.Contains("get")) return (0, "203.0.113.10 via 192.168.1.1 dev wlan0 src 192.168.1.20 uid 0");
             return (0, "");
         };
+        // Never touch the real resolver file, whether or not this machine has systemd-resolved.
+        var dir = Directory.CreateTempSubdirectory("jay-resolv-");
+        UnixExitNetwork.ResolvConf = Path.Combine(dir.FullName, "resolv.conf");
+        File.WriteAllText(UnixExitNetwork.ResolvConf, "nameserver 127.0.0.53\n");
         try
         {
             var exit = new UnixExitNetwork(new ExitNetworkPlan("10.233.144.20", ["203.0.113.10"], "amberlan-10000"));
@@ -93,7 +97,97 @@ public sealed class UnixExitNetworkTests
             Assert.Contains("ip -4 route del 203.0.113.10/32 proto 201", calls);
             Assert.Equal("nft delete table inet jay_exit", calls[^1]);
         }
-        finally { UnixExitNetwork.RunForTest = null; }
+        finally
+        {
+            UnixExitNetwork.RunForTest = null;
+            UnixExitNetwork.ResolvConf = "/etc/resolv.conf";
+            dir.Delete(true);
+        }
+    }
+
+    /// <summary>Runs a resolv.conf test against a temporary folder instead of /etc.</summary>
+    private static void WithResolvConf(Action<string> test)
+    {
+        var dir = Directory.CreateTempSubdirectory("jay-resolv-");
+        UnixExitNetwork.ResolvConf = Path.Combine(dir.FullName, "resolv.conf");
+        try { test(dir.FullName); }
+        finally
+        {
+            UnixExitNetwork.ResolvConf = "/etc/resolv.conf";
+            dir.Delete(true);
+        }
+    }
+
+    [Fact]
+    public void ResolvConfOriginalIsKeptOnDiskAndRestored()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        WithResolvConf(_ =>
+        {
+            var path = UnixExitNetwork.ResolvConf;
+            File.WriteAllText(path, "nameserver 192.168.1.1\nsearch lan\n");
+            UnixExitNetwork.ReplaceResolvConf();
+            Assert.Contains("nameserver " + ExitDnsServers.Primary, File.ReadAllText(path));
+            // The original sits next to it while the session runs, so it outlives a killed guard.
+            Assert.Equal("nameserver 192.168.1.1\nsearch lan\n", File.ReadAllText(UnixExitNetwork.ResolvConfBackup));
+            UnixExitNetwork.RestoreResolvConf();
+            Assert.Equal("nameserver 192.168.1.1\nsearch lan\n", File.ReadAllText(path));
+            Assert.False(File.Exists(UnixExitNetwork.ResolvConfBackup));
+            UnixExitNetwork.RestoreResolvConf(); // nothing left to do
+            Assert.Equal("nameserver 192.168.1.1\nsearch lan\n", File.ReadAllText(path));
+        });
+    }
+
+    [Fact]
+    public void ResolvConfLeftByAKilledGuardIsRestoredOnTheNextStart()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        WithResolvConf(_ =>
+        {
+            var path = UnixExitNetwork.ResolvConf;
+            File.WriteAllText(path, "nameserver 192.168.1.1\n");
+            UnixExitNetwork.ReplaceResolvConf();
+            // A new session replaces it again: the backup must still be the user's file, not Jay's.
+            UnixExitNetwork.ReplaceResolvConf();
+            Assert.Equal("nameserver 192.168.1.1\n", File.ReadAllText(UnixExitNetwork.ResolvConfBackup));
+            UnixExitNetwork.RestoreResolvConf();
+            Assert.Equal("nameserver 192.168.1.1\n", File.ReadAllText(path));
+        });
+    }
+
+    [Fact]
+    public void ResolvConfLinkIsMovedAsALinkAndItsTargetIsNeverWritten()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        WithResolvConf(dir =>
+        {
+            var path = UnixExitNetwork.ResolvConf;
+            var managed = Path.Combine(dir, "managed-resolv.conf");
+            File.WriteAllText(managed, "nameserver 192.168.1.1\n");
+            File.CreateSymbolicLink(path, managed);
+            UnixExitNetwork.ReplaceResolvConf();
+            Assert.Null(new FileInfo(path).LinkTarget);
+            Assert.Equal(managed, new FileInfo(UnixExitNetwork.ResolvConfBackup).LinkTarget);
+            Assert.Equal("nameserver 192.168.1.1\n", File.ReadAllText(managed));
+            UnixExitNetwork.RestoreResolvConf();
+            Assert.Equal(managed, new FileInfo(path).LinkTarget);
+            Assert.Equal("nameserver 192.168.1.1\n", File.ReadAllText(managed));
+        });
+    }
+
+    [Fact]
+    public void MissingResolvConfIsMissingAgainAfterRestore()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        WithResolvConf(_ =>
+        {
+            var path = UnixExitNetwork.ResolvConf;
+            UnixExitNetwork.ReplaceResolvConf();
+            Assert.True(File.Exists(path));
+            UnixExitNetwork.RestoreResolvConf();
+            Assert.False(File.Exists(path));
+            Assert.False(File.Exists(UnixExitNetwork.ResolvConfAbsent));
+        });
     }
 
     [Fact]

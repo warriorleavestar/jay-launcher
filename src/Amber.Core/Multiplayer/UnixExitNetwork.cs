@@ -33,7 +33,7 @@ internal sealed class UnixExitNetwork
     private bool _firewall;
     private string? _pfToken;
     private bool _resolved;
-    private string? _resolvConfBackup;
+    private bool _resolvConfReplaced;
     private MacDnsBackup? _macDns;
 
     public UnixExitNetwork(ExitNetworkPlan plan) => _plan = plan;
@@ -45,6 +45,7 @@ internal sealed class UnixExitNetwork
         {
             Run("ip", ["-4", "route", "flush", "proto", RouteProto.ToString(System.Globalization.CultureInfo.InvariantCulture)]);
             Run("nft", ["delete", "table", "inet", NftTable]);
+            RestoreResolvConf();
         }
         else if (OperatingSystem.IsMacOS())
         {
@@ -184,15 +185,73 @@ internal sealed class UnixExitNetwork
             Run("resolvectl", ["flush-caches"]);
             return;
         }
-        // 没有 systemd-resolved：临时改写 /etc/resolv.conf，结束时原样写回。
-        const string path = "/etc/resolv.conf";
-        _resolvConfBackup = File.Exists(path) ? File.ReadAllText(path) : "";
-        File.WriteAllText(path, "# Temporary DNS while Jay routes traffic through a room member; restored afterwards\n" + string.Concat(DnsServers.Select(s => $"nameserver {s}\n")));
+        // 没有 systemd-resolved：临时换掉 /etc/resolv.conf，结束时原样换回。
+        ReplaceResolvConf();
+        _resolvConfReplaced = true;
+    }
+
+    /// <summary>The resolver file; tests point it at a temporary folder.</summary>
+    internal static string ResolvConf = "/etc/resolv.conf";
+
+    /// <summary>The original resolv.conf (a plain file or a link, moved as it is) while Jay's temporary file is in place.</summary>
+    internal static string ResolvConfBackup => ResolvConf + ".jay-backup";
+
+    /// <summary>Marks that there was no resolv.conf before, so restoring means removing Jay's file.</summary>
+    internal static string ResolvConfAbsent => ResolvConf + ".jay-absent";
+
+    private const string ResolvConfHeader = "# Temporary DNS while Jay routes traffic through a room member; restored afterwards\n";
+
+    private static bool PathExists(string path) => File.Exists(path) || Directory.Exists(path) || new FileInfo(path).LinkTarget is not null;
+
+    /// <summary>
+    /// Puts Jay's resolver file in place. The original is renamed, not copied, so it survives a killed guard on disk next to
+    /// the file (root-owned like the folder it is in), and a link managed by NetworkManager or resolvconf is kept as a link:
+    /// Jay never writes into the file it points to. <see cref="RestoreResolvConf"/> renames it back.
+    /// </summary>
+    internal static void ReplaceResolvConf()
+    {
+        RestoreResolvConf();
+        var temp = ResolvConf + ".jay-new";
+        if (PathExists(temp)) File.Delete(temp);
+        using (var stream = new FileStream(temp, new FileStreamOptions
+        {
+            Mode = FileMode.CreateNew,
+            Access = FileAccess.Write,
+            UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.OtherRead,
+        }))
+        {
+            stream.Write(Encoding.UTF8.GetBytes(ResolvConfHeader + string.Concat(DnsServers.Select(s => $"nameserver {s}\n"))));
+            stream.Flush(true);
+        }
+        if (PathExists(ResolvConf)) File.Move(ResolvConf, ResolvConfBackup);
+        else File.WriteAllText(ResolvConfAbsent, "");
+        File.Move(temp, ResolvConf, overwrite: true);
+    }
+
+    /// <summary>
+    /// Puts the original resolv.conf back if Jay's file is in place: at the end of a session, and before every guard and exit
+    /// start in case a guard was killed before it could. Failures are thrown so the guard reports them.
+    /// </summary>
+    internal static void RestoreResolvConf()
+    {
+        if (PathExists(ResolvConfBackup))
+        {
+            File.Move(ResolvConfBackup, ResolvConf, overwrite: true);
+        }
+        else if (File.Exists(ResolvConfAbsent))
+        {
+            // Remove only Jay's own file: something else may have created one since.
+            if (File.Exists(ResolvConf) && new FileInfo(ResolvConf).LinkTarget is null
+                && File.ReadAllText(ResolvConf).StartsWith(ResolvConfHeader, StringComparison.Ordinal))
+                File.Delete(ResolvConf);
+            File.Delete(ResolvConfAbsent);
+        }
+        if (File.Exists(ResolvConf + ".jay-new")) File.Delete(ResolvConf + ".jay-new");
     }
 
     private static bool UsesResolvedStub()
     {
-        try { return File.ReadAllText("/etc/resolv.conf").Contains("127.0.0.53", StringComparison.Ordinal); }
+        try { return File.ReadAllText(ResolvConf).Contains("127.0.0.53", StringComparison.Ordinal); }
         catch (IOException) { return false; }
         catch (UnauthorizedAccessException) { return false; }
     }
@@ -265,10 +324,10 @@ internal sealed class UnixExitNetwork
         {
             if (_resolved && _tun is { } tun) Run("resolvectl", ["revert", tun]);
             _resolved = false;
-            if (_resolvConfBackup is { } backup)
+            if (_resolvConfReplaced)
             {
-                try { File.WriteAllText("/etc/resolv.conf", backup); } catch (IOException) { } catch (UnauthorizedAccessException) { }
-                _resolvConfBackup = null;
+                _resolvConfReplaced = false;
+                RestoreResolvConf();
             }
         }
         else ExitMacDns();
