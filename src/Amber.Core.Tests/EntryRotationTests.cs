@@ -129,6 +129,8 @@ public sealed class EntryRotationTests : IAsyncLifetime
         Assert.Null(error);
         Assert.Equal(Rule, parsed.Rotation!.Rotation);
         Assert.Equal(rotation.Seed, parsed.Rotation.Seed);
+        Assert.NotNull(GateInvite.TryParse(invite.Encode() + " thanks, see you at 8", out _));
+        Assert.NotNull(GateInvite.TryParse(invite.Encode() + "\nJoin tonight", out _));
         var plain = GateInvite.TryParse((invite with { Rotation = null }).Encode(), out _)!;
         Assert.Null(plain.Rotation);
     }

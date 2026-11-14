@@ -124,6 +124,7 @@ public sealed class PrivacyPlusPlusTests : IAsyncLifetime
         var parsed = GateRelayCode.TryParse("节点码：\n" + text.ToLowerInvariant())!;
         Assert.Equal(code.ServerKeyHash, parsed.ServerKeyHash);
         Assert.Equal(code.Secret, parsed.Secret);
+        Assert.NotNull(GateRelayCode.TryParse(text + " on node 2"));
         Assert.DoesNotContain(text[GateRelayCode.Prefix.Length..], code.ToString());
         var tampered = text[..10] + (text[10] == 'Z' ? 'Y' : 'Z') + text[11..];
         Assert.Null(GateRelayCode.TryParse(tampered));
