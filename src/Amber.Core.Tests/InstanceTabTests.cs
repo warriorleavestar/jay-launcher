@@ -53,6 +53,39 @@ public sealed class InstanceTabTests : IDisposable
         Assert.Equal(Path.GetFullPath(dir), Path.GetFullPath(vm.Current!.WorkDir));
     });
 
+    /// <summary>[Play] on a world in the Worlds tab starts in place like the overview: it makes the instance current and asks for a launch.</summary>
+    [Fact]
+    public void JoiningAWorldStartsInPlace() => UiTestThread.Run(() =>
+    {
+        foreach (var id in new[] { "a", "b" })
+        {
+            var dir = Path.Combine(_root, "versions", id);
+            Directory.CreateDirectory(dir);
+            File.WriteAllText(Path.Combine(dir, id + ".json"), $$"""{"id":"{{id}}","mainClass":"Example","libraries":[]}""");
+            File.WriteAllBytes(Path.Combine(dir, id + ".jar"), []);
+        }
+        var service = new LauncherService(new AppSettings
+        {
+            GameDirectory = _root,
+            SavePathForTest = Path.Combine(_root, "settings.json"),
+            PlayerName = "",
+            AutoJavaDownload = false,
+            LastVersion = "a",
+        });
+        var requests = new List<LaunchRequest>();
+        service.LaunchRequested += requests.Add;
+        var vm = new InstanceViewModel(service);
+        vm.SelectedId = "b";
+        var world = new WorldItem(new Amber.Core.Game.WorldInfo("w", Path.Combine(_root, "w"), "w", "", null, null));
+
+        vm.JoinWorldCommand.Execute(world);
+
+        Assert.Equal("b", service.CurrentInstance);
+        var request = Assert.Single(requests);
+        Assert.Equal("b", request.VersionId);
+        Assert.Equal("w", request.JoinWorld);
+    });
+
     [Fact]
     public void EachInstanceRemembersItsLastTab() => UiTestThread.Run(() =>
     {

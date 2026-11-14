@@ -67,11 +67,7 @@ public sealed partial class ModItem(LocalMod mod) : LocalizedObservable
         }
     }
 
-    partial void OnUpdateChanged(ModUpdate? value)
-    {
-        OnPropertyChanged(nameof(UpdateText));
-        OnPropertyChanged(nameof(UpdateShort));
-    }
+    partial void OnUpdateChanged(ModUpdate? value) => OnPropertyChanged(nameof(UpdateText));
 
     /// <summary>Ticked for bulk actions (official design §6.5). Not the same as enabled.</summary>
     [ObservableProperty]
@@ -84,7 +80,6 @@ public sealed partial class ModItem(LocalMod mod) : LocalizedObservable
     public string AuthorsText => string.IsNullOrWhiteSpace(Mod.Authors) ? "" : L.F("instance.mods.by", Mod.Authors);
     /// <summary>Short compatibility mark for the table: ✓, or ⚠ with the problem.</summary>
     public string CompatShort => Compat is null ? "" : Compat.IsProblem ? "⚠" : "✓";
-    public string UpdateShort => Update is null ? "" : "↑";
     public ModFacts Facts => new(Name, Mod.FileName, Mod.ModId, Mod.Authors, Enabled, HasUpdate, HasCompatProblem);
 
     partial void OnCompatChanged(CompatResult? value) => OnPropertyChanged(nameof(CompatShort));
@@ -402,7 +397,8 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
     }
 
     /// <summary>
-    /// 删除实例：弹对话框写明实例名和占用空间，确认后直接删除实例文件夹（不进回收目录，对话框里写明无法撤销，规格 3.9）。
+    /// Deletes the instance: after the dialog (which shows the instance name and size), the instance folder is moved to
+    /// the recycle folder, and the toast can undo it.
     /// </summary>
     [RelayCommand]
     private async Task DeleteVersionAsync()
@@ -689,15 +685,22 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
         _ = LoadJavaChoicesAsync(s.JavaPath);
     }
 
+    /// <summary>Counts Java list loads, so a scan that returns after a newer load does not overwrite its list.</summary>
+    private int _javaLoad;
+
     private async Task LoadJavaChoicesAsync(string? current)
     {
-        // 扫描要一会儿，这期间下拉框不留空。
-        if (JavaChoices.Count == 0)
-        {
-            JavaChoices.Add(new JavaChoice("", null));
-            SelectedJava = JavaChoices[0];
-        }
+        // The scan takes a while. Until it returns, the list holds the automatic entry and this instance's stored path,
+        // and the stored path stays selected, so an edit made meanwhile saves the right Java (not the automatic one
+        // or the previous instance's choice). This part runs while the settings are still being loaded.
+        JavaChoices.Clear();
+        JavaChoices.Add(new JavaChoice("", null));
+        if (current is not null) JavaChoices.Add(new JavaChoice(current, current));
+        SelectedJava = JavaChoices[^1];
+        var load = ++_javaLoad;
         var found = await _service.Java.ScanAsync();
+        // Another instance's settings were loaded meanwhile: its own scan fills the list.
+        if (load != _javaLoad) return;
         var wasLoading = _loadingSettings;
         _loadingSettings = true;
         JavaChoices.Clear();
@@ -741,7 +744,12 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
             // Changed on its own card (and from Discover), never by this form.
             UniversalLoader = old.UniversalLoader,
         };
-        s.Save(_service.Directory, c.Id);
+        try { s.Save(_service.Directory, c.Id); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            SetStatus(StatusMessage.Failure("settings.error.save_failed", e, ErrorText.Of(e)));
+            return;
+        }
         var id = c.Id;
         if (s.Isolate != old.Isolate)
         {
@@ -762,7 +770,6 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
 
     public ObservableCollection<ModItem> Mods { get; } = [];
 
-    [ObservableProperty] public partial string ModSummary { get; set; } = "";
     [ObservableProperty] public partial bool NeedsConnector { get; set; }
     [ObservableProperty] public partial string CompatSummary { get; set; } = "";
 
@@ -785,7 +792,6 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
             Mods.Add(item);
             if (mod.Icon is { } icon) _ = DecodeIconAsync(item, icon);
         }
-        ModSummary = L.P("instance.mods.summary", list.Count, list.Count, list.Count(m => m.Enabled));
         _modsLoadedFor = c;
         RecheckCompat();
     }
@@ -806,7 +812,6 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
         // 只在模组页已经加载完、而且是当前实例的模组时重算（加载中或者刚换实例时列表可能还是上一个实例的）。
         if (_modsLoadedFor is { } loaded && ReferenceEquals(loaded, Current))
         {
-            ModSummary = L.P("instance.mods.summary", Mods.Count, Mods.Count, Mods.Count(m => m.Enabled));
             // 兼容提示是检查时按当时的语言写的，重新检查一遍（只读已经扫描好的信息，很快）。
             RecheckCompat();
         }
@@ -889,7 +894,6 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
     {
         if (item is null || !Trash(item.Mod.Path, () => _ = LoadModsAsync())) return;
         Mods.Remove(item);
-        ModSummary = L.P("instance.mods.summary", Mods.Count, Mods.Count, Mods.Count(m => m.Enabled));
         RecheckCompat();
     }
 
@@ -1004,8 +1008,9 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
     private void JoinWorld(WorldItem? item)
     {
         if (Current is not { } c || item is null) return;
+        // Starts in place, like [Enter] on the overview: progress is in the hero and the playing pill.
+        _service.SetCurrentInstance(c.Id);
         _service.RequestLaunch(new LaunchRequest(c.Id, JoinWorld: item.World.FolderName));
-        NavigateHome?.Invoke();
     }
 
     /// <summary>[Send to a friend] on a world (batch 12): the "Send a file" panel opens with this world filled in.</summary>
@@ -1042,7 +1047,7 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
             SetStatus(StatusMessage.Success("instance.worlds.imported", folder));
             LoadWorlds();
         }
-        catch (Exception e) when (e is IOException or InvalidDataException)
+        catch (Exception e) when (e is IOException or InvalidDataException or UnauthorizedAccessException)
         {
             SetStatus(StatusMessage.Failure("instance.worlds.import_failed", e, ErrorText.Of(e)));
         }
@@ -1277,8 +1282,8 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
     private void JoinServerNow(ServerItem? item)
     {
         if (Current is not { } c || item is null) return;
+        _service.SetCurrentInstance(c.Id);
         _service.RequestLaunch(new LaunchRequest(c.Id, JoinServer: item.Address));
-        NavigateHome?.Invoke();
     }
 
     [RelayCommand]
@@ -1287,23 +1292,11 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
         if (Current is not null) LoadServers();
     }
 
-    /// <summary>主窗口设置：启动请求发出后切回启动页。</summary>
-    public Action? NavigateHome { get; set; }
-
     /// <summary>主窗口设置：右上角【+ 新建实例】。</summary>
     public Action? NavigateToNewInstance { get; set; }
 
     /// <summary>主窗口设置：【在线浏览…】跳到资源页，参数是实例和内容类型。</summary>
     public Action<string, ContentType, string?>? NavigateToContent { get; set; }
-
-    /// <summary>顶部【▶ 启动】：启动当前实例，切回启动页看进度。</summary>
-    [RelayCommand]
-    private void Launch()
-    {
-        if (Current is not { } c) return;
-        _service.RequestLaunch(new LaunchRequest(c.Id));
-        NavigateHome?.Invoke();
-    }
 
     [RelayCommand]
     private void NewInstance() => NavigateToNewInstance?.Invoke();

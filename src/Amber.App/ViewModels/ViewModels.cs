@@ -278,7 +278,7 @@ public sealed partial class MainViewModel : ObservableObject
         L.Changed += () => Dispatcher.UIThread.Post(() => OnPropertyChanged(nameof(VersionText)));
         var log = new LogViewModel();
         var home = new HomeViewModel(service, log);
-        var instance = new InstanceViewModel(service) { NavigateHome = null };
+        var instance = new InstanceViewModel(service);
         instance.AttachHome(home);
         var content = new ContentViewModel(service);
         var multiplayer = new MultiplayerViewModel(service);
@@ -327,7 +327,6 @@ public sealed partial class MainViewModel : ObservableObject
             shell.Navigate("discover");
             await content.ImportLocalPackAsync(path);
         };
-        instance.NavigateHome = () => shell.Navigate("library");
         instance.LiveLogFor = id => log.Runs.LastOrDefault(r => r.Instance == id && r.Store?.Record.Outcome == RunOutcome.Running);
         home.RunStarted += id => Avalonia.Threading.Dispatcher.UIThread.Post(() => instance.OnRunsChanged(id));
         home.RunFinished += id => Avalonia.Threading.Dispatcher.UIThread.Post(() => instance.OnRunsChanged(id));
@@ -845,7 +844,7 @@ public sealed partial class SettingsViewModel : PageViewModel
         var code = LanguageKeys[Math.Clamp(value, 0, LanguageKeys.Length - 1)];
         _service.Settings.Language = code == "system" ? null : code;
         Amber.Core.Localization.L.SetLanguage(_service.Settings.Language);
-        try { _service.Settings.Save(); } catch (IOException) { }
+        try { _service.Settings.Save(); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
     }
 
     protected override void OnFirstActivated() => _ = LoadJavaAsync(false);
@@ -869,7 +868,12 @@ public sealed partial class SettingsViewModel : PageViewModel
             var mode = Amber.Core.Layout.Density.Modes[Math.Clamp(value, 0, 1)];
             if (mode == Amber.Core.Layout.Density.Normalize(_service.Settings.Density)) return;
             _service.Settings.Density = mode;
-            _service.Settings.Save();
+            try { _service.Settings.Save(); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                // Still applied for this session; say that it was not stored.
+                SetStatus(StatusMessage.Failure("settings.error.save_failed", e, ErrorText.Of(e)));
+            }
             Amber.App.Services.DensityService.Apply(mode);
             OnPropertyChanged();
         }
@@ -1276,13 +1280,13 @@ public sealed partial class SettingsViewModel : PageViewModel
         {
             s.Save();
         }
-        catch (IOException e)
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
             SetStatus(StatusMessage.Failure("settings.error.save_failed", e, ErrorText.Of(e)));
             return;
         }
         _service.Reload();
-        if (HasConcurrencyError || HasWindowError || HasJvmArgsError || HasGameArgsError)
+        if (HasConcurrencyError || HasWindowError || HasJvmArgsError || HasGameArgsError || HasBreakerDelayError)
             SetStatus(StatusMessage.Warning("settings.saved_with_errors"));
         else
             SetStatus(StatusMessage.Success(_service.AnyRunning ? "settings.saved_next_launch" : "settings.saved_tick"));
@@ -1438,10 +1442,10 @@ public sealed partial class LogViewModel : PageViewModel
     public void Add(GameLogLine line) => Add(null, line);
 
     /// <summary>加到某次启动的日志里（多开时游戏输出各进各的）；run 为 null 时加到正在看的那次。</summary>
-    public void Add(RunLog? run, GameLogLine line)
+    public void Add(RunLog? run, GameLogLine line, bool chat = false)
     {
         var level = LogLevelParser.Parse(line.Message, line.Level);
-        run?.Store?.Add(line.Time, level, line.Message);
+        run?.Store?.Add(line.Time, level, line.Message, chat: chat);
         Post(run, new LogEntry(line.Time, level.ToString().ToUpperInvariant(), line.Message, level));
     }
 

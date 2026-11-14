@@ -232,6 +232,47 @@ public sealed class ContentViewModelTests
     });
 
     [Fact]
+    public void SearchTimeoutShowsAnErrorInsteadOfSpinningForever() => Run((vm, modrinth, _) =>
+    {
+        // An HTTP timeout surfaces as TaskCanceledException although nobody cancelled the search.
+        modrinth.Failure = new TaskCanceledException("timed out");
+        vm.Activate();
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.False(vm.IsSearching);
+        Assert.True(vm.IsSearchError);
+        Assert.Equal("content.search.failed", vm.StatusInfo?.Key);
+    });
+
+    [Fact]
+    public void ReplacedSearchStaysSilent() => Run((vm, modrinth, _) =>
+    {
+        modrinth.SearchWith = async ct => { await Task.Delay(Timeout.Infinite, ct); return new SearchResult([], 0); };
+        vm.Activate();
+        Assert.True(vm.IsSearching);
+
+        modrinth.SearchWith = null;
+        vm.SearchCommand.ExecuteAsync(null).GetAwaiter().GetResult();
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.True(modrinth.Tokens[0].IsCancellationRequested);
+        Assert.False(vm.IsSearching);
+        Assert.False(vm.IsSearchError);
+        Assert.Single(vm.Results);
+    });
+
+    [Fact]
+    public void FileListTimeoutShowsAnError() => Run((vm, modrinth, _) =>
+    {
+        vm.Activate();
+        modrinth.FilesFailure = new TaskCanceledException("timed out");
+        vm.Selected = vm.Results[0];
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal("content.files.fetch_failed", vm.StatusInfo?.Key);
+    });
+
+    [Fact]
     public void ShowAllVersionsTurnsOffInstanceFilterAndSearchesAgain() => Run((vm, modrinth, _) =>
     {
         vm.Activate();
@@ -414,7 +455,8 @@ public sealed class ContentViewModelTests
         var missingPack = Path.Combine(Path.GetTempPath(), "amber-missing-pack-" + Guid.NewGuid().ToString("N") + ".zip");
 
         Assert.True(vm.IsSearching);
-        vm.ImportLocalPackAsync(missingPack).GetAwaiter().GetResult();
+        // The pack is opened on the thread pool, so pump the UI thread instead of blocking it.
+        Pump(vm.ImportLocalPackAsync(missingPack));
         var status = vm.StatusInfo;
         Assert.Equal("instance.worlds.import_failed", status?.Key);
         Assert.True(Assert.Single(modrinth.Tokens).IsCancellationRequested);
@@ -476,12 +518,64 @@ public sealed class ContentViewModelTests
         }
     }
 
+    [Fact]
+    public void BrokenTargetInstanceDoesNotThrow()
+    {
+        // A version folder whose JSON cannot be read is still listed; picking it must not crash the page.
+        var root = Path.Combine(Path.GetTempPath(), "amber-content-broken-" + Guid.NewGuid().ToString("N"));
+        var bad = Path.Combine(root, "versions", "bad");
+        Directory.CreateDirectory(bad);
+        File.WriteAllText(Path.Combine(bad, "bad.json"), "{ not json");
+        try
+        {
+            UiTestThread.Run(() =>
+            {
+                using var service = new LauncherService(new AppSettings { GameDirectory = root, PlayerName = "" });
+                var provider = new FakeProvider(ContentSource.Modrinth)
+                {
+                    Files = [new ContentFile(ContentSource.Modrinth, "P", "f1", "f", "f.jar", "https://x/f", null, 1, ["1.21.1"], ["fabric"], "release", default, [])],
+                };
+                var vm = new ContentViewModel(service, _ => provider, () => false, ContentType.Mod);
+                vm.Activate();
+                vm.TargetInstance = "bad";
+                vm.TypeIndex = (int)ContentType.Shader;
+                vm.UpdateShaderState();
+                Assert.Null(vm.ShaderState);
+
+                vm.TypeIndex = (int)ContentType.Mod;
+                Dispatcher.UIThread.RunJobs();
+                vm.Selected = vm.Results[0];
+                Dispatcher.UIThread.RunJobs();
+                Assert.NotNull(vm.SelectedFile);
+                vm.InstallCommand.ExecuteAsync(null).GetAwaiter().GetResult();
+                Assert.Equal("content.install.instance_required", vm.StatusInfo?.Key);
+            });
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
     private static void Version(string root, string id, string libraries)
     {
         var dir = Path.Combine(root, "versions", id);
         Directory.CreateDirectory(dir);
         File.WriteAllText(Path.Combine(dir, id + ".json"),
             $$"""{"id":"{{id}}","type":"release","mainClass":"net.minecraft.client.main.Main","libraries":{{libraries}}}""");
+    }
+
+    private static void Pump(Task task)
+    {
+        var until = DateTime.UtcNow.AddSeconds(15);
+        while (!task.IsCompleted && DateTime.UtcNow < until)
+        {
+            Dispatcher.UIThread.RunJobs();
+            Thread.Sleep(1);
+        }
+        Assert.True(task.IsCompleted, "the task did not finish");
+        task.GetAwaiter().GetResult();
+        Dispatcher.UIThread.RunJobs();
     }
 
     private static void Run(Action<ContentViewModel, FakeProvider, FakeProvider> test) => Run(test, hasCurseForge: true);
@@ -514,6 +608,9 @@ public sealed class ContentViewModelTests
         public List<CancellationToken> Tokens { get; } = [];
         public Exception? Failure { get; set; }
         public Task<SearchResult>? PendingSearch { get; set; }
+        public Func<CancellationToken, Task<SearchResult>>? SearchWith { get; set; }
+        public Exception? FilesFailure { get; set; }
+        public IReadOnlyList<ContentFile> Files { get; set; } = [];
         public bool Empty { get; set; }
         public ContentFile? FileById { get; set; }
         public Task<ContentFile>? PendingFile { get; set; }
@@ -523,6 +620,7 @@ public sealed class ContentViewModelTests
         {
             Queries.Add(query);
             Tokens.Add(ct);
+            if (SearchWith is { } search) return search(ct);
             if (PendingSearch is { } pending) return pending;
             if (Failure is { } failure) return Task.FromException<SearchResult>(failure);
             if (Empty) return Task.FromResult(new SearchResult([], 0));
@@ -531,7 +629,7 @@ public sealed class ContentViewModelTests
         }
 
         public Task<IReadOnlyList<ContentFile>> GetFilesAsync(string projectId, string? gameVersion, string? loader, CancellationToken ct = default)
-            => Task.FromResult<IReadOnlyList<ContentFile>>([]);
+            => FilesFailure is { } failure ? Task.FromException<IReadOnlyList<ContentFile>>(failure) : Task.FromResult(Files);
 
         public Task<ContentProject> GetProjectAsync(string projectId, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<ContentFile> GetFileAsync(string projectId, string fileId, CancellationToken ct = default)
