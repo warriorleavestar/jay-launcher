@@ -222,8 +222,22 @@ public static class DirectGatherer
             : L.T("core.mp.gather.noipv6"));
         log(L.T("core.mp.gather.lan") + string.Join(L.T("core.mp.format.listseparator"), list.Where(c => c.Kind == PathKind.Lan).Select(c => c.EndPoint.Address)));
 
+        // Looking for the router's UPnP / NAT-PMP only waits for answers, so it runs while STUN classifies the NAT. The
+        // mapping itself is asked for only after STUN is done: a mapping that appeared between two STUN queries could
+        // change the external port and make a cone NAT look symmetric.
+        var gateway = tryPortMapping ? PortMapping.FindGatewayAsync(log, ct) : null;
         var watch = Stopwatch.StartNew();
-        var stun = await Stun.DetectAsync(socket, stunServers, ct);
+        StunResult? stunResult = null;
+        try
+        {
+            stunResult = await Stun.DetectAsync(socket, stunServers, ct);
+        }
+        finally
+        {
+            // Don't leave the gateway search unobserved when STUN was cancelled or failed.
+            if (stunResult is null && gateway is not null) _ = gateway.ContinueWith(t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted);
+        }
+        var stun = stunResult;
         log(stun.Mapped is { } m
             ? L.F("core.mp.gather.stun_external", watch.ElapsedMilliseconds, stun.Detail, m)
             : L.F("core.mp.gather.stun", watch.ElapsedMilliseconds, stun.Detail));
@@ -234,7 +248,7 @@ public static class DirectGatherer
         PortMappingResult? mapping = null;
         if (tryPortMapping)
         {
-            mapping = await PortMapping.TryMapAsync(port, log, ct);
+            mapping = await PortMapping.MapAsync(await gateway!, port, log, ct);
             if (mapping is not null)
             {
                 list.Add(new Candidate(PathKind.Mapped, mapping.External));

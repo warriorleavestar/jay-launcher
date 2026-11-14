@@ -107,6 +107,20 @@ public sealed class PortMappingRenewalTests
         Assert.False(await result.Renew(default));
     }
 
+    /// <summary>
+    /// Finding the router (which runs alongside STUN) asks for nothing; the mapping is asked for only afterwards, and only
+    /// from a router that was found with a public external address.
+    /// </summary>
+    [Fact]
+    public async Task MappingIsAskedForOnlyFromARouterThatWasFound()
+    {
+        var logs = new List<string>();
+        Assert.Null(await PortMapping.MapAsync(PortMapping.GatewayInfo.None, 40000, logs.Add));
+        // NAT-PMP reports a private external address (the router is behind another NAT): no mapping request is sent.
+        Assert.Null(await PortMapping.MapAsync(new PortMapping.GatewayInfo(IPAddress.Loopback, null, null, IPAddress.Parse("10.0.0.2")), 40000, logs.Add));
+        Assert.Equal(2, logs.Count);
+    }
+
     [Fact]
     public async Task HostStopsOfferingAMappingItCouldNotRenew()
     {
