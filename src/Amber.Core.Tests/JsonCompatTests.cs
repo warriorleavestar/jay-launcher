@@ -186,11 +186,11 @@ public class JsonCompatTests
              "Instances":{"fabric-loader-0.20.1-1.21.1":{"DisplayName":"我的生存服","State":"incomplete"},"1.20.1":{"DisplayName":null,"State":null}}}
             """;
         AssertSame<AppSettings>(json, AppSettingsJson.Options, AppSettingsJson.Generated);
+        // "CheckUpdatesOnStart" was removed (nothing read it): an old file that still has it loads fine.
         var read = JsonSerializer.Deserialize(json, AppJsonContext.Default.AppSettings)!;
         Assert.Equal(["1.21.1 Fabric", "fabric-loader-0.20.1-1.21.1"], read.RecentInstances);
         Assert.True(read.SidebarCollapsed && read.ReduceMotion);
         Assert.Equal("tray", read.AfterLaunch);
-        Assert.False(read.CheckUpdatesOnStart);
         Assert.Equal(3, read.TrashRetentionDays);
         Assert.Equal("我的生存服", read.Instances!["fabric-loader-0.20.1-1.21.1"].DisplayName);
         Assert.Equal("incomplete", read.Instances["fabric-loader-0.20.1-1.21.1"].State);
@@ -200,7 +200,6 @@ public class JsonCompatTests
         Assert.Null(old.RecentInstances);
         Assert.False(old.SidebarCollapsed || old.ReduceMotion);
         Assert.Equal("minimize", old.AfterLaunch);
-        Assert.True(old.CheckUpdatesOnStart);
         Assert.Equal(7, old.TrashRetentionDays);
         Assert.Null(old.Instances);
     }

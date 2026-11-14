@@ -256,9 +256,6 @@ public sealed class AppSettings
     /// <summary>Say so when a file has finished arriving.</summary>
     public bool FilesNotifyDone { get; set; } = true;
 
-    /// <summary>打开启动器时检查一次更新（只在设置导航上显示提示，不自动下载）。</summary>
-    public bool CheckUpdatesOnStart { get; set; } = true;
-
     /// <summary>
     /// The universal loader's default: instances that have not chosen for themselves (and new instances, which start from
     /// this) launch through it. It used to be the one global "bake" switch; the name stays so old settings keep their meaning.
