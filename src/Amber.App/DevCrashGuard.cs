@@ -19,6 +19,9 @@ internal static class DevCrashGuard
 
     public static bool Enabled { get; private set; }
 
+    /// <summary>One of the unattended developer switches is set (before <see cref="InstallIfUnattended"/> runs).</summary>
+    public static bool Unattended => Switches.Any(s => !string.IsNullOrEmpty(Environment.GetEnvironmentVariable(s)));
+
     private static string? _crashFile;
 
     public static void InstallIfUnattended()

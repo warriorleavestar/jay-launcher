@@ -23,6 +23,18 @@ public partial class MainWindow : Window
         InitLazyOverlays();
         Amber.App.Services.ThemeService.AttachMainWindow(this);
         Amber.App.Services.DensityService.Attach(this);
+        // Jay started again on the same data folder: that start ends, and this window comes forward.
+        if (Program.Instance is { } instance)
+        {
+            void Forward() => Dispatcher.UIThread.Post(() =>
+            {
+                if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
+                Show();
+                Activate();
+            });
+            instance.ActivationRequested += Forward;
+            Closed += (_, _) => instance.ActivationRequested -= Forward;
+        }
         AttachShell();
         AttachDrop();
         AttachTips();

@@ -18,7 +18,10 @@ internal static class AppRestart
                 // dotnet Amber.App.dll 这样跑的（开发时）：参数里第一项是 dll，要一起带上；发布版的第一项是程序本身，跳过。
                 var args = Environment.GetCommandLineArgs();
                 var isHost = Path.GetFileNameWithoutExtension(path).Equals("dotnet", StringComparison.OrdinalIgnoreCase);
-                foreach (var arg in isHost ? args : args.Skip(1)) start.ArgumentList.Add(arg);
+                foreach (var arg in SingleInstance.WithoutWaitPid(isHost ? args : args.Skip(1))) start.ArgumentList.Add(arg);
+                // The new Jay waits for this one to close before it takes the data folder.
+                start.ArgumentList.Add(SingleInstance.WaitPidArgument);
+                start.ArgumentList.Add(Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture));
                 Process.Start(start);
             }
         }
