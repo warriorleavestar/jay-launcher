@@ -6,7 +6,7 @@ This program will not transfer any information to other networked systems unless
 
 除非用户本人要求，本程序不会向其他网络系统发送任何信息。具体来说：
 
-- 没有遥测、统计、崩溃上报，也不生成设备识别码。/ No telemetry, analytics or crash reporting, and no device identifiers.
+- 没有遥测、统计、崩溃上报，也没有硬件或厂商的设备 ID。联机会用一把每次安装各自生成、可以重置的设备密钥（你加入的房主和公共网络看得到）；设备指纹是可选的，你打开以前没有。/ No telemetry, analytics or crash reporting, and no hardware-derived or vendor device ID. Multiplayer uses a device key that each install makes for itself and that you can reset (the hosts and public networks you join see it); a device fingerprint is optional and doesn't exist until you turn it on.
 - 只有在你执行对应操作时才会联网 / Network access happens only when you start the matching action:
   - 微软 / Xbox 账号登录（login.microsoftonline.com、Xbox Live、Minecraft 服务）/ Microsoft and Xbox account login.
   - 你添加的第三方皮肤站（authlib-injector）/ Third-party skin servers you add.

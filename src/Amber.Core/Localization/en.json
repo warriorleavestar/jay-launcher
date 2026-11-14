@@ -1096,7 +1096,7 @@
   "settings.java.rescan": "Scan again",
   "settings.language.label": "Language",
   "settings.language.system": "System",
-  "settings.privacy.hint": "Jay has no telemetry, remote configuration, or forced updates, and generates no device IDs. Region is used only to choose the default download source.",
+  "settings.privacy.hint": "Jay has no telemetry, remote configuration, or forced updates, and no hardware or vendor device ID. Multiplayer uses this device's identity, a key made by this install that you can reset. Region is used only to choose the default download source.",
   "settings.privacy.title": "Privacy and network access",
   "settings.save": "Save settings",
   "settings.saved_directory_changed": "Saved and switched to the new game directory",

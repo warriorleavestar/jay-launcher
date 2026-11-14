@@ -47,7 +47,7 @@ Group chat for the room, private messages to one friend, and file transfer, all 
 
 ### 🔒 Private by design
 
-Invites are single-use and expire; leaked codes are useless. Nobody gets in without your approval, and kicking someone rotates the room key. No telemetry, no device ID, no remote switches, and no Jay server in the middle.
+Invites are single-use and expire; leaked codes are useless. Nobody gets in without your approval, and kicking someone rotates the room key. No telemetry, no hardware or vendor device ID, no remote switches, and no Jay server in the middle.
 
 </td>
 <td width="50%" valign="top">
@@ -186,7 +186,7 @@ Built on the open-source [EasyTier](https://github.com/EasyTier/EasyTier) (LGPL-
 
 Jay is built on a simple promise: **it only goes online to do what you asked**, plus one update check a day that you can turn off.
 
-- **No telemetry.** Jay collects no usage data and creates no device ID.
+- **No telemetry.** Jay collects no usage data and has no hardware or vendor device ID. For multiplayer, each install makes its own device key, which the hosts you join see and which you can reset; a device fingerprint is optional and off until you turn it on.
 - **No remote control.** No remote switch or cloud config can change what Jay does.
 - **Updates are up to you.** Once a day Jay asks the official releases for a new version (on for new installs; an upgraded Jay keeps it off until you turn it on) and tells you only when 2 of the 3 trustees signed it. It never downloads or installs anything by itself, and you can turn the check off in Settings › About.
 - **No Jay servers in the middle.** Room codes are generated on your computer. Multiplayer connects only to the relay nodes listed on the Multiplayer page (you can turn the built-in ones off or add your own) and to the players in your room.
