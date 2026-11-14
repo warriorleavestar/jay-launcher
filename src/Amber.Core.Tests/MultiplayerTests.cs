@@ -304,14 +304,20 @@ public class EasyTierExtractTests
         Assert.Throws<PlatformNotSupportedException>(() => EasyTierRelease.For("linux", System.Runtime.InteropServices.Architecture.Wasm));
     }
 
+    [Fact]
+    public void ThereIsNo32BitWindowsPackage()
+    {
+        // Every Jay release is 64-bit, so a 32-bit Windows package could never be chosen.
+        Assert.Throws<PlatformNotSupportedException>(() => EasyTierRelease.For("windows", System.Runtime.InteropServices.Architecture.X86));
+        Assert.DoesNotContain(EasyTierRelease.All, a => a.Platform == "windows-i686");
+    }
+
     [Theory]
-    [InlineData(System.Runtime.InteropServices.Architecture.X86, "WinDivert32.sys")]
     [InlineData(System.Runtime.InteropServices.Architecture.X64, "WinDivert64.sys")]
     [InlineData(System.Runtime.InteropServices.Architecture.Arm64, "WinDivert64.sys")]
     public void WindowsPackagesKeepTheirOwnWinDivertDriver(System.Runtime.InteropServices.Architecture arch, string driver)
     {
-        // The 32-bit package ships WinDivert32.sys; keeping only WinDivert64.sys used to drop it, so full LAN on
-        // 32-bit Windows never counted as installed.
+        // Full LAN counts as installed only with the package's own WinDivert driver extracted next to easytier-core.
         var asset = EasyTierRelease.For("windows", arch);
         Assert.Equal(driver, asset.DriverName);
         var root = Path.Combine(Path.GetTempPath(), "amber-et-" + Guid.NewGuid().ToString("N"));

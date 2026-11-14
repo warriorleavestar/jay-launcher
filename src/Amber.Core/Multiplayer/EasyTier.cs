@@ -45,11 +45,10 @@ public static class EasyTierRelease
         public string Url => BaseUrl + Name;
 
         /// <summary>
-        /// The WinDivert driver the Windows package ships (full-LAN broadcast relay): WinDivert32.sys in the
-        /// 32-bit package, WinDivert64.sys in the x64 and arm64 ones (arm64's is upstream's placeholder). Null elsewhere.
+        /// The WinDivert driver the Windows package ships (full-LAN broadcast relay): WinDivert64.sys in the x64 and arm64
+        /// ones (arm64's is upstream's placeholder). Null elsewhere.
         /// </summary>
-        public string? DriverName => Platform == "windows-i686" ? "WinDivert32.sys"
-            : Platform.StartsWith("windows-", StringComparison.Ordinal) ? "WinDivert64.sys" : null;
+        public string? DriverName => Platform.StartsWith("windows-", StringComparison.Ordinal) ? "WinDivert64.sys" : null;
     }
 
     /// <summary>The package for this system. Hashes and sizes come from SHA256SUMS.txt and SIZES.txt of the ReleaseTag release.</summary>
@@ -59,7 +58,6 @@ public static class EasyTierRelease
     {
         ("windows", Architecture.X64) => A("windows-x86_64", "cdb113651de1f37244f16d405447806a76cd9012780a4e519ed7eba062306888", 11_621_165, true),
         ("windows", Architecture.Arm64) => A("windows-arm64", "a5ce68a4a6f0e458e10ff3dbabadedacc6ddcf621bd5c4338efe613cabfceefa", 10_643_891, true),
-        ("windows", Architecture.X86) => A("windows-i686", "32e8d1c6b06ba53614c5581295d317f1bcf1d044398631ab486c616e2e9cfe7b", 11_223_763, true),
         ("macos", Architecture.X64) => A("macos-x86_64", "74e059185ba6cc32e3464cad66eab0ff8c86c5cbbb12b51ffaa41dda38a3724b", 12_104_239),
         ("macos", Architecture.Arm64) => A("macos-aarch64", "57063f611183f30804f3104498859166845eaa7b9e93a8a769cedb9eca66bc79", 10_738_210),
         ("linux", Architecture.X64) => A("linux-x86_64", "6ad63ed07f270f2942387d1257ef0db45a31b2e525c73f8aa981c7c94fbcb300", 13_500_986),
@@ -67,10 +65,13 @@ public static class EasyTierRelease
         _ => throw new PlatformNotSupportedException(L.F("core.mp.component.unsupportedplatform", os, arch)),
     };
 
-    /// <summary>Every package of this build, one per supported system.</summary>
+    /// <summary>
+    /// Every package of this build, one per supported system. No 32-bit Windows: every Jay release is 64-bit, so its
+    /// package could never be chosen.
+    /// </summary>
     public static IReadOnlyList<Asset> All =>
     [
-        For("windows", Architecture.X64), For("windows", Architecture.Arm64), For("windows", Architecture.X86),
+        For("windows", Architecture.X64), For("windows", Architecture.Arm64),
         For("macos", Architecture.X64), For("macos", Architecture.Arm64), For("linux", Architecture.X64), For("linux", Architecture.Arm64),
     ];
 

@@ -34,8 +34,9 @@ public sealed class EasyTierSignatureTests
     public void EmbeddedListIsTheReleaseListAndCoversEveryPinnedPackage()
     {
         var listed = ReleaseSignature.ParseSums(Encoding.UTF8.GetString(EmbeddedSums()));
-        Assert.Equal(EasyTierRelease.All.Count, listed.Count);
         foreach (var asset in EasyTierRelease.All) Assert.Equal(asset.Sha256, listed[asset.Name]);
+        // The signed list may still carry the 32-bit Windows package, which no Jay release can use; nothing else may be extra.
+        Assert.All(listed.Keys, name => Assert.True(EasyTierRelease.All.Any(a => a.Name == name) || name.StartsWith("easytier-windows-i686-", StringComparison.Ordinal), name));
         Assert.StartsWith(EasyTierRelease.Commit, EasyTierRelease.FullCommit, StringComparison.Ordinal);
         Assert.Equal(40, EasyTierRelease.FullCommit.Length);
     }
