@@ -50,6 +50,13 @@ internal static class InstanceSettingsTrust
             : Path.Combine(SpecialFolders.ApplicationData(), "Amber"),
         "instance-settings-trust.json");
 
+    /// <summary>Jay's data folder, which holds the record (and nothing the game can write).</summary>
+    internal static string DataFolder => Path.GetDirectoryName(StorePath)!;
+
+    /// <summary>A short name for a folder, the same however its path is written (see <see cref="Key"/>).</summary>
+    internal static string FolderKey(string folder) =>
+        Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(Key(folder))))[..32];
+
     /// <summary>The hash of the fields that reach outside the sandbox, or null when all of them are empty.</summary>
     internal static string? Fingerprint(InstanceSettings s)
     {
@@ -128,8 +135,11 @@ internal static class InstanceSettingsTrust
         var changed = AdoptIfNew(dir, store);
         if (Fingerprint(settings) is { } print)
         {
-            changed |= NoteUse(store, Key(dir.Root), print);
+            // Add first: it may trim, and a trim sets what this folder uses from the files as they are now, before
+            // the save. Noting the new values after it keeps them on that list, so a later trim keeps them while the
+            // folder is away.
             changed |= Add(store, print);
+            changed |= NoteUse(store, Key(dir.Root), print);
         }
         return changed;
     }, QuickWait, then: store => save?.Invoke(store.Trusted.Contains));
@@ -426,7 +436,7 @@ internal static class InstanceSettingsTrust
     /// process has open, even one opened with FileShare.Delete, so a lock-free <see cref="Read"/> that is reading the
     /// record makes the move fail for a moment: try again for a short while, then give up and remove the temp file.
     /// </summary>
-    private static void MoveOver(string temp, string path)
+    internal static void MoveOver(string temp, string path)
     {
         var deadline = Stopwatch.GetTimestamp() + Stopwatch.Frequency;
         while (true)

@@ -454,6 +454,124 @@ public sealed class InstanceSettingsTrustTests : IDisposable
         Assert.True(next.HasUnconfirmedValues);
     }
 
+    [Fact]
+    public void ANewValueSurvivesATrimAndTheFolderGoingAway()
+    {
+        UsePrivateStore();
+        InstanceSettingsTrust.MaxTrusted = 2;
+        var other = _game + "-other";
+        try
+        {
+            new InstanceSettings { JvmArgs = "-Dv1=" + _marker }.Save(Dir, "a");
+            new InstanceSettings { JvmArgs = "-Db=" + _marker }.Save(Dir, "b");
+            // Over the limit: this save trims while the file still holds a's old value.
+            new InstanceSettings { JvmArgs = "-Dv3=" + _marker }.Save(Dir, "a");
+            // The folder goes away (an unplugged drive) and a save elsewhere trims again.
+            Directory.Move(_game, _game + "-away");
+            try
+            {
+                new InstanceSettings { JvmArgs = "-Dother=" + _marker }.Save(new GameDirectory(other), "o");
+            }
+            finally
+            {
+                Directory.Move(_game + "-away", _game);
+            }
+            var back = InstanceSettings.Load(Dir, "a");
+            Assert.False(back.DroppedUnknownValues);
+            Assert.Equal("-Dv3=" + _marker, back.JvmArgs);
+        }
+        finally
+        {
+            try { Directory.Delete(other, true); } catch (IOException) { }
+        }
+    }
+
+    [Fact]
+    public void CopiesKeptAsideGoToJaysDataFolderNotThroughLinksInTheInstanceFolder()
+    {
+        if (OperatingSystem.IsWindows()) return; // links there need rights a test run may not have
+        var store = UsePrivateStore();
+        var outside = _game + "-outside";
+        Directory.CreateDirectory(outside);
+        try
+        {
+            var sentinel = Path.Combine(outside, "sentinel.txt");
+            File.WriteAllText(sentinel, "sentinel");
+            new InstanceSettings { MaxMemoryMb = 2048 }.Save(Dir, "a");
+            var folder = Path.GetDirectoryName(FileOf("a"))!;
+            // Settings Jay did not save, and links where a copy might be written: a dangling one, and one to a file
+            // outside, behind names that are already taken.
+            WriteRaw("a", $$"""{"PreLaunchCommand":"echo {{_marker}}"}""");
+            var old = InstanceSettings.FileName + ".unconfirmed";
+            File.CreateSymbolicLink(Path.Combine(folder, old), Path.Combine(outside, "dangling"));
+            for (var n = 2; n <= 4; n++) File.WriteAllText(Path.Combine(folder, old + "." + n), "taken " + n);
+            File.CreateSymbolicLink(Path.Combine(folder, old + ".5"), sentinel);
+            File.CreateSymbolicLink(Path.Combine(folder, "1.json"), sentinel);
+            new InstanceSettings { MaxMemoryMb = 4096 }.Save(Dir, "a");
+            Assert.Equal("sentinel", File.ReadAllText(sentinel));
+            Assert.False(File.Exists(Path.Combine(outside, "dangling")));
+            var copy = Assert.Single(InstanceSettings.UnconfirmedCopies(Dir, "a"));
+            Assert.StartsWith(Path.GetFullPath(Path.GetDirectoryName(store)!), Path.GetFullPath(copy));
+            Assert.Contains("echo " + _marker, File.ReadAllText(copy));
+            Assert.Null(InstanceSettings.Load(Dir, "a").PreLaunchCommand);
+        }
+        finally
+        {
+            Directory.Delete(outside, true);
+        }
+    }
+
+    [Theory]
+    [InlineData("symbolic")]
+    [InlineData("hard")]
+    [InlineData("record")]
+    public void ASaveReplacesALinkedSettingsFileInsteadOfWritingThroughIt(string kind)
+    {
+        if (OperatingSystem.IsWindows()) return; // links there need rights a test run may not have
+        var store = UsePrivateStore();
+        var outside = _game + "-outside";
+        Directory.CreateDirectory(outside);
+        try
+        {
+            new InstanceSettings { MaxMemoryMb = 2048 }.Save(Dir, "a");
+            var sentinel = Path.Combine(outside, "sentinel.txt");
+            File.WriteAllText(sentinel, "sentinel");
+            File.Delete(FileOf("a"));
+            var target = kind == "record" ? store : sentinel;
+            var before = File.ReadAllText(target);
+            if (kind == "hard") Assert.Equal(0, HardLink(sentinel, FileOf("a")));
+            else File.CreateSymbolicLink(FileOf("a"), target);
+
+            new InstanceSettings { MaxMemoryMb = 4096, JvmArgs = "-Dx=" + _marker }.Save(Dir, "a");
+
+            if (kind == "record")
+            {
+                // The record changed only as Jay's own write changes it: it is still the record, now listing the new values.
+                var record = File.ReadAllText(store);
+                Assert.Contains("\"roots\"", record);
+                Assert.DoesNotContain("MaxMemoryMb", record);
+            }
+            else
+            {
+                Assert.Equal(before, File.ReadAllText(target));
+            }
+            Assert.Null(new FileInfo(FileOf("a")).LinkTarget);
+            var loaded = InstanceSettings.Load(Dir, "a");
+            Assert.Equal("-Dx=" + _marker, loaded.JvmArgs);
+            Assert.Equal(4096, loaded.MaxMemoryMb);
+            // A link holds nothing of the player's: no copy of what it pointed at.
+            if (kind != "hard") Assert.Empty(InstanceSettings.UnconfirmedCopies(Dir, "a"));
+            Assert.Empty(Directory.EnumerateFiles(Path.GetDirectoryName(FileOf("a"))!, "*.tmp", SearchOption.AllDirectories));
+        }
+        finally
+        {
+            Directory.Delete(outside, true);
+        }
+    }
+
+    [System.Runtime.InteropServices.DllImport("libc", EntryPoint = "link", SetLastError = true)]
+    private static extern int HardLink(string existing, string link);
+
     private string VersionWith(string id, string mainClass, bool legacy = false, string? logArg = null)
     {
         Directory.CreateDirectory(Path.Combine(_game, "versions", id));

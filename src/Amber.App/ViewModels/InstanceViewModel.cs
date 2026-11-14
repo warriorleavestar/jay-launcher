@@ -8,6 +8,7 @@ using Amber.Core.Game;
 using Amber.Core.Install;
 using Amber.Core.Launch;
 using Amber.Core.Localization;
+using Avalonia.Controls.Notifications;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -685,6 +686,37 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
         PostExit = s.PostExitCommand ?? "";
         JoinServer = s.JoinServer ?? "";
         _ = LoadJavaChoicesAsync(s.JavaPath);
+        ShowLeftOutSettings(s, Current!.Id);
+    }
+
+    /// <summary>The instances whose kept copies the player has already been told about this session.</summary>
+    private readonly HashSet<string> _toldAboutKeptCopies = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Says when Load left out commands, the Java path or arguments (see <see cref="InstanceSettings.DropReason"/>),
+    /// and where the copies of settings Jay kept aside are. Nothing is restored from a copy with one click: the player
+    /// opens it and enters again what they recognise, so values a game wrote are never taken in unseen.
+    /// </summary>
+    private void ShowLeftOutSettings(InstanceSettings s, string id)
+    {
+        switch (s.DropReason)
+        {
+            case InstanceSettingsDrop.NotSavedByJay:
+                SetStatus(StatusMessage.Warning("instance.settings.dropped_not_saved"));
+                break;
+            case InstanceSettingsDrop.RecordUnavailable:
+                SetStatus(StatusMessage.Warning("instance.settings.dropped_unchecked"));
+                Toasts.WithAction(L.T("instance.settings.dropped_unchecked"), L.T("instance.settings.retry"), () =>
+                {
+                    if (Current?.Id == id) LoadSettings();
+                }, NotificationType.Warning);
+                break;
+        }
+        if (s.HasUnconfirmedValues && _toldAboutKeptCopies.Add(id))
+        {
+            var folder = InstanceSettings.UnconfirmedFolder(_service.Directory, id);
+            Toasts.WithAction(L.F("instance.settings.kept_copies", id), L.T("instance.settings.open_kept"), () => OpenPath(folder), NotificationType.Warning);
+        }
     }
 
     private async Task LoadJavaChoicesAsync(string? current)
@@ -737,7 +769,17 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
             PostExitCommand = NullIfBlank(PostExit),
             JoinServer = NullIfBlank(JoinServer),
         };
-        s.Save(_service.Directory, c.Id);
+        try
+        {
+            s.Save(_service.Directory, c.Id);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            // Another Jay window holds the record, or a file can't be written: the file stays as it was and the page
+            // keeps what the player entered, so the next change (or leaving a field) saves it again.
+            SetStatus(StatusMessage.Failure("instance.settings.save_failed", e, c.Id, ErrorText.Of(e)));
+            return;
+        }
         var id = c.Id;
         if (s.Isolate != old.Isolate)
         {
