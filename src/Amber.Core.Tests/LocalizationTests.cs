@@ -225,11 +225,17 @@ public partial class LocalizationTests
     /// <summary>占位符的完整写法（包括 :F1 这类格式），译文要和原文一模一样。</summary>
     private static HashSet<string> Placeholders(string text) => Placeholder().Matches(text).Select(m => m.Value).ToHashSet();
 
-    /// <summary>界面、Core 和开发用 CLI 的所有代码（XAML 和 C#），不含 bin / obj。</summary>
+    /// <summary>Other projects whose C# code calls L.T / L.F / L.P.</summary>
+    private static readonly string[] OtherProjects = ["Amber.Mobile", "Amber.Android", "Amber.iOS", "Amber.NetworkServer", "Amber.Server"];
+
+    /// <summary>All code that looks up keys: the desktop UI (XAML and C#), Core, the developer CLI and <see cref="OtherProjects"/>, without bin / obj.</summary>
     private static IEnumerable<string> CodeFiles() =>
         UiFiles()
             .Concat(Directory.EnumerateFiles(Path.Combine(Src, "Amber.Core"), "*.cs", SearchOption.AllDirectories))
             .Concat(Directory.EnumerateFiles(Path.Combine(Src, "Amber.Cli"), "*.cs", SearchOption.AllDirectories))
+            // The mobile apps and the server projects look up keys from the same tables.
+            .Concat(OtherProjects.Select(p => Path.Combine(Src, p)).Where(Directory.Exists)
+                .SelectMany(d => Directory.EnumerateFiles(d, "*.cs", SearchOption.AllDirectories)))
             .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}") && !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}"));
 
     /// <summary>单复数变体（key.one / key.other）：原文表里只有 key，译文可以多出这两种。</summary>
