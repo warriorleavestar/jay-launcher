@@ -918,7 +918,9 @@ public sealed class ChatHub : IAsyncDisposable
         }
     }
 
-    /// <summary>端到端转交：只发给指纹是 to 的在线成员（可能有好几条连接），发方由成员表盖。收方队列满了就丢（传文件那边有确认和重发）。</summary>
+    /// <summary>端到端转交：只发给指纹是 to 的在线成员（可能有好几条连接），发方由成员表盖。收方队列满了就丢。
+    /// There is no resending: the file transfer keeps few enough chunks in flight per receiver that the queue does not fill
+    /// (<see cref="PrivateMessenger.Window"/>); a lost chunk ends the transfer, and sending again resumes it.</summary>
     private void Forward(MemberEntry from, string to, string blob)
     {
         byte[]? frame = null;

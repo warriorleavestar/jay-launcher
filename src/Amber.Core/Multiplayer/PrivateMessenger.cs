@@ -51,7 +51,8 @@ public interface IPrivateLink
 
 /// <summary>
 /// 房间成员之间的私聊和传文件，端到端加密（<see cref="PrivateSeal"/>），房主只按指纹转交。
-/// 传文件：发方先发“要发这个文件”（名字、大小、SHA-256），收方点接收后发方按 3 KB 一块发，最多 16 块没确认；
+/// 传文件：发方先发“要发这个文件”（名字、大小、SHA-256），收方点接收后发方按 3 KB 一块发，最多 16 块没确认
+/// (counted over all transfers to the same person; there is no resending, see <see cref="PeerWindow"/>)；
 /// 收方每收到一块回确认，写进临时文件，收完核对 SHA-256 后改成正式文件名。中途断开、被拒、被取消都会清掉临时文件。
 /// </summary>
 public sealed partial class PrivateMessenger : IAsyncDisposable
@@ -93,6 +94,8 @@ public sealed partial class PrivateMessenger : IAsyncDisposable
         public readonly TaskCompletionSource<bool> Answer = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public readonly SemaphoreSlim Credits = new(Window, int.MaxValue);
         public long Acked;
+        /// <summary>Places in the receiver's shared window (<see cref="PeerWindow"/>) this transfer holds: chunks sent, not acked yet.</summary>
+        public int PeerHeld;
         /// <summary>对方已经有的块数（断点续传：上次没收完的部分），接收时对方告诉我们。</summary>
         public long From;
         public volatile bool Cancelled;
@@ -117,6 +120,14 @@ public sealed partial class PrivateMessenger : IAsyncDisposable
     }
 
     private readonly ConcurrentDictionary<string, Outgoing> _outgoing = new();
+    /// <summary>
+    /// Unacked chunks to one receiver across all transfers to them. There is no resending: the host passes frames on
+    /// through a small queue per receiver and drops them when it is full, so all transfers to one person together keep
+    /// at most <see cref="Window"/> chunks in flight, well below that queue, and other frames still fit.
+    /// </summary>
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> _peerWindow = new();
+
+    private SemaphoreSlim PeerWindow(string to) => _peerWindow.GetOrAdd(to, _ => new SemaphoreSlim(Window, int.MaxValue));
     private readonly ConcurrentDictionary<string, Incoming> _incoming = new();
     private readonly SemaphoreSlim _incomingGate = new(1, 1);
     /// <summary>收到的帧排队一个一个处理（文件块要按顺序写）。</summary>
@@ -294,6 +305,12 @@ public sealed partial class PrivateMessenger : IAsyncDisposable
                 var read = await file.ReadAtLeastAsync(buffer, buffer.Length, throwOnEndOfStream: false, linked.Token);
                 if (read == 0) break;
                 if (!await job.Credits.WaitAsync(AckTimeout, linked.Token)) return Fail(job, L.T("core.mp.private.stalled"), FileEnd.Stalled);
+                if (!await PeerWindow(to).WaitAsync(AckTimeout, linked.Token))
+                {
+                    job.Credits.Release();
+                    return Fail(job, L.T("core.mp.private.stalled"), FileEnd.Stalled);
+                }
+                Interlocked.Increment(ref job.PeerHeld);
                 if (job.Cancelled) return Fail(job, L.T("core.mp.private.cancelled"), FileEnd.Cancelled);
                 if (!await SendAsync(to, new JsonObject { ["t"] = "chunk", ["id"] = job.Id, ["i"] = index, ["d"] = Convert.ToBase64String(buffer, 0, read) }, linked.Token))
                     return Fail(job, L.T("core.mp.private.offline"), FileEnd.Stalled);
@@ -324,7 +341,21 @@ public sealed partial class PrivateMessenger : IAsyncDisposable
         finally
         {
             _outgoing.TryRemove(job.Id, out _);
+            // Chunks that were never acked give their places in the receiver's window back.
+            if (Interlocked.Exchange(ref job.PeerHeld, 0) is var held and > 0) PeerWindow(to).Release(held);
         }
+    }
+
+    /// <summary>One ack: gives one of this transfer's places in the receiver's window back.</summary>
+    private void ReleasePeerPlace(Outgoing job)
+    {
+        int held;
+        do
+        {
+            held = Volatile.Read(ref job.PeerHeld);
+            if (held <= 0) return;
+        } while (Interlocked.CompareExchange(ref job.PeerHeld, held - 1, held) != held);
+        PeerWindow(job.To).Release();
     }
 
     private bool Fail(Outgoing job, string error, FileEnd end)
@@ -550,6 +581,7 @@ public sealed partial class PrivateMessenger : IAsyncDisposable
                 case "ack" when id is not null && _outgoing.TryGetValue(id, out var acked) && acked.To == frame.FromFingerprint:
                     var done = Interlocked.Increment(ref acked.Acked);
                     acked.Credits.Release();
+                    ReleasePeerPlace(acked);
                     Report(acked, done * ChunkSize);
                     break;
                 case "cancel" when id is not null:

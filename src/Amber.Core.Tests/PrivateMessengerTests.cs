@@ -113,6 +113,44 @@ public sealed class PrivateMessengerTests : IDisposable
         lock (got) Assert.Equal(["old news", "later", "a bit out of order"], got);
     }
 
+    /// <summary>
+    /// The host's queue towards one person is small and drops frames when full, and nothing is resent: two files to the same
+    /// person together keep no more than one window of chunks in flight.
+    /// </summary>
+    [Fact]
+    public async Task TransfersToOnePersonShareOneWindow()
+    {
+        var inFlight = 0;
+        var most = 0;
+        var all = new Dictionary<string, RoutedLink>();
+        foreach (var (key, name) in new[] { (_alice, "Alice"), (_bob, "Bob") }) all[Fp(key)] = new RoutedLink(Fp(key), key.PublicKey, name, all);
+        var keys = new Dictionary<string, byte[]> { [Fp(_alice)] = _alice.PublicKey, [Fp(_bob)] = _bob.PublicKey };
+        // Watch what goes over the link: chunks towards Bob, acks back to Alice.
+        all[Fp(_bob)].PrivateReceived += frame =>
+        {
+            if (System.Text.Json.Nodes.JsonNode.Parse(PrivateSeal.Open(_bob, frame.FromPublicKey, frame.Sealed)!)?["t"]?.GetValue<string>() == "chunk")
+                Volatile.Write(ref most, Math.Max(Volatile.Read(ref most), Interlocked.Increment(ref inFlight)));
+        };
+        all[Fp(_alice)].PrivateReceived += frame =>
+        {
+            if (System.Text.Json.Nodes.JsonNode.Parse(PrivateSeal.Open(_alice, frame.FromPublicKey, frame.Sealed)!)?["t"]?.GetValue<string>() == "ack")
+                Interlocked.Decrement(ref inFlight);
+        };
+        await using var alice = new PrivateMessenger(all[Fp(_alice)], _alice, f => keys.GetValueOrDefault(f), Path.Combine(_dir, "alice"));
+        await using var bob = new PrivateMessenger(all[Fp(_bob)], _bob, f => keys.GetValueOrDefault(f), Path.Combine(_dir, "bob"));
+        bob.FileOffered += o => _ = Task.Run(() => bob.AcceptAsync(o.Id));
+        Directory.CreateDirectory(_dir);
+        var files = Enumerable.Range(0, 2).Select(i =>
+        {
+            var path = Path.Combine(_dir, $"big-{i}.bin");
+            File.WriteAllBytes(path, RandomNumberGenerator.GetBytes(PrivateMessenger.ChunkSize * 200));
+            return path;
+        }).ToList();
+        var sends = files.Select(f => alice.SendFileAsync(Fp(_bob), f)).ToList();
+        Assert.All(await Task.WhenAll(sends).WaitAsync(TimeSpan.FromSeconds(60)), Assert.True);
+        Assert.InRange(Volatile.Read(ref most), 1, PrivateMessenger.Window);
+    }
+
     private static async Task<bool> WaitUntil(Func<bool> condition)
     {
         for (var i = 0; i < 100 && !condition(); i++) await Task.Delay(50);
