@@ -52,16 +52,34 @@ public static class UnixElevatedGuardHost
             }
         }
         catch (Exception e) when (e is IOException or SocketException or UnauthorizedAccessException or ArgumentException) { return 3; }
-        using var session = new GuardSession(socket, corePath);
+        var session = new GuardSession(socket, corePath);
         // A signal (logout, kill, Ctrl+C in a terminal) must still take down the core, routes and firewall rules:
-        // stop the session and let the using block clean up instead of letting the runtime end the process.
-        var signals = new List<PosixSignalRegistration>();
+        // stop the session and clean up instead of letting the runtime end the process. The handlers stay in place
+        // until the clean-up is over, so a second signal during it is absorbed too.
+        var signals = new List<IDisposable>();
         if (requireRoot)
             foreach (var signal in new[] { PosixSignal.SIGTERM, PosixSignal.SIGINT, PosixSignal.SIGHUP, PosixSignal.SIGQUIT })
                 signals.Add(PosixSignalRegistration.Create(signal, ctx => { ctx.Cancel = true; session.RequestStop(); }));
         StopHookForTest?.Invoke(session.RequestStop);
-        try { return session.Run(); }
-        finally { foreach (var r in signals) r.Dispose(); }
+        return RunThenCleanUp(session.Run, session, signals);
+    }
+
+    /// <summary>
+    /// Runs <paramref name="run"/>, then disposes <paramref name="session"/> (stopping the core, restoring routes, DNS and
+    /// firewall), and only then <paramref name="signals"/>: a signal that arrives while the session cleans up still finds
+    /// a handler and cannot cut the clean-up short.
+    /// </summary>
+    internal static int RunThenCleanUp(Func<int> run, IDisposable session, IReadOnlyList<IDisposable> signals)
+    {
+        try
+        {
+            try { return run(); }
+            finally { session.Dispose(); }
+        }
+        finally
+        {
+            foreach (var r in signals) r.Dispose();
+        }
     }
 
     private sealed class GuardSession(Socket socket, string corePath) : IDisposable
@@ -74,7 +92,12 @@ public static class UnixElevatedGuardHost
         private readonly ManualResetEventSlim _coreExited = new(false);
         private readonly ManualResetEventSlim _stop = new(false);
 
-        public void RequestStop() => _stop.Set();
+        /// <summary>Safe to call any number of times, from a signal handler too, also once the session is disposed.</summary>
+        public void RequestStop()
+        {
+            try { _stop.Set(); }
+            catch (ObjectDisposedException) { }
+        }
 
         public int Run()
         {

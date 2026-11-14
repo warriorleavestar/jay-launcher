@@ -251,9 +251,12 @@ public sealed class UnixFullLanTests
             var pid = int.Parse(guard.RecentOutput.First(l => l.StartsWith("pid=", StringComparison.Ordinal))[4..]);
             Assert.True(SpinWait.SpinUntil(() => stop is not null, 5000));
             stop!();
+            stop();
             Assert.True(host!.Join(TimeSpan.FromSeconds(10)));
             Assert.Equal(0, result);
             Assert.True(SpinWait.SpinUntil(() => !IsRunning(pid), 5000));
+            // Another stop request after the session has ended (a late signal) is harmless.
+            stop();
         }
         finally
         {
@@ -262,6 +265,38 @@ public sealed class UnixFullLanTests
             UnixElevatedGuard.AcceptAnyUserForTest = false;
             File.Delete(core);
         }
+    }
+
+    private sealed class Step(List<string> log, string name, Action? onDispose = null) : IDisposable
+    {
+        public void Dispose()
+        {
+            onDispose?.Invoke();
+            log.Add(name);
+        }
+    }
+
+    /// <summary>
+    /// The guard's signal handlers outlive the session's clean-up (stopping the core, restoring routes and firewall), so a
+    /// second signal during the clean-up cannot end the process half way; also when the session fails.
+    /// </summary>
+    [Fact]
+    public void SignalHandlersStayUntilTheCleanUpIsOver()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var log = new List<string>();
+        var signalsHeld = 2;
+        var session = new Step(log, "session", () => log.Add(signalsHeld == 2 ? "cleanup with handlers" : "cleanup without handlers"));
+        IDisposable[] signals = [new Step(log, "signal", () => signalsHeld--), new Step(log, "signal", () => signalsHeld--)];
+        Assert.Equal(0, UnixElevatedGuardHost.RunThenCleanUp(() => 0, session, signals));
+        Assert.Equal(["cleanup with handlers", "session", "signal", "signal"], log);
+
+        log.Clear();
+        signalsHeld = 2;
+        session = new Step(log, "session", () => log.Add(signalsHeld == 2 ? "cleanup with handlers" : "cleanup without handlers"));
+        signals = [new Step(log, "signal", () => signalsHeld--), new Step(log, "signal", () => signalsHeld--)];
+        Assert.Throws<InvalidOperationException>(() => UnixElevatedGuardHost.RunThenCleanUp(() => throw new InvalidOperationException(), session, signals));
+        Assert.Equal(["cleanup with handlers", "session", "signal", "signal"], log);
     }
 
     private static bool IsRunning(int pid)
