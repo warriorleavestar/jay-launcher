@@ -1,5 +1,5 @@
 <#
-Attach the universal loader package zip to Jay's GitHub release that Jay downloads it from.
+Attach the universal loader package zip to the loader repository's GitHub release that Jay downloads it from.
 Jay only accepts the zip pinned in build/pins.json (id jay-loader: asset name, size, SHA-256), so this script
 first checks the zip against that pin and refuses anything else. See docs/universal-loader-release.md.
 

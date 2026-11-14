@@ -59,6 +59,9 @@ public static partial class ErrorReport
         text = Jwt().Replace(text, "<redacted-token>");
         text = Bearer().Replace(text, "Bearer <redacted>");
         text = Email().Replace(text, "<email>");
+        // The account name also appears on its own: environment dumps in hs_err files and the JVM's user.name property.
+        text = UserVariable().Replace(text, "$1<user>");
+        text = UserProperty().Replace(text, "$1<user>");
         if (!string.IsNullOrEmpty(homeDir) && homeDir.Length > 3)
         {
             text = text.Replace(homeDir, "~", StringComparison.OrdinalIgnoreCase);
@@ -74,6 +77,12 @@ public static partial class ErrorReport
 
     [GeneratedRegex(@"(--(?:accessToken|session|uuid|xuid|clientId|userProperties))\s+(?:""[^""]*""|\S+)", RegexOptions.IgnoreCase)]
     private static partial Regex ArgSecret();
+
+    [GeneratedRegex(@"(?im)^([ \t]*(?:USERNAME|USER|LOGNAME)=)[^\r\n]*")]
+    private static partial Regex UserVariable();
+
+    [GeneratedRegex(@"(?i)(-Duser\.name=)\S+")]
+    private static partial Regex UserProperty();
 
     [GeneratedRegex(@"token:[A-Za-z0-9._\-]{8,}(?::[0-9a-fA-F\-]{8,})?")]
     private static partial Regex SessionToken();

@@ -159,7 +159,18 @@ public static class ShaderSelection
         foreach (var file in Files(workDir))
         {
             if (!File.Exists(file)) continue;
-            var values = File.ReadAllLines(file).Select(l => l.Split('=', 2)).Where(p => p.Length == 2).ToDictionary(p => p[0].Trim(), p => p[1].Trim());
+            string[] lines;
+            try { lines = File.ReadAllLines(file); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { continue; }
+            // A Java properties file: comments start with # or !, a later duplicate wins, and values are escaped.
+            var values = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var line in lines)
+            {
+                var trimmed = line.TrimStart();
+                if (trimmed.StartsWith('#') || trimmed.StartsWith('!')) continue;
+                var pair = trimmed.Split('=', 2);
+                if (pair.Length == 2) values[pair[0].Trim()] = Unescape(pair[1].Trim());
+            }
             if (values.TryGetValue("enableShaders", out var on) && on == "false") return null;
             return values.TryGetValue("shaderPack", out var pack) && pack.Length > 0 ? pack : null;
         }
@@ -175,7 +186,7 @@ public static class ShaderSelection
         {
             Directory.CreateDirectory(Path.GetDirectoryName(file)!);
             if (!File.Exists(file)) File.WriteAllText(file, "");
-            if (pack is not null) ShaderToggle.SetKey(file, "shaderPack", pack);
+            if (pack is not null) ShaderToggle.SetKey(file, "shaderPack", Escape(pack));
             ShaderToggle.SetKey(file, "enableShaders", pack is null ? "false" : "true");
         }
         // OptiFine keeps its choice in optionsshaders.txt; only touched when it is already there.
@@ -201,6 +212,43 @@ public static class ShaderSelection
         {
             return false;
         }
+    }
+
+    /// <summary>
+    /// Java reads .properties files as ISO-8859-1: a value is written with backslashes doubled and every character
+    /// outside printable ASCII as \uXXXX, the way Iris and Oculus write it themselves.
+    /// </summary>
+    internal static string Escape(string value)
+    {
+        var sb = new System.Text.StringBuilder(value.Length);
+        foreach (var c in value)
+        {
+            if (c == '\\') sb.Append(@"\\");
+            else if (c < 0x20 || c > 0x7E) sb.Append(@"\u").Append(((int)c).ToString("x4", System.Globalization.CultureInfo.InvariantCulture));
+            else sb.Append(c);
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>Reverses the escapes of a .properties value (\uXXXX, \t, \n, \r, \f and an escaped character).</summary>
+    internal static string Unescape(string value)
+    {
+        if (!value.Contains('\\')) return value;
+        var sb = new System.Text.StringBuilder(value.Length);
+        for (var i = 0; i < value.Length; i++)
+        {
+            var c = value[i];
+            if (c != '\\' || i + 1 == value.Length) { sb.Append(c); continue; }
+            var next = value[++i];
+            if (next == 'u' && i + 4 < value.Length
+                && int.TryParse(value.AsSpan(i + 1, 4), System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture, out var code))
+            {
+                sb.Append((char)code);
+                i += 4;
+            }
+            else sb.Append(next switch { 't' => '\t', 'n' => '\n', 'r' => '\r', 'f' => '\f', _ => next });
+        }
+        return sb.ToString();
     }
 
     private static string[] Files(string workDir) =>

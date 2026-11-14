@@ -2,7 +2,7 @@
 
 Jay's experimental bake needs the universal loader. The loader is a separate project: Jay does not build it and it is not bundled with Jay. Jay downloads one pinned zip from a GitHub release of the loader's own repository, [warriorleavestar/jay-loader](https://github.com/warriorleavestar/jay-loader/releases). The release root is one value in the pin (`ReleasesBase`), so moving the asset elsewhere is a one-line change.
 
-If the pin is ever left empty (no tag or hash), **Download loader** stays disabled and says the loader has not been published, and the launch status box only explains why baking was skipped.
+The pin must always be complete: a pins file whose jay-loader pin has no hash, or whose URL does not end in `/releases/download/<tag>/<file>`, is refused when it is loaded, and the unit tests require the pin to name a published zip.
 
 ## What Jay does
 

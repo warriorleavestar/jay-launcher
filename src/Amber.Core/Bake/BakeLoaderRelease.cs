@@ -11,14 +11,12 @@ namespace Amber.Core.Bake;
 /// "Install loader from zip…" (every file checked against the package's manifest).
 /// <para>
 /// <see cref="ReleasesBase"/> is the repository's release download root (the loader's own repository today), so moving
-/// the asset is a one-line change. With an empty pin (no tag or hash) "Download loader" says the loader is not
+/// the asset is a one-line change. With a pin that has no size "Download loader" says the loader is not
 /// published instead of downloading. See docs/universal-loader-release.md.
 /// </para>
 /// </summary>
 public sealed record BakeLoaderRelease(string ReleasesBase, string LoaderVersion, string Tag, string AssetName, string Sha256, long Size)
 {
-    public const string JayReleases = "https://github.com/warriorleavestar/jay-launcher/releases/download/";
-
     /// <summary>The loader's own repository, where its packages are released.</summary>
     public const string LoaderReleases = "https://github.com/warriorleavestar/jay-loader/releases/download/";
 
