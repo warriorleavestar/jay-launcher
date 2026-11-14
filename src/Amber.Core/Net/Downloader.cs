@@ -12,7 +12,14 @@ namespace Amber.Core.Net;
 
 /// <summary>一个下载项：官方地址 + 本地路径 + 可选校验信息。</summary>
 /// <param name="Within">设了的话，文件只能写在这个目录里面（版本文件、库、资源这类路径来自不可信的版本文件时用）。</param>
-public sealed record DownloadItem(string Url, string LocalPath, string? Sha1 = null, long? Size = null, string? Within = null);
+public sealed record DownloadItem(string Url, string LocalPath, string? Sha1 = null, long? Size = null, string? Within = null)
+{
+    /// <summary>
+    /// The person typed this address in themselves (the download tool): it is fetched as given, plain http included,
+    /// instead of being moved to https as addresses from version JSONs and other files are.
+    /// </summary>
+    public bool UserTyped { get; init; }
+}
 
 /// <summary>BytesDownloaded 是实时累计的字节数，CurrentFile 可能为空。</summary>
 public readonly record struct DownloadProgress(int CompletedFiles, int TotalFiles, long BytesDownloaded, string? CurrentFile);
@@ -106,6 +113,18 @@ public sealed class Downloader
                 return cooling || _hostFailures.GetValueOrDefault(host) >= HostFailureLimit ? 1 : 0;
             }).ToList();
         }
+    }
+
+    /// <summary>
+    /// Candidate addresses for one file. A plain-http address is fetched over https (and through the mirrors that map
+    /// the https address); the http address itself is tried last, and only when a SHA-1 checks what arrives.
+    /// </summary>
+    private IReadOnlyList<string> CandidatesFor(DownloadItem item)
+    {
+        if (item.UserTyped || HttpsUpgrade.Upgrade(item.Url) is not { } secure) return OrderedCandidates(item.Url);
+        var list = OrderedCandidates(secure).ToList();
+        if (item.Sha1 is not null && !list.Contains(item.Url)) list.Add(item.Url);
+        return list;
     }
 
     /// <summary>占用一个到该主机的连接名额，主机限流中就先等它恢复。</summary>
@@ -319,7 +338,7 @@ public sealed class Downloader
         Exception? last = null;
         // 每个源最后一次失败的原因：全都失败时一起报出来（否则只看得到最后一个源，比如镜像限流，看不出官方源也连不上）。
         var reasons = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        var candidates = OrderedCandidates(item.Url);
+        var candidates = CandidatesFor(item);
         foreach (var url in candidates)
         {
             for (var attempt = 0; attempt < RetriesPerSource; attempt++)

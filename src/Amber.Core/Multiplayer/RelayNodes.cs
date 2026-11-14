@@ -27,8 +27,10 @@ public static class RelayNodes
     public static readonly string[] Official = [];
 
     /// <summary>
-    /// 社区公开的 EasyTier 节点，实测能用才放进来（2026-11-08 两机联机测试用的香港节点）。随时可能失效，所以内置几个、全都连上：
-    /// EasyTier 同时连列表里的每个节点，哪个通走哪个，一个挂了不影响。
+    /// Public community EasyTier nodes, added only after they worked in a real test (the Hong Kong node used in the
+    /// two-machine test on 2026-11-08). Only this one node is built in today, and it can go away at any time: EasyTier
+    /// connects to every node in the list at once, so more nodes here (or an <see cref="Official"/> one) would remove this
+    /// single point of failure. Users can turn built-in nodes off and add their own.
     /// </summary>
     public static readonly string[] Community = ["tcp://et-hk.clickor.click:11010"];
 

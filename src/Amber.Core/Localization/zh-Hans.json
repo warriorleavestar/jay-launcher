@@ -1067,7 +1067,7 @@
   "settings.java.rescan": "重新扫描",
   "settings.language.label": "语言 / Language",
   "settings.language.system": "跟随系统 / System",
-  "settings.privacy.hint": "Jay 没有遥测、没有云控、没有强制更新，不生成设备识别码，地区只用来挑默认下载源。",
+  "settings.privacy.hint": "Jay 没有遥测、没有云控、没有强制更新，也没有硬件或厂商的设备 ID。联机用的是“这台设备的身份”：这次安装自己生成的一把密钥，可以重置。地区只用来挑默认下载源。",
   "settings.privacy.title": "隐私和联网",
   "settings.save": "保存设置",
   "settings.saved_directory_changed": "已保存，已切换到新的游戏目录",
