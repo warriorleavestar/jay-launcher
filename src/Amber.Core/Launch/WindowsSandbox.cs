@@ -79,7 +79,10 @@ public static unsafe class WindowsSandbox
         var container = level == WindowsSandboxLevel.Strong ? ContainerSid() : null;
         // A strong launch left the container's rights on these folders. Low-integrity processes were seen to be refused
         // reading anything whose ACL names a specific container SID, so the standard level takes them off again.
-        if (container is null && DerivedContainerSid() is { } previous)
+        // Not while a strong game is still running in that container: it reads through the same folders (the ones
+        // above its grants above all), and taking its rights away under it breaks it. The next standard launch with no
+        // strong game running takes them off.
+        if (container is null && !StrongGameRunning && DerivedContainerSid() is { } previous)
             foreach (var path in UngrantTargets(grants.ReadWrite.Concat(grants.ReadOnly))) Ungrant(path, previous);
         // Grants first, hidden folders after: a hidden folder inside a granted one keeps its own label.
         foreach (var path in grants.ReadWrite)
@@ -105,6 +108,32 @@ public static unsafe class WindowsSandbox
     }
 
     private static bool Exists(string path) => Directory.Exists(path) || File.Exists(path);
+
+    private static readonly List<Process> StrongGames = [];
+
+    /// <summary>A game this Jay started at the strong level is still running (in the shared container).</summary>
+    internal static bool StrongGameRunning
+    {
+        get
+        {
+            lock (StrongGames)
+            {
+                StrongGames.RemoveAll(HasExited);
+                return StrongGames.Count > 0;
+            }
+        }
+    }
+
+    internal static void TrackStrong(Process process)
+    {
+        lock (StrongGames) StrongGames.Add(process);
+    }
+
+    private static bool HasExited(Process process)
+    {
+        try { return process.HasExited; }
+        catch (Exception e) when (e is InvalidOperationException or Win32Exception) { return true; }
+    }
 
     /// <summary>The label SDDL now on a path, for diagnostics.</summary>
     public static string? CurrentLabelPublic(string path) => CurrentLabel(path);
@@ -612,6 +641,7 @@ public static unsafe class WindowsSandbox
             outRead = errRead = 0;
             started = true;
             ResumeThread(pi.hThread);
+            if (container is not null) TrackStrong(process);
             return process;
         }
         finally

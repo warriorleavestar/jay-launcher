@@ -43,6 +43,8 @@ public sealed class RoomTransport : IAsyncDisposable
     /// <summary>Member: how game and chat connections are opened (split or one path, and why).</summary>
     public SplitConnector? GameSplit { get; private set; }
     public SplitConnector? ChatSplit { get; private set; }
+    /// <summary>The chat connection went on one path, and a new one would split now.</summary>
+    public bool ChatCouldSplit => ChatSplit?.CouldSplitNow == true;
     public TunnelClient? Game { get; private set; }
     public TunnelClient? Chat { get; private set; }
     public TunnelClient? Remote { get; private set; }
@@ -96,24 +98,41 @@ public sealed class RoomTransport : IAsyncDisposable
         // Opened before the single-path port, so a Strict room with a busy leg port fails before it listens anywhere.
         if (o.IsHost && HostSplits(o))
         {
-            // The session bound the leg ports before EasyTier started (EasyTier only lets members reach them then). Without
-            // a session, or when the transport starts again in the same session, they are bound here.
-            var legs = o.HostSplitLegs?.TryTake() ?? SplitLegReservation.TryReserve(room.Split.Paths, listen)?.TryTake();
-            if (legs is null)
+            // The session bound the leg ports before EasyTier started (EasyTier only lets members reach them then) and keeps
+            // them for as long as it runs; the transport borrows them, also when it starts again in the same session. Only
+            // without a session are they bound here. When the session found a leg port taken it said so, and EasyTier
+            // doesn't serve the leg ports: no second try, which could open listeners no member can reach.
+            Action? giveBack = null;
+            TcpListener[]? legs = null;
+            if (o.HostSplitLegs is { } held)
             {
-                // A leg port is taken by another program. Auto rooms carry on without splitting; a Strict service would be
-                // unreachable, so then the room doesn't start.
-                if (SplitLegReservation.NeedsLegs(room.Split)) throw SplitLegReservation.Busy(room.Split);
-                _log?.Invoke(L.T("core.mp.split.ports_busy"));
+                legs = held.TryBorrow();
+                if (legs is not null) giveBack = held.Return;
+                // The session's ports are still lent to a transport that hasn't stopped yet: not another program's.
+                else NoLegs(new IOException(L.T("core.mp.split.ports_lent_strict")), "core.mp.split.ports_lent");
             }
-            else
+            else if (!o.HostSplitLegsBusy)
+            {
+                legs = SplitLegReservation.TryReserve(room.Split.Paths, listen)?.TryTake();
+                // A leg port is taken by another program.
+                if (legs is null) NoLegs(SplitLegReservation.Busy(room.Split), "core.mp.split.ports_busy");
+            }
+
+            // Auto rooms carry on without splitting; a Strict service would be unreachable, so then the room doesn't start.
+            void NoLegs(IOException strict, string key)
+            {
+                if (SplitLegReservation.NeedsLegs(room.Split)) throw strict;
+                _log?.Invoke(L.T(key));
+            }
+
+            if (legs is not null)
             {
                 SplitServer = Add(new SplitTunnelServer(room, service => service switch
                 {
                     TunnelService.Game => TunnelServer.ToLocalPort(room.Port),
                     TunnelService.Chat => TunnelServer.ToLocalPort(RoomChat.Port),
                     _ => null,
-                }, _log, listeners: legs));
+                }, _log, listeners: legs, giveBack: giveBack));
             }
         }
 

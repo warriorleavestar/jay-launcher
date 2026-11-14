@@ -328,6 +328,20 @@ public sealed class GameLauncher(GameDirectory dir)
         return (this, args);
     }
 
+    /// <summary>
+    /// Creates the transformer cache folder, which must be inside the working directory: level by level, never through
+    /// a link the game left there (an <see cref="IOException"/> then). Another caller cannot skip the check.
+    /// </summary>
+    internal static void CreateInside(string workDir, string folder)
+    {
+        var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(workDir));
+        var relative = Path.GetRelativePath(root, Path.GetFullPath(folder));
+        var parts = relative.Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries);
+        if (Path.IsPathRooted(relative) || parts.Length == 0 || parts.Any(p => p is "." or ".."))
+            throw ContainedFiles.Blocked(folder);
+        ContainedFiles.CreateDirectory(root, parts);
+    }
+
     private Process LaunchCore(LaunchOptions options, Action<string>? onOutput)
     {
         var version = dir.ResolveVersion(options.VersionId);
@@ -378,7 +392,7 @@ public sealed class GameLauncher(GameDirectory dir)
         try
         {
             // forge-1.12.2's transformer cache folder (inside the instance) exists before the game starts.
-            if (options.Baked?.WritableCache is { Length: > 0 } writableCache) Directory.CreateDirectory(writableCache);
+            if (options.Baked?.WritableCache is { Length: > 0 } writableCache) CreateInside(workDir, writableCache);
             if (options.Sandbox.Enabled && GameSandbox.IsSupported)
             {
                 windowsLevel = Sandbox(psi, options.Sandbox, workDir, legacyHome, onOutput);

@@ -539,11 +539,11 @@
                 <Border x:Name="InviteCard" Classes="card" Margin="0" IsVisible="{Binding IsHosting}">
                   <StackPanel Spacing="8">
                     <TextBlock Classes="h2" Text="{l:T multiplayer.invite.button}" Margin="0" />
-                    <!-- Room opened before the game: what it is waiting for, a port box for other games, and [Find]. -->
+                    <!-- Room opened before the game: what it is waiting for or linked to, a port box for other games, and [Find] (also once linked, for a world reopened on a new port). -->
                     <Border x:Name="GameLinkPanel" Background="{DynamicResource AccentTint}" CornerRadius="6" Padding="10" IsVisible="{Binding HasGameRelay}">
                       <StackPanel Spacing="6">
                         <TextBlock x:Name="GameLinkText" Text="{Binding GameLinkText}" TextWrapping="Wrap" />
-                        <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding IsWaitingForGame}">
+                        <Grid ColumnDefinitions="*,Auto">
                           <TextBox x:Name="GameLinkPortBox" Text="{Binding ManualPort}" PlaceholderText="{l:T multiplayer.lan.port_placeholder}" />
                           <Button x:Name="GameLinkFindButton" Grid.Column="1" Content="{l:T common.find}" Command="{Binding FindGameForRoomCommand}" Margin="6,0,0,0" ToolTip.Tip="{l:T multiplayer.lan.scan_tooltip}" />
                         </Grid>
@@ -619,6 +619,8 @@
                     <TextBlock Classes="h2" Text="{l:T multiplayer.join.active}" Margin="0" />
                     <TextBlock Text="{l:T multiplayer.join.address_label}" />
                     <TextBox Text="{Binding JoinAddress}" IsReadOnly="True" FontFamily="Consolas,monospace" FontSize="16" />
+                    <SelectableTextBlock Text="{Binding RoomHostAddressText}" TextWrapping="Wrap" FontSize="12"
+                                         IsVisible="{Binding RoomHostAddressText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
                     <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.join.address_hint}" />
                     <TextBlock Text="{Binding HostFingerprintText}" FontFamily="Consolas,monospace" IsVisible="{Binding HasHostFingerprint}" TextWrapping="Wrap" />
                     <ComboBox ItemsSource="{Binding Instances}" SelectedItem="{Binding TargetInstance}" HorizontalAlignment="Stretch" ToolTip.Tip="{l:T multiplayer.join.version_label}" />
@@ -718,10 +720,11 @@
                       </WrapPanel>
                     </Panel>
                     <Border IsVisible="{Binding UsingGameProxy}" BorderBrush="{DynamicResource Warning}" BorderThickness="1" CornerRadius="6" Padding="8">
-                      <Grid ColumnDefinitions="*,Auto">
-                        <TextBlock Text="{Binding GameProxyBanner}" TextWrapping="Wrap" VerticalAlignment="Center" />
-                        <Button Grid.Column="1" Content="{l:T multiplayer.proxy.stop}" Command="{Binding StopGameProxyCommand}" Margin="8,0,0,0" />
-                      </Grid>
+                      <!-- The details column can be narrow: the explanation gets the full width, the button goes under it. -->
+                      <StackPanel Spacing="8">
+                        <TextBlock Text="{Binding GameProxyBanner}" TextWrapping="Wrap" />
+                        <Button Content="{l:T multiplayer.proxy.stop}" Command="{Binding StopGameProxyCommand}" HorizontalAlignment="Right" />
+                      </StackPanel>
                     </Border>
                     <WrapPanel ItemSpacing="6" LineSpacing="6" IsVisible="{Binding CanUseExit}">
                       <TextBlock Text="{l:T multiplayer.exit.peer_label}" VerticalAlignment="Center" />
@@ -1362,6 +1365,11 @@
                   <TextBlock FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.volunteer.privacy}" />
                   <CheckBox IsChecked="{Binding VolunteerEnabled}" Content="{l:T multiplayer.volunteer.enable}" />
                   <StackPanel Spacing="6" IsEnabled="{Binding VolunteerEnabled}">
+                    <CheckBox IsChecked="{Binding VolunteerSigned}">
+                      <TextBlock TextWrapping="Wrap" Text="{l:T multiplayer.volunteer.sign}" />
+                    </CheckBox>
+                    <!-- What signing tells the network's operator: shown once the person turns it on, before they save. -->
+                    <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Margin="28,0,0,0" Text="{l:T multiplayer.volunteer.sign_privacy}" IsVisible="{Binding VolunteerSigned}" />
                     <TextBlock FontSize="12" Text="{l:T multiplayer.volunteer.address}" />
                     <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
                       <TextBox Text="{Binding VolunteerAddress}" FontFamily="Consolas,monospace" MaxLength="253" PlaceholderText="203.0.113.5 / jay.example.org" />

@@ -241,37 +241,26 @@ public static partial class BakePlatform
     /// Forge checks for updates online at every start unless <c>config/fml.toml</c> says <c>versionCheck = false</c>.
     /// The loader's interface asks the launcher to turn it off for baked Forge launches.
     /// </summary>
-    public static void DisableForgeUpdateCheck(string workDir)
-    {
-        var path = Path.Combine(workDir, "config", "fml.toml");
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        if (!File.Exists(path))
-        {
-            File.WriteAllText(path, "versionCheck = false\n", new UTF8Encoding(false));
-            return;
-        }
-        var text = File.ReadAllText(path);
-        var updated = VersionCheckLine().IsMatch(text) ? VersionCheckLine().Replace(text, "versionCheck = false") : text.TrimEnd() + "\nversionCheck = false\n";
-        if (updated != text) File.WriteAllText(path, updated, new UTF8Encoding(false));
-    }
+    public static void DisableForgeUpdateCheck(string workDir) =>
+        // The game can write its own config folder: never read or write through a link it left there.
+        ContainedFiles.UpdateText(workDir, ["config"], "fml.toml", text =>
+            text.Length == 0 ? "versionCheck = false\n"
+            : VersionCheckLine().IsMatch(text) ? VersionCheckLine().Replace(text, "versionCheck = false")
+            : text.TrimEnd() + "\nversionCheck = false\n");
 
     /// <summary>
     /// Forge 1.12.2 asks its update server at every start unless <c>config/forge.cfg</c> turns version checking off
     /// (<c>version_checking { B:Global=false }</c>). Jay turns it off for baked launches, as for Forge 1.20.1.
     /// Other settings in the file are kept; Forge fills in the rest of its defaults on the first start.
     /// </summary>
-    public static void DisableLegacyForgeUpdateCheck(string workDir)
-    {
-        var path = Path.Combine(workDir, "config", "forge.cfg");
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        var text = File.Exists(path) ? File.ReadAllText(path) : "";
-        string updated;
-        if (LegacyGlobalCheck().IsMatch(text)) updated = LegacyGlobalCheck().Replace(text, m => m.Groups[1].Value + "false");
-        else if (LegacyCheckCategory().Match(text) is { Success: true } category)
-            updated = text.Insert(category.Index + category.Length, "\n    B:Global=false");
-        else updated = (text.Length == 0 ? "" : text.TrimEnd() + "\n\n") + "version_checking {\n    B:Global=false\n}\n";
-        if (updated != text) File.WriteAllText(path, updated, new UTF8Encoding(false));
-    }
+    public static void DisableLegacyForgeUpdateCheck(string workDir) =>
+        ContainedFiles.UpdateText(workDir, ["config"], "forge.cfg", text =>
+        {
+            if (LegacyGlobalCheck().IsMatch(text)) return LegacyGlobalCheck().Replace(text, m => m.Groups[1].Value + "false");
+            if (LegacyCheckCategory().Match(text) is { Success: true } category)
+                return text.Insert(category.Index + category.Length, "\n    B:Global=false");
+            return (text.Length == 0 ? "" : text.TrimEnd() + "\n\n") + "version_checking {\n    B:Global=false\n}\n";
+        });
 
     [GeneratedRegex(@"(?m)^([ \t]*B:Global[ \t]*=[ \t]*)[^\r\n]*")]
     private static partial Regex LegacyGlobalCheck();

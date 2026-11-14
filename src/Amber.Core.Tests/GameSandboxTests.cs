@@ -586,6 +586,39 @@ public sealed class GameSandboxTests : IDisposable
         Assert.False(Named(game));
     }
 
+    [Fact]
+    public void Windows_StandardLevel_LeavesTheContainerAloneWhileAStrongGameRuns()
+    {
+        // A standard launch while a strong game of the same container still runs: taking the container's entries off the
+        // folders above its grants would break the running game, so they stay until no strong game runs.
+        if (!OperatingSystem.IsWindows() || WindowsSandbox.DerivedContainerSid() is not { } sid) return;
+        var game = Dir("strong-game");
+        var libraries = Dir("strong-game", "libraries");
+        var instance = Dir("strong-game", "versions", "B");
+        bool Named(string path) => new DirectoryInfo(path).GetAccessControl()
+            .GetAccessRules(true, false, typeof(System.Security.Principal.SecurityIdentifier))
+            .OfType<System.Security.AccessControl.FileSystemAccessRule>().Any(r => r.IdentityReference == sid);
+        WindowsSandbox.Grant(game, sid, write: false);
+        var strong = Process.Start(new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe"),
+            "-NoProfile -NonInteractive -Command Start-Sleep 60") { UseShellExecute = false, CreateNoWindow = true })!;
+        try
+        {
+            WindowsSandbox.TrackStrong(strong);
+            Assert.True(WindowsSandbox.StrongGameRunning);
+            WindowsSandbox.Prepare(new SandboxGrants { ReadWrite = [instance], ReadOnly = [libraries] }, WindowsSandboxLevel.Standard);
+            Assert.True(Named(game));
+        }
+        finally
+        {
+            strong.Kill(true);
+            strong.WaitForExit(10_000);
+            strong.Dispose();
+        }
+        Assert.False(WindowsSandbox.StrongGameRunning);
+        WindowsSandbox.Prepare(new SandboxGrants { ReadWrite = [instance], ReadOnly = [libraries] }, WindowsSandboxLevel.Standard);
+        Assert.False(Named(game));
+    }
+
     /// <summary>A JDK for the real-Java tests: JAVA_HOME, else an Adoptium install; null skips them.</summary>
     private static string? TestJava()
     {

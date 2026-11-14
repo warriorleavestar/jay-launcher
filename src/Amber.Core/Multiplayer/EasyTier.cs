@@ -369,6 +369,8 @@ public sealed record EasyTierOptions(
     /// Null when they couldn't be bound; the leg ports are then not opened to the room and no extra instance starts.
     /// </summary>
     public Transport.SplitLegReservation? HostSplitLegs { get; init; }
+    /// <summary>The session found a leg port taken (Auto): the transport then doesn't bind the leg ports either.</summary>
+    public bool HostSplitLegsBusy { get; init; }
     /// <summary>邀请房间的加入方：远程控制连房主用的本机端口（不建网卡时经 EasyTier 或封装通道转到房主的 47662）。</summary>
     public int? LocalRemotePort { get; init; }
     /// <summary>允许房间里的人经自己“仅游戏”转发（只开 SOCKS5，不用建网卡）。</summary>
@@ -385,6 +387,15 @@ public sealed record EasyTierOptions(
     public IReadOnlyList<string> DirectUnderlayAddresses { get; init; } = [];
     /// <summary>当前有 IPv6 直连承载；现有全局出口门禁只支持明确识别的 IPv4 承载。</summary>
     public bool DirectUnderlayUsesIpv6 { get; init; }
+
+    /// <summary>
+    /// The IPv4 addresses a relay named by a domain resolved to when the exit was chosen (see <see cref="ExitRelays"/>);
+    /// keyed by host name. The exit's route plan protects these as relay underlay.
+    /// </summary>
+    public IReadOnlyDictionary<string, IReadOnlyList<string>> RelayAddresses { get; init; } = new Dictionary<string, IReadOnlyList<string>>();
+
+    /// <summary>The peers as configured, before <see cref="ExitRelays"/> pinned domain relays to addresses.</summary>
+    public IReadOnlyList<string>? ConfiguredPeers { get; init; }
 
     /// <summary>
     /// Carry this member's forwarded TCP streams (game, chat, tunnel) over EasyTier's QUIC proxy instead of its
@@ -653,7 +664,7 @@ public sealed class EasyTierSession : IEasyTierSession
     internal static EasyTierOptions WithSplitLegs(EasyTierOptions options, out bool busy, IReadOnlyList<int>? ports = null)
     {
         busy = false;
-        options = options with { HostSplitLegs = null };
+        options = options with { HostSplitLegs = null, HostSplitLegsBusy = false };
         if (!options.IsHost || !EasyTierArgs.SplitsOnThisInstance(options)) return options;
         var split = options.Room.Split;
         var legs = Transport.SplitLegReservation.TryReserve(split.Paths, ports: ports);
@@ -661,7 +672,7 @@ public sealed class EasyTierSession : IEasyTierSession
         {
             if (Transport.SplitLegReservation.NeedsLegs(split)) throw Transport.SplitLegReservation.Busy(split);
             busy = true;
-            return options;
+            return options with { HostSplitLegsBusy = true };
         }
         return options with { HostSplitLegs = legs };
     }

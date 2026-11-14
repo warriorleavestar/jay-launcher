@@ -21,6 +21,61 @@ namespace Amber.App.Views;
 /// </summary>
 internal sealed partial class SelfTest
 {
+    /// <summary>
+    /// The transformer cache switch in a Forge 1.12.2 instance's settings tab: shown only there, on by default, and
+    /// switching it off is saved to that instance (and only written while off).
+    /// </summary>
+    private async Task ForgeLegacyToggleAsync(InstanceViewModel instance, string game)
+    {
+        var service = main.Service;
+        const string legacy = "1.12.2-forge-14.23.5.2860";
+        var shownBefore = instance.Current?.Id;
+        var tabBefore = instance.TabIndex;
+        // On this page the switch shows while the universal loader is on (and the instance is Forge 1.12.2).
+        var bakeBefore = service.Settings.ExperimentalBake;
+        service.Settings.ExperimentalBake = true;
+        var vanilla = Path.Combine(game, "versions", "1.12.2");
+        Directory.CreateDirectory(vanilla);
+        File.WriteAllText(Path.Combine(vanilla, "1.12.2.json"), """{"id":"1.12.2","type":"release","mainClass":"net.minecraft.client.main.Main","libraries":[]}""");
+        var forge = Path.Combine(game, "versions", legacy);
+        Directory.CreateDirectory(forge);
+        File.WriteAllText(Path.Combine(forge, legacy + ".json"),
+            $$"""{"id":"{{legacy}}","inheritsFrom":"1.12.2","type":"release","mainClass":"net.minecraft.launchwrapper.Launch","libraries":[{"name":"net.minecraftforge:forge:1.12.2-14.23.5.2860"}]}""");
+        service.NotifyInstalledChanged();
+        await WaitAsync(() => instance.Instances.Contains(legacy), 10);
+
+        CheckBox? Box() => Dispatcher.UIThread.Invoke(() => window.PageHost.GetVisualDescendants().OfType<InstancePage>().FirstOrDefault()?
+            .GetVisualDescendants().OfType<CheckBox>().FirstOrDefault(c => c.Name == "TransformerCacheBox"));
+        instance.TabIndex = (int)InstanceTab.Settings;
+        await Task.Delay(400);
+        Check("启动缓存：不是 Forge 1.12.2 的实例不显示这一项", !instance.ShowTransformerCache && Box()?.IsEffectivelyVisible != true, $"current={instance.Current?.Id}");
+
+        instance.SelectedId = legacy;
+        await WaitAsync(() => instance.Current?.Id == legacy, 10);
+        instance.TabIndex = (int)InstanceTab.Settings;
+        await Task.Delay(500);
+        var box = Box();
+        Check("启动缓存：Forge 1.12.2 实例的设置页签里有这一项，默认开着",
+            instance.ShowTransformerCache && box?.IsEffectivelyVisible == true && box.IsChecked == true && instance.TransformerCache,
+            $"legacy={instance.IsForgeLegacy} visible={box?.IsEffectivelyVisible} checked={box?.IsChecked}");
+        Dispatcher.UIThread.Invoke(() => box?.BringIntoView());
+        await Task.Delay(300);
+        await ShotAsync("instance-forge1122-toggle");
+
+        Dispatcher.UIThread.Invoke(() => { if (box is not null) box.IsChecked = false; });
+        await WaitAsync(() => InstanceSettings.Load(service.Directory, legacy).LegacyTransformerCache == false, 5);
+        Check("启动缓存：关掉后存进这个实例的设置", InstanceSettings.Load(service.Directory, legacy).LegacyTransformerCache == false && !instance.TransformerCache);
+        Dispatcher.UIThread.Invoke(() => { if (box is not null) box.IsChecked = true; });
+        await WaitAsync(() => InstanceSettings.Load(service.Directory, legacy).LegacyTransformerCache is null, 5);
+        Check("启动缓存：再打开后设置里不再写这一项（默认就是开）", InstanceSettings.Load(service.Directory, legacy).LegacyTransformerCache is null);
+
+        service.Settings.ExperimentalBake = bakeBefore;
+        instance.SelectedId = shownBefore;
+        await WaitAsync(() => instance.Current?.Id == shownBefore, 10);
+        instance.TabIndex = tabBefore;
+        await Task.Delay(300);
+    }
+
     private async Task InstanceDetailAsync()
     {
         var service = main.Service;
@@ -132,6 +187,10 @@ internal sealed partial class SelfTest
             Check("正在玩：不是实心琥珀，是正在玩的颜色", instance.StartPlaying && page?.StartButton.Classes.Contains("playing") == true
                 && !page.StartButton.Classes.Contains("play"), instance.StartLabel);
             Check("正在玩：写了玩了几分钟", instance.StartLabel.Contains("分钟"), instance.StartLabel);
+            await Task.Delay(200);
+            // The quit button beside the start button is shorter than it: its label must still sit in the middle.
+            var offCentre = page is null ? ["no page"] : ButtonsWithOffCentreContent(page.Hero);
+            Check("Playing: the labels and icons in the header sit in the middle of their buttons", offCentre.Count == 0, string.Join("; ", offCentre));
             await ShotAsync("instance-playing");
             window.Width = 600;
             await Task.Delay(400);
@@ -217,6 +276,8 @@ internal sealed partial class SelfTest
             await Task.Delay(300);
             instance.GoToTabCommand.Execute("Worlds");
             Check("概览：“全部 ›”切到对应页签", instance.TabIndex == (int)InstanceTab.Worlds);
+
+            await ForgeLegacyToggleAsync(instance, game);
 
             // ---- Keys ----
             window.RaiseEvent(new KeyEventArgs { RoutedEvent = InputElement.KeyDownEvent, Key = Key.D1, KeyModifiers = KeyModifiers.Alt, Source = window });
