@@ -65,7 +65,16 @@ public static class MemberChannel
             var binding = hs.HandshakeHash;
             var (send, receive) = hs.Split();
             var secure = new SecureStream(stream, send, receive, profile);
-            if (key.Attestor is { } attestor) await ProveAsInitiatorAsync(secure, attestor, binding, timeout.Token);
+            try
+            {
+                if (key.Attestor is { } attestor) await ProveAsInitiatorAsync(secure, attestor, binding, timeout.Token);
+            }
+            catch
+            {
+                // A failed or timed-out attestation must not leave the record loops running and the keys in memory.
+                secure.Abort();
+                throw;
+            }
             return secure;
         }
         finally
@@ -106,7 +115,15 @@ public static class MemberChannel
             var binding = hs.HandshakeHash;
             var (send, receive) = hs.Split();
             var secure = new SecureStream(stream, send, receive, profile);
-            await HostAttestAsync(secure, member, binding, timeout.Token);
+            try
+            {
+                await HostAttestAsync(secure, member, binding, timeout.Token);
+            }
+            catch
+            {
+                secure.Abort();
+                throw;
+            }
             return (secure, member, payload);
         }
         finally

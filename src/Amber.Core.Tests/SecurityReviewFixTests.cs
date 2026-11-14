@@ -416,6 +416,12 @@ public class SecurityReviewFixTests
         Assert.Null(await JoinTarget.ResolveForRelayAsync("localhost:25565", default, Public, NoSrv));
         Assert.Null(await JoinTarget.ResolveForRelayAsync("192.168.1.5:25565", default, Public, NoSrv));
         Assert.Equal(new RelayPlan("1.2.3.4", 25565, "1.2.3.4", 25565), await JoinTarget.ResolveForRelayAsync("1.2.3.4", default, Public, NoSrv));
+        // A name in another script is sent and looked up in its ASCII form.
+        string? srvAsked = null;
+        (string, int)? SrvSpy(string name) { srvAsked = name; return null; }
+        Assert.Equal(new RelayPlan("xn--bcher-kva.example.org", 25565, "xn--bcher-kva.example.org", 25565),
+            await JoinTarget.ResolveForRelayAsync("bücher.example.org", default, Public, SrvSpy));
+        Assert.Equal("_minecraft._tcp.xn--bcher-kva.example.org", srvAsked);
         // 本机名字不去查 SRV。
         var asked = false;
         (string, int)? Spy(string _) { asked = true; return null; }
@@ -426,6 +432,48 @@ public class SecurityReviewFixTests
         (string, int)? Hang(string _) { Thread.Sleep(10_000); return null; }
         Assert.NotNull(await JoinTarget.ResolveForRelayAsync("play.example.org", default, Public, Hang));
         Assert.True(watch.Elapsed < TimeSpan.FromSeconds(6));
+    }
+
+    /// <summary>
+    /// Names in another script are relayed under the name the game itself would use (Java's IDN.toASCII, IDNA2003),
+    /// not under a different domain: ß and final sigma fold, ZWJ/ZWNJ drop, ideographic and full-width dots separate
+    /// labels, a trailing root dot stays, ASCII labels keep their case.
+    /// </summary>
+    [Theory]
+    [InlineData("straße.example.org", "strasse.example.org")]
+    [InlineData("STRAßE.example.org", "strasse.example.org")]
+    [InlineData("λόγος.example.org", "xn--oxapnq6b.example.org")]
+    [InlineData("bü\u200Dcher.example.org", "xn--bcher-kva.example.org")]
+    [InlineData("bü\u200Ccher.example.org", "xn--bcher-kva.example.org")]
+    [InlineData("例子\u3002example\u3002org", "xn--fsqu00a.example.org")]
+    [InlineData("例子\uFF0Eexample\uFF0Eorg", "xn--fsqu00a.example.org")]
+    [InlineData("例子\uFF61example\uFF61org", "xn--fsqu00a.example.org")]
+    [InlineData("bücher.example.org.", "xn--bcher-kva.example.org.")]
+    [InlineData("bücher.example.org\u3002", "xn--bcher-kva.example.org.")]
+    [InlineData("Bücher.EXAMPLE.org", "xn--bcher-kva.EXAMPLE.org")]
+    [InlineData("a\u1806b.example.org", "ab.example.org")]
+    [InlineData("A\u00ADB.example.org", "ab.example.org")]
+    [InlineData("bü\u200Bcher.example.org", "xn--bcher-kva.example.org")]
+    [InlineData("bü\uFE0Fcher\u2060.example.org", "xn--bcher-kva.example.org")]
+    public async Task JoinTarget_IdnNamesMatchTheGame(string typed, string expected)
+    {
+        // Not resolved here: the name goes to the relay as it is.
+        static Task<IPAddress[]> Unresolved(string _, CancellationToken __) => Task.FromResult(Array.Empty<IPAddress>());
+        string? srvAsked = null;
+        (string, int)? SrvSpy(string name) { srvAsked = name; return null; }
+        Assert.Equal(new RelayPlan(expected, 25565, expected, 25565), await JoinTarget.ResolveForRelayAsync(typed, default, Unresolved, SrvSpy));
+        Assert.Equal("_minecraft._tcp." + expected.TrimEnd('.'), srvAsked);
+    }
+
+    [Theory]
+    [InlineData("bücher..example.org")]
+    [InlineData("\u200D.example.org")]
+    [InlineData("\u1806\u00AD.example.org")]
+    public async Task JoinTarget_InvalidIdnNamesAreNotRelayed(string typed)
+    {
+        static Task<IPAddress[]> Unresolved(string _, CancellationToken __) => Task.FromResult(Array.Empty<IPAddress>());
+        static (string, int)? NoSrv(string _) => null;
+        Assert.Null(await JoinTarget.ResolveForRelayAsync(typed, default, Unresolved, NoSrv));
     }
 
     [Fact]
