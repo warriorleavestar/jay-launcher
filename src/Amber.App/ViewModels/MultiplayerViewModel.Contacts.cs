@@ -134,6 +134,9 @@ public sealed partial class MultiplayerViewModel
     /// <summary>Every directory call goes through here so first-use pinning applies everywhere.</summary>
     internal RoomDirectoryClient DirectoryClient(IPublicNetwork network) => new(network) { KeyMemory = DirectoryKeys };
 
+    /// <summary>The highest signed-record versions this computer took, so an older one isn't taken again.</summary>
+    internal static RecordSeqMemory RecordSeqs => new(Path.Combine(AppSettings.DataDir, RecordSeqMemory.FileName));
+
     /// <summary>The mail service on the network that is connected now (null when none is).</summary>
     private ContactPost? Post
     {
