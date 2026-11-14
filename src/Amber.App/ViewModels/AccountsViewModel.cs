@@ -199,6 +199,8 @@ public sealed partial class AccountsViewModel : PageViewModel, ISnapshotDemo
 
     protected override void OnFirstActivated()
     {
+        // The Me page shows and edits multiplayer state (devices, friend code): load it like the multiplayer page does.
+        Multiplayer?.Activate();
         _active = true;
         Rebuild();
     }

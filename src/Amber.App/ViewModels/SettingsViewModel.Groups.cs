@@ -150,11 +150,25 @@ public sealed partial class SettingsViewModel
         get;
         set
         {
-            if (field is { } old) old.PropertyChanged -= OnMultiplayerChanged;
+            if (field is { } old)
+            {
+                old.PropertyChanged -= OnMultiplayerChanged;
+                old.ActionStatus -= OnMultiplayerActionStatus;
+            }
             field = value;
-            if (value is not null) value.PropertyChanged += OnMultiplayerChanged;
+            if (value is not null)
+            {
+                value.PropertyChanged += OnMultiplayerChanged;
+                value.ActionStatus += OnMultiplayerActionStatus;
+            }
             RefreshAdvanced();
         }
+    }
+
+    /// <summary>The multiplayer commands in Settings › Multiplayer and › Network report here while Settings is on screen.</summary>
+    private void OnMultiplayerActionStatus(StatusMessage status)
+    {
+        if (IsCurrent) SetStatus(status);
     }
 
     [RelayCommand]

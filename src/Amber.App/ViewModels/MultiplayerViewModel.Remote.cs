@@ -97,6 +97,7 @@ public sealed partial class MultiplayerViewModel
     {
         NotifyRemoteAvailability();
         OnPropertyChanged(nameof(ShowModCheck));
+        RunAfterRoom();
     }
 
     private ITileCodec RemoteCodec => new SkiaTileCodec();

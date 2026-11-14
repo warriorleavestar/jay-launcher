@@ -99,6 +99,7 @@ public static class ThemeSlots
             if (s.TryGetProperty("focus", out var focus))
             {
                 if (focus.ValueKind == JsonValueKind.Array && focus.GetArrayLength() == 2
+                    && focus[0].ValueKind == JsonValueKind.Number && focus[1].ValueKind == JsonValueKind.Number
                     && focus[0].TryGetDouble(out var x) && focus[1].TryGetDouble(out var y) && double.IsFinite(x) && double.IsFinite(y))
                     (fx, fy) = (Math.Clamp(x, 0, 1), Math.Clamp(y, 0, 1));
                 else pack.Problems.Add(new("bad_value", where + ".focus"));
