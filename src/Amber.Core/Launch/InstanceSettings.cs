@@ -34,23 +34,48 @@ public sealed class InstanceSettings
 
     public const string FileName = "amber-instance.json";
 
+    /// <summary>
+    /// True when the file held a command, Java path or argument that Jay did not write (the sandboxed game can write
+    /// the instance folder). Those values were dropped; the rest of the settings load as usual. See
+    /// <see cref="InstanceSettingsTrust"/>.
+    /// </summary>
+    [JsonIgnore]
+    public bool DroppedUnknownValues { get; private set; }
+
     public static InstanceSettings Load(GameDirectory dir, string id)
     {
         var path = Path.Combine(dir.VersionDir(id), FileName);
         if (!File.Exists(path)) return new InstanceSettings();
+        var settings = ReadFile(path) ?? new InstanceSettings();
+        if (!InstanceSettingsTrust.IsTrusted(dir, settings))
+        {
+            settings.PreLaunchCommand = null;
+            settings.PostExitCommand = null;
+            settings.JavaPath = null;
+            settings.JvmArgs = null;
+            settings.GameArgs = null;
+            settings.DroppedUnknownValues = true;
+        }
+        return settings;
+    }
+
+    /// <summary>The file as it is, with no check of who wrote it; null when it cannot be read.</summary>
+    internal static InstanceSettings? ReadFile(string path)
+    {
         try
         {
-            return JsonSerializer.Deserialize(File.ReadAllText(path), Options.Info<InstanceSettings>()) ?? new InstanceSettings();
+            return JsonSerializer.Deserialize(File.ReadAllText(path), Options.Info<InstanceSettings>());
         }
-        catch (JsonException)
+        catch (Exception e) when (e is JsonException or IOException or UnauthorizedAccessException)
         {
-            return new InstanceSettings();
+            return null;
         }
     }
 
     public void Save(GameDirectory dir, string id)
     {
         Directory.CreateDirectory(dir.VersionDir(id));
+        InstanceSettingsTrust.Trust(dir, this);
         File.WriteAllText(Path.Combine(dir.VersionDir(id), FileName), JsonSerializer.Serialize(this, Options.Info<InstanceSettings>()));
     }
 

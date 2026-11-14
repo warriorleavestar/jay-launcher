@@ -131,7 +131,12 @@ public sealed class GameLauncher(GameDirectory dir)
     }
 
     /// <summary>noTraceDir：这次无痕模式配置放的临时目录（没生成时为 null），用完由调用方删掉。</summary>
-    internal List<string> BuildArguments(LaunchOptions options, Action<string>? notice, out string? noTraceDir, string? scriptConfigDir = null)
+    /// <param name="fromVersion">
+    /// Collects the arguments that come from the version JSON. The game can rewrite that file, so the sandbox grants
+    /// nothing for the files these name (see <see cref="Sandbox"/>).
+    /// </param>
+    internal List<string> BuildArguments(LaunchOptions options, Action<string>? notice, out string? noTraceDir, string? scriptConfigDir = null,
+        List<string>? fromVersion = null)
     {
         noTraceDir = null;
         var version = dir.ResolveVersion(options.VersionId);
@@ -203,7 +208,10 @@ public sealed class GameLauncher(GameDirectory dir)
                     logPath = ChatLogFilter.Prepare(logPath, noTraceDir);
                     notice?.Invoke(L.T("core.launch.notrace.on"));
                 }
-                args.Add(AsciiPaths.MapArgument(logArg.Replace("${path}", logPath), notice));
+                var logging = AsciiPaths.MapArgument(logArg.Replace("${path}", logPath), notice);
+                args.Add(logging);
+                // Without no-trace the argument and the file it names both come from the version JSON.
+                if (!options.NoTrace) fromVersion?.Add(logging);
             }
             else if (options.NoTrace)
             {
@@ -236,7 +244,9 @@ public sealed class GameLauncher(GameDirectory dir)
             // Forge 的 ignoreList 里写的是 ${version_name}.jar，意思是“客户端 jar”；
             // 这里的 classpath 直接用原版 jar，所以在 JVM 参数里 version_name 要指向它。
             var jvmVars = new Dictionary<string, string>(vars) { ["version_name"] = jarId, ["primary_jar_name"] = jarId + ".jar" };
-            args.AddRange(Expand(jvm, rules).Select(a => Substitute(a, jvmVars)));
+            var versionJvm = Expand(jvm, rules).Select(a => Substitute(a, jvmVars)).ToList();
+            args.AddRange(versionJvm);
+            fromVersion?.AddRange(versionJvm);
         }
         else
         {
@@ -259,9 +269,17 @@ public sealed class GameLauncher(GameDirectory dir)
         }
 
         if (version.Arguments?.Game is { Count: > 0 } game)
-            args.AddRange(Expand(game, rules).Select(a => Substitute(a, vars)));
+        {
+            var versionGame = Expand(game, rules).Select(a => Substitute(a, vars)).ToList();
+            args.AddRange(versionGame);
+            fromVersion?.AddRange(versionGame);
+        }
         if (version.MinecraftArguments is { } legacy)
-            args.AddRange(legacy.Split(' ', StringSplitOptions.RemoveEmptyEntries).Select(a => Substitute(a, vars)));
+        {
+            var versionLegacy = legacy.Split(' ', StringSplitOptions.RemoveEmptyEntries).Select(a => Substitute(a, vars)).ToList();
+            args.AddRange(versionLegacy);
+            fromVersion?.AddRange(versionLegacy);
+        }
 
         if (options.WindowWidth is not null && version.Arguments is null)
             args.AddRange(["--width", vars["resolution_width"], "--height", vars["resolution_height"]]);
@@ -353,11 +371,12 @@ public sealed class GameLauncher(GameDirectory dir)
         var realWorkDir = RealRoot is { } real ? AsciiPaths.Remap(workDir, dir.Root, real) : workDir;
         var legacyHome = IsPreLaunchwrapperHome(version) ? AsciiPaths.LegacyHome(realWorkDir, onOutput) : null;
         string? noTraceDir = null;
+        List<string> fromVersion = [];
         try
         {
             if (legacyHome is not null && !OperatingSystem.IsWindows())
                 psi.ArgumentList.Add("-Duser.home=" + legacyHome);
-            foreach (var arg in BuildArguments(options, onOutput, out noTraceDir)) psi.ArgumentList.Add(arg);
+            foreach (var arg in BuildArguments(options, onOutput, out noTraceDir, fromVersion: fromVersion)) psi.ArgumentList.Add(arg);
         }
         catch
         {
@@ -379,7 +398,7 @@ public sealed class GameLauncher(GameDirectory dir)
         {
             if (options.Sandbox.Enabled && GameSandbox.IsSupported)
             {
-                windowsLevel = Sandbox(psi, options.Sandbox, workDir, legacyHome, onOutput);
+                windowsLevel = Sandbox(psi, options.Sandbox, workDir, legacyHome, fromVersion, onOutput);
                 sandboxed = true;
                 onOutput?.Invoke(windowsLevel switch
                 {
@@ -423,8 +442,13 @@ public sealed class GameLauncher(GameDirectory dir)
     /// when the sandbox cannot start; the game is then not launched. On Windows the process is started by
     /// <see cref="WindowsSandbox.Start"/> afterwards, at the level returned here.
     /// </summary>
-    private WindowsSandboxLevel? Sandbox(ProcessStartInfo psi, SandboxOptions sandbox, string workDir, string? legacyHome, Action<string>? onOutput)
+    private WindowsSandboxLevel? Sandbox(ProcessStartInfo psi, SandboxOptions sandbox, string workDir, string? legacyHome,
+        IReadOnlyList<string> fromVersion, Action<string>? onOutput)
     {
+        // Files named only by the version JSON's arguments get no grant of their own: the game can rewrite that JSON,
+        // and a grant would let its next launch read any file (Jay's data folder included). What those arguments
+        // legitimately name (libraries, the client jar, log configs) is inside the granted game folders anyway.
+        IEnumerable<string> Named() => GameSandbox.Without(psi.ArgumentList, fromVersion);
         List<string> extraReadOnly = [];
         var natives = GameSandbox.NativeExtractArguments(workDir);
         for (var i = 0; i < natives.Count; i++) psi.ArgumentList.Insert(i, natives[i]);
@@ -437,7 +461,7 @@ public sealed class GameLauncher(GameDirectory dir)
             // Checked before any strong-only argument goes on the command line.
             if (windowsLevel == WindowsSandboxLevel.Strong)
             {
-                var planned = GameSandbox.For(workDir, dir.Root, psi.FileName, psi.ArgumentList, sandbox,
+                var planned = GameSandbox.For(workDir, dir.Root, psi.FileName, Named(), sandbox,
                     extraReadWrite: legacyHome is null ? null : [legacyHome]);
                 if (WindowsSandboxSetup.FoldersToOpen(planned.ReadWrite.Concat(planned.ReadOnly)) is { Count: > 0 } closed)
                 {
@@ -478,7 +502,7 @@ public sealed class GameLauncher(GameDirectory dir)
                 extraReadOnly.Add(fs);
             }
         }
-        var grants = GameSandbox.For(workDir, dir.Root, psi.FileName, psi.ArgumentList, sandbox, extraReadOnly,
+        var grants = GameSandbox.For(workDir, dir.Root, psi.FileName, Named(), sandbox, extraReadOnly,
             extraReadWrite: legacyHome is null ? null : [legacyHome]);
         if (grants.Problem() is { } problem) throw new SandboxUnavailableException(problem);
         GameSandbox.FilterEnvironment(psi.Environment);
