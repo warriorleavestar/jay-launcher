@@ -746,6 +746,32 @@ public sealed class VolunteerNodesTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task ClosingTheServerStopsChecksStillWaitingOrDialling()
+    {
+        var never = new TaskCompletionSource<bool>();
+        var server = await StartAsync(b => b.UseVolunteerProbe((_, _) => never.Task));
+        var probed = 0;
+        server.Volunteers!.Probed += (_, _) => Interlocked.Increment(ref probed);
+        var probes = new List<Task>();
+        for (var port = 1; port <= VolunteerRegistry.MaxProbingPerHost + 3; port++)
+        {
+            Assert.True(Ok(server.Directory!.Handle(new JsonObject { ["op"] = "volunteer", ["url"] = $"tcp://host.example.org:{port}" })));
+            probes.Add(server.Volunteers.LastProbe);
+        }
+        await Task.Delay(50);
+        var volunteers = server.Volunteers;
+        await server.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(2));
+        _cleanup.Remove(server);
+        Assert.All(probes, p => Assert.True(p.IsCompleted));
+        await Task.Delay(50);
+        Assert.Equal(0, probed);
+        // Nothing new starts afterwards.
+        Assert.True(Ok(volunteers.Register("tcp://other.example.org:11010")));
+        Assert.True(volunteers.LastProbe.IsCompleted);
+        Assert.Empty(volunteers.Listed());
+    }
+
+    [Fact]
     public async Task OperatorSeesAndBansVolunteerNodes()
     {
         var server = await StartAsync(admin: true);

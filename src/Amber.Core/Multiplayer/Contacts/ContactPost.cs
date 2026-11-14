@@ -71,7 +71,8 @@ public sealed class ContactPost(Func<X25519KeyPair> me, ContactBook book, RoomDi
         try { await SendAsync(theirs, reply, ct); }
         catch
         {
-            // Not sent (the network held it back, say): the request stays there to accept again later.
+            // Maybe not sent (the network held it back, or the answer was lost): the request stays there to accept
+            // again later, which sends this same reply; if it did arrive, their answer is still taken.
             book.Unaccept(theirs);
             throw;
         }

@@ -333,7 +333,7 @@ public sealed record VolunteerEntry(string Url, string? Operator, IReadOnlyList<
 /// resolver, only the host name counts.
 /// </param>
 public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>>? probe = null, Func<DateTimeOffset>? clock = null,
-    Func<string, CancellationToken, Task<IPAddress?>>? resolve = null)
+    Func<string, CancellationToken, Task<IPAddress?>>? resolve = null) : IAsyncDisposable
 {
     public const int MaxEntries = 256;
     public static readonly TimeSpan ReprobeEvery = TimeSpan.FromHours(1);
@@ -377,6 +377,9 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
     private readonly Dictionary<string, Entry> _entries = new(StringComparer.Ordinal);
     private readonly Lock _gate = new();
     private long _tickets;
+    /// <summary>Cancelled when the registry is disposed: checks still waiting or dialling stop.</summary>
+    private readonly CancellationTokenSource _stopping = new();
+    private readonly HashSet<Task> _probes = [];
 
     /// <summary>Addresses the operator banned (checked on every register and list).</summary>
     public Func<string, bool>? Blocked { get; set; }
@@ -505,7 +508,7 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
             _lastCheck[address] = now;
         }
         // One deadline for the lookup and the connection together, so the reply still fits the request's deadline.
-        using var total = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        using var total = CancellationTokenSource.CreateLinkedTokenSource(ct, _stopping.Token);
         total.CancelAfter(VolunteerNodes.CheckTimeout);
         ct = total.Token;
         IPAddress? ip = null;
@@ -660,7 +663,7 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
             {
                 entry!.Seen = now;
                 listed = entry.VerifiedAt is { } at && now - at < ReprobeEvery;
-                startProbe = !listed && !entry.Probing;
+                startProbe = !listed && !entry.Probing && !_stopping.IsCancellationRequested;
                 if (startProbe) entry.Probing = true;
             }
         }
@@ -669,7 +672,7 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
             if (newlyDisputed) Disputed?.Invoke(address);
             return Error("owner");
         }
-        if (startProbe) LastProbe = ProbeAsync(address);
+        if (startProbe) LastProbe = Track(ProbeAsync(address));
         return new JsonObject { ["ok"] = true, ["listed"] = listed };
     }
 
@@ -697,7 +700,8 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
         string? machine = null;
         if (_resolve is not null)
         {
-            using var lookup = new CancellationTokenSource(VolunteerNodes.CheckTimeout);
+            using var lookup = CancellationTokenSource.CreateLinkedTokenSource(_stopping.Token);
+            lookup.CancelAfter(VolunteerNodes.CheckTimeout);
             try { ip = await _resolve(address, lookup.Token); }
             catch (Exception e) when (e is not OutOfMemoryException) { ip = null; }
             if (ip is not null) machine = VolunteerNodes.MachineOf(ip);
@@ -748,15 +752,27 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
                 }
             }
             if (!wait) break;
-            await Task.Delay(WaitStep);
+            try { await Task.Delay(WaitStep, _stopping.Token); }
+            catch (OperationCanceledException) { break; }
+        }
+        if (_stopping.IsCancellationRequested)
+        {
+            Stopped(address);
+            return;
         }
         if (crowded || (_resolve is not null && ip is null)) ok = false;
         else if (sameListener is not null) ok = true;
         else
         {
-            using var dial = new CancellationTokenSource(ListingDialTimeout);
+            using var dial = CancellationTokenSource.CreateLinkedTokenSource(_stopping.Token);
+            dial.CancelAfter(ListingDialTimeout);
             try { ok = await Dial(address, ip, asNode: true, dial.Token).WaitAsync(dial.Token); }
             catch (Exception e) when (e is not OutOfMemoryException) { ok = false; }
+            if (_stopping.IsCancellationRequested)
+            {
+                Stopped(address);
+                return;
+            }
         }
         lock (_gate)
         {
@@ -780,6 +796,30 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
             }
         }
         Probed?.Invoke(address, ok);
+    }
+
+    /// <summary>The registry is shutting down: the check ends without a verdict (nothing is logged or dropped).</summary>
+    private void Stopped(string address)
+    {
+        lock (_gate)
+            if (_entries.TryGetValue(address, out var entry)) (entry.Probing, entry.Dialing) = (false, false);
+    }
+
+    private Task Track(Task probe)
+    {
+        lock (_probes) _probes.Add(probe);
+        _ = probe.ContinueWith(t => { lock (_probes) _probes.Remove(t); }, TaskScheduler.Default);
+        return probe;
+    }
+
+    /// <summary>Stops every check still waiting or dialling and waits for them to end. No new checks start after.</summary>
+    public async ValueTask DisposeAsync()
+    {
+        if (!_stopping.IsCancellationRequested) await _stopping.CancelAsync();
+        Task[] running;
+        lock (_probes) running = [.. _probes];
+        try { await Task.WhenAll(running); }
+        catch (Exception e) when (e is not OutOfMemoryException) { }
     }
 
     /// <summary>

@@ -513,6 +513,8 @@ public sealed class JayNetworkServer : IAsyncDisposable
         if (_admin is not null) await _admin.DisposeAsync();
         _network?.Dispose();
         if (Directory is not null) await Directory.DisposeAsync();
+        // Volunteer checks still waiting or dialling stop too (none is logged after this).
+        if (Volunteers is not null) await Volunteers.DisposeAsync();
     }
 }
 

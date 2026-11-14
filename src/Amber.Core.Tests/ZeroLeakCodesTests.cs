@@ -254,6 +254,37 @@ public sealed class ZeroLeakCodesTests : IAsyncDisposable
         Assert.Equal(Assert.Single(alex.Book.Pending).Sas, Assert.Single(steve.Book.Pending).Sas);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AnAcceptWhoseAnswerWasLostStillFinishes(bool acceptAgain)
+    {
+        // Steve's reply reached the directory but sending it looked failed (the answer was lost, say), so the request
+        // shows as asking him again. Alex's nonce is still taken; accepting again resends the very same reply.
+        var server = StartDirectory();
+        using var alex = NewPerson("alex", server);
+        using var steve = NewPerson("steve", server);
+        Assert.True(await alex.Post.AddAsync(steve.Key.PublicKey, alex.Name, default));
+        Assert.Empty(await steve.Post.CheckAsync(steve.Name, default));
+        steve.Book.Me = steve.Key.PublicKey;
+        var reply = steve.Book.Accept(alex.Key.PublicKey, steve.Name)!;
+        await steve.Post.SendAsync(alex.Key.PublicKey, reply, default);
+        steve.Book.Unaccept(alex.Key.PublicKey);
+        Assert.Equal(ContactStep.AskingMe, Assert.Single(steve.Book.Pending).Step);
+        if (acceptAgain)
+        {
+            Assert.Same(reply, steve.Book.Accept(alex.Key.PublicKey, steve.Name));
+            steve.Book.Unaccept(alex.Key.PublicKey);
+            await steve.Post.AcceptAsync(alex.Key.PublicKey, steve.Name, default);
+        }
+        await alex.Post.CheckAsync(alex.Name, default);
+        await steve.Post.CheckAsync(steve.Name, default);
+        var (a, b) = (Assert.Single(alex.Book.Pending), Assert.Single(steve.Book.Pending));
+        Assert.Equal(ContactStep.Compare, a.Step);
+        Assert.Equal(ContactStep.Compare, b.Step);
+        Assert.Equal(a.Sas, b.Sas);
+    }
+
     [Fact]
     public async Task InviteTravelsAsSealedMailAndComesBackWithAReceipt()
     {
