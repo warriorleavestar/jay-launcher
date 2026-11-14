@@ -276,9 +276,10 @@ public sealed class ExitTrafficPolicyScriptTests
         $script:exitRoutes += [pscustomobject]@{ Prefix='2001:db8::6/128'; Index=7; Guid=$script:PhysicalGuid; Hop='fe80::1'; Metric=1; Owned=$true }
         Enter-ExitTrafficPolicy $script:Adapters[0] $script:Plan
         $v4 = '1e5c9fae-8a84-4135-a331-950b54229ecd'
-        # Packet layers: loopback, virtual adapter and block on each, three underlay permits and three link-address permits
-        # (not repeated per address). ALE: ND, DHCPv6 and a block for each link address, and the receive rules for fe80::/10.
-        Assert-That ($script:Filters.Count -eq 25) ('unexpected filter count ' + $script:Filters.Count)
+        # Packet layers: loopback, virtual adapter and block on each, three underlay permits and six link-address permits
+        # (not repeated per address). ALE: ND, listener reports, DHCPv6 and a block for each link address, and the receive
+        # rules for fe80::/10.
+        Assert-That ($script:Filters.Count -eq 32) ('unexpected filter count ' + $script:Filters.Count)
         Assert-That (Test-Packet6 700007 '2001:db8::5' 0) 'protected IPv6 underlay was blocked'
         Assert-That (-not (Test-Packet6 900009 '2001:db8::5' 0)) 'IPv6 underlay escaped through another adapter'
         Assert-That (-not (Test-Packet6 700007 '2001:db8::7' 0)) 'IPv6 exception widened beyond its addresses'
@@ -305,6 +306,20 @@ public sealed class ExitTrafficPolicyScriptTests
         Assert-That (Test-Send6 700007 'ff02::1:2' 17 546 547) 'DHCPv6 renewal was blocked'
         Assert-That (-not (Test-Send6 700007 'ff02::1:2' 17 50000 547)) 'other UDP to DHCPv6 servers leaked'
         Assert-That (-not (Test-Send6 700007 'ff02::1:2' 6 50000 547)) 'TCP to DHCPv6 servers leaked'
+        # Listener reports that keep the solicited-node group forwarded where switches snoop MLD: MLDv2 reports to ff02::16,
+        # MLDv1 reports to the group itself and done messages to all routers; nothing else to those groups.
+        Assert-That (Test-Send6 700007 'ff02::16' 58 143 0) 'MLDv2 report was blocked'
+        Assert-That (Test-Send6 700007 'ff02::1:ff00:1' 58 131 0) 'MLDv1 report for the solicited-node group was blocked'
+        Assert-That (Test-Send6 700007 'ff02::2' 58 132 0) 'MLDv1 done was blocked'
+        Assert-That (-not (Test-Send6 700007 'ff02::16' 58 131 0)) 'other ICMPv6 to the MLDv2 group leaked'
+        Assert-That (-not (Test-Send6 700007 'ff02::16' 17 50000 9)) 'UDP to the MLDv2 group leaked'
+        Assert-That (-not (Test-Send6 700007 'ff02::2' 58 133 0)) 'router solicitations leaked'
+        Assert-That (-not (Test-Send6 700007 'ff02::2' 17 50000 9)) 'UDP to all routers leaked'
+        Assert-That (-not (Test-Send6 700007 'ff02::1' 58 143 0)) 'reports to all nodes leaked'
+        Assert-That (-not (Test-Send6 900009 'ff02::16' 58 143 0)) 'MLDv2 permit escaped through another adapter'
+        Assert-That (-not (Test-Packet6 900009 'ff02::16' 0)) 'MLDv2 packet permit escaped through another adapter'
+        # Queries come from the router's link-local address.
+        Assert-That (Test-Receive6 700007 'fe80::1' 58 130 0) 'listener queries were blocked'
         Assert-That (-not (Test-Packet6 700007 'ff02::fb' 0)) 'mDNS leaked'
         Assert-That (-not (Test-Packet6 700007 'ff02::1:3' 0)) 'LLMNR leaked'
         Assert-That (-not (Test-Packet6 700007 'ff05::2' 0)) 'wider multicast leaked'
@@ -319,7 +334,7 @@ public sealed class ExitTrafficPolicyScriptTests
         $rules = @($script:Filters | Where-Object { $_.Name -eq 'Amber exit protected underlay' -and $_.Layer -eq 'a3b3ab6b-3564-488c-9117-f34e82142763' })
         Assert-That ($rules.Count -eq 2 -and @($rules | Where-Object { $_.Conditions.Count -ne 3 }).Count -eq 0) 'IPv6 underlay permit must require LUID, interface index and address'
         $link = @($script:Filters | Where-Object { $_.Name -eq 'Amber exit IPv6 link addresses' })
-        Assert-That ($link.Count -eq 4 -and @($link | Where-Object { $_.Conditions.Count -ne 3 }).Count -eq 0) 'link permits must require LUID, interface index and address'
+        Assert-That ($link.Count -eq 6 -and @($link | Where-Object { $_.Conditions.Count -ne 3 }).Count -eq 0) 'link permits must require LUID, interface index and address'
         $ale = @($script:Filters | Where-Object { $_.Layer -eq '4a72393b-319f-44bc-84c3-ba54dcb3b6b4' -or $_.Layer -eq 'a3b42c97-9f04-4672-b87e-cee9c483257f' })
         Assert-That (@($ale | Where-Object { -not ($_.Conditions | Where-Object { $_.Key -eq '4cd62a49-59c3-4969-b7f3-bda5d32890a4' -and $_.Value -eq 700007 }) }).Count -eq 0) 'ALE rules must be limited to the physical adapter'
         Exit-ExitTrafficPolicy

@@ -540,6 +540,7 @@
   "core.mp.session.failed": "直連失敗：",
   "core.mp.session.fallback": "改用中轉：",
   "core.mp.session.nofallback": "沒有可用的中轉（沒開「無法直接連線時使用中轉」或中轉清單是空的），無法改走中轉",
+  "core.mp.session.bearer_unverified": "IPv6 直連還沒確認連通，過幾秒再試",
   "core.mp.session.guest": "加入方",
   "core.mp.session.host": "房主",
   "core.mp.session.hostnat": "房主網路類型：{0}；經加密通道收到 {1} 個位址",

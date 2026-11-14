@@ -12,7 +12,7 @@ namespace Amber.Core.Tests;
 /// </summary>
 public sealed class ExitPeerTrustTests
 {
-    private const byte Probe = 1, Ping = 4, Pong = 5;
+    private const byte Probe = 1, Ping = 4, Pong = 5, Guest = 0, Host = 1;
 
     private static List<Candidate> Loopback(DirectBridge bridge) =>
         [new(PathKind.Lan, new IPEndPoint(IPAddress.Loopback, bridge.SocketEndPoint.Port))];
@@ -67,7 +67,7 @@ public sealed class ExitPeerTrustTests
             var seq = BinaryPrimitives.ReadUInt32BigEndian(ping.Buffer.AsSpan(1));
             byte[] payload = answered switch
             {
-                0 => ping.Buffer[1..^16].Select((b, i) => i >= 4 ? (byte)(b ^ 0xFF) : b).ToArray(),
+                0 => [.. ping.Buffer[1..^16].Select((b, i) => i is >= 4 and < 4 + DirectBridge.PingNonceLength ? (byte)(b ^ 0xFF) : b), Guest],
                 1 => ping.Buffer[1..5],
                 _ => Replayed(previous ?? seq, ping.Buffer[5..^16]),
             };
@@ -83,16 +83,17 @@ public sealed class ExitPeerTrustTests
         {
             var ping = await forged.ReceiveAsync(limit.Token);
             if (ping.Buffer[0] != Ping) continue;
-            await forged.SendAsync(host.Seal(Pong, ping.Buffer[1..^16]), target, limit.Token);
+            await forged.SendAsync(host.Seal(Pong, [.. ping.Buffer[1..^16], Guest]), target, limit.Token);
             break;
         }
         while (!peer.Verified) await Task.Delay(20, limit.Token);
 
         static byte[] Replayed(uint seq, byte[] nonce)
         {
-            var payload = new byte[4 + nonce.Length];
+            var payload = new byte[4 + nonce.Length + 1];
             BinaryPrimitives.WriteUInt32BigEndian(payload, seq);
             nonce.CopyTo(payload, 4);
+            payload[^1] = Guest;
             return payload;
         }
     }
@@ -120,5 +121,66 @@ public sealed class ExitPeerTrustTests
             Assert.True(peer.PendingPings.Count <= 1, $"{peer.PendingPings.Count} pings still pending");
         }
         Assert.False(peer.Verified);
+    }
+
+    [Fact]
+    public async Task SomeoneWhoOnlySendsPacketsBackCannotVerifyAnAddress()
+    {
+        await using var host = new DirectBridge(DirectBridge.CreateSocket(), DirectTestKeys.Bridge, true, 1, _ => { });
+        using var reflector = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
+        var target = new IPEndPoint(IPAddress.Loopback, host.SocketEndPoint.Port);
+        using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        // A replayed probe of a real guest registers the address; from then on this side holds no key and can only
+        // send the host's own packets back to it.
+        await reflector.SendAsync(host.Seal(Probe, [Guest]), target, limit.Token);
+        DirectPeer? peer = null;
+        while ((peer = host.Peers.SingleOrDefault()) is null) await Task.Delay(20, limit.Token);
+        var pongs = 0;
+        for (var reflected = 0; reflected < 4;)
+        {
+            var packet = await reflector.ReceiveAsync(limit.Token);
+            if (packet.Buffer[0] == Pong) pongs++;
+            if (packet.Buffer[0] != Ping) continue;
+            await reflector.SendAsync(packet.Buffer, target, limit.Token);
+            reflected++;
+        }
+        await Task.Delay(300, limit.Token);
+        while (reflector.Available > 0)
+            if ((await reflector.ReceiveAsync(limit.Token)).Buffer[0] == Pong) pongs++;
+        // The host never answered its own pings, so there was never an answer to send back.
+        Assert.Equal(0, pongs);
+        Assert.False(peer.Verified);
+    }
+
+    [Fact]
+    public async Task AnAnswerThatClaimsToComeFromTheSameSideDoesNotVerify()
+    {
+        await using var host = new DirectBridge(DirectBridge.CreateSocket(), DirectTestKeys.Bridge, true, 1, _ => { });
+        using var forged = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
+        var target = new IPEndPoint(IPAddress.Loopback, host.SocketEndPoint.Port);
+        using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await forged.SendAsync(host.Seal(Probe, [Guest]), target, limit.Token);
+        DirectPeer? peer = null;
+        while ((peer = host.Peers.SingleOrDefault()) is null) await Task.Delay(20, limit.Token);
+        for (var answered = 0; answered < 3;)
+        {
+            var ping = await forged.ReceiveAsync(limit.Token);
+            if (ping.Buffer[0] != Ping) continue;
+            // The exact echo, but marked as answered by a host (what the host itself would send).
+            await forged.SendAsync(host.Seal(Pong, [.. ping.Buffer[1..^16], Host]), target, limit.Token);
+            answered++;
+        }
+        await Task.Delay(300, limit.Token);
+        Assert.False(peer.Verified);
+    }
+
+    [Fact]
+    public void AGuestThatJoinedThroughABackupNodeGivesItsIdleBridgeNoException()
+    {
+        DirectPeer[] peers = [Peer("2001:db8::1", admitted: true, verified: true), Peer("203.0.113.30", admitted: false, verified: false)];
+        // The room runs over the backup node; whatever answers on the idle bridge later carries nothing of it.
+        Assert.Empty(DirectSession.BridgePeersCarryingTheRoom(isHost: false, usingFallbackNode: true, peers));
+        Assert.Equal(peers, DirectSession.BridgePeersCarryingTheRoom(isHost: false, usingFallbackNode: false, peers));
+        Assert.Equal(peers, DirectSession.BridgePeersCarryingTheRoom(isHost: true, usingFallbackNode: false, peers));
     }
 }

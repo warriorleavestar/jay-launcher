@@ -540,6 +540,7 @@
   "core.mp.session.failed": "直接接続に失敗しました：",
   "core.mp.session.fallback": "中継に切り替えます：",
   "core.mp.session.nofallback": "使える中継がない（「直接接続できない場合は中継を使用」がオフ、または中継一覧が空）ため、中継に切り替えられません",
+  "core.mp.session.bearer_unverified": "IPv6 の直接接続がまだ確認できていません。数秒後にもう一度お試しください",
   "core.mp.session.guest": "参加側",
   "core.mp.session.host": "ホスト",
   "core.mp.session.hostnat": "ホストのネットワーク種別：{0}、暗号化された通信路で {1} 件のアドレスを受信",

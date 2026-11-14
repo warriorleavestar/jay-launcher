@@ -554,6 +554,7 @@
   "core.mp.session.failed": "Direct connection failed: ",
   "core.mp.session.fallback": "Switching to a relay: ",
   "core.mp.session.nofallback": "No relays available (relay fallback is off or the relay list is empty), so the connection can't fall back to a relay",
+  "core.mp.session.bearer_unverified": "the direct connection over IPv6 hasn't been confirmed yet. Try again in a few seconds",
   "core.mp.session.guest": "Joining player",
   "core.mp.session.host": "Host",
   "core.mp.session.hostnat": "Host network type: {0}; {1} addresses received over the encrypted channel",

@@ -158,7 +158,9 @@ internal sealed class UnixExitNetwork
     /// multicast group (ff02::1:ff00:0/104); solicitations and advertisements to link-local neighbors (the gateway, or an
     /// on-link peer asking from its link-local address) and to a gateway outside fe80::/10, and advertisements to all
     /// nodes (ff02::1, the answer to duplicate address detection), as ICMPv6 with hop limit 255;
-    /// and DHCPv6 from port 546 to the servers group ff02::1:2 port 547, so the device keeps its address. mDNS, LLMNR
+    /// DHCPv6 from port 546 to the servers group ff02::1:2 port 547, so the device keeps its address; and the multicast
+    /// listener reports for the solicited-node group (MLDv2 to ff02::16, MLDv1 to the group and its done to ff02::2, hop
+    /// limit 1), without which a switch that snoops MLD stops forwarding neighbor solicitations (RFC 8504 5.11). mDNS, LLMNR
     /// and other link-local traffic stay blocked. An on-link underlay address is already permitted as a destination.
     /// </summary>
     private static bool IsLinkLocal(string address) => IPAddress.TryParse(address, out var ip) && ip.IsIPv6LinkLocal;
@@ -186,6 +188,9 @@ internal sealed class UnixExitNetwork
                 sb.Append("    oifname \"").Append(device).Append("\" ip6 daddr fe80::/10 ip6 hoplimit 255 icmpv6 type { nd-neighbor-solicit, nd-neighbor-advert } accept\n");
                 sb.Append("    oifname \"").Append(device).Append("\" ip6 daddr ff02::1 ip6 hoplimit 255 icmpv6 type nd-neighbor-advert accept\n");
                 sb.Append("    oifname \"").Append(device).Append("\" ip6 daddr ff02::1:2 udp sport 546 udp dport 547 accept\n");
+                sb.Append("    oifname \"").Append(device).Append("\" ip6 daddr ff02::16 ip6 hoplimit 1 icmpv6 type mld2-listener-report accept\n");
+                sb.Append("    oifname \"").Append(device).Append("\" ip6 daddr ff02::1:ff00:0/104 ip6 hoplimit 1 icmpv6 type mld-listener-report accept\n");
+                sb.Append("    oifname \"").Append(device).Append("\" ip6 daddr ff02::2 ip6 hoplimit 1 icmpv6 type mld-listener-done accept\n");
             }
             if (gateway is not null && !IsLinkLocal(gateway))
                 sb.Append("    oifname \"").Append(device).Append("\" ip6 daddr ").Append(gateway).Append(" ip6 hoplimit 255 icmpv6 type { nd-neighbor-solicit, nd-neighbor-advert } accept\n");
@@ -214,6 +219,10 @@ internal sealed class UnixExitNetwork
                 sb.Append("pass out quick on ").Append(device).Append(" inet6 proto ipv6-icmp from any to fe80::/10 icmp6-type { neighbrsol, neighbradv }\n");
                 sb.Append("pass out quick on ").Append(device).Append(" inet6 proto ipv6-icmp from any to ff02::1 icmp6-type neighbradv\n");
                 sb.Append("pass out quick on ").Append(device).Append(" inet6 proto udp from any port 546 to ff02::1:2 port 547\n");
+                // Listener reports by number: 143 (MLDv2 report), 131 (MLDv1 report), 132 (MLDv1 done).
+                sb.Append("pass out quick on ").Append(device).Append(" inet6 proto ipv6-icmp from any to ff02::16 icmp6-type 143\n");
+                sb.Append("pass out quick on ").Append(device).Append(" inet6 proto ipv6-icmp from any to ff02::1:ff00:0/104 icmp6-type 131\n");
+                sb.Append("pass out quick on ").Append(device).Append(" inet6 proto ipv6-icmp from any to ff02::2 icmp6-type 132\n");
             }
             if (gateway is not null && !IsLinkLocal(gateway))
                 sb.Append("pass out quick on ").Append(device).Append(" inet6 proto ipv6-icmp from any to ").Append(gateway).Append(" icmp6-type { neighbrsol, neighbradv }\n");

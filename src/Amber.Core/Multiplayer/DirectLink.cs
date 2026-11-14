@@ -621,17 +621,28 @@ public sealed class DirectBridge : IAsyncDisposable
                     && _punches.TryGetValue(BinaryPrimitives.ReadInt32BigEndian(payload.AsSpan(1)), out var round)
                     && _peers.TryGetValue(from, out var acknowledged)) round.TrySetResult(acknowledged);
                 break;
-            case Ping when _peers.TryGetValue(from, out var p1):
+            // A ping names the side that sent it. Our own pings sent back to us (a reflection by someone on the path who
+            // doesn't hold the key) are never answered, so they can't be turned into an answer for ourselves.
+            case Ping when _peers.TryGetValue(from, out var p1) && payload.Length >= PingLength && payload[PingLength - 1] != OwnRole:
                 p1.LastSeen = DateTime.UtcNow;
-                await SendRawAsync(Seal(Pong, payload), from, _cts.Token);
+                var pong = new byte[PingLength + 1];
+                payload.AsSpan(0, PingLength).CopyTo(pong);
+                pong[PingLength] = OwnRole;
+                await SendRawAsync(Seal(Pong, pong), from, _cts.Token);
                 break;
             case Pong when _peers.TryGetValue(from, out var p2) && payload.Length >= 4:
+                // An answer must be to our ping (our side in the echo) and come from the other side; anything else,
+                // such as one of our own answers sent back to us, is ignored whole.
+                if (payload.Length >= PingLength && payload[PingLength - 1] != OwnRole) break;
+                if (payload.Length > PingLength && payload[PingLength] == OwnRole) break;
                 p2.LastSeen = DateTime.UtcNow;
                 var seq = BinaryPrimitives.ReadUInt32BigEndian(payload);
                 if (p2.PendingPings.TryRemove(seq, out var pending))
                 {
-                    // The answer to this address's own fresh ping, from this address: the path works both ways.
-                    if (payload.Length >= 4 + PingNonceLength && CryptographicOperations.FixedTimeEquals(pending.Nonce, payload.AsSpan(4, PingNonceLength)))
+                    // The answer to this address's own fresh ping, from this address and from the other side: the path
+                    // works both ways.
+                    if (payload.Length == PingLength + 1
+                        && CryptographicOperations.FixedTimeEquals(pending.Nonce, payload.AsSpan(4, PingNonceLength)))
                         Volatile.Write(ref p2._verified, true);
                     Interlocked.Increment(ref p2.PongsReceived);
                     var rtt = _clock.Elapsed.TotalMilliseconds - pending.SentAt / 1000.0;
@@ -646,6 +657,12 @@ public sealed class DirectBridge : IAsyncDisposable
     }
 
     internal const int PingNonceLength = 16;
+
+    /// <summary>A ping: sequence number, random value, and the side that sent it (1 = host, 0 = guest). Its answer
+    /// echoes the ping and adds the answering side.</summary>
+    internal const int PingLength = 4 + PingNonceLength + 1;
+
+    private byte OwnRole => _isHost ? (byte)1 : (byte)0;
 
     /// <summary>房主最多同时接这么多个加入方（每个一个本机套接字和一个转发循环）。</summary>
     public const int MaxHostPeers = 32;
@@ -871,11 +888,12 @@ public sealed class DirectBridge : IAsyncDisposable
                 foreach (var (s, ping) in peer.PendingPings)
                     if (_clock.Elapsed.TotalMilliseconds - ping.SentAt / 1000.0 > 5000) peer.PendingPings.TryRemove(s, out _);
                 Interlocked.Increment(ref peer.PingsSent);
-                // Sequence number, then a random value the answer must echo (older versions echo the whole payload).
-                var payload = new byte[4 + PingNonceLength];
+                // Sequence number, a random value the answer must echo, and our side.
+                var payload = new byte[PingLength];
                 BinaryPrimitives.WriteUInt32BigEndian(payload, seq);
-                RandomNumberGenerator.Fill(payload.AsSpan(4));
-                peer.PendingPings[seq] = new PendingPing((long)(_clock.Elapsed.TotalMilliseconds * 1000), payload[4..]);
+                RandomNumberGenerator.Fill(payload.AsSpan(4, PingNonceLength));
+                payload[PingLength - 1] = OwnRole;
+                peer.PendingPings[seq] = new PendingPing((long)(_clock.Elapsed.TotalMilliseconds * 1000), payload[4..(4 + PingNonceLength)]);
                 await SendRawAsync(Seal(Ping, payload), peer.Remote, _cts.Token);
                 if (DateTime.UtcNow - peer.LastSeen > ReprobeAfter)
                     await SendRawAsync(Seal(Probe, BuildProbePayload(_probeRound)), peer.Remote, _cts.Token);

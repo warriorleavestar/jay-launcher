@@ -238,6 +238,11 @@ internal static class ExitTrafficPolicyScript
                     # Duplicate address detection: another host defending its address answers to all nodes (ff02::1).
                     $neighbors += [pscustomobject]@{ Kind='allnodes'; Type=11; Address=[byte[]]@(0xff, 0x02, 0,0,0,0,0,0,0,0,0,0,0,0,0, 0x01); Link=$link }
                     $neighbors += [pscustomobject]@{ Kind='dhcp'; Type=11; Address=[byte[]]@(0xff, 0x02, 0,0,0,0,0,0,0,0,0,0, 0x00, 0x01, 0x00, 0x02); Link=$link }
+                    # Multicast listener reports for the solicited-node group (RFC 8504 5.11): on a switch that snoops MLD,
+                    # a group nobody reports for stops being forwarded, and neighbor solicitations no longer arrive. MLDv2
+                    # reports go to ff02::16; MLDv1 reports go to the group itself (above) and its done message to ff02::2.
+                    $neighbors += [pscustomobject]@{ Kind='mldv2'; Type=11; Address=[byte[]]@(0xff, 0x02, 0,0,0,0,0,0,0,0,0,0,0,0,0, 0x16); Link=$link }
+                    $neighbors += [pscustomobject]@{ Kind='routers'; Type=11; Address=[byte[]]@(0xff, 0x02, 0,0,0,0,0,0,0,0,0,0,0,0,0, 0x02); Link=$link }
                     $hop = $null
                     if ([Net.IPAddress]::TryParse([string]$entries[0].Hop, [ref]$hop) -and $hop.AddressFamily -eq [Net.Sockets.AddressFamily]::InterNetworkV6 -and -not $hop.Equals([Net.IPAddress]::IPv6Any)) {
                         if ($hop.IsIPv6Multicast) { throw 'Unexpected IPv6 underlay gateway' }
@@ -297,14 +302,14 @@ internal static class ExitTrafficPolicyScript
                     # Everything else is blocked. The exit carries IPv4 only, so other IPv6 traffic is blocked and apps fall back to IPv4.
                     Add-ExitWfpFilter $engine $subLayer ([pscustomobject]@{ Name='block other egress'; Layer=$layer; Permit=$false; Weight=1; Conditions=@() })
                 }
-                # What programs may send to (and accept from) those link addresses: neighbor discovery and DHCPv6 only.
+                # What programs may send to (and accept from) those link addresses: neighbor discovery, listener reports and DHCPv6 only.
                 # No catch-all here; traffic to other addresses is decided by the packet layer above.
                 foreach ($neighbor in $links) {
                     $on = [pscustomobject]@{ Key=$interfaceKey; Match=0; Type=4; Value=$neighbor.Link.Luid }
                     $to = [pscustomobject]@{ Key=$addressKey; Match=0; Type=$neighbor.Type; Value=$neighbor.Address }
                     $icmp = [pscustomobject]@{ Key=$protocolKey; Match=0; Type=1; Value=58 }
                     $udp = [pscustomobject]@{ Key=$protocolKey; Match=0; Type=1; Value=17 }
-                    $types = if ($neighbor.Kind -eq 'unicast') { @(135, 136) } elseif ($neighbor.Kind -eq 'solicited') { @(135) } elseif ($neighbor.Kind -eq 'allnodes') { @(136) } else { @() }
+                    $types = switch ($neighbor.Kind) { 'unicast' { @(135, 136) } 'solicited' { @(135, 131) } 'allnodes' { @(136) } 'mldv2' { @(143) } 'routers' { @(132) } default { @() } }
                     foreach ($type in $types) {
                         Add-ExitWfpFilter $engine $subLayer ([pscustomobject]@{ Name='IPv6 neighbor discovery'; Layer=$connectV6; Permit=$true; Weight=30; Conditions=@(
                             $on, $to, $icmp, [pscustomobject]@{ Key=$localPortKey; Match=0; Type=2; Value=$type }) })

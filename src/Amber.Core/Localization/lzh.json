@@ -535,6 +535,7 @@
   "core.mp.session.failed": "直連未成：",
   "core.mp.session.fallback": "改用轉驛：",
   "core.mp.session.nofallback": "無可用之轉驛（未啟「不能直連則用轉驛」，或轉驛之錄空），不能改行中繼",
+  "core.mp.session.bearer_unverified": "IPv6 直連未證其通，少頃再試",
   "core.mp.session.guest": "入者",
   "core.mp.session.host": "房主",
   "core.mp.session.hostnat": "房主之網類：{0}；經密道得址 {1}",

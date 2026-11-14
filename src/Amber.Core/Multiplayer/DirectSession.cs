@@ -262,7 +262,15 @@ public sealed class DirectSession : IAsyncDisposable
 
     private IReadOnlyList<string> UnderlayAddresses() => CollectDirectUnderlayAddresses(
         (_remote?.Candidates ?? _guestCandidates).Select(c => c.EndPoint.Address),
-        TrustedPeerAddresses(Bridge?.Peers ?? []));
+        TrustedPeerAddresses(BridgePeersCarryingTheRoom(IsHost, UsingFallbackNode, CurrentBridgePeers())));
+
+    /// <summary>
+    /// Bridge peers that actually carry this room. A guest that joined through a backup node runs the room over that node:
+    /// its bridge stays open but idle, and a peer that turns up there later carries nothing of the room, so it gets no
+    /// exception from the exit.
+    /// </summary>
+    internal static IEnumerable<DirectPeer> BridgePeersCarryingTheRoom(bool isHost, bool usingFallbackNode, IEnumerable<DirectPeer> peers) =>
+        !isHost && usingFallbackNode ? [] : peers;
 
     /// <summary>
     /// Connected peers whose address the exit may trust. An IPv6 peer must be admitted to the room (host side: proved
@@ -296,6 +304,29 @@ public sealed class DirectSession : IAsyncDisposable
             .Select(a => a.ToString()).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
     }
 
+    internal Func<IEnumerable<DirectPeer>>? BridgePeersForTest { get; init; }
+
+    private IEnumerable<DirectPeer> CurrentBridgePeers() => BridgePeersForTest?.Invoke() ?? Bridge?.Peers ?? [];
+
+    /// <summary>How long switching to an exit waits for members over IPv6 to answer a ping (one goes out every second).</summary>
+    internal TimeSpan BearerWait { get; init; } = TimeSpan.FromSeconds(6);
+
+    /// <summary>
+    /// True once every admitted IPv6 peer carrying the room has answered a fresh ping (<see cref="DirectPeer.Verified"/>),
+    /// false when one still hasn't after <paramref name="wait"/>.
+    /// </summary>
+    internal static async Task<bool> BearersVerifiedAsync(Func<IEnumerable<DirectPeer>> peers, TimeSpan wait, CancellationToken ct)
+    {
+        var deadline = DateTime.UtcNow + wait;
+        while (true)
+        {
+            if (!peers().Any(p => p.Admitted && !p.Verified && Normal(p.Remote.Address).AddressFamily == AddressFamily.InterNetworkV6))
+                return true;
+            if (DateTime.UtcNow >= deadline) return false;
+            await Task.Delay(100, ct);
+        }
+    }
+
     /// <summary>手动切换出口和矩阵切换共用启动锁，直连会话一直拥有其 EasyTier 子会话。</summary>
     public async Task SetExitNodeAsync(string? exitNode, CancellationToken ct = default)
     {
@@ -306,6 +337,12 @@ public sealed class DirectSession : IAsyncDisposable
             ObjectDisposedException.ThrowIf(_disposed, this);
             var current = EasyTier?.Options ?? _currentOptions;
             if (current is null || !current.Tun) throw new InvalidOperationException(L.T("core.mp.component.exitrequireslan"));
+            // The traffic gate lets through only bridge peers that answered a fresh ping. A member over IPv6 whose answer
+            // hasn't come back yet (just connected, a lost answer, a reconnect) would be left out and then cut off, ping
+            // answers included: wait for it, and keep the running session when it doesn't come.
+            if (exitNode is not null && !await BearersVerifiedAsync(() => BridgePeersCarryingTheRoom(IsHost, UsingFallbackNode,
+                    CurrentBridgePeers()), BearerWait, ct))
+                throw new IOException(L.T("core.mp.session.bearer_unverified"));
             var options = current with { ExitNode = exitNode, DirectUnderlayAddresses = UnderlayAddresses() };
             await StartEasyTierLockedAsync(options, ct);
             ObjectDisposedException.ThrowIf(_disposed, this);

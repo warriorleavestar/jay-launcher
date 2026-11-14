@@ -32,6 +32,57 @@ public sealed class ExitLifecycleRegressionTests
         new(null!, Path.Combine(Path.GetTempPath(), "amber-exit-lifecycle-" + Guid.NewGuid().ToString("N")), Room, false, Direct, new DiagnosticLog())
         { StartForTest = start };
 
+    private static DirectPeer Ipv6Member(bool verified) =>
+        new() { Remote = new IPEndPoint(IPAddress.Parse("2001:db8::7"), 40000), Path = PathKind.IPv6, Admitted = true, _verified = verified };
+
+    [Fact]
+    public async Task AMemberWhosePingAnswerHasNotArrivedKeepsTheRunningSession()
+    {
+        // Data already flows over the bridge, but the member's answer to a fresh ping hasn't come back: turning the exit on
+        // now would leave its address out of the gate and cut the room off. The switch waits, then gives up and keeps
+        // what is running.
+        var member = Ipv6Member(verified: false);
+        await using var session = new DirectSession(null!, Path.Combine(Path.GetTempPath(), "amber-exit-lifecycle-" + Guid.NewGuid().ToString("N")),
+            Room, false, Direct, new DiagnosticLog())
+        {
+            StartForTest = (o, _) => Task.FromResult<IEasyTierSession>(new FakeEasyTier(o)),
+            BridgePeersForTest = () => [member],
+            BearerWait = TimeSpan.FromMilliseconds(300),
+        };
+        await session.StartEasyTierAsync(Original, default);
+        var original = session.EasyTier!;
+        await Assert.ThrowsAsync<IOException>(() => session.SetExitNodeAsync(EasyTierArgs.HostIp));
+        Assert.Same(original, session.EasyTier);
+        Assert.False(original.HasExited);
+        Assert.Null(original.Options.ExitNode);
+        Assert.Equal(1, session.EasyTierStarts);
+
+        // Turning the exit off never waits.
+        await session.SetExitNodeAsync(null);
+    }
+
+    [Fact]
+    public async Task ALateAnswerLetsTheSwitchGoAheadWithThatMembersAddress()
+    {
+        var member = Ipv6Member(verified: false);
+        await using var session = new DirectSession(null!, Path.Combine(Path.GetTempPath(), "amber-exit-lifecycle-" + Guid.NewGuid().ToString("N")),
+            Room, false, Direct, new DiagnosticLog())
+        {
+            StartForTest = (o, _) => Task.FromResult<IEasyTierSession>(new FakeEasyTier(o)),
+            BridgePeersForTest = () => [member],
+            BearerWait = TimeSpan.FromSeconds(5),
+        };
+        await session.StartEasyTierAsync(Original, default);
+        var switching = session.SetExitNodeAsync(EasyTierArgs.HostIp);
+        await Task.Delay(250);
+        Assert.False(switching.IsCompleted);
+        Assert.Equal(1, session.EasyTierStarts);
+        Volatile.Write(ref member._verified, true);
+        await switching.WaitAsync(Deadline);
+        Assert.Equal(EasyTierArgs.HostIp, session.EasyTier!.Options.ExitNode);
+        Assert.Contains("2001:db8::7", session.EasyTier.Options.DirectUnderlayAddresses);
+    }
+
     [Fact]
     public async Task ExitIsPublishedOnlyAfterReadinessAcknowledgement()
     {
