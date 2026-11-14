@@ -1690,6 +1690,7 @@
   "core.gate.mc.downloading_server": "Downloading the {0} server…",
   "core.gate.mc.downloading_java": "Downloading Java {0}…",
   "core.gate.mc.java_failed": "Couldn't start Java",
+  "core.gate.mc.properties_unsafe": "Couldn't make server.properties accept only local connections, so the server wasn't started",
   "core.gate.mc.name_not_bound": "The username {0} isn't linked to this device",
   "core.gate.log.enrolled": "Enrolled: {0} linked device {1}",
   "core.gate.log.enroll_refused": "Enrollment refused ({0}): device {1}",

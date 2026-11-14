@@ -1659,6 +1659,7 @@
   "core.gate.mc.downloading_server": "{0} サーバーをダウンロード中…",
   "core.gate.mc.downloading_java": "Java {0} をダウンロード中…",
   "core.gate.mc.java_failed": "Java を起動できませんでした",
+  "core.gate.mc.properties_unsafe": "server.properties をローカル接続だけを受け付ける設定にできなかったため、サーバーを起動しませんでした",
   "core.gate.mc.name_not_bound": "ユーザー名 {0} はこのデバイスに紐づいていません",
   "core.gate.log.enrolled": "参加：{0} がデバイス {1} を登録しました",
   "core.gate.log.enroll_refused": "参加を拒否（{0}）：デバイス {1}",

@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using System.Net;
+using System.Text;
 using Amber.Core.Multiplayer.Gate;
 using Amber.Core.Net;
 using Xunit;
@@ -83,6 +85,193 @@ public sealed class McServerHostTests : IDisposable
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct) =>
             Task.FromResult(respond(request.RequestUri!.ToString()));
+    }
+
+    /// <summary>
+    /// server.properties as Java reads it: continued lines, escaped keys and repeated keys never leave a forced value
+    /// swallowed or overridden, and every other entry keeps the value it had. Checked with a reader written separately
+    /// from the one under test, and with java.util.Properties itself when Java is installed.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(TrickyProperties))]
+    public void ForcedPropertiesTakeEffectAsJavaReadsTheFile(string name, string content)
+    {
+        var host = new McServerHost(Root);
+        Directory.CreateDirectory(host.McDirectory);
+        var path = Path.Combine(host.McDirectory, "server.properties");
+        File.WriteAllText(path, content);
+        var before = JavaLoad(content);
+        host.WriteProperties(25570);
+        var once = File.ReadAllText(path);
+        host.WriteProperties(25570);
+        var twice = File.ReadAllText(path);
+
+        foreach (var text in new[] { once, twice })
+        {
+            var after = JavaLoad(text);
+            Assert.True(after.TryGetValue("server-ip", out var ip) && ip == "127.0.0.1", $"{name}: server-ip is '{ip}'");
+            Assert.Equal("25570", after["server-port"]);
+            Assert.Equal("false", after["enable-query"]);
+            Assert.Equal("false", after["enable-rcon"]);
+            Assert.Equal("false", after["online-mode"]);
+            string[] forced = ["server-ip", "server-port", "enable-query", "enable-rcon", "online-mode", "enforce-secure-profile"];
+            foreach (var (key, value) in before.Where(p => !forced.Contains(p.Key)))
+                Assert.True(after.TryGetValue(key, out var kept) && kept == value, $"{name}: {key} changed from '{value}' to '{kept}'");
+            Assert.Empty(after.Keys.Except(before.Keys).Except(forced));
+        }
+        if (JavaProperties([content, once, twice]) is { } java)
+        {
+            Assert.Equal(before, java[0]);
+            Assert.Equal(JavaLoad(once), java[1]);
+            Assert.Equal(JavaLoad(twice), java[2]);
+        }
+    }
+
+    public static TheoryData<string, string> TrickyProperties() => new()
+    {
+        { "continued motd swallows a server-ip line", "motd=hello\\\nserver-ip=127.0.0.1\nserver-ip=127.0.0.1\nonline-mode=false\n" },
+        { "server-ip only inside a continuation", "motd=a\\\n   server-ip=0.0.0.0\nonline-mode=false\n" },
+        { "even backslashes do not continue", "motd=a\\\\\nserver-ip=0.0.0.0\nonline-mode=false\n" },
+        { "three backslashes continue", "motd=a\\\\\\\nserver-ip=0.0.0.0\nserver-ip=0.0.0.0\nonline-mode=false\n" },
+        { "escaped keys", "server\\-ip=0.0.0.0\n\\u0073erver-ip=0.0.0.0\nenable\\u002drcon=true\nonline-mode=false\n" },
+        { "forced key continued over lines", "server-ip=0.0.\\\n  0.0\nenable-rcon=tr\\\n ue\nonline-mode=false\n" },
+        { "continuation line starting with a comment marker", "motd=a\\\n# not a comment\nserver-ip=0.0.0.0\nonline-mode=false\n" },
+        { "comment ending in a backslash does not continue", "# note \\\nserver-ip=0.0.0.0\nonline-mode=false\n" },
+        { "last line continues at the end of the file", "online-mode=false\nmotd=x\\" },
+        { "empty line ends a continuation", "motd=x\\\n\nserver-ip=0.0.0.0\nonline-mode=false\n" },
+        { "separators and duplicates", "server-ip 0.0.0.0\nserver-ip:0.0.0.0\n  server-ip = 0.0.0.0\nlevel-name=world\nonline-mode=false\r\nmotd=crlf\r\n" },
+    };
+
+    /// <summary>
+    /// java.util.Properties.load, written from its documentation as a character reader, separately from McServerHost.
+    /// </summary>
+    private static Dictionary<string, string> JavaLoad(string content)
+    {
+        var result = new Dictionary<string, string>();
+        var pos = 0;
+        string? NextNaturalLine()
+        {
+            if (pos >= content.Length) return null;
+            var start = pos;
+            while (pos < content.Length && content[pos] is not ('\r' or '\n')) pos++;
+            var line = content[start..pos];
+            // A line ends at \n, \r or \r\n.
+            if (pos < content.Length && content[pos] == '\r') pos++;
+            if (pos < content.Length && content[pos] == '\n' && (pos == start + line.Length || content[pos - 1] == '\r')) pos++;
+            return line;
+        }
+        static bool IsSpace(char c) => c is ' ' or '\t' or '\f';
+        static int TrailingBackslashes(StringBuilder b) { var n = 0; while (n < b.Length && b[b.Length - 1 - n] == '\\') n++; return n; }
+        while (NextNaturalLine() is { } natural)
+        {
+            var at = 0;
+            while (at < natural.Length && IsSpace(natural[at])) at++;
+            if (at == natural.Length || natural[at] is '#' or '!') continue;
+            var logical = new StringBuilder(natural[at..]);
+            while (TrailingBackslashes(logical) % 2 == 1)
+            {
+                logical.Length--;
+                if (NextNaturalLine() is not { } next) break;
+                var skip = 0;
+                while (skip < next.Length && IsSpace(next[skip])) skip++;
+                if (skip == next.Length) break;
+                logical.Append(next, skip, next.Length - skip);
+            }
+            var text = logical.ToString();
+            var key = new StringBuilder();
+            var i = 0;
+            for (; i < text.Length; i++)
+            {
+                var c = text[i];
+                if (c == '\\' && i + 1 < text.Length) { key.Append('\\').Append(text[++i]); continue; }
+                if (c is '=' or ':' || IsSpace(c)) break;
+                key.Append(c);
+            }
+            while (i < text.Length && IsSpace(text[i])) i++;
+            if (i < text.Length && text[i] is '=' or ':') i++;
+            while (i < text.Length && IsSpace(text[i])) i++;
+            result[Decode(key.ToString())] = Decode(text[i..]);
+        }
+        return result;
+    }
+
+    private static string Decode(string s)
+    {
+        var b = new StringBuilder();
+        for (var i = 0; i < s.Length; i++)
+        {
+            if (s[i] != '\\') { b.Append(s[i]); continue; }
+            if (++i >= s.Length) break;
+            b.Append(s[i] switch
+            {
+                'u' when i + 4 < s.Length => (char)Convert.ToInt32(s.Substring((i += 4) - 3, 4), 16),
+                't' => '\t',
+                'n' => '\n',
+                'r' => '\r',
+                'f' => '\f',
+                var c => c,
+            });
+        }
+        return b.ToString();
+    }
+
+    /// <summary>Loads each text with java.util.Properties when a Java runtime is on this machine; null otherwise.</summary>
+    private Dictionary<string, string>[]? JavaProperties(string[] texts)
+    {
+        var java = FindJava();
+        if (java is null) return null;
+        var dir = Directory.CreateDirectory(Path.Combine(_outer, "java-check")).FullName;
+        var source = Path.Combine(dir, "LoadProperties.java");
+        File.WriteAllText(source, """
+            import java.io.*;
+            import java.nio.charset.StandardCharsets;
+            import java.util.*;
+            public class LoadProperties {
+                public static void main(String[] args) throws Exception {
+                    PrintStream out = new PrintStream(System.out, true, "UTF-8");
+                    for (String file : args) {
+                        Properties p = new Properties();
+                        try (Reader r = new InputStreamReader(new FileInputStream(file), StandardCharsets.UTF_8)) { p.load(r); }
+                        for (String k : new TreeSet<>(p.stringPropertyNames())) out.println(esc(k) + "\t" + esc(p.getProperty(k)));
+                        out.println("--");
+                    }
+                }
+                static String esc(String s) { return s.replace("\\", "\\\\").replace("\t", "\\t").replace("\n", "\\n").replace("\r", "\\r"); }
+            }
+            """);
+        var info = new ProcessStartInfo(java) { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, StandardOutputEncoding = Encoding.UTF8 };
+        info.ArgumentList.Add(source);
+        for (var i = 0; i < texts.Length; i++)
+        {
+            var file = Path.Combine(dir, $"{i}.properties");
+            File.WriteAllText(file, texts[i]);
+            info.ArgumentList.Add(file);
+        }
+        using var process = Process.Start(info)!;
+        var stderr = process.StandardError.ReadToEndAsync();
+        var output = process.StandardOutput.ReadToEnd();
+        Assert.True(process.WaitForExit(120_000), "java did not finish");
+        Assert.True(process.ExitCode == 0, stderr.Result);
+        var maps = new List<Dictionary<string, string>> { new() };
+        foreach (var line in output.Split('\n').Select(l => l.TrimEnd('\r')))
+        {
+            if (line == "--") { maps.Add([]); continue; }
+            if (line.Length == 0) continue;
+            var tab = line.IndexOf('\t');
+            maps[^1][Unesc(line[..tab])] = Unesc(line[(tab + 1)..]);
+        }
+        return [.. maps.Take(texts.Length)];
+        static string Unesc(string s) => s.Replace("\\r", "\r").Replace("\\n", "\n").Replace("\\t", "\t").Replace("\\\\", "\\");
+    }
+
+    private static string? FindJava()
+    {
+        var name = OperatingSystem.IsWindows() ? "java.exe" : "java";
+        if (Environment.GetEnvironmentVariable("JAVA_HOME") is { Length: > 0 } home && File.Exists(Path.Combine(home, "bin", name)))
+            return Path.Combine(home, "bin", name);
+        foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+            if (File.Exists(Path.Combine(dir, name))) return Path.Combine(dir, name);
+        return null;
     }
 
     public void Dispose()
