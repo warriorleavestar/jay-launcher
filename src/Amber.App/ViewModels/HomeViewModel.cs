@@ -573,6 +573,13 @@ public sealed partial class HomeViewModel : PageViewModel
         // 这一局全程用开始时的游戏目录、安装器和 Java：准备到一半换了目录，也还是在原目录里补文件、启动。
         var ctx = request.ExpectedContext ?? _service.Context;
         var workDir = _service.WorkDirFor(ctx, id);
+        // The world was backed up in this folder: an instance that now runs from another one (shared folder switched)
+        // would upgrade a world nobody backed up.
+        if (maintenance?.WorkDir is { } backedUp && !SameFolder(backedUp, workDir))
+        {
+            maintenance.Finish(TaskOutcome.Failure(L.T("maintenance.directory_changed")));
+            return;
+        }
         var run = new GameRun(id) { WorkDir = workDir, Maintenance = maintenance };
         maintenance?.WhilePreparing(() => { try { run.Cts.Cancel(); } catch (ObjectDisposedException) { } });
         // 每局一份日志：多开时第二局不会清掉第一局的，也不会混在一起。
@@ -748,7 +755,7 @@ public sealed partial class HomeViewModel : PageViewModel
             });
             run.Started = DateTime.UtcNow;
             run.Game = game;
-            if (maintenance is not null && options.Baked?.Maintenance is { } maintenanceLaunch) maintenance.Launched(maintenanceLaunch);
+            if (maintenance is not null && options.Baked?.Maintenance is { } maintenanceLaunch) maintenance.Launched(maintenanceLaunch, workDir);
             run.Session.ProcessUp(DateTimeOffset.Now);
             // 同一个游戏目录里同时开着两局：两局的崩溃报告、latest.log 分不清，崩溃分析只用各自的输出。
             foreach (var sibling in _runs.Where(r => r != run && r.Game is not null && string.Equals(r.WorkDir, workDir, StringComparison.OrdinalIgnoreCase)))
@@ -762,7 +769,7 @@ public sealed partial class HomeViewModel : PageViewModel
             var code = game.ExitCode;
             if (run.Baked) MergeBakeProblemsFile(run);
             // Maintenance said how it ended and quit normally: no crash check.
-            var maintained = maintenance?.Last is { IsEnd: true } && code == 0;
+            var maintained = maintenance?.End is not null && code == 0;
             if (maintenance is not null) EndMaintenance(run, MaintenanceOutcome(maintenance, code), quiet: true);
             // 退出码 0 但没进主界面：比如没有 OpenGL 时游戏弹个框就“正常”退出了，也要看一眼日志。
             CrashInput? input = null;
@@ -870,14 +877,23 @@ public sealed partial class HomeViewModel : PageViewModel
         SetStatus(StatusMessage.Plain(outcome.Message ?? ""));
     }
 
-    /// <summary>How a maintenance run ended, from its last progress line and the exit code.</summary>
-    internal static TaskOutcome MaintenanceOutcome(MaintenanceRun run, int exitCode) => run.Last?.Step switch
+    private static bool SameFolder(string a, string b) =>
+        string.Equals(Path.TrimEndingDirectorySeparator(Path.GetFullPath(a)), Path.TrimEndingDirectorySeparator(Path.GetFullPath(b)),
+            OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+
+    /// <summary>
+    /// How a maintenance run ended: its last word (done, cancelled, failed; the "quit" after it does not count) and the
+    /// exit code. A non-zero exit after "done" is still a failure.
+    /// </summary>
+    internal static TaskOutcome MaintenanceOutcome(MaintenanceRun run, int exitCode) => exitCode != 0 && run.End?.Step == "done"
+        ? TaskOutcome.Failure(L.F("maintenance.exited", exitCode))
+        : run.End?.Step switch
     {
         "done" => TaskOutcome.Success((run.Spec.PregenRadius > 0
             ? L.F("maintenance.done_pregen", run.Name, Amber.Core.Bake.WorldMaintenance.Chunks(run.Spec.PregenRadius).ToString("N0"))
             : L.F("maintenance.done_upgrade", run.Name)) + (run.Backup is not null ? " " + L.T("maintenance.backup_note") : "")),
         "cancelled" => new TaskOutcome(TaskState.Cancelled, L.T("maintenance.cancelled")),
-        "failed" => TaskOutcome.Failure(run.Last.Message is { Length: > 0 } why ? L.F("maintenance.failed_because", why) : L.T("maintenance.failed")),
+        "failed" => TaskOutcome.Failure(run.End.Message is { Length: > 0 } why ? L.F("maintenance.failed_because", why) : L.T("maintenance.failed")),
         _ when run.CancelRequested => new TaskOutcome(TaskState.Cancelled, L.T("maintenance.cancelled")),
         _ => TaskOutcome.Failure(L.F("maintenance.exited", exitCode)),
     };

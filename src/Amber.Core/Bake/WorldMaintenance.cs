@@ -1,6 +1,8 @@
 using System.Globalization;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Amber.Core.Launch;
 
 namespace Amber.Core.Bake;
 
@@ -70,17 +72,29 @@ public sealed record MaintenanceLaunch(string World, string Upgrade, int SpawnRa
         return o;
     }
 
-    /// <summary>Asks the running game to stop at the next batch (it saves its place and quits normally).</summary>
-    public bool RequestCancel()
+    /// <summary>The loader's cancel file, relative to the instance folder (bake interface: only its existence counts).</summary>
+    public static readonly IReadOnlyList<string> CancelFolders = [".amber-ul"];
+
+    public const string CancelFileName = "maintenance.cancel";
+
+    /// <summary>
+    /// Asks the running game to stop at the next batch (it saves its place and quits normally). Only the cancel file the
+    /// interface names, inside <paramref name="instanceDir"/>, is ever written, and through <see cref="ContainedFiles"/>:
+    /// the game can write its own instance, so a link it left on the way (or in place of the file) is never followed.
+    /// </summary>
+    public bool RequestCancel(string instanceDir)
     {
         if (CancelFile is not { Length: > 0 } file) return false;
         try
         {
-            if (Path.GetDirectoryName(file) is { Length: > 0 } dir) Directory.CreateDirectory(dir);
-            File.WriteAllText(file, "cancel");
+            var root = Path.GetFullPath(instanceDir);
+            var expected = Path.Combine([root, .. CancelFolders, CancelFileName]);
+            var named = Path.GetFullPath(file, root);
+            if (!string.Equals(named, expected, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)) return false;
+            ContainedFiles.UpdateText(root, CancelFolders, CancelFileName, _ => "cancel");
             return true;
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return false; }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) { return false; }
     }
 
     internal static string? Str(JsonObject o, string key) => o[key] is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;
@@ -100,7 +114,9 @@ public sealed record MaintenanceProgress(string Step, long Done, long Total, str
         if (at < 0) return null;
         try
         {
-            if (JsonNode.Parse(line[(at + Prefix.Length)..]) is not JsonObject o) return null;
+            // Only the first JSON value after the marker: a log line may go on after it.
+            var reader = new Utf8JsonReader(Encoding.UTF8.GetBytes(line[(at + Prefix.Length)..]), new JsonReaderOptions { AllowMultipleValues = true });
+            if (JsonNode.Parse(ref reader) is not JsonObject o) return null;
             if (MaintenanceLaunch.Str(o, "schema") != Schema || MaintenanceLaunch.Str(o, "step") is not { Length: > 0 } step) return null;
             static long Long(JsonObject o, string key) => o[key] is JsonValue v && v.TryGetValue<long>(out var n) ? n : 0;
             return new MaintenanceProgress(step, Long(o, "done"), Long(o, "total"), MaintenanceLaunch.Str(o, "world"), MaintenanceLaunch.Str(o, "message"));
@@ -125,12 +141,14 @@ public sealed record PregenState(int Radius, long Done, long Total, bool Complet
 {
     public const string FileName = "amber-ul-pregen.json";
 
+    /// <summary>The loader writes a few hundred bytes; anything much larger is not its file and is not read.</summary>
+    public const int MaxBytes = 16 * 1024;
+
     public static PregenState? Read(string worldDir)
     {
-        var path = Path.Combine(worldDir, FileName);
         try
         {
-            if (!File.Exists(path) || JsonNode.Parse(File.ReadAllText(path)) is not JsonObject o) return null;
+            if (ContainedFiles.ReadSmall(Path.Combine(worldDir, FileName), MaxBytes) is not { } bytes || JsonNode.Parse(bytes) is not JsonObject o) return null;
             if (MaintenanceLaunch.Str(o, "schema") != "amber-ul/pregen@1") return null;
             static long Long(JsonObject o, string key) => o[key] is JsonValue v && v.TryGetValue<long>(out var n) ? n : 0;
             return new PregenState((int)Long(o, "radius"), Long(o, "done"), Long(o, "total"), o["complete"] is JsonValue c && c.TryGetValue<bool>(out var b) && b);

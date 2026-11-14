@@ -261,7 +261,9 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
         service.UniversalLoaderChanged += id => Dispatcher.UIThread.Post(() =>
         {
             if (Current?.Id == id) RefreshUniversalLoader();
+            RefreshMaintenanceState();
         });
+        service.SettingsChangedElsewhere += () => Dispatcher.UIThread.Post(RefreshMaintenanceState);
     }
 
     private bool _active;

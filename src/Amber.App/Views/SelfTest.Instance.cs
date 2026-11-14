@@ -391,6 +391,24 @@ internal sealed partial class SelfTest
             await Task.Delay(300);
             Check("选 128：估算跟着变，开了通用加载器后能开始", instance.PregenRadius == 128 && instance.PregenEstimate.Contains("2,048") && instance.CanMaintainWorlds
                 && Dispatcher.UIThread.Invoke(() => page?.StartPregenButton.IsEnabled == true), instance.PregenEstimate);
+            // The drawer stays open while what blocks it changes: [Start] follows without reopening.
+            service.SetUniversalLoader(id, false);
+            await Task.Delay(300);
+            var offWhileOpen = !instance.CanStartPregen && instance.PregenBlocker == L.T("maintenance.needs_loader")
+                && Dispatcher.UIThread.Invoke(() => page?.StartPregenButton.IsEnabled == false);
+            service.SetUniversalLoader(id, true);
+            await Task.Delay(300);
+            var onWhileOpen = instance.CanStartPregen && Dispatcher.UIThread.Invoke(() => page?.StartPregenButton.IsEnabled == true);
+            var home = main.Pages.OfType<HomeViewModel>().First();
+            Dispatcher.UIThread.Invoke(() => home.IsBusy = true);
+            await Task.Delay(300);
+            var busyWhileOpen = !instance.CanStartPregen && instance.PregenBlocker == L.T("maintenance.game_running")
+                && Dispatcher.UIThread.Invoke(() => page?.StartPregenButton.IsEnabled == false);
+            Dispatcher.UIThread.Invoke(() => home.IsBusy = false);
+            await Task.Delay(300);
+            Check("抽屉开着时关掉通用加载器、开始一局游戏：【开始预生成】马上变灰并写原因，恢复后又能点",
+                offWhileOpen && onWhileOpen && busyWhileOpen && instance.CanStartPregen && Dispatcher.UIThread.Invoke(() => page?.StartPregenButton.IsEnabled == true),
+                $"{offWhileOpen} {onWhileOpen} {busyWhileOpen}");
             Check("抽屉写“开始前会先备份这个存档。”", Dispatcher.UIThread.Invoke(() => page?.PregenBackupText.IsEffectivelyVisible == true && page.PregenBackupText.Text == L.T("maintenance.pregen.backup")));
             await ShotAsync("instance-world-pregen-drawer");
 

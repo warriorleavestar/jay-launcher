@@ -39,6 +39,11 @@ public sealed partial class InstanceViewModel
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException) { return null; }
     };
 
+    /// <summary>The world's resumable place, read once when the drawer opens for it.</summary>
+    private PregenState? _pregenState;
+
+    partial void OnPregenWorldChanged(WorldItem? value) => _pregenState = value is { } w ? Amber.Core.Bake.PregenState.Read(w.World.Path) : null;
+
     private long PregenDiskNeed => WorldMaintenance.DiskBytes(PregenRadius, PregenState()?.DoneFor(PregenRadius) ?? 0);
 
     private long? PregenDiskFree => PregenWorld is { } w ? FreeSpaceFor(w.World.Path) : null;
@@ -92,18 +97,25 @@ public sealed partial class InstanceViewModel
 
     public bool CanMaintainWorlds => MaintenanceBlocker is null;
 
-    private PregenState? PregenState() => PregenWorld is { } w ? Amber.Core.Bake.PregenState.Read(w.World.Path) : null;
+    private PregenState? PregenState() => _pregenState;
 
-    [RelayCommand]
-    private void OpenPregen(WorldItem? item)
+    /// <summary>What the blockers depend on changed (a game started or ended, the loader switch, the instance).</summary>
+    internal void RefreshMaintenanceState()
     {
-        if (item is null) return;
-        PregenWorld = item;
         OnPropertyChanged(nameof(MaintenanceBlocker));
         OnPropertyChanged(nameof(CanMaintainWorlds));
         OnPropertyChanged(nameof(PregenBlocker));
         OnPropertyChanged(nameof(CanStartPregen));
         OnPropertyChanged(nameof(PregenDiskShort));
+    }
+
+    [RelayCommand]
+    private void OpenPregen(WorldItem? item)
+    {
+        if (item is null) return;
+        if (ReferenceEquals(PregenWorld, item)) OnPregenWorldChanged(item);
+        PregenWorld = item;
+        RefreshMaintenanceState();
         PregenOpen = true;
     }
 
@@ -137,12 +149,14 @@ public sealed partial class InstanceViewModel
         }
         var key = (c.Id, item.World.FolderName);
         if (_maintenance.ContainsKey(key)) return null;
-        var run = new MaintenanceRun(spec) { Name = item.Name };
+        // The game folder and instance folder the backup is made in: the launch must still use them.
+        var context = _service.Context;
+        var workDir = c.WorkDir;
+        var run = new MaintenanceRun(spec) { Name = item.Name, WorkDir = workDir };
         var title = spec.PregenRadius > 0 ? L.F("maintenance.task.pregen", item.Name, spec.PregenRadius) : L.F("maintenance.task.upgrade", item.Name);
         _maintenance[key] = run;
         SetWorldBusy(key, L.T("maintenance.row.preparing"));
         var world = item.World;
-        var workDir = c.WorkDir;
         _service.Tasks.Start("world-maintenance", title, async (ctx, ct) =>
         {
             try
@@ -159,11 +173,12 @@ public sealed partial class InstanceViewModel
                     return TaskOutcome.Failure(L.F("maintenance.backup_failed", ErrorText.Describe(e)));
                 }
                 ct.ThrowIfCancellationRequested();
+                if (!_service.IsCurrentDirectory(context)) return TaskOutcome.Failure(L.T("maintenance.directory_changed"));
                 SetBusyLater(key, L.T("maintenance.row.preparing"));
                 run.Progressed += p => ctx.Report(p.Fraction, StepText(p));
                 using var stop = ct.Register(run.Cancel);
                 ctx.Report(null, L.T("maintenance.step.preparing"));
-                (launch ?? _service.RequestLaunch)(new LaunchRequest(c.Id) { Maintenance = run });
+                (launch ?? _service.RequestLaunch)(new LaunchRequest(c.Id) { Maintenance = run, ExpectedContext = context });
                 return await run.Done;
             }
             finally
