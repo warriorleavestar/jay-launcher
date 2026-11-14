@@ -78,7 +78,7 @@ JSON 里可以写 `//` 注释和结尾逗号。每一部分都可选，没写的
   "motion": { "DurationBase": 200 },
   // 线描插画的两种颜色（两套都用）。
   "illustration": { "IlloLine": "#93B4FF", "IlloFill": "#202A3A" },
-  // 实例页英雄区：cover / blur / flat；遮罩最低 0.85。
+  // 实例页英雄区：cover / blur / flat；遮罩最低 0.85。这一版只读取和检查，还没画出来（见下面组件表后的说明）。
   "hero": { "mode": "cover", "scrim": 0.88 },
 
   // 字体：包里的文件（fonts/…）或系统字体名。可以按语言指定：default / zh-Hans / zh-Hant / ja / en。
@@ -204,7 +204,7 @@ Jay 默认配色是“夜 / 晨”两套（墨蓝底、松鸦蓝强调色、琥�
 | capsule（正在玩胶囊）、requestbar（只管非安全条目） | | |
 | heading（页面标题）、window（窗口底色，可用图片） | | |
 
-这一版 Jay 已经画出来的组件：button 全部、card、card.cover、hero、chip、badge、tag、tab、sidebar、rail.item、nav.item（含 indicator）、topbar（背景）、input、combobox、switch（开的颜色）、checkbox、banner、menu、tooltip、progress、heading、window。其余组件（segmented、list.row、table.header、toast、drawer、dialog、coachmark、capsule、requestbar）现在会被读取和检查，后续版本接上，写了不会报错。
+这一版 Jay 已经画出来的组件：button 全部、card、card.cover、hero（不含 scrim）、chip、badge、tag、tab（不含 indicator、indicatorHeight）、sidebar、rail.item、nav.item（含 indicator）、topbar（背景）、input、combobox、switch（开的颜色）、checkbox、banner、menu、tooltip、progress、heading、window。其余组件（segmented、list.row、table.header、toast、drawer、dialog、coachmark、capsule、requestbar），以及 hero 的 `scrim`、tab 的 `indicator` / `indicatorHeight` 和 tokens.json 里的 `hero`（mode、scrim），现在会被读取和检查，后续版本接上，写了不会报错。
 
 值的写法：
 
