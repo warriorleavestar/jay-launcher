@@ -197,19 +197,22 @@ public class DownloaderTests : IDisposable
     [Fact]
     public void TheTestServerMovesOnWhenItsPortIsTakenFirst()
     {
-        using var taken = new HttpListener();
-        var busy = TakenPort(taken);
+        var (taken, busy) = TakenPort();
+        using var _ = taken;
         var tries = 0;
-        using var server = new TestServer(() => ++tries == 1 ? busy : FreeLoopbackPort());
-        Assert.Equal(2, tries);
+        var last = 0;
+        // The free ports after the first try are probed and released, so one of them can be taken too: any later try may win.
+        using var server = new TestServer(() => last = ++tries == 1 ? busy : FreeLoopbackPort());
+        Assert.InRange(tries, 2, 5);
         Assert.NotEqual(busy, server.Port);
+        Assert.Equal(last, server.Port);
     }
 
     [Fact]
     public void TheTestServerGivesUpAfterFiveTakenPorts()
     {
-        using var taken = new HttpListener();
-        var busy = TakenPort(taken);
+        var (taken, busy) = TakenPort();
+        using var _ = taken;
         var tries = 0;
         Assert.Throws<HttpListenerException>(() => new TestServer(() => { tries++; return busy; }));
         Assert.Equal(5, tries);
@@ -224,16 +227,26 @@ public class DownloaderTests : IDisposable
         return port;
     }
 
-    /// <summary>A port another HttpListener holds on the same prefix the test server would use.</summary>
-    private static int TakenPort(HttpListener holder)
+    /// <summary>
+    /// A port another HttpListener holds on the same prefix the test server would use. A failed Start closes the
+    /// listener, so every attempt uses a new one; the caller disposes the one that holds the port.
+    /// </summary>
+    private static (HttpListener Holder, int Port) TakenPort()
     {
         for (var attempt = 0; ; attempt++)
         {
             var port = FreeLoopbackPort();
-            holder.Prefixes.Clear();
+            var holder = new HttpListener();
             holder.Prefixes.Add($"http://127.0.0.1:{port}/");
-            try { holder.Start(); return port; }
-            catch (HttpListenerException) when (attempt < 5) { }
+            try
+            {
+                holder.Start();
+                return (holder, port);
+            }
+            catch (HttpListenerException) when (attempt < 5)
+            {
+                holder.Close();
+            }
         }
     }
 
