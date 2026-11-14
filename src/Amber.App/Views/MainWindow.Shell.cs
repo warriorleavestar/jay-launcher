@@ -65,7 +65,7 @@ public partial class MainWindow
             }
             ApplyShell();
         };
-        SizeChanged += (_, _) => ApplyShell();
+        SizeChanged += (_, _) => ApplyShell(onResize: true);
         ContentColumn.SizeChanged += (_, e) =>
         {
             ApplyContentTier(e.NewSize.Width);
@@ -119,10 +119,14 @@ public partial class MainWindow
         return ShellRules.ParseMode(ThemeService.Shell?.NavStyle);
     }
 
-    private void ApplyShell()
+    /// <summary>What the last shell layout was built from; a resize that changes none of it rebuilds nothing.</summary>
+    private object? _shellLayoutKey;
+
+    private void ApplyShell() => ApplyShell(onResize: false);
+
+    private void ApplyShell(bool onResize)
     {
         var shell = ThemeService.Shell;
-        (DataContext as MainViewModel)?.Shell.ApplyOrder(shell);
         var nav = shell?.Nav ?? "left";
         var horizontal = nav is "top" or "bottom";
         ShellNav = nav;
@@ -130,13 +134,20 @@ public partial class MainWindow
         var width = Bounds.Width > 0 ? Bounds.Width : Width;
         var sidebarWidth = shell?.SidebarWidth ?? ShellRules.SidebarWidth;
         var railWidth = shell?.RailWidth ?? ShellRules.RailWidth;
-        SidebarExpanded = !horizontal && ShellRules.IsExpanded(width, SidebarModeNow(), sidebarWidth, SidebarExpanded);
+        var mode = SidebarModeNow();
+        SidebarExpanded = !horizontal && ShellRules.IsExpanded(width, mode, sidebarWidth, SidebarExpanded);
         var rail = !horizontal && !SidebarExpanded;
         var navSize = SidebarExpanded ? sidebarWidth : railWidth;
 
         var height = Bounds.Height > 0 ? Bounds.Height : Height;
         HeightTierNow = LayoutTiers.ForHeight(height, HeightTierNow);
         var tight = HeightTierNow == HeightTier.Tight;
+
+        // Window resizes come in a stream: only a change of tier (or of theme, nav place or sidebar mode) relays the shell.
+        var key = (shell, nav, mode, SidebarExpanded, navSize, HeightTierNow);
+        if (onResize && Equals(key, _shellLayoutKey)) return;
+        _shellLayoutKey = key;
+        (DataContext as MainViewModel)?.Shell.ApplyOrder(shell);
 
         ShellGrid.ColumnDefinitions.Clear();
         ShellGrid.RowDefinitions.Clear();
