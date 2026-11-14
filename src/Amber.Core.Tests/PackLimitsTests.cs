@@ -54,6 +54,8 @@ public sealed class PackLimitsTests : IDisposable
     [InlineData("https://raw.githubusercontent.com/o/r/main/a.jar", true)]
     [InlineData("https://gitlab.com/o/r/-/raw/main/a.jar", true)]
     [InlineData("https://CDN.Modrinth.com/a.jar", true)]
+    [InlineData("https://edge.forgecdn.net/files/1/2/a.jar", true)]
+    [InlineData("https://mediafilez.forgecdn.net/files/1/2/a.jar", true)]
     [InlineData("https://example.com/a.jar", false)]
     [InlineData("https://cdn.modrinth.com.example.com/a.jar", false)]
     [InlineData("https://192.168.1.10/a.jar", false)]

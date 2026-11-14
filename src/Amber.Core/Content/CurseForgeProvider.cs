@@ -306,7 +306,6 @@ public sealed class CurseForgeProvider(HttpClient http, Func<string?> apiKey, st
         _ => null,
     };
 
-    /// <summary>CurseForge 指纹：去掉空白字节后的 Murmur2（种子 1）。</summary>
     /// <summary>
     /// <see cref="Fingerprint(ReadOnlySpan{byte})"/> of a file, read in two streaming passes (the hash needs the filtered
     /// length first) instead of holding the whole jar, twice, in memory.
@@ -364,6 +363,7 @@ public sealed class CurseForgeProvider(HttpClient http, Func<string?> apiKey, st
         }
     }
 
+    /// <summary>CurseForge 指纹：去掉空白字节后的 Murmur2（种子 1）。</summary>
     public static uint Fingerprint(ReadOnlySpan<byte> data)
     {
         var filtered = new byte[data.Length];

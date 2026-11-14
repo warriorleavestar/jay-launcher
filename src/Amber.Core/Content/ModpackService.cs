@@ -183,7 +183,8 @@ public sealed partial class ModpackService(LoaderContext ctx, ModrinthProvider m
             // so a pack can't make Jay contact a server of its choosing.
             if (urls.FirstOrDefault(IsAllowedMrpackHost) is not { } url)
             {
-                pack.OnUnavailable?.Invoke(L.F("core.content.modpack.hostrefused", file["path"]!.GetValue<string>(), new Uri(urls[0]).Host));
+                pack.OnUnavailable?.Invoke(L.F("core.content.modpack.hostrefused", file["path"]!.GetValue<string>(),
+                    Uri.TryCreate(urls[0], UriKind.Absolute, out var refused) ? refused.Host : urls[0]));
                 continue;
             }
             items.Add(new DownloadItem(url, target, sha1, file["fileSize"]?.GetValue<long>()));
@@ -235,8 +236,12 @@ public sealed partial class ModpackService(LoaderContext ctx, ModrinthProvider m
         foreach (var id in missing) pack.OnUnavailable?.Invoke(L.F("core.content.modpack.missingcursefile", id));
     }
 
-    /// <summary>Hosts the Modrinth pack format allows in <c>downloads</c>.</summary>
-    private static readonly string[] MrpackHosts = ["cdn.modrinth.com", "github.com", "raw.githubusercontent.com", "gitlab.com"];
+    /// <summary>
+    /// Hosts the Modrinth pack format allows in <c>downloads</c>, plus CurseForge's download hosts: packs exported by other
+    /// tools list CurseForge files there, and Jay already downloads from them for CurseForge packs.
+    /// </summary>
+    private static readonly string[] MrpackHosts =
+        ["cdn.modrinth.com", "github.com", "raw.githubusercontent.com", "gitlab.com", "edge.forgecdn.net", "mediafilez.forgecdn.net"];
 
     internal static bool IsAllowedMrpackHost(string url) =>
         Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps && uri.IsDefaultPort
