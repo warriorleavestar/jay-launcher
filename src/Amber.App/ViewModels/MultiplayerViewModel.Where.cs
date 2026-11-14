@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using Amber.Core.Localization;
 using Amber.Core.Multiplayer.Contacts;
+using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
@@ -96,7 +97,11 @@ public sealed partial class MultiplayerViewModel
     private void InitWhere()
     {
         PropertyChanged += OnWhereInputChanged;
-        FriendRooms.CollectionChanged += (_, _) => NotifyWhere();
+        FriendRooms.CollectionChanged += (_, _) =>
+        {
+            NotifyWhere();
+            WatchFriendRoomExpiry();
+        };
         PublicRooms.CollectionChanged += (_, _) =>
         {
             OnPropertyChanged(nameof(ShowPublicRoomList));
@@ -134,6 +139,35 @@ public sealed partial class MultiplayerViewModel
         PruneFriendRooms();
         if (FriendRooms.Any(r => r.Key == key)) return;
         FriendRooms.Insert(0, new FriendRoomItem(key, invite, who, room));
+    }
+
+    private DispatcherTimer? _friendRoomTimer;
+
+    /// <summary>How often a listed friend's room is checked for having run out (while the list shows one that can).</summary>
+    internal static readonly TimeSpan FriendRoomCheckInterval = TimeSpan.FromSeconds(5);
+
+    /// <summary>Tests: whether listed friends' rooms are being checked for running out.</summary>
+    internal bool WatchingFriendRoomExpiry => _friendRoomTimer?.IsEnabled == true;
+
+    /// <summary>
+    /// While a listed room can run out, check it every few seconds, so it leaves the list on its own: nobody has to
+    /// switch the filter, click it or answer its request.
+    /// </summary>
+    private void WatchFriendRoomExpiry()
+    {
+        if (FriendRooms.Any(r => r.Invite.Expires is not null))
+        {
+            _friendRoomTimer ??= new DispatcherTimer(FriendRoomCheckInterval, DispatcherPriority.Background, (_, _) => PruneFriendRooms());
+            _friendRoomTimer.Start();
+        }
+        else _friendRoomTimer?.Stop();
+    }
+
+    /// <summary>Drops one room from the list (its request timed out: the invite ran out).</summary>
+    private void DropFriendRoom(string key)
+    {
+        if (FriendRooms.FirstOrDefault(r => r.Key == key) is { } row) FriendRooms.Remove(row);
+        _mailedInvites.Remove(key);
     }
 
     /// <summary>Drops rows whose invite has run out, with the request that offered to join.</summary>

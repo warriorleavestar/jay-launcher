@@ -511,7 +511,12 @@ public sealed partial class MultiplayerViewModel
                 break;
             case "contact-invite":
                 // "Ignore" only closes the request: the room stays under "where to play" until the invite runs out.
-                if (handle.Choice != "join") break;
+                // The request timing out means just that, so the room goes with it.
+                if (handle.Choice != "join")
+                {
+                    if (handle.ResolvedBy == RequestSource.Timeout) DropFriendRoom(key);
+                    break;
+                }
                 PruneFriendRooms();
                 if (FriendRooms.FirstOrDefault(r => r.Key == key) is { } listed) _ = JoinFriendRoomAsync(listed);
                 else SetStatus(StatusMessage.Warning("multiplayer.where.friend_room.expired"));
@@ -570,6 +575,12 @@ public sealed partial class MultiplayerViewModel
     private async Task<bool> MailInviteAsync(ContactItem? item, int uses, TimeSpan lifetime, bool askFirst, bool quiet)
     {
         if (item is null || _lobby is not { } lobby || _credentials is not { } credentials) return false;
+        // A mailed invite knocks through a relay; a "No server" room's lobby reaches none.
+        if (IsDirect)
+        {
+            if (!quiet) SetStatus(StatusMessage.Warning("multiplayer.direct.use_sealed"));
+            return false;
+        }
         var send = TestSendInvite;
         if (send is null)
         {
