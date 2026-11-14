@@ -147,8 +147,21 @@ public sealed class LauncherService : IDisposable
         // file that could not be read is not empty: neither makes an account.
         if (!store.Unreadable && MigratesPlayerName(store.Accounts.Count, settings.PlayerName, settings.IsFresh || settings.LoadProblem is not null,
                 Environment.GetEnvironmentVariable("AMBER_SELFTEST"), Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE")))
-            Accounts.AddOffline(settings.PlayerName);
+            MigrateOfflineAccount(Accounts, settings.PlayerName);
         Reload();
+    }
+
+    /// <summary>
+    /// Turns an old player name into an offline account. An accounts file that cannot be written must not stop Jay from
+    /// starting: the account holds for this run, and the next start migrates the name again.
+    /// </summary>
+    internal static void MigrateOfflineAccount(AccountService accounts, string playerName)
+    {
+        try { accounts.AddOffline(playerName); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            System.Diagnostics.Trace.WriteLine("Jay: saving the migrated offline account failed: " + e.Message);
+        }
     }
 
     /// <summary>

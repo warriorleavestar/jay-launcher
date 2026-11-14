@@ -1235,7 +1235,6 @@ public sealed partial class SettingsViewModel : PageViewModel
         _ = LoadJavaAsync(true);
     }
 
-    /// <summary>把通过校验的字段写进设置并保存；没通过的字段留在设置里的旧值，提示写在字段下面。</summary>
     /// <summary>What <see cref="LauncherService.Reload"/> builds the downloader, installers and content providers from.</summary>
     private static object CoreKey(AppSettings s) =>
         (s.GameDirectory, s.DownloadSource, s.DownloadConcurrency, s.AutoJavaDownload, s.CurseForgeApiRoot, s.CurseForgeApiKey);
@@ -1248,6 +1247,7 @@ public sealed partial class SettingsViewModel : PageViewModel
     /// <summary>What the services were last built from, and the defaults the pages last refreshed for.</summary>
     private object _builtCore, _shownDefaults;
 
+    /// <summary>把通过校验的字段写进设置并保存；没通过的字段留在设置里的旧值，提示写在字段下面。</summary>
     private void Persist()
     {
         if (_loading) return;

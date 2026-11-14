@@ -41,6 +41,20 @@ public sealed class StartupFileProblemTests : IDisposable
     }
 
     [Fact]
+    public void AnAccountsFileThatCannotBeWrittenDoesNotStopStartup()
+    {
+        // The accounts path is taken by a folder, so writing the file fails: the old player name still becomes an
+        // account for this run instead of the start failing.
+        var path = Path.Combine(_root, "accounts.json");
+        Directory.CreateDirectory(path);
+        var store = new AccountStore(path);
+        using var http = new HttpClient();
+        var accounts = new AccountService(http, store, _root, () => null);
+        LauncherService.MigrateOfflineAccount(accounts, "Alex");
+        Assert.Equal(["Alex"], store.Accounts.Select(a => a.Name));
+    }
+
+    [Fact]
     public void ADamagedAccountsFileIsKeptAndTheListStartsEmpty()
     {
         var path = Path.Combine(_root, "accounts.json");
