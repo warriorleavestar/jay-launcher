@@ -45,29 +45,27 @@ public sealed class DirectoryCallerSourceTests
     }
 
     [Fact]
-    public async Task LocalCallersArentLimitedPerSourceUntilAMappedCallerIsSeen()
+    public async Task LocalCallersShareAWiderCappedLimitUntilAMappedCallerIsSeen()
     {
-        // Without the loopback-source patch every caller arrives from 127.0.0.1. One caller must not use up everyone's
-        // allowance, so these get only the directory-wide limits.
+        // Without the loopback-source patch every caller arrives from 127.0.0.1 and can't be told apart. They share a
+        // wider allowance than one caller's, still capped below the directory's own, so one of them can't take every place.
         await using var server = new RoomDirectoryServer(IPAddress.Loopback, 0);
         var held = new List<TcpClient>();
         try
         {
-            for (var i = 0; i < RoomDirectoryServer.MaxConnectionsPerSource + 4; i++)
+            for (var i = 0; i < RoomDirectoryServer.MaxConnectionsUnmapped + 4; i++)
             {
                 var c = new TcpClient();
                 await c.ConnectAsync(IPAddress.Loopback, server.Port);
                 held.Add(c);
             }
-            await Task.Delay(300);
+            for (var i = 0; i < 200 && server.OpenFrom(RoomDirectoryServer.UnmappedLoopbackSource) < RoomDirectoryServer.MaxConnectionsUnmapped; i++)
+                await Task.Delay(20);
+            await Task.Delay(200);
             Assert.False(server.MappingSeen);
             Assert.Equal(0, server.OpenFrom(RoomDirectoryServer.SharedLoopbackSource));
-            foreach (var c in held)
-            {
-                using var timeout = new CancellationTokenSource(100);
-                try { Assert.NotEqual(0, await c.GetStream().ReadAsync(new byte[1], timeout.Token)); }
-                catch (OperationCanceledException) { }
-            }
+            Assert.Equal(RoomDirectoryServer.MaxConnectionsUnmapped, server.OpenFrom(RoomDirectoryServer.UnmappedLoopbackSource));
+            Assert.True(RoomDirectoryServer.MaxConnectionsUnmapped < RoomDirectoryServer.MaxConcurrent);
         }
         finally
         {

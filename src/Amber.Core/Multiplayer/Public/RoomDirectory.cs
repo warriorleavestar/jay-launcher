@@ -78,7 +78,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
         public string? Account;
     }
 
-    private sealed record SealedItem(string Blob, string DropHash, DateTimeOffset Expires);
+    private sealed record SealedItem(string Blob, string DropHash, DateTimeOffset Expires, bool Unmapped = false);
 
     /// <summary>All mailboxes together hold at most this many items (about 32 MB of blobs at the largest size).</summary>
     public const int MaxSealedMail = 8000;
@@ -195,6 +195,8 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
     /// <summary>Mailbox id → sealed mail waiting there.</summary>
     private readonly Dictionary<string, List<SealedItem>> _mailboxes = new(StringComparer.Ordinal);
     private int _sealedCount;
+    /// <summary>Of <see cref="_sealedCount"/>, mail posted by callers that couldn't be told apart (<see cref="UnmappedLoopbackSource"/>).</summary>
+    private int _sealedUnmapped;
     /// <summary>Rendezvous id (hex) → sealed record, taken at most once (<see cref="Rendezvous"/>).</summary>
     private readonly Dictionary<string, (string Blob, DateTimeOffset Expires)> _rendezvous = new(StringComparer.Ordinal);
     /// <summary>Rendezvous puts per source address in the current window.</summary>
@@ -233,6 +235,22 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
 
     /// <summary>Sealed mail posts one source address may make per <see cref="MailPostWindow"/>.</summary>
     public const int MaxMailPostsPerSource = 20;
+
+    // Callers that can't be told apart (UnmappedLoopbackSource: the node's EasyTier doesn't map callers) share one
+    // allowance each. It is wider than one caller's, since every member over the network is in it, and narrower than the
+    // directory's, so one caller can't use up what direct callers have, or fill the stores.
+
+    /// <summary>Connections callers that can't be told apart may have open at once, together.</summary>
+    public const int MaxConnectionsUnmapped = MaxConcurrent / 2;
+
+    /// <summary>Sealed mail posts callers that can't be told apart may make per <see cref="MailPostWindow"/>, together.</summary>
+    public const int MaxMailPostsUnmapped = 120;
+
+    /// <summary>Sealed mail from callers that can't be told apart held at once.</summary>
+    public const int MaxSealedMailUnmapped = MaxSealedMail / 4;
+
+    /// <summary>Rendezvous puts callers that can't be told apart may make per <see cref="Rendezvous.MaxTtl"/>, together.</summary>
+    public const int MaxRendezvousPutsUnmapped = 4 * MaxRendezvousPutsPerSource;
 
     /// <summary>The window for <see cref="MaxMailPostsPerSource"/>.</summary>
     public static readonly TimeSpan MailPostWindow = TimeSpan.FromMinutes(10);
@@ -644,18 +662,23 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
     /// The source the per-source limits use. Until the first caller arrives mapped (127.235.c.d), the node's EasyTier is
     /// taken to lack the loopback-source patch: then every caller over the network arrives from a local address, and
     /// counting them as one source would let one caller use up everyone's allowance. So until then local callers are
-    /// <see cref="UnmappedLoopbackSource"/>: no per-source limits (<see cref="PerSource"/>) and only the directory-wide
-    /// budgets and <see cref="MaxConcurrent"/> hold, except for what stays in the directory for days (new signed records,
-    /// which they share one allowance for). Once a mapped caller was seen, the shared local source is limited like any other.
+    /// <see cref="UnmappedLoopbackSource"/>, which has its own wider allowances (<see cref="MaxConnectionsUnmapped"/>,
+    /// <see cref="MaxMailPostsUnmapped"/>, <see cref="MaxSealedMailUnmapped"/>, <see cref="MaxRendezvousPutsUnmapped"/>; new
+    /// signed records share <see cref="MaxRecordPutsPerSource"/>), all below the directory's own. Once a mapped caller was
+    /// seen, or when the node's EasyTier is known to map callers (<see cref="SourcesMapped"/>), the shared local source is
+    /// limited like <see cref="SharedLoopbackSource"/>.
     /// </summary>
     private string? Limited(string? source) =>
-        source == SharedLoopbackSource && !Volatile.Read(ref _mappingSeen) ? UnmappedLoopbackSource : source;
+        source == SharedLoopbackSource && !SourcesMapped && !Volatile.Read(ref _mappingSeen) ? UnmappedLoopbackSource : source;
+
+    /// <summary>
+    /// The node's EasyTier is known to map callers (<see cref="EasyTierRelease.MapsCallers"/>): local callers are the shared
+    /// local source from the start, never <see cref="UnmappedLoopbackSource"/>.
+    /// </summary>
+    public bool SourcesMapped { get; init; }
 
     /// <summary>Local callers while no caller has arrived mapped (see <see cref="Limited"/>).</summary>
     internal const string UnmappedLoopbackSource = "loopback-unmapped";
-
-    /// <summary>The source for limits that would let one caller use up everyone's allowance: none for unmapped callers.</summary>
-    private static string? PerSource(string? source) => source == UnmappedLoopbackSource ? null : source;
 
     /// <summary>Has a mapped caller been seen (per-source limits apply to local callers too)? Tests.</summary>
     internal bool MappingSeen => Volatile.Read(ref _mappingSeen);
@@ -671,12 +694,17 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
 
     private bool TryOpen(string? source)
     {
-        source = PerSource(source);
         if (source is null) return true;
         lock (_openBySource)
         {
             var open = _openBySource.GetValueOrDefault(source);
-            if (open >= (source == SharedLoopbackSource ? MaxConnectionsShared : MaxConnectionsPerSource)) return false;
+            var cap = source switch
+            {
+                SharedLoopbackSource => MaxConnectionsShared,
+                UnmappedLoopbackSource => MaxConnectionsUnmapped,
+                _ => MaxConnectionsPerSource,
+            };
+            if (open >= cap) return false;
             _openBySource[source] = open + 1;
             return true;
         }
@@ -684,7 +712,6 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
 
     private void Close(string? source)
     {
-        source = PerSource(source);
         if (source is null) return;
         lock (_openBySource)
         {
@@ -713,14 +740,14 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
                 "withdraw" => Withdraw(request),
                 "snap" => JsonNode.Parse(BuildSnapshot(PlanSnapshot(request))) as JsonObject ?? Error("bad"),
                 "find" => Find(request),
-                "post" => Post(request, PerSource(source)),
+                "post" => Post(request, source),
                 "fetch" => Fetch(request),
                 "drop" => Drop(request),
-                "rv.put" => RendezvousPut(request, PerSource(source)),
+                "rv.put" => RendezvousPut(request, source),
                 "rv.take" => RendezvousTake(request),
                 "rec.put" => RecordPut(request, source),
                 "rec.get" => RecordGet(request),
-                "volunteer" => Volunteers is { } v ? v.Register(request["url"]?.GetValue<string>(), request["operator"], PerSource(source)) : Error("off"),
+                "volunteer" => Volunteers is { } v ? v.Register(request["url"]?.GetValue<string>(), request["operator"], source) : Error("off"),
                 // In-process calls only (the server awaits "probe" itself): blocks for at most VolunteerNodes.CheckTimeout.
                 "probe" => Volunteers is { } p ? p.CheckAsync(request["url"]?.GetValue<string>()).GetAwaiter().GetResult() : Error("off"),
                 "nodes" => Volunteers is { } v ? NodesReply(v.Pick()) : Error("off"),
@@ -1176,17 +1203,20 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             var now = _now();
             var existing = _mailboxes.TryGetValue(box!, out var items);
             if (existing && items!.Any(i => i.Blob == blob)) return new JsonObject { ["ok"] = true };
-            if (_sealedCount >= MaxSealedMail || (existing && items!.Count >= RoomDirectoryProtocol.MaxMailPerBox)) return Error("full");
+            var unmapped = source == UnmappedLoopbackSource;
+            if (_sealedCount >= MaxSealedMail || (existing && items!.Count >= RoomDirectoryProtocol.MaxMailPerBox)
+                || unmapped && _sealedUnmapped >= MaxSealedMailUnmapped) return Error("full");
             // Every check first; allowances are only used up by a post that is taken.
             var (count, until) = source is not null && _mailPosts.TryGetValue(source, out var used) && used.Until > now ? used : (0, now + MailPostWindow);
             // "rate" so older Jay still shows a sensible text; "what" lets newer Jay say it is about mail.
-            if (source is not null && count >= MaxMailPostsPerSource) return new JsonObject { ["ok"] = false, ["error"] = "rate", ["what"] = "mail" };
+            if (source is not null && count >= (unmapped ? MaxMailPostsUnmapped : MaxMailPostsPerSource)) return new JsonObject { ["ok"] = false, ["error"] = "rate", ["what"] = "mail" };
             if (!_mailBudget.CanAcquire()) return BudgetFull("post", "mail-busy");
             if (source is not null) _mailPosts[source] = (count + 1, until);
             _mailBudget.TryAcquire();
             if (!existing) _mailboxes[box!] = items = [];
-            items!.Add(new SealedItem(blob, drop!, _now() + RoomDirectoryProtocol.MailTtl));
+            items!.Add(new SealedItem(blob, drop!, _now() + RoomDirectoryProtocol.MailTtl, unmapped));
             _sealedCount++;
+            if (unmapped) _sealedUnmapped++;
             return new JsonObject { ["ok"] = true };
         }
     }
@@ -1229,6 +1259,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
         {
             if (_mailboxes.TryGetValue(box!, out var items))
             {
+                _sealedUnmapped -= items.Count(i => i.DropHash == hash && i.Unmapped);
                 _sealedCount -= items.RemoveAll(i => i.DropHash == hash);
                 if (items.Count == 0) _mailboxes.Remove(box!);
             }
@@ -1251,7 +1282,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             var now = _now();
             // Every check first; allowances are only used up by a put that is taken.
             var (count, until) = source is not null && _rendezvousPuts.TryGetValue(source, out var used) && used.Until > now ? used : (0, now + Rendezvous.MaxTtl);
-            if (source is not null && count >= MaxRendezvousPutsPerSource) return Error("rate");
+            if (source is not null && count >= (source == UnmappedLoopbackSource ? MaxRendezvousPutsUnmapped : MaxRendezvousPutsPerSource)) return Error("rate");
             // Never overwrite: whoever put first keeps the id until it is taken or expires.
             if (_rendezvous.ContainsKey(id!)) return Error("exists");
             if (_rendezvous.Count >= MaxRendezvous) return Error("full");
@@ -1347,6 +1378,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
         var now = _now();
         foreach (var (box, items) in _mailboxes.ToList())
         {
+            _sealedUnmapped -= items.Count(i => i.Expires <= now && i.Unmapped);
             _sealedCount -= items.RemoveAll(i => i.Expires <= now);
             if (items.Count == 0) _mailboxes.Remove(box);
         }
