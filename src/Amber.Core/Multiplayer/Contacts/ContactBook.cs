@@ -340,6 +340,21 @@ public sealed class ContactBook(string path, Func<DateTimeOffset>? clock = null)
         return reply;
     }
 
+    /// <summary>
+    /// The hello-r for a request I accepted could not be mailed: the request goes back to asking me, so accepting again
+    /// sends a fresh one (otherwise it would sit waiting for a nonce the other side can never send).
+    /// </summary>
+    internal void UndoAccept(ReadOnlySpan<byte> theirs)
+    {
+        lock (_gate)
+        {
+            if (!_pending.TryGetValue(Convert.ToHexStringLower(theirs), out var pending) || pending.Initiator || pending.Step != ContactStep.WaitingForNonce) return;
+            pending.MyNonce = null;
+            pending.Step = ContactStep.AskingMe;
+        }
+        Changed?.Invoke();
+    }
+
     private MailMessage AcceptLocked(PendingContact pending, string myName)
     {
         pending.MyNonce = ContactHandshake.NewNonce();
