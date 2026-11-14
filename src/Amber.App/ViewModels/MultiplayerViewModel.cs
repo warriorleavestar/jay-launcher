@@ -700,6 +700,13 @@ public sealed partial class MultiplayerViewModel : PageViewModel
             SetStatus(StatusMessage.Warning("multiplayer.nodes.host_required"));
             return;
         }
+        var tunnel = new TunnelSettings(SelectedTransport.Mode, CanDisguise && DisguiseAsMinecraft);
+        var relayOnly = OpenRoute == RoomRoute.RelayOnly;
+        if (relayOnly && SplitNeedsDirect(NewRoomSplit(tunnel)))
+        {
+            SetStatus(StatusMessage.Warning("multiplayer.split.relay_only_strict"));
+            return;
+        }
         // No LAN world yet: the room opens on a relay and picks the game up when it's opened to LAN.
         if (await HostGamePortAsync(checkManual: true) is not (var gamePort, var relay)) return;
         if (!IsIdle)
@@ -709,8 +716,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         }
         // 房间的网络名和密钥随机生成，只在批准加入时经加密的敲门通道发给对方；没有可以直接分享的房间码，靠“邀请”。
         // "Relays only" travels with the credentials, so every member the host lets in turns direct connections off too.
-        var relayOnly = OpenRoute == RoomRoute.RelayOnly;
-        var credentials = NewCredentials(gamePort, new TunnelSettings(SelectedTransport.Mode, CanDisguise && DisguiseAsMinecraft)) with { RelayOnly = relayOnly };
+        var credentials = NewCredentials(gamePort, tunnel) with { RelayOnly = relayOnly };
         // 成员表：批准一个人时发给他自己的钥匙（游戏通道和聊天按它认人）；房主自己的聊天客户端也有一把。
         var members = new MemberTable();
         // My own "always relays only" setting turns direct connections off on this computer without making it the room's rule.
