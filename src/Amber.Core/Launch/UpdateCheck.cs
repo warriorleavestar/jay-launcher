@@ -56,18 +56,23 @@ public sealed class UpdateCheck(HttpClient http, string dataDir, TrustList? trus
     /// The seq of the newest trustee change this install has followed from the list it was built with (0 when none).
     /// Stored with that list's hash: a build with a different list built in starts again from 0.
     /// </summary>
-    public long ChainSeq
+    public long ChainSeq => ReadChainState().Seq;
+
+    /// <summary>The hash of the list the newest followed change introduced (null when none): later chains must pass through it.</summary>
+    public string? ChainHash => ReadChainState().Hash;
+
+    /// <summary>The state file holds "own-list-hash seq reached-list-hash".</summary>
+    private (long Seq, string? Hash) ReadChainState()
     {
-        get
+        try
         {
-            try
-            {
-                var parts = File.ReadAllText(ChainStatePath).Trim().Split(' ');
-                return parts.Length == 2 && parts[0] == OwnHash
-                       && long.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var seq) ? seq : 0;
-            }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return 0; }
+            var parts = File.ReadAllText(ChainStatePath).Trim().Split(' ');
+            return parts.Length == 3 && parts[0] == OwnHash
+                   && long.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var seq) && seq > 0
+                ? (seq, parts[2])
+                : (0, null);
         }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return (0, null); }
     }
 
     /// <summary>Null when no feed is set or there is nothing newer; otherwise the newer release with its signature verdict.</summary>
@@ -103,10 +108,11 @@ public sealed class UpdateCheck(HttpClient http, string dataDir, TrustList? trus
         var sigs = Encoding.UTF8.GetString(await GetAsync(sigsUrl, MaxSigs, ct));
         var chain = assets.TryGetValue(ReleaseSignature.ChainFileName, out var chainUrl) ? Encoding.UTF8.GetString(await GetAsync(chainUrl, MaxChain, ct)) : null;
 
-        var check = ReleaseSignature.Verify(sigs, sums, chain, tag, trust, HighestSeq, chainSeq: ChainSeq);
+        var (chainSeq, chainHash) = ReadChainState();
+        var check = ReleaseSignature.Verify(sigs, sums, chain, tag, trust, HighestSeq, chainSeq: chainSeq, chainHash: chainHash);
         if (!check.IsValid) return new(info, check, empty, assets);
         Remember(check.Seq);
-        RememberChain(check.ChainSeq);
+        RememberChain(check.ChainSeq, check.ChainHash);
         return new(info, check, ReleaseSignature.ParseSums(Encoding.UTF8.GetString(sums)), assets);
     }
 
@@ -166,12 +172,12 @@ public sealed class UpdateCheck(HttpClient http, string dataDir, TrustList? trus
         File.Move(temp, StatePath, overwrite: true);
     }
 
-    private void RememberChain(long seq)
+    private void RememberChain(long seq, string? hash)
     {
-        if (seq <= ChainSeq) return;
+        if (seq <= ChainSeq || hash is null) return;
         Directory.CreateDirectory(dataDir);
         var temp = ChainStatePath + ".tmp";
-        File.WriteAllText(temp, OwnHash + " " + seq.ToString(CultureInfo.InvariantCulture) + "\n");
+        File.WriteAllText(temp, OwnHash + " " + seq.ToString(CultureInfo.InvariantCulture) + " " + hash + "\n");
         File.Move(temp, ChainStatePath, overwrite: true);
     }
 

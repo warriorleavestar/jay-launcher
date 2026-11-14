@@ -25,9 +25,10 @@ release's assets and offers the update only when:
   one wrong is no vote; a key outside the list is no vote; a key signing twice is one vote);
 - the trustee list it names is the one built into this Jay, or reachable from it through
   `trust-chain.json`, each step signed by enough of the list before it, with seqs that grow along the
-  chain. Once this Jay has followed a change, it remembers that change's seq (`trust-chain-seq.txt` in
-  the data folder, together with the hash of the built-in list) and refuses a release whose list was
-  retired by it;
+  chain. Once this Jay has followed a change, it remembers that change's seq and the list it introduced
+  (`trust-chain-seq.txt` in the data folder, together with the hash of the built-in list) and refuses a
+  release whose list was retired by it, or whose chain does not pass through that list (so a retired
+  list can't sign a newer change of its own);
 - its release seq is not lower than the highest this Jay has accepted (kept in `release-seq.txt` in the
   data folder), so an old signed release can't be passed off as new.
 
