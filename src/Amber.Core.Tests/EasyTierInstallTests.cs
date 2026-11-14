@@ -294,8 +294,10 @@ public sealed class EasyTierInstallTests : IDisposable
     public async Task ImportAndAutomaticInstallIntoTheSameFolderDoNotInterleave(bool automaticFirst)
     {
         var data = Path.Combine(_root, "data-mixed");
-        var (auto, autoHandler) = Create(NoNetwork, Bundle("bundle-mixed"), data);
-        var import = Create(NoNetwork, dataDir: data).Installer;
+        // Both belong to the same Jay, so they share its bundled package: the elevated guard's copy counts toward "installed".
+        var bundle = Bundle("bundle-mixed");
+        var (auto, autoHandler) = Create(NoNetwork, bundle, data);
+        var import = Create(NoNetwork, bundle, data).Installer;
         var zip = WriteFile("import.zip", _good);
         Task Start(EasyTierInstaller i) => i == auto ? i.EnsureAsync() : i.ImportAsync(zip);
         var (holder, waiter) = automaticFirst ? (auto, import) : (import, auto);
