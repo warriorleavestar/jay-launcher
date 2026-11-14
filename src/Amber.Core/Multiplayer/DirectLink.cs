@@ -307,6 +307,28 @@ public sealed class DirectBridge : IAsyncDisposable
     /// </summary>
     public Func<bool>? AcceptingNewPeers { get; set; }
 
+    /// <summary>
+    /// While set, IPv6 peers this bridge doesn't already have are taken only from these addresses (null: no limit).
+    /// A member exit sets it: its traffic gate lets IPv6 through only to the addresses fixed when the exit started, so a
+    /// peer outside them would connect and then be cut off. Turned away here instead, it joins through the room's other
+    /// paths like any player who can't connect directly. IPv4 peers are not affected.
+    /// </summary>
+    public IReadOnlySet<IPAddress>? Ipv6Allowed
+    {
+        get => Volatile.Read(ref _ipv6Allowed);
+        set => Volatile.Write(ref _ipv6Allowed, value);
+    }
+    private IReadOnlySet<IPAddress>? _ipv6Allowed;
+    private long _ipv6HeldLogged;
+
+    /// <summary>Whether <see cref="Ipv6Allowed"/> turns a new peer from <paramref name="from"/> away.</summary>
+    internal static bool Ipv6Held(IReadOnlySet<IPAddress>? allowed, IPAddress from)
+    {
+        if (allowed is null) return false;
+        var address = from.IsIPv4MappedToIPv6 ? from.MapToIPv4() : from;
+        return address.AddressFamily == AddressFamily.InterNetworkV6 && !allowed.Contains(address);
+    }
+
     /// <summary>喷洒时每轮往多少个端口发（对方对称 NAT 时用）。</summary>
     public int SprayPorts { get; set; } = 256;
 
@@ -710,6 +732,11 @@ public sealed class DirectBridge : IAsyncDisposable
         }
         if (!_isHost && !_peers.IsEmpty) return false;
         if (_blocked.Contains(from)) return false;
+        if (Ipv6Held(Ipv6Allowed, from.Address))
+        {
+            if (Transport.TunnelServer.OncePerMinute(ref _ipv6HeldLogged)) _log(L.F("core.mp.direct.exit_holds_ipv6", from));
+            return false;
+        }
         var path = Classify(from);
         if (!AllowedPaths.Contains(path) && !(path == PathKind.Punch && AllowedPaths.Contains(PathKind.PunchSpray)))
         {

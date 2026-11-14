@@ -143,6 +143,61 @@ public sealed class ExitLifecycleRegressionTests
     }
 
     [Fact]
+    public async Task WhileTheExitRunsTheBridgeTakesIpv6OnlyFromThePlannedAddresses()
+    {
+        // From the start of the switch no IPv6 peer the bridge doesn't have yet gets in, then only the planned ones,
+        // until the exit is turned off. A switch that fails leaves no limit behind.
+        var member = Ipv6Member(verified: true);
+        var holds = new List<IReadOnlySet<IPAddress>?>();
+        await using var session = new DirectSession(null!, Path.Combine(Path.GetTempPath(), "amber-exit-lifecycle-" + Guid.NewGuid().ToString("N")),
+            Room, false, Direct, new DiagnosticLog())
+        {
+            StartForTest = (o, _) => Task.FromResult<IEasyTierSession>(new FakeEasyTier(o)),
+            BridgePeersForTest = () => [member],
+            BearerWait = TimeSpan.FromMilliseconds(300),
+            Ipv6HoldForTest = h => { lock (holds) holds.Add(h); },
+        };
+        await session.StartEasyTierAsync(Original, default);
+        await session.SetExitNodeAsync(EasyTierArgs.HostIp).WaitAsync(Deadline);
+        var only = IPAddress.Parse("2001:db8::7");
+        Assert.Equal(3, holds.Count);
+        Assert.All(holds, h => Assert.Equal([only], h!));
+
+        await session.SetExitNodeAsync(null).WaitAsync(Deadline);
+        Assert.Null(holds[^1]);
+
+        holds.Clear();
+        Volatile.Write(ref member._verified, false);
+        await Assert.ThrowsAsync<IOException>(() => session.SetExitNodeAsync(EasyTierArgs.HostIp));
+        Assert.Equal([only], holds[0]!);
+        Assert.Null(holds[^1]);
+    }
+
+    [Fact]
+    public async Task APeerThatSlipsInWhileTheExitStartsIsReported()
+    {
+        var member = Ipv6Member(verified: true);
+        var late = new DirectPeer { Remote = new IPEndPoint(IPAddress.Parse("2001:db8::9"), 40000), Path = PathKind.IPv6, Admitted = true, _verified = true };
+        var peers = new List<DirectPeer> { member };
+        var log = new DiagnosticLog();
+        await using var session = new DirectSession(null!, Path.Combine(Path.GetTempPath(), "amber-exit-lifecycle-" + Guid.NewGuid().ToString("N")),
+            Room, false, Direct, log)
+        {
+            StartForTest = (o, _) =>
+            {
+                if (o.ExitNode is not null) lock (peers) peers.Add(late);
+                return Task.FromResult<IEasyTierSession>(new FakeEasyTier(o));
+            },
+            BridgePeersForTest = () => { lock (peers) return [.. peers]; },
+        };
+        await session.StartEasyTierAsync(Original, default);
+        await session.SetExitNodeAsync(EasyTierArgs.HostIp).WaitAsync(Deadline);
+        Assert.DoesNotContain("2001:db8::9", session.EasyTier!.Options.DirectUnderlayAddresses);
+        Assert.Contains(log.Snapshot(), e => e.Text.Contains(L.T("core.mp.session.exit_peer_rejoin"), StringComparison.Ordinal));
+        Assert.Single(DirectSession.PeersOutsideThePlan([member, late], session.EasyTier.Options.DirectUnderlayAddresses));
+    }
+
+    [Fact]
     public async Task AJoinThatDoesNotFinishKeepsTheRunningSessionButAnAbandonedOneDoesNotHoldTheSwitch()
     {
         var joining = Ipv6Member(verified: false);

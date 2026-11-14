@@ -186,6 +186,49 @@ public sealed class ExitPeerTrustTests
     }
 
     [Fact]
+    public void AnIpv6LimitTurnsAwayOnlyIpv6AddressesOutsideIt()
+    {
+        var planned = IPAddress.Parse("2001:db8::7");
+        var limit = new HashSet<IPAddress> { planned };
+        Assert.False(DirectBridge.Ipv6Held(null, IPAddress.Parse("2001:db8::9")));
+        Assert.False(DirectBridge.Ipv6Held(limit, planned));
+        Assert.True(DirectBridge.Ipv6Held(limit, IPAddress.Parse("2001:db8::9")));
+        Assert.True(DirectBridge.Ipv6Held(new HashSet<IPAddress>(), planned));
+        // IPv4, also as a dual-stack socket reports it, is never held.
+        Assert.False(DirectBridge.Ipv6Held(new HashSet<IPAddress>(), IPAddress.Parse("203.0.113.5")));
+        Assert.False(DirectBridge.Ipv6Held(new HashSet<IPAddress>(), IPAddress.Parse("203.0.113.5").MapToIPv6()));
+    }
+
+    [Fact]
+    public async Task WithAnIpv6LimitNewIpv6PeersOutsideItAreTurnedAwayAndIpv4IsNot()
+    {
+        if (!Socket.OSSupportsIPv6) return;
+        await using var host = new DirectBridge(DirectBridge.CreateSocket(), DirectTestKeys.Bridge, true, 1, _ => { });
+        if (host.SocketEndPoint.AddressFamily != AddressFamily.InterNetworkV6) return;
+        using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var v6Target = new IPEndPoint(IPAddress.IPv6Loopback, host.SocketEndPoint.Port);
+        var v4Target = new IPEndPoint(IPAddress.Loopback, host.SocketEndPoint.Port);
+        host.Ipv6Allowed = new HashSet<IPAddress>();
+
+        using var v6 = new UdpClient(new IPEndPoint(IPAddress.IPv6Loopback, 0));
+        for (var i = 0; i < 5; i++)
+        {
+            await v6.SendAsync(host.Seal(Probe, [Guest]), v6Target, limit.Token);
+            await Task.Delay(50, limit.Token);
+        }
+        await Task.Delay(200, limit.Token);
+        Assert.Empty(host.Peers);
+
+        using var v4 = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
+        await v4.SendAsync(host.Seal(Probe, [Guest]), v4Target, limit.Token);
+        while (host.Peers.Count == 0) await Task.Delay(20, limit.Token);
+
+        host.Ipv6Allowed = new HashSet<IPAddress> { IPAddress.IPv6Loopback };
+        await v6.SendAsync(host.Seal(Probe, [Guest]), v6Target, limit.Token);
+        while (host.Peers.Count < 2) await Task.Delay(20, limit.Token);
+    }
+
+    [Fact]
     public async Task AnOlderVersionsPingsAreStillAnsweredButItsAnswersNeverVerify()
     {
         await using var host = new DirectBridge(DirectBridge.CreateSocket(), DirectTestKeys.Bridge, true, 1, _ => { });
