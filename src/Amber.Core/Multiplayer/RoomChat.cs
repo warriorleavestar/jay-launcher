@@ -805,6 +805,10 @@ public sealed class ChatHub : IAsyncDisposable
             }
             writer = WriteLoopAsync(member);
             var stream = member.Stream;
+            // One deadline for everything before Join. Control frames are read before the join check, so a deadline per
+            // frame would let a connection that never joins stay for as long as it keeps sending them.
+            using var joinDeadline = CancellationTokenSource.CreateLinkedTokenSource(member.Cts.Token);
+            joinDeadline.CancelAfter(FirstFrameTimeout);
             while (!member.Cts.IsCancellationRequested)
             {
                 byte[]? frame;
@@ -815,9 +819,7 @@ public sealed class ChatHub : IAsyncDisposable
                 }
                 else
                 {
-                    using var deadline = CancellationTokenSource.CreateLinkedTokenSource(member.Cts.Token);
-                    deadline.CancelAfter(FirstFrameTimeout);
-                    frame = await RoomChat.ReadFrameAsync(stream, deadline.Token);
+                    frame = await RoomChat.ReadFrameAsync(stream, joinDeadline.Token);
                 }
                 if (frame is null) break;
                 if (_table is not null && ChatWire.ControlOf(frame, out var control) is { } ctl)

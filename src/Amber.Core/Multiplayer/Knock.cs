@@ -889,7 +889,15 @@ public sealed class KnockServer : IAsyncDisposable
             timeout.CancelAfter(_limits.HandshakeTimeout);
             try
             {
-                var id = await KnockProtocol.ReadFrameAsync(stream, timeout.Token, KnockProtocol.MaxEarlyFrame);
+                byte[] id;
+                // A connection that closes, stalls or sends rubbish before it has named an invite has proven nothing. Like an
+                // unknown id it is dropped without counting as a failure, so it cannot keep knocking paused for everyone.
+                try { id = await KnockProtocol.ReadFrameAsync(stream, timeout.Token, KnockProtocol.MaxEarlyFrame); }
+                catch (Exception e) when (e is IOException or InvalidDataException or OperationCanceledException or SocketException)
+                {
+                    if (!ct.IsCancellationRequested) _log?.Invoke(L.F("core.mp.knock.failed", L.T("core.mp.knock.unknown")));
+                    return;
+                }
                 invite = id.Length == KnockProtocol.IdLength ? _book.Find(id) : null;
                 // A password invite while password guessing is suspected: answer exactly as for an unknown id.
                 if (invite is { FromPassword: true } && IsPasswordPaused) invite = null;
