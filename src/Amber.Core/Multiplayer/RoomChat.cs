@@ -314,8 +314,10 @@ internal static class ChatWire
                 var pk = node?["pk"]?.GetValue<string>();
                 if (fp is null || pk is not { Length: 64 }) continue;
                 var key = Convert.FromHexString(pk);
-                if (MemberIdentity.FingerprintOf(key) != fp || !seen.Add(fp)) continue;
+                if (MemberIdentity.FingerprintOf(key) != fp) continue;
                 var name = node?["name"]?.GetValue<string>();
+                // Claim the fingerprint only once the whole entry has been read, so a broken entry can't hide a good one after it.
+                if (!seen.Add(fp)) continue;
                 list.Add(new RosterEntry(fp, key, RoomChat.Clean(name, RoomChat.MaxNameLength)));
             }
             catch (Exception e) when (e is InvalidOperationException or FormatException) { }
