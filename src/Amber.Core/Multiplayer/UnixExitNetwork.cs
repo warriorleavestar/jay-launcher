@@ -17,7 +17,7 @@ namespace Amber.Core.Multiplayer;
 [UnsupportedOSPlatform("windows")]
 internal sealed class UnixExitNetwork
 {
-    internal static readonly string[] DnsServers = ["1.1.1.1", "8.8.8.8"];
+    internal static readonly string[] DnsServers = ExitDnsServers.All;
 
     /// <summary>Linux：本模块加的路由都带这个 proto 号，崩溃后能认出来清掉。</summary>
     internal const int RouteProto = 201;
