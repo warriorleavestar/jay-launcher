@@ -18,6 +18,7 @@ namespace Amber.App.Views;
 /// AMBER_SELFTEST_SCOPE=instance (UI batch 4b): the instance page's hero, start button states, the "last session" panel
 /// and the overview tab, in a throwaway game directory inside the report folder. Start states are simulated with
 /// sessions; no game is started and nothing goes online. Screenshots: every start state, three widths, two languages.
+/// Also: a theme pack's instances.json layout places the "last session" panel (<see cref="InstanceThemeLayoutAsync"/>).
 /// </summary>
 internal sealed partial class SelfTest
 {
@@ -205,6 +206,10 @@ internal sealed partial class SelfTest
             Check("上一局：× 关掉后不再显示", !instance.ShowLastRun && page?.LastRunPanel.IsVisible == false);
             home.Crash = null;
 
+            // ---- A theme pack's instances.json places the last session panel ----
+            if (page is null) Check("主题排版（实例页）：找得到实例页", false);
+            else await InstanceThemeLayoutAsync(instance, home, page, id, crash);
+
             // ---- Overview ----
             instance.TabIndex = (int)InstanceTab.Overview;
             await Task.Delay(400);
@@ -258,6 +263,132 @@ internal sealed partial class SelfTest
             service.Settings.Instances = originalMeta;
             service.Settings.GameDirectory = originalDir;
             service.SaveAndReload();
+        }
+    }
+
+    /// <summary>
+    /// A theme pack whose layout/pages/instances.json places the last session panel (instances.lastrun): after a failed
+    /// last run the panel is mounted where the theme put it and visible, wide and at 600×420, also with long
+    /// (pseudo-localized) text. After restoring the default theme it is back in its own place under the header.
+    /// The pack is removed afterwards and the theme the data directory had is selected again. Nothing goes online.
+    /// </summary>
+    private async Task InstanceThemeLayoutAsync(InstanceViewModel instance, HomeViewModel home, InstancePage page, string id, CrashAnalysis crash)
+    {
+        const string packId = "selftest-instance-layout";
+        var settings = Page<SettingsViewModel>();
+        var originalPack = settings.SelectedThemePack?.Id;
+        var originalPseudo = L.Pseudo;
+        var panel = page.LastRunPanel;
+        Rect? RectOf(Control c) => c.TranslatePoint(default, window) is { } p ? new Rect(p, c.Bounds.Size) : null;
+        // Mounted in this window, visible, not squeezed to nothing, its left and right edges inside the window and its top on screen.
+        bool OnScreen(Control c) => TopLevel.GetTopLevel(c) == window && c.IsEffectivelyVisible && RectOf(c) is { Width: > 0, Height: > 0 } r
+            && r.X >= -1 && r.Right <= window.Bounds.Width + 1 && r.Y >= -1 && r.Y < window.Bounds.Height;
+        string Placed(Control c) => $"{RectOf(c)?.ToString() ?? "不在窗口里"} 窗口 {window.Bounds.Width:F0}×{window.Bounds.Height:F0}";
+        // The fix buttons bind to the page's view model through $parent[UserControl]: they must still find it in the theme's tree.
+        List<Button> FixButtons() => panel.GetVisualDescendants().OfType<Button>().Where(b => b.DataContext is LastRunFixButton).ToList();
+        try
+        {
+            var path = Path.Combine(reportDir, "instance-layout.jaytheme");
+            ThemeSelfTest.WritePack(path, $$"""{ "format": 2, "id": "{{packId}}", "name": "自检实例排版" }""", "{}",
+                ("layout/pages/instances.json", """
+                {
+                  "wide": { "type": "grid", "columns": ["*", "360"], "rows": ["auto", "*", "auto"], "spacing": 12, "children": [
+                      { "type": "region", "name": "instances.header", "columnSpan": 2 },
+                      { "type": "region", "name": "instances.details", "row": 1 },
+                      { "type": "scroll", "row": 1, "column": 1, "children": ["instances.lastrun"] },
+                      { "type": "region", "name": "instances.status", "row": 2, "columnSpan": 2 } ] },
+                  "compact": { "type": "scroll", "children": [
+                      { "type": "stack", "spacing": 8, "children": ["instances.lastrun", "instances.header", "instances.details", "instances.status"] } ] }
+                }
+                """));
+            settings.ImportThemePack(path);
+            await Task.Delay(500);
+            Check("主题排版（实例页）：带 instances.json 的主题包装上，上一局区块认得、不用 Jay 补", ThemeService.Current?.Id == packId
+                && ThemeService.Current.Pages.ContainsKey("instances")
+                && !ThemeService.Current.Problems.Any(p => p.Code is "unknown_region" or "required_region_added"),
+                string.Join(", ", ThemeService.Current?.Problems.Select(p => $"{p.Code} {p.Detail}") ?? []));
+
+            // A failed last run, as in 崩溃后 above: the session ends crashed, and the analysis is shown for this instance.
+            var now = DateTimeOffset.Now;
+            var session = home.SetSessionForTest(id, new LaunchSession(id, now));
+            session.ProcessUp(now);
+            session.EnteredGame(now);
+            session.ProcessEnded(now, 1, crashed: true);
+            home.ShowCrashForTest(id, crash);
+            window.Width = 1600;
+            window.Height = 900;
+            await WaitAsync(() => instance.Start?.Kind == StartKind.RetryAfterCrash && instance.ShowLastRun, 5);
+            await Task.Delay(500);
+            Check("主题排版 1600×900：实例页用主题的布局，上一局挂在页面上、看得见", page.ThemeLayout.UsingThemeLayout && instance.ShowLastRun
+                && OnScreen(panel) && !page.NoticeScroll.IsVisualAncestorOf(panel), Placed(panel));
+            Check("主题排版 1600×900：上一局在主题放的位置（页签右边一栏）",
+                RectOf(panel) is { } wide && RectOf(page.DetailsCard) is { } details && wide.X >= details.Right - 1 && wide.Y < details.Bottom,
+                $"上一局 {RectOf(panel)} 页签 {RectOf(page.DetailsCard)}");
+            var fixes = FixButtons();
+            Check("主题排版：上一局的修复按钮还在、还连着这个实例", fixes.Count == instance.LastRunCauses.Sum(c => c.Fixes.Count) && fixes.Count > 0
+                && fixes.All(b => b.IsEffectivelyVisible && ReferenceEquals(b.Command, instance.ApplyFixCommand)), $"{fixes.Count}");
+            Check("主题排版：崩溃后英雄区照样是【再试一次】", instance.StartLabel == L.T("instance.hero.retry") && page.StartButton.IsEffectivelyVisible, instance.StartLabel);
+            await ShotAsync("instance-theme-lastrun-1600x900");
+
+            window.Width = 600;
+            window.Height = 420;
+            await Task.Delay(600);
+            Check("主题排版 600×420：换成紧凑的那棵树，上一局挂在页面上、看得见", page.ThemeLayout.UsingThemeLayout && OnScreen(panel), Placed(panel));
+            Check("主题排版 600×420：上一局在主题放的位置（英雄区上面）",
+                RectOf(panel) is { } compact && RectOf(page.Hero) is { } hero && compact.Bottom <= hero.Y + 1, $"上一局 {RectOf(panel)} 英雄区 {RectOf(page.Hero)}");
+            await ShotAsync("instance-theme-lastrun-600x420");
+
+            // Long translations: the pseudo-localization of the layout check (English, every text 40% longer and bracketed).
+            L.Pseudo = true;
+            L.SetLanguage("en");
+            await WaitAsync(() => instance.LastRunTitle.StartsWith('⟦'), 3);
+            foreach (var (w, h) in new[] { (600, 420), (1600, 900) })
+            {
+                window.Width = w;
+                window.Height = h;
+                await Task.Delay(600);
+                var title = panel.GetVisualDescendants().OfType<TextBlock>().FirstOrDefault(t => t.Text == instance.LastRunTitle);
+                var clipped = LayoutCheck.Find(panel, panel.Bounds.Size);
+                Check($"主题排版 {w}×{h} 长译文：上一局看得见、标题换了长文字，面板里没有被切掉或叠在一起的内容",
+                    OnScreen(panel) && title?.Text?.StartsWith('⟦') == true && clipped.Count == 0,
+                    $"{Placed(panel)}；{title?.Text}；{string.Join("；", clipped.Take(5))}");
+                await ShotAsync($"instance-theme-lastrun-pseudo-{w}x{h}");
+            }
+            L.Pseudo = originalPseudo;
+            L.SetLanguage("zh-Hans");
+
+            // Back to the default theme: the panel returns to the notice column between the header and the tabs.
+            window.Width = 1024;
+            window.Height = 720;
+            settings.ResetThemePackCommand.Execute(null);
+            await Task.Delay(600);
+            var notices = page.NoticeScroll.Content as StackPanel;
+            Check("恢复默认排版：实例页用回自带布局，上一局回到原来的位置（提示栏里，Bisect 卡片后面）", ThemeService.Current is null
+                && !page.ThemeLayout.UsingThemeLayout && notices is not null && ReferenceEquals(panel.Parent, notices)
+                && notices.Children.IndexOf(panel) == notices.Children.IndexOf(page.BisectCard) + 1,
+                $"{panel.Parent?.GetType().Name} {notices?.Children.IndexOf(panel)}");
+            Check("恢复默认排版：上一局看得见，在英雄区下面、页签上面", OnScreen(panel) && RectOf(panel) is { } back && RectOf(page.Hero) is { } top
+                && RectOf(page.DetailsCard) is { } tabs && back.Y >= top.Bottom - 1 && back.Y < tabs.Y,
+                $"上一局 {RectOf(panel)} 英雄区 {RectOf(page.Hero)} 页签 {RectOf(page.DetailsCard)}");
+            fixes = FixButtons();
+            Check("恢复默认排版：修复按钮还连着这个实例", fixes.Count > 0 && fixes.All(b => ReferenceEquals(b.Command, instance.ApplyFixCommand)), $"{fixes.Count}");
+            await ShotAsync("instance-theme-lastrun-restored");
+        }
+        finally
+        {
+            L.Pseudo = originalPseudo;
+            L.SetLanguage("zh-Hans");
+            home.Crash = null;
+            home.SetSessionForTest(id, new LaunchSession(id, DateTimeOffset.Now)).Cancel(DateTimeOffset.Now);
+            window.Width = 1024;
+            window.Height = 720;
+            if (settings.ThemePacks.FirstOrDefault(o => o.Id == packId) is { } mine)
+            {
+                settings.SelectedThemePack = mine;
+                settings.RemoveThemePackCommand.Execute(null);
+            }
+            settings.SelectedThemePack = settings.ThemePacks.FirstOrDefault(o => o.Id == originalPack) ?? settings.ThemePacks.FirstOrDefault();
+            await WaitAsync(() => instance.Start?.Kind == StartKind.Ready, 3);
         }
     }
 }
