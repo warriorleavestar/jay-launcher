@@ -119,7 +119,7 @@ Root files: `Program.cs` (startup checks, dev flags, Avalonia bootstrap), `App.a
 | `tools/FullLanCheck/` | Headless end-to-end check of full-LAN mode on macOS/Linux (needs root), used by the fulllan-e2e workflow. |
 | `tools/jay-dns/` | Java 18+ name resolver for the Windows strong sandbox; built by Amber.Core.csproj and embedded (`WindowsSandbox.ResolverJar`). |
 | `tools/jay-fs/` | Java file system provider for the Windows sandbox (fixes `Files.isWritable` under low integrity / AppContainer); `stub/` is compile-only. Embedded (`WindowsSandbox.FileSystemJar`). |
-| `third_party/` | Android runtime sources and patches (`android-glfw`, `android-lwjgl`, `android-mesa`, `android-mobileglues`, `android-openjdk`); built by `scripts/build-android-*.sh` and the `android-*-runtime` workflows. |
+| `third_party/` | Android runtime sources and patches (`android-glfw`, `android-lwjgl`, `android-mobileglues`, `android-openjdk`); built by `scripts/build-android-*.sh` and the `android-*-runtime` workflows. |
 | `.github/` | Workflows: CI (`build.yml`), security regression tests (`security-regression.yml`), full-LAN end-to-end check (`fulllan-e2e.yml`), network registry checks (`networks.yml`), Android runtimes (`android-runtime.yml`, `android-graphics-runtime.yml`, `android-lwjgl-runtime.yml`); plus issue templates. |
 
 ## Where to start for common tasks
