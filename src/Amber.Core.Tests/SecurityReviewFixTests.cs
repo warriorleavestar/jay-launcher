@@ -451,23 +451,29 @@ public class SecurityReviewFixTests
     [InlineData("bücher.example.org.", "xn--bcher-kva.example.org.")]
     [InlineData("bücher.example.org\u3002", "xn--bcher-kva.example.org.")]
     [InlineData("Bücher.EXAMPLE.org", "xn--bcher-kva.EXAMPLE.org")]
+    [InlineData("a\u1806b.example.org", "ab.example.org")]
+    [InlineData("A\u00ADB.example.org", "ab.example.org")]
+    [InlineData("bü\u200Bcher.example.org", "xn--bcher-kva.example.org")]
+    [InlineData("bü\uFE0Fcher\u2060.example.org", "xn--bcher-kva.example.org")]
     public async Task JoinTarget_IdnNamesMatchTheGame(string typed, string expected)
     {
-        static Task<IPAddress[]> Public(string _, CancellationToken __) => Task.FromResult(new[] { IPAddress.Parse("8.8.8.8") });
+        // Not resolved here: the name goes to the relay as it is.
+        static Task<IPAddress[]> Unresolved(string _, CancellationToken __) => Task.FromResult(Array.Empty<IPAddress>());
         string? srvAsked = null;
         (string, int)? SrvSpy(string name) { srvAsked = name; return null; }
-        Assert.Equal(new RelayPlan(expected, 25565, expected, 25565), await JoinTarget.ResolveForRelayAsync(typed, default, Public, SrvSpy));
+        Assert.Equal(new RelayPlan(expected, 25565, expected, 25565), await JoinTarget.ResolveForRelayAsync(typed, default, Unresolved, SrvSpy));
         Assert.Equal("_minecraft._tcp." + expected.TrimEnd('.'), srvAsked);
     }
 
     [Theory]
     [InlineData("bücher..example.org")]
     [InlineData("\u200D.example.org")]
+    [InlineData("\u1806\u00AD.example.org")]
     public async Task JoinTarget_InvalidIdnNamesAreNotRelayed(string typed)
     {
-        static Task<IPAddress[]> Public(string _, CancellationToken __) => Task.FromResult(new[] { IPAddress.Parse("8.8.8.8") });
+        static Task<IPAddress[]> Unresolved(string _, CancellationToken __) => Task.FromResult(Array.Empty<IPAddress>());
         static (string, int)? NoSrv(string _) => null;
-        Assert.Null(await JoinTarget.ResolveForRelayAsync(typed, default, Public, NoSrv));
+        Assert.Null(await JoinTarget.ResolveForRelayAsync(typed, default, Unresolved, NoSrv));
     }
 
     [Fact]
