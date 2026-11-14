@@ -107,6 +107,25 @@ public sealed partial class PrivateMessenger
         if (job.ModSha1 is { } sha1 && _modFiles.TryGetValue((job.Offer.FromFingerprint, sha1), out var done)) done.TrySetResult(path);
     }
 
+    /// <summary>An offer for a mod file we asked for (<paramref name="sha1"/>, null when it isn't one) can't be taken: stop waiting for it.</summary>
+    private void RefuseMod(string from, string? sha1)
+    {
+        if (sha1 is not null && _modFiles.TryGetValue((from, sha1), out var done)) done.TrySetResult(null);
+    }
+
+    /// <summary>Host: send a requested mod file; when it can't be sent or the joiner doesn't take it, answer "modfileno".</summary>
+    private async Task SendModFileAsync(string to, string path, string sha1)
+    {
+        bool sent;
+        try { sent = await SendFileCoreAsync(to, path, sha1, _cts.Token); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException) { sent = false; }
+        catch (OperationCanceledException) { return; }
+        if (sent) return;
+        try { await SendAsync(to, new JsonObject { ["t"] = "modfileno", ["sha1"] = sha1 }, _cts.Token); }
+        catch (Exception e) when (e is IOException or ObjectDisposedException or OperationCanceledException or InvalidOperationException
+            or System.Net.Sockets.SocketException) { }
+    }
+
     private static bool MatchesSha1(string path, string expected)
     {
         using var stream = File.OpenRead(path);
@@ -155,7 +174,7 @@ public sealed partial class PrivateMessenger
                     await SendAsync(frame.FromFingerprint, new JsonObject { ["t"] = "modfileno", ["sha1"] = sha1 ?? "" }, _cts.Token);
                     return;
                 }
-                _ = SendFileCoreAsync(frame.FromFingerprint, path, sha1, _cts.Token);
+                _ = SendModFileAsync(frame.FromFingerprint, path, sha1);
                 break;
             case "modfileno":
                 var refused = body["sha1"]?.GetValue<string>()?.ToLowerInvariant();
