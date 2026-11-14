@@ -119,8 +119,9 @@ public sealed record PublicNetworkProfile(string Id, string Name, string Network
 /// <param name="DirectoryIndex">第几个目录节点（1 是主目录，2–4 是备用）。</param>
 /// <param name="ExtraPeers">More peers to try besides the network's nodes (volunteer nodes remembered from last time).</param>
 /// <param name="Volunteer">Run this member as a volunteer node (listen publicly and relay for this network only).</param>
+/// <param name="Relay">A node's limits on relaying other EasyTier networks (rooms) through it. Null: EasyTier's defaults.</param>
 public sealed record PublicNetworkOptions(PublicNetworkProfile Profile, int RpcPort, int SocksPort, bool Directory = false, IReadOnlyList<string>? Listeners = null,
-    int DirectoryIndex = 1, IReadOnlyList<string>? ExtraPeers = null, VolunteerSettings? Volunteer = null)
+    int DirectoryIndex = 1, IReadOnlyList<string>? ExtraPeers = null, VolunteerSettings? Volunteer = null, RelayLimits? Relay = null)
 {
     public override string ToString() => "PublicNetworkOptions";
 }
@@ -135,9 +136,28 @@ public sealed record VolunteerSettings(string Address, int Port = VolunteerNodes
         ?? throw new ArgumentException(Amber.Core.Localization.L.T("core.mp.public.volunteer_bad_address"));
 }
 
+/// <summary>How much a public node relays for other EasyTier networks (the rooms that use it as a relay).</summary>
+/// <param name="KBpsPerNetwork">Most it relays for any one other network, in KB/s (0 = no limit).</param>
+/// <param name="Networks">EasyTier's relay whitelist: space-separated network names, <c>*</c> wildcards allowed. Null: relay every network.</param>
+public sealed record RelayLimits(int KBpsPerNetwork = 0, string? Networks = null);
+
 public static class PublicNetworkArgs
 {
-    public static Dictionary<string, string> Environment(PublicNetworkOptions o) => new() { [EasyTierArgs.SecretVariable] = o.Profile.Secret };
+    /// <summary>
+    /// Jay's EasyTier build (JAY.md, item 9): with this set to "1", a connection handed to a local service comes from
+    /// 127.235.c.d, an address of the calling peer's own picked by its peer id (not its public-network address), and from
+    /// one shared address outside 127.235.0.0/16 for a peer the route table doesn't know yet, instead of 127.0.0.1. Set for the directory node only,
+    /// so the directory can apply its per-source limits. Needs jay-v2.6.4-5 or later; on an older build every caller
+    /// arrives from 127.0.0.1 and the directory gives those callers one shared, capped allowance (RoomDirectoryServer).
+    /// </summary>
+    public const string LoopbackSourceVariable = "JAY_ET_LOOPBACK_SOURCE";
+
+    public static Dictionary<string, string> Environment(PublicNetworkOptions o)
+    {
+        var env = new Dictionary<string, string> { [EasyTierArgs.SecretVariable] = o.Profile.Secret };
+        if (o.Directory) env[LoopbackSourceVariable] = "1";
+        return env;
+    }
 
     public static List<string> Build(PublicNetworkOptions o)
     {
@@ -171,6 +191,11 @@ public static class PublicNetworkArgs
             args.AddRange(["--mapped-listeners", volunteer.Url]);
             args.AddRange(["--relay-network-whitelist", o.Profile.NetworkName]);
             if (volunteer.LimitKBps > 0) args.AddRange(["--instance-recv-bps-limit", (volunteer.LimitKBps * 1024L).ToString(CultureInfo.InvariantCulture)]);
+        }
+        if (o.Volunteer is null && o.Relay is { } relay)
+        {
+            if (!string.IsNullOrWhiteSpace(relay.Networks)) args.AddRange(["--relay-network-whitelist", relay.Networks.Trim()]);
+            if (relay.KBpsPerNetwork > 0) args.AddRange(["--foreign-relay-bps-limit", (relay.KBpsPerNetwork * 1024L).ToString(CultureInfo.InvariantCulture)]);
         }
         var peers = o.Profile.Nodes.Concat(o.ExtraPeers ?? []).Where(p => !string.IsNullOrWhiteSpace(p)).Select(p => p.Trim())
             .Where(p => o.Volunteer is not { } self || p != self.Url).Distinct().ToList();

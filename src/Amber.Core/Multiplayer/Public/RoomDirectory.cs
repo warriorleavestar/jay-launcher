@@ -41,6 +41,9 @@ public static class RoomDirectoryProtocol
     public static readonly TimeSpan Ttl = TimeSpan.FromSeconds(90);
     public static readonly TimeSpan RenewEvery = TimeSpan.FromSeconds(30);
     public static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(10);
+    /// <summary>How long the directory waits for a caller to finish the handshake and send its request.</summary>
+    public static readonly TimeSpan HandshakeTimeout = TimeSpan.FromSeconds(5);
+
     /// <summary>How long a snapshot call may take until the reply's length arrives (then <see cref="SnapshotDeadline"/> applies).</summary>
     public static readonly TimeSpan SnapshotTimeout = TimeSpan.FromSeconds(60);
 
@@ -59,7 +62,7 @@ public static class RoomDirectoryProtocol
 public sealed class RoomDirectoryServer : IAsyncDisposable
 {
     public const int MaxRooms = 5000;
-    public const int MaxConcurrent = 64;
+    public const int MaxConcurrent = 128;
     public const int MaxListed = 300;
 
     private sealed class Entry
@@ -75,7 +78,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
         public string? Account;
     }
 
-    private sealed record SealedItem(string Blob, string DropHash, DateTimeOffset Expires);
+    private sealed record SealedItem(string Blob, string DropHash, DateTimeOffset Expires, bool Unmapped = false);
 
     /// <summary>All mailboxes together hold at most this many items (about 32 MB of blobs at the largest size).</summary>
     public const int MaxSealedMail = 8000;
@@ -192,6 +195,8 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
     /// <summary>Mailbox id → sealed mail waiting there.</summary>
     private readonly Dictionary<string, List<SealedItem>> _mailboxes = new(StringComparer.Ordinal);
     private int _sealedCount;
+    /// <summary>Of <see cref="_sealedCount"/>, mail posted by callers that couldn't be told apart (<see cref="UnmappedLoopbackSource"/>).</summary>
+    private int _sealedUnmapped;
     /// <summary>Rendezvous id (hex) → sealed record, taken at most once (<see cref="Rendezvous"/>).</summary>
     private readonly Dictionary<string, (string Blob, DateTimeOffset Expires)> _rendezvous = new(StringComparer.Ordinal);
     /// <summary>Rendezvous puts per source address in the current window.</summary>
@@ -213,6 +218,76 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
 
     /// <summary>Record puts (new or renewed) one source address may make per hour.</summary>
     public const int MaxRecordPutsPerSource = 60;
+
+    // Budgets for the whole directory, alongside the per-source limits above: they bound how fast the stores can fill.
+
+    /// <summary>Rendezvous puts the whole directory takes per minute.</summary>
+    public const int MaxRendezvousPutsPerMinute = 300;
+
+    /// <summary>New record puts the whole directory takes per minute (renewals of a record already held don't count).</summary>
+    public const int MaxRecordPutsPerMinute = 120;
+
+    /// <summary>Record puts (new or renewed) one signing key may make per hour.</summary>
+    public const int MaxRecordPutsPerSigner = 60;
+
+    /// <summary>Sealed mail posts the whole directory takes per minute.</summary>
+    public const int MaxMailPostsPerMinute = 240;
+
+    /// <summary>Sealed mail posts one source address may make per <see cref="MailPostWindow"/>.</summary>
+    public const int MaxMailPostsPerSource = 20;
+
+    // Callers that can't be told apart (UnmappedLoopbackSource: the node's EasyTier doesn't map callers) share one
+    // allowance each. It is wider than one caller's, since every member over the network is in it, and narrower than the
+    // directory's, so one caller can't use up what direct callers have, or fill the stores.
+
+    /// <summary>Connections callers that can't be told apart may have open at once, together.</summary>
+    public const int MaxConnectionsUnmapped = MaxConcurrent / 2;
+
+    /// <summary>Sealed mail posts callers that can't be told apart may make per <see cref="MailPostWindow"/>, together.</summary>
+    public const int MaxMailPostsUnmapped = 120;
+
+    /// <summary>Sealed mail from callers that can't be told apart held at once.</summary>
+    public const int MaxSealedMailUnmapped = MaxSealedMail / 4;
+
+    /// <summary>Rendezvous puts callers that can't be told apart may make per <see cref="Rendezvous.MaxTtl"/>, together.</summary>
+    public const int MaxRendezvousPutsUnmapped = 4 * MaxRendezvousPutsPerSource;
+
+    /// <summary>The window for <see cref="MaxMailPostsPerSource"/>.</summary>
+    public static readonly TimeSpan MailPostWindow = TimeSpan.FromMinutes(10);
+
+    /// <summary>Mail posts per source address in the current window.</summary>
+    private readonly Dictionary<string, (int Count, DateTimeOffset Until)> _mailPosts = new(StringComparer.Ordinal);
+
+    /// <summary>When each directory-wide budget last ran out and was logged (at most once a minute each).</summary>
+    private readonly Dictionary<string, DateTimeOffset> _budgetLogged = new(StringComparer.Ordinal);
+
+    /// <summary>Requests refused because a directory-wide budget ran out (shown in the node status).</summary>
+    public int BudgetRefusals => Volatile.Read(ref _budgetRefusals);
+    private int _budgetRefusals;
+
+    /// <summary>
+    /// A directory-wide budget ran out: counts it, logs it at most once a minute per op, replies "rate" (with
+    /// <paramref name="what"/>, when given, so newer Jay can tell the user what it is about). Called under the gate.
+    /// </summary>
+    private JsonObject BudgetFull(string op, string? what = null)
+    {
+        Interlocked.Increment(ref _budgetRefusals);
+        var now = _now();
+        if (!_budgetLogged.TryGetValue(op, out var last) || now - last >= TimeSpan.FromMinutes(1))
+        {
+            _budgetLogged[op] = now;
+            _log?.Invoke(L.F("core.mp.public.budget_full", op));
+        }
+        var reply = Error("rate");
+        if (what is not null) reply["what"] = what;
+        return reply;
+    }
+
+    private readonly RateLimiter _rendezvousBudget;
+    private readonly RateLimiter _recordBudget;
+    private readonly RateLimiter _mailBudget;
+    /// <summary>Record puts per signing key (hex) in the current hour.</summary>
+    private readonly Dictionary<string, (int Count, DateTimeOffset Until)> _signerPuts = new(StringComparer.Ordinal);
 
     /// <summary>How far ahead of this directory's clock a record's expiry may be beyond <see cref="SignedRecord.MaxLifetime"/>.</summary>
     private static readonly TimeSpan RecordClockSkew = TimeSpan.FromMinutes(10);
@@ -271,6 +346,9 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
     {
         _now = clock ?? (() => DateTimeOffset.UtcNow);
         _log = log;
+        _rendezvousBudget = new RateLimiter(MaxRendezvousPutsPerMinute, TimeSpan.FromMinutes(1), _now);
+        _recordBudget = new RateLimiter(MaxRecordPutsPerMinute, TimeSpan.FromMinutes(1), _now);
+        _mailBudget = new RateLimiter(MaxMailPostsPerMinute, TimeSpan.FromMinutes(1), _now);
         _listener = new TcpListener(address, port);
         _listener.Start();
         Port = ((IPEndPoint)_listener.LocalEndpoint).Port;
@@ -305,42 +383,63 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             TcpClient client;
             try { client = await _listener.AcceptTcpClientAsync(_cts.Token); }
             catch (Exception e) when (e is OperationCanceledException or ObjectDisposedException or SocketException) { break; }
+            var source = Limited(Source(client));
+            NoteMapping(client, source);
+            if (!TryOpen(source))
+            {
+                client.Dispose();
+                continue;
+            }
             if (!_slots.Wait(0))
             {
+                Close(source);
                 client.Dispose();
                 continue;
             }
             _ = Task.Run(async () =>
             {
-                try { await HandleAsync(client); }
+                try { await HandleAsync(client, source); }
                 finally
                 {
                     client.Dispose();
                     _slots.Release();
+                    Close(source);
                 }
             });
         }
     }
 
-    private async Task HandleAsync(TcpClient client)
+    private async Task HandleAsync(TcpClient client, string? source)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
         deadline.CancelAfter(RoomDirectoryProtocol.RequestTimeout);
         try
         {
             var stream = client.GetStream();
+            // The first byte, the handshake and the request share one deadline, shorter than the whole exchange: a caller
+            // that opens connections and then stalls holds a slot for seconds, not for the full request timeout.
+            using var handshake = CancellationTokenSource.CreateLinkedTokenSource(deadline.Token);
+            handshake.CancelAfter(RoomDirectoryProtocol.HandshakeTimeout);
             var first = new byte[1];
-            if (!await SecureStream.ReadExactAsync(stream, first, deadline.Token)) return;
+            if (!await SecureStream.ReadExactAsync(stream, first, handshake.Token)) return;
             // Only the authenticated channel is spoken. An old plaintext JSON request is dropped at once; anything else
             // fails the handshake's first-message check and is dropped without a reply too.
             if (first[0] == DirectoryChannel.LegacyFirstByte) return;
-            if (await DirectoryChannel.AcceptAsync(stream, first[0], Identity ?? _ephemeralIdentity.Value, NetworkSecret, deadline.Token, Certificate) is not { } secure) return;
-            if (Text(secure.Request["op"]) == "snap")
+            if (await DirectoryChannel.AcceptAsync(stream, first[0], Identity ?? _ephemeralIdentity.Value, NetworkSecret, handshake.Token, Certificate) is not { } secure) return;
+            switch (Text(secure.Request["op"]))
             {
-                await SnapshotAsync(secure, Source(client));
-                return;
+                case "snap":
+                    // Counted under the caller's own source even before mapped callers are seen (snapshots are large;
+                    // UncountedLoopback opts the shared local source out).
+                    await SnapshotAsync(secure, Source(client));
+                    return;
+                // Dials out: awaited here within the request's deadline, rather than holding a thread while it waits.
+                case "probe" when Volunteers is { } volunteers && VersionError(secure.Request) is null:
+                    OnRequest?.Invoke((JsonObject)secure.Request.DeepClone());
+                    await secure.Reply(await volunteers.CheckAsync(Text(secure.Request["url"]), deadline.Token), deadline.Token);
+                    return;
             }
-            await secure.Reply(Handle(secure.Request, Source(client)), deadline.Token);
+            await secure.Reply(Handle(secure.Request, source), deadline.Token);
         }
         catch (Exception e) when (e is IOException or InvalidDataException or OperationCanceledException or SocketException or EndOfStreamException
             or ObjectDisposedException) { }
@@ -377,7 +476,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             await secure.Reply(old, quick.Token);
             return;
         }
-        if (source is not null && !(UncountedLoopback && IPAddress.TryParse(source, out var address) && IPAddress.IsLoopback(address)))
+        if (source is not null && !(UncountedLoopback && source == SharedLoopbackSource))
         {
             bool limited;
             lock (_gate)
@@ -494,7 +593,132 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
         }
     }
 
-    private static string? Source(TcpClient client) => (client.Client.RemoteEndPoint as IPEndPoint)?.Address.ToString();
+    /// <summary>
+    /// The caller's source for per-source limits. A caller the local EasyTier hands over comes from 127.235.c.d, an
+    /// address of its own that EasyTier picks by the caller's peer id (see <see cref="PublicNetworkArgs.LoopbackSourceVariable"/>;
+    /// not the caller's room-network address), and is counted under 10.235.c.d. Every other loopback address (this machine, or anything EasyTier couldn't map) shares the one
+    /// source <see cref="SharedLoopbackSource"/>, so no caller over a network goes uncounted. Other addresses (a directory
+    /// reached directly on a LAN) count by address. Null only for no address at all (calls made in-process).
+    /// </summary>
+    internal static string? Source(IPAddress? address)
+    {
+        if (address is null) return null;
+        if (address.IsIPv4MappedToIPv6) address = address.MapToIPv4();
+        if (IPAddress.IsLoopback(address))
+        {
+            var b = address.GetAddressBytes();
+            // The room network's network, directory and broadcast addresses are never a member's own.
+            var reserved = (b[2], b[3]) is (0, 0) or (0, 1) or (255, 255);
+            return b.Length == 4 && b[1] == MappedSecondOctet && !reserved ? $"{PublicNetworkProfile.Subnet}{b[2]}.{b[3]}" : SharedLoopbackSource;
+        }
+        return address.ToString();
+    }
+
+    /// <summary>The one source every loopback caller outside the mapped range shares.</summary>
+    public const string SharedLoopbackSource = "loopback";
+
+    /// <summary>Second octet of the room network (10.235.0.0/16), which EasyTier keeps when it maps a caller to 127.235.c.d.</summary>
+    private const byte MappedSecondOctet = 235;
+
+    private string? Source(TcpClient client) =>
+        Source((client.Client.RemoteEndPoint as IPEndPoint)?.Address) is var source && ExemptLoopbackForTest && source == SharedLoopbackSource ? null : source;
+
+    /// <summary>Tests that make many calls from 127.0.0.1 through the real client: don't count them as one source.</summary>
+    internal bool ExemptLoopbackForTest { get; init; }
+
+    /// <summary>Connections one source may have open at once.</summary>
+    public const int MaxConnectionsPerSource = 8;
+
+    /// <summary>
+    /// Connections the shared local source may have open at once, once mapped callers are seen. It holds the callers
+    /// EasyTier doesn't know yet (members whose route hasn't arrived, for a few seconds after they join) and scripts on
+    /// this machine. Wider than one member's, so one of them reconnecting can't shut the rest out. The shared source's
+    /// other per-source limits (mail, rendezvous) are shared by those callers too; a member gets its own source as soon
+    /// as its route arrives.
+    /// </summary>
+    public const int MaxConnectionsShared = 32;
+    private readonly Dictionary<string, int> _openBySource = new(StringComparer.Ordinal);
+
+    /// <summary>Callers seen from 127.0.0.1 before any mapped caller (127.235.c.d); see <see cref="NoteMapping"/>.</summary>
+    private int _unmappedCallers;
+    private bool _mappingSeen;
+
+    /// <summary>
+    /// Warns once when callers keep arriving from 127.0.0.1 and none ever from a mapped address: the node's EasyTier then
+    /// lacks the loopback-source patch (or the switch), and every caller shares one source.
+    /// </summary>
+    private void NoteMapping(TcpClient client, string? source)
+    {
+        if (Volatile.Read(ref _mappingSeen)) return;
+        if (source is not null && source != SharedLoopbackSource && IsMapped(source)) { Volatile.Write(ref _mappingSeen, true); return; }
+        if ((client.Client.RemoteEndPoint as IPEndPoint)?.Address is { } a && IPAddress.IsLoopback(a)
+            && Interlocked.Increment(ref _unmappedCallers) == UnmappedCallersBeforeWarning)
+            _log?.Invoke(L.T("core.mp.public.callers_unmapped"));
+    }
+
+    private static bool IsMapped(string source) => source.StartsWith(PublicNetworkProfile.Subnet, StringComparison.Ordinal);
+
+    /// <summary>
+    /// The source the per-source limits use. Until the first caller arrives mapped (127.235.c.d), the node's EasyTier is
+    /// taken to lack the loopback-source patch: then every caller over the network arrives from a local address, and
+    /// counting them as one source would let one caller use up everyone's allowance. So until then local callers are
+    /// <see cref="UnmappedLoopbackSource"/>, which has its own wider allowances (<see cref="MaxConnectionsUnmapped"/>,
+    /// <see cref="MaxMailPostsUnmapped"/>, <see cref="MaxSealedMailUnmapped"/>, <see cref="MaxRendezvousPutsUnmapped"/>; new
+    /// signed records share <see cref="MaxRecordPutsPerSource"/>), all below the directory's own. Once a mapped caller was
+    /// seen, or when the node's EasyTier is known to map callers (<see cref="SourcesMapped"/>), the shared local source is
+    /// limited like <see cref="SharedLoopbackSource"/>.
+    /// </summary>
+    private string? Limited(string? source) =>
+        source == SharedLoopbackSource && !SourcesMapped && !Volatile.Read(ref _mappingSeen) ? UnmappedLoopbackSource : source;
+
+    /// <summary>
+    /// The node's EasyTier is known to map callers (<see cref="EasyTierRelease.MapsCallers"/>): local callers are the shared
+    /// local source from the start, never <see cref="UnmappedLoopbackSource"/>.
+    /// </summary>
+    public bool SourcesMapped { get; init; }
+
+    /// <summary>Local callers while no caller has arrived mapped (see <see cref="Limited"/>).</summary>
+    internal const string UnmappedLoopbackSource = "loopback-unmapped";
+
+    /// <summary>Has a mapped caller been seen (per-source limits apply to local callers too)? Tests.</summary>
+    internal bool MappingSeen => Volatile.Read(ref _mappingSeen);
+
+    /// <summary>Callers from 127.0.0.1 in a row, with none mapped, before the node warns.</summary>
+    internal const int UnmappedCallersBeforeWarning = 50;
+
+    /// <summary>Connections open from <paramref name="source"/> right now (tests).</summary>
+    internal int OpenFrom(string source)
+    {
+        lock (_openBySource) return _openBySource.GetValueOrDefault(source);
+    }
+
+    private bool TryOpen(string? source)
+    {
+        if (source is null) return true;
+        lock (_openBySource)
+        {
+            var open = _openBySource.GetValueOrDefault(source);
+            var cap = source switch
+            {
+                SharedLoopbackSource => MaxConnectionsShared,
+                UnmappedLoopbackSource => MaxConnectionsUnmapped,
+                _ => MaxConnectionsPerSource,
+            };
+            if (open >= cap) return false;
+            _openBySource[source] = open + 1;
+            return true;
+        }
+    }
+
+    private void Close(string? source)
+    {
+        if (source is null) return;
+        lock (_openBySource)
+        {
+            if (_openBySource.TryGetValue(source, out var open) && open > 1) _openBySource[source] = open - 1;
+            else _openBySource.Remove(source);
+        }
+    }
 
     /// <summary>Sees every request as it arrives (tests check that readers all send the same thing).</summary>
     internal Action<JsonObject>? OnRequest { get; set; }
@@ -516,7 +740,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
                 "withdraw" => Withdraw(request),
                 "snap" => JsonNode.Parse(BuildSnapshot(PlanSnapshot(request))) as JsonObject ?? Error("bad"),
                 "find" => Find(request),
-                "post" => Post(request),
+                "post" => Post(request, source),
                 "fetch" => Fetch(request),
                 "drop" => Drop(request),
                 "rv.put" => RendezvousPut(request, source),
@@ -524,7 +748,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
                 "rec.put" => RecordPut(request, source),
                 "rec.get" => RecordGet(request),
                 "volunteer" => Volunteers is { } v ? v.Register(request["url"]?.GetValue<string>(), request["operator"], source) : Error("off"),
-                // Blocks this connection's task for at most a few seconds while the directory dials the address.
+                // In-process calls only (the server awaits "probe" itself): blocks for at most VolunteerNodes.CheckTimeout.
                 "probe" => Volunteers is { } p ? p.CheckAsync(request["url"]?.GetValue<string>()).GetAwaiter().GetResult() : Error("off"),
                 "nodes" => Volunteers is { } v ? NodesReply(v.Pick()) : Error("off"),
                 "login" when Login is { } login => LoginRequest(login, request),
@@ -965,7 +1189,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
 
     private static bool IsHex(string? text, int length) => text is not null && text.Length == length && text.All(char.IsAsciiHexDigit);
 
-    private JsonObject Post(JsonObject request)
+    private JsonObject Post(JsonObject request, string? source)
     {
         var box = request["box"]?.GetValue<string>()?.ToLowerInvariant();
         var blob = request["blob"]?.GetValue<string>();
@@ -976,15 +1200,23 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
         lock (_gate)
         {
             PruneMail();
-            if (!_mailboxes.TryGetValue(box!, out var items))
-            {
-                if (_sealedCount >= MaxSealedMail) return Error("full");
-                _mailboxes[box!] = items = [];
-            }
-            if (items.Any(i => i.Blob == blob)) return new JsonObject { ["ok"] = true };
-            if (items.Count >= RoomDirectoryProtocol.MaxMailPerBox || _sealedCount >= MaxSealedMail) return Error("full");
-            items.Add(new SealedItem(blob, drop!, _now() + RoomDirectoryProtocol.MailTtl));
+            var now = _now();
+            var existing = _mailboxes.TryGetValue(box!, out var items);
+            if (existing && items!.Any(i => i.Blob == blob)) return new JsonObject { ["ok"] = true };
+            var unmapped = source == UnmappedLoopbackSource;
+            if (_sealedCount >= MaxSealedMail || (existing && items!.Count >= RoomDirectoryProtocol.MaxMailPerBox)
+                || unmapped && _sealedUnmapped >= MaxSealedMailUnmapped) return Error("full");
+            // Every check first; allowances are only used up by a post that is taken.
+            var (count, until) = source is not null && _mailPosts.TryGetValue(source, out var used) && used.Until > now ? used : (0, now + MailPostWindow);
+            // "rate" so older Jay still shows a sensible text; "what" lets newer Jay say it is about mail.
+            if (source is not null && count >= (unmapped ? MaxMailPostsUnmapped : MaxMailPostsPerSource)) return new JsonObject { ["ok"] = false, ["error"] = "rate", ["what"] = "mail" };
+            if (!_mailBudget.CanAcquire()) return BudgetFull("post", "mail-busy");
+            if (source is not null) _mailPosts[source] = (count + 1, until);
+            _mailBudget.TryAcquire();
+            if (!existing) _mailboxes[box!] = items = [];
+            items!.Add(new SealedItem(blob, drop!, _now() + RoomDirectoryProtocol.MailTtl, unmapped));
             _sealedCount++;
+            if (unmapped) _sealedUnmapped++;
             return new JsonObject { ["ok"] = true };
         }
     }
@@ -1027,6 +1259,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
         {
             if (_mailboxes.TryGetValue(box!, out var items))
             {
+                _sealedUnmapped -= items.Count(i => i.DropHash == hash && i.Unmapped);
                 _sealedCount -= items.RemoveAll(i => i.DropHash == hash);
                 if (items.Count == 0) _mailboxes.Remove(box!);
             }
@@ -1047,15 +1280,15 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
         {
             PruneRendezvous();
             var now = _now();
-            if (source is not null)
-            {
-                var (count, until) = _rendezvousPuts.TryGetValue(source, out var used) && used.Until > now ? used : (0, now + Rendezvous.MaxTtl);
-                if (count >= MaxRendezvousPutsPerSource) return Error("rate");
-                _rendezvousPuts[source] = (count + 1, until);
-            }
+            // Every check first; allowances are only used up by a put that is taken.
+            var (count, until) = source is not null && _rendezvousPuts.TryGetValue(source, out var used) && used.Until > now ? used : (0, now + Rendezvous.MaxTtl);
+            if (source is not null && count >= (source == UnmappedLoopbackSource ? MaxRendezvousPutsUnmapped : MaxRendezvousPutsPerSource)) return Error("rate");
             // Never overwrite: whoever put first keeps the id until it is taken or expires.
             if (_rendezvous.ContainsKey(id!)) return Error("exists");
             if (_rendezvous.Count >= MaxRendezvous) return Error("full");
+            if (!_rendezvousBudget.CanAcquire()) return BudgetFull("rv.put");
+            if (source is not null) _rendezvousPuts[source] = (count + 1, until);
+            _rendezvousBudget.TryAcquire();
             _rendezvous[id!] = (blob, now + TimeSpan.FromSeconds(ttl));
             return new JsonObject { ["ok"] = true };
         }
@@ -1083,7 +1316,8 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
         lock (_gate)
         {
             PruneRecords();
-            if (_records.TryGetValue(lookup, out var have))
+            var renewal = _records.TryGetValue(lookup, out var have);
+            if (renewal)
             {
                 // First signer owns the lookup until its record expires; nobody else can replace or shadow it.
                 if (!CryptographicOperations.FixedTimeEquals(have.Signer, record.Signer)) return Error("owner");
@@ -1091,12 +1325,23 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
                 if (record.Seq <= have.Seq) return Error("stale");
             }
             else if (_records.Count >= MaxRecords) return Error("full");
-            if (source is not null)
-            {
-                var (count, until) = _recordPuts.TryGetValue(source, out var used) && used.Until > now ? used : (0, now + TimeSpan.FromHours(1));
-                if (count >= MaxRecordPutsPerSource) return Error("rate");
-                _recordPuts[source] = (count + 1, until);
-            }
+            // Every check first; allowances are only used up by a put that is taken.
+            // Unmapped local callers can't be told apart, so they share one allowance, and only for new records: renewals of
+            // records they hold aren't held back by somebody else's puts (each signer is still limited below).
+            if (source == UnmappedLoopbackSource && renewal) source = null;
+            var (count, until) = source is not null && _recordPuts.TryGetValue(source, out var used) && used.Until > now ? used : (0, now + TimeSpan.FromHours(1));
+            if (source is not null && count >= MaxRecordPutsPerSource) return Error("rate");
+            var signer = Convert.ToHexStringLower(record.Signer);
+            var (signed, signedUntil) = _signerPuts.TryGetValue(signer, out var bySigner) && bySigner.Until > now ? bySigner : (0, now + TimeSpan.FromHours(1));
+            if (signed >= MaxRecordPutsPerSigner) return Error("rate");
+            // The signer table is bounded like the records: a full table takes no new signers until entries expire.
+            if (signed == 0 && !_signerPuts.ContainsKey(signer) && _signerPuts.Count >= MaxRecords) return BudgetFull("rec.signer");
+            // Renewing a record already held adds nothing to the store, so it doesn't draw on the directory-wide budget
+            // (its signer and source are still limited above).
+            if (!renewal && !_recordBudget.CanAcquire()) return BudgetFull("rec.put");
+            if (source is not null) _recordPuts[source] = (count + 1, until);
+            _signerPuts[signer] = (signed + 1, signedUntil);
+            if (!renewal) _recordBudget.TryAcquire();
             _records[lookup] = record;
             return new JsonObject { ["ok"] = true };
         }
@@ -1118,6 +1363,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
         var now = _now();
         foreach (var (lookup, record) in _records.Where(p => p.Value.Expires <= now).ToList()) _records.Remove(lookup);
         foreach (var (source, used) in _recordPuts.Where(p => p.Value.Until <= now).ToList()) _recordPuts.Remove(source);
+        foreach (var (signer, used) in _signerPuts.Where(p => p.Value.Until <= now).ToList()) _signerPuts.Remove(signer);
     }
 
     private void PruneRendezvous()
@@ -1132,9 +1378,11 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
         var now = _now();
         foreach (var (box, items) in _mailboxes.ToList())
         {
+            _sealedUnmapped -= items.Count(i => i.Expires <= now && i.Unmapped);
             _sealedCount -= items.RemoveAll(i => i.Expires <= now);
             if (items.Count == 0) _mailboxes.Remove(box);
         }
+        foreach (var (source, used) in _mailPosts.Where(p => p.Value.Until <= now).ToList()) _mailPosts.Remove(source);
     }
 
     private void Prune()
@@ -1304,15 +1552,23 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
 
     private static void Check(JsonObject reply)
     {
-        if (reply["ok"]?.GetValue<bool>() == true) return;
+        if (Rejection(reply) is { } rejected) throw rejected;
+    }
+
+    /// <summary>What a directory's refusal means to the user, or null when <paramref name="reply"/> is ok (GUI self-check).</summary>
+    public static DirectoryRejectedException? Rejection(JsonObject reply)
+    {
+        if (reply["ok"]?.GetValue<bool>() == true) return null;
         var code = reply["error"]?.GetValue<string>() ?? "";
         // 网络节点自己的审核规则拒绝时会带一句原因（节点写的，只当文字显示）。
         var reason = reply["reason"]?.GetValue<string>() is { } r ? RoomChat.Clean(r, DirectoryExtensions.MaxReason) : null;
-        throw new DirectoryRejectedException(code, code switch
+        return new DirectoryRejectedException(code, code switch
         {
             "owner" or "lookup" or "stale" => L.T("core.mp.public.err_owner"),
             "full" => L.T("core.mp.public.err_full"),
             "gone" => L.T("core.mp.public.err_gone"),
+            "rate" when reply["what"] is JsonValue what && what.TryGetValue<string>(out var w) && w == "mail" => L.T("core.mp.public.err_mail_rate"),
+            "rate" when reply["what"] is JsonValue what && what.TryGetValue<string>(out var w) && w == "mail-busy" => L.T("core.mp.public.err_mail_busy"),
             "rate" => L.T("core.mp.public.err_rate"),
             "busy" => L.T("core.mp.public.err_busy"),
             "clock" => L.T("core.mp.public.err_clock"),

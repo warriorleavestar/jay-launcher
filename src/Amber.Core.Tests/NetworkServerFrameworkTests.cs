@@ -242,6 +242,8 @@ public sealed class NetworkServerFrameworkTests : IAsyncDisposable
     [Fact]
     public async Task ExtensionsAnswerTheirOwnOpsOnly()
     {
+        Assert.Throws<ArgumentException>(() => new JayNetworkServerBuilder().UseRelayLimits(0, " "));
+        Assert.Throws<ArgumentException>(() => new JayNetworkServerBuilder().UseRelayLimits(0, ""));
         Assert.Throws<ArgumentException>(() => new JayNetworkServerBuilder().AddExtension(new LambdaExtension("motd")));
         Assert.Throws<ArgumentException>(() => new JayNetworkServerBuilder().AddExtension(new Motd()).AddExtension(new Motd()));
         var server = await StartAsync(b => b.AddExtension(new Motd()).AddExtension(new Broken()));
@@ -471,6 +473,16 @@ public sealed class NetworkServerFrameworkTests : IAsyncDisposable
 
         Assert.Throws<ArgumentException>(() => Program.DirectoryBuilder(_dir, Options.Parse(["directory", "--seed-only", "--accounts"]), output, _ => { }));
         Assert.Throws<ArgumentException>(() => Program.DirectoryBuilder(_dir, Options.Parse(["directory", "--rate-limit", "3,x"]), output, _ => { }));
+        Assert.Throws<ArgumentException>(() => Program.DirectoryBuilder(_dir, Options.Parse(["directory", "--no-rate-limit", "--rate-limit", "3,6,600"]), output, _ => { }));
+        Assert.Throws<ArgumentException>(() => Program.DirectoryBuilder(_dir, Options.Parse(["directory", "--relay-limit-kbps", "-1"]), output, _ => { }));
+        Assert.Throws<ArgumentException>(() => Program.DirectoryBuilder(_dir, Options.Parse(["directory", "--relay-networks", " "]), output, _ => { }));
+        // --no-volunteers no longer swallows --rate-limit; relay limits reach the builder.
+        var limited = Program.DirectoryBuilder(_dir, Options.Parse(["directory", "--no-volunteers", "--rate-limit", "2,4,50",
+            "--relay-limit-kbps", "2048", "--relay-networks", "jay-*"]), output, _ => { });
+        Assert.False(limited.VolunteersOn);
+        Assert.NotNull(limited.RateLimit);
+        Assert.Equal(new RelayLimits(2048, "jay-*"), limited.Relay);
+        Assert.Null(Program.DirectoryBuilder(_dir, Options.Parse(["directory"]), output, _ => { }).Relay);
 
         var words = Path.Combine(_dir, "words.txt");
         File.WriteAllText(words, "# 屏蔽词\n广告\n");

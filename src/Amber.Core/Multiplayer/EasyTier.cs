@@ -29,6 +29,11 @@ public static class EasyTierRelease
     public const string Commit = "9407746b1ce1";
     /// <summary>The hardened build's full commit, as the trustees' signature names it.</summary>
     public const string FullCommit = "9407746b1ce1dc4d977441c47dfdcb303363a62a";
+    /// <summary>
+    /// Whether this build gives each caller of a local service its own address (<see cref="Public.PublicNetworkArgs.LoopbackSourceVariable"/>,
+    /// jay-v2.6.4-5 and later). Set it with the bump.
+    /// </summary>
+    public const bool MapsCallers = false;
     /// <summary>Signature seq of this build: one more for every hardened release.</summary>
     public const long Seq = 3;
     /// <summary>Component name in the trustees' signature (<see cref="ReleaseStatement.Components"/>).</summary>

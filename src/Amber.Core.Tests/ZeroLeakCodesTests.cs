@@ -1,3 +1,4 @@
+using Amber.Core.Localization;
 using System.Net;
 using System.Net.Sockets;
 using System.Text.Json.Nodes;
@@ -42,6 +43,8 @@ public sealed class ZeroLeakCodesTests : IAsyncDisposable
         var server = new RoomDirectoryServer(IPAddress.Loopback, 0, clock: () => _now)
         {
             Identity = identity, NetworkSecret = Secret, Certificate = certificate,
+            // Every person in these tests calls from 127.0.0.1; per-source limits have their own tests.
+            ExemptLoopbackForTest = true,
         };
         _cleanup.Add(server);
         return server;
@@ -226,6 +229,63 @@ public sealed class ZeroLeakCodesTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task AnAcceptTheNetworkHeldBackCanBeAcceptedAgain()
+    {
+        var server = StartDirectory();
+        using var alex = NewPerson("alex", server);
+        using var steve = NewPerson("steve", server);
+        Assert.True(await alex.Post.AddAsync(steve.Key.PublicKey, alex.Name, default));
+        Assert.Empty(await steve.Post.CheckAsync(steve.Name, default));
+        // The directory-wide mail budget is used up: the reply isn't sent, and the request still asks steve.
+        for (var i = 0; i < RoomDirectoryServer.MaxMailPostsPerMinute; i++)
+            server.Handle(new JsonObject
+            {
+                ["op"] = "post", ["box"] = Convert.ToHexStringLower(System.Security.Cryptography.RandomNumberGenerator.GetBytes(16)),
+                ["blob"] = Convert.ToBase64String([(byte)i, 3]), ["drop"] = SealedMail.DropHash(new byte[16]),
+            });
+        var e = await Assert.ThrowsAsync<DirectoryRejectedException>(() => steve.Post.AcceptAsync(alex.Key.PublicKey, steve.Name, default));
+        Assert.Equal("rate", e.Code);
+        Assert.Equal(ContactStep.AskingMe, Assert.Single(steve.Book.Pending).Step);
+        // A minute later, accepting again finishes the exchange.
+        _now += TimeSpan.FromMinutes(1.1);
+        await steve.Post.AcceptAsync(alex.Key.PublicKey, steve.Name, default);
+        await alex.Post.CheckAsync(alex.Name, default);
+        await steve.Post.CheckAsync(steve.Name, default);
+        Assert.Equal(Assert.Single(alex.Book.Pending).Sas, Assert.Single(steve.Book.Pending).Sas);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AnAcceptWhoseAnswerWasLostStillFinishes(bool acceptAgain)
+    {
+        // Steve's reply reached the directory but sending it looked failed (the answer was lost, say), so the request
+        // shows as asking him again. Alex's nonce is still taken; accepting again resends the very same reply.
+        var server = StartDirectory();
+        using var alex = NewPerson("alex", server);
+        using var steve = NewPerson("steve", server);
+        Assert.True(await alex.Post.AddAsync(steve.Key.PublicKey, alex.Name, default));
+        Assert.Empty(await steve.Post.CheckAsync(steve.Name, default));
+        steve.Book.Me = steve.Key.PublicKey;
+        var reply = steve.Book.Accept(alex.Key.PublicKey, steve.Name)!;
+        await steve.Post.SendAsync(alex.Key.PublicKey, reply, default);
+        steve.Book.Unaccept(alex.Key.PublicKey);
+        Assert.Equal(ContactStep.AskingMe, Assert.Single(steve.Book.Pending).Step);
+        if (acceptAgain)
+        {
+            Assert.Same(reply, steve.Book.Accept(alex.Key.PublicKey, steve.Name));
+            steve.Book.Unaccept(alex.Key.PublicKey);
+            await steve.Post.AcceptAsync(alex.Key.PublicKey, steve.Name, default);
+        }
+        await alex.Post.CheckAsync(alex.Name, default);
+        await steve.Post.CheckAsync(steve.Name, default);
+        var (a, b) = (Assert.Single(alex.Book.Pending), Assert.Single(steve.Book.Pending));
+        Assert.Equal(ContactStep.Compare, a.Step);
+        Assert.Equal(ContactStep.Compare, b.Step);
+        Assert.Equal(a.Sas, b.Sas);
+    }
+
+    [Fact]
     public async Task InviteTravelsAsSealedMailAndComesBackWithAReceipt()
     {
         var server = StartDirectory();
@@ -330,6 +390,51 @@ public sealed class ZeroLeakCodesTests : IAsyncDisposable
             await client.PostMailAsync(box, [(byte)i, 1], SealedMail.DropHash(new byte[16]), default);
         var e = await Assert.ThrowsAsync<DirectoryRejectedException>(() => client.PostMailAsync(box, [255, 255], SealedMail.DropHash(new byte[16]), default));
         Assert.Equal("full", e.Code);
+    }
+
+    [Fact]
+    public async Task MailPostsHaveADirectoryWideBudget()
+    {
+        var server = StartDirectory();
+        var accepted = 0;
+        for (var i = 0; i < RoomDirectoryServer.MaxMailPostsPerMinute; i++)
+        {
+            var post = new System.Text.Json.Nodes.JsonObject
+            {
+                ["op"] = "post", ["box"] = Convert.ToHexStringLower(System.Security.Cryptography.RandomNumberGenerator.GetBytes(16)),
+                ["blob"] = Convert.ToBase64String([(byte)i, 1]), ["drop"] = SealedMail.DropHash(new byte[16]),
+            };
+            if (server.Handle(post)["ok"]?.GetValue<bool>() == true) accepted++;
+        }
+        Assert.Equal(RoomDirectoryServer.MaxMailPostsPerMinute, accepted);
+        var client = new RoomDirectoryClient(new Loopback(server.Port));
+        var e = await Assert.ThrowsAsync<DirectoryRejectedException>(() => client.PostMailAsync(new string('d', 32), [9, 9], SealedMail.DropHash(new byte[16]), default));
+        Assert.Equal("rate", e.Code);
+        // The network is busy, not the user sending too fast.
+        Assert.Equal(L.T("core.mp.public.err_mail_busy"), e.Message);
+        _now += TimeSpan.FromMinutes(1.1);
+        await client.PostMailAsync(new string('d', 32), [9, 9], SealedMail.DropHash(new byte[16]), default);
+    }
+
+    [Fact]
+    public void MailPostsAreLimitedPerSource()
+    {
+        var server = StartDirectory();
+        System.Text.Json.Nodes.JsonObject Post(int i) => new()
+        {
+            ["op"] = "post", ["box"] = Convert.ToHexStringLower(System.Security.Cryptography.RandomNumberGenerator.GetBytes(16)),
+            ["blob"] = Convert.ToBase64String([(byte)i, 2]), ["drop"] = SealedMail.DropHash(new byte[16]),
+        };
+        for (var i = 0; i < RoomDirectoryServer.MaxMailPostsPerSource; i++)
+            Assert.True(server.Handle(Post(i), "127.0.9.1")["ok"]?.GetValue<bool>());
+        var refused = server.Handle(Post(99), "127.0.9.1");
+        Assert.Equal("rate", refused["error"]?.GetValue<string>());
+        // Older Jay reads plain "rate"; newer Jay also learns that it is about mail.
+        Assert.Equal("mail", refused["what"]?.GetValue<string>());
+        // Another source isn't held back by the first one.
+        Assert.True(server.Handle(Post(100), "127.0.9.2")["ok"]?.GetValue<bool>());
+        _now += RoomDirectoryServer.MailPostWindow + TimeSpan.FromSeconds(1);
+        Assert.True(server.Handle(Post(101), "127.0.9.1")["ok"]?.GetValue<bool>());
     }
 
     [Fact]

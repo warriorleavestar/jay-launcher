@@ -82,6 +82,8 @@ public sealed class PendingContact
 
 
     internal byte[]? MyNonce;
+    /// <summary>The hello-r I made when accepting: accepting again sends this same one (it may have arrived already).</summary>
+    internal MailMessage? MyReply;
     internal byte[]? TheirCommit;
     internal byte[]? TheirNonce;
 }
@@ -291,7 +293,9 @@ public sealed class ContactBook(string path, Func<DateTimeOffset>? clock = null)
                     reply = MailMessage.Create(MailKind.HelloNonce, sender, new JsonObject { ["n"] = Convert.ToHexStringLower(pending.MyNonce!) }, _now());
                     break;
                 }
-                case MailKind.HelloNonce when pending is { Initiator: false, Step: ContactStep.WaitingForNonce }:
+                // Also when my reply's sending failed: it may have got through all the same.
+                case MailKind.HelloNonce when pending is { Initiator: false, Step: ContactStep.WaitingForNonce }
+                                              or { Initiator: false, Step: ContactStep.AskingMe, MyReply: not null }:
                 {
                     if (MailMessage.Hex(message.Body["n"], ContactHandshake.NonceLength) is not { } nonce) return null;
                     // A nonce that doesn't open the commitment: the other side changed its mind after seeing mine. Drop it.
@@ -329,16 +333,33 @@ public sealed class ContactBook(string path, Func<DateTimeOffset>? clock = null)
         return reply;
     }
 
+    /// <summary>
+    /// Sending the reply <see cref="Accept"/> made failed: the request shows as asking me again, so it can be accepted
+    /// again. That sends the same reply (same nonce), since this one may have arrived after all; their nonce is taken
+    /// meanwhile too. Nothing changes once their nonce has come in.
+    /// </summary>
+    public void Unaccept(ReadOnlySpan<byte> theirs)
+    {
+        lock (_gate)
+        {
+            if (!_pending.TryGetValue(Convert.ToHexStringLower(theirs), out var pending) || pending.Initiator
+                || pending.Step != ContactStep.WaitingForNonce) return;
+            pending.Step = ContactStep.AskingMe;
+        }
+        Changed?.Invoke();
+    }
+
     private MailMessage AcceptLocked(PendingContact pending, string myName)
     {
-        pending.MyNonce = ContactHandshake.NewNonce();
         pending.Step = ContactStep.WaitingForNonce;
+        if (pending.MyReply is { } made) return made;
+        pending.MyNonce = ContactHandshake.NewNonce();
         var body = new JsonObject
         {
             ["name"] = KnockProtocol.SanitizeName(myName),
             ["n"] = Convert.ToHexStringLower(pending.MyNonce),
         };
-        return MailMessage.Create(MailKind.HelloReply, pending.PublicKey, body, _now());
+        return pending.MyReply = MailMessage.Create(MailKind.HelloReply, pending.PublicKey, body, _now());
     }
 
     /// <summary>The emoji matched: the contact is saved as verified.</summary>

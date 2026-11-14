@@ -414,6 +414,17 @@ public sealed class RateLimiter(int count, TimeSpan window, Func<DateTimeOffset>
     private readonly Queue<DateTimeOffset> _times = new();
     private readonly Func<DateTimeOffset> _clock = clock ?? (() => DateTimeOffset.UtcNow);
 
+    /// <summary>Would <see cref="TryAcquire"/> succeed now? Takes nothing.</summary>
+    public bool CanAcquire()
+    {
+        var now = _clock();
+        lock (_times)
+        {
+            while (_times.Count > 0 && now - _times.Peek() >= window) _times.Dequeue();
+            return _times.Count < count;
+        }
+    }
+
     public bool TryAcquire()
     {
         var now = _clock();
