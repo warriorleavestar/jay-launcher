@@ -31,7 +31,7 @@ public class PrivacyRow : SafetySurface
         _panel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children = { shield, _text } };
         Child = _panel;
         Update();
-        L.Changed += () => Avalonia.Threading.Dispatcher.UIThread.Post(Update);
+        Amber.App.Localization.LanguageListeners.Add(this, static o => ((PrivacyRow)o).Update());
     }
 
     private string FullText => $"{L.T("main.no_cloud_control")} · {L.T("main.no_telemetry")}";

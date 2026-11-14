@@ -254,8 +254,14 @@ public sealed partial class MultiplayerViewModel
 
     /// <summary>
     /// My own default on top of what the room says: used when my side of a room starts. A room that needs a direct main
-    /// path for a strict split is left as it is: on relays only it would never connect.
+    /// path for a strict split is never joined with it on (<see cref="RefusesForMyRelayChoice"/>).
     /// </summary>
+    /// <summary>
+    /// "Always relays only" is on and the room needs a direct main path (a strict split): Jay doesn't join it, since that
+    /// path would show the host this computer's address.
+    /// </summary>
+    internal bool RefusesForMyRelayChoice(RoomCode room) => _service.Settings.MultiplayerRelayOnly && !room.RelayOnly && SplitNeedsDirect(room.Split);
+
     internal RoomCode WithMyRelayChoice(RoomCode room) =>
         _service.Settings.MultiplayerRelayOnly && !room.RelayOnly && !SplitNeedsDirect(room.Split) ? room with { RelayOnly = true } : room;
 

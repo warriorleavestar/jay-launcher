@@ -3496,6 +3496,7 @@
   "multiplayer.open.server": "Open an always-on server…",
   "multiplayer.room.created_relay_only": "Room created (relays only: Jay connects nobody in the room directly). Select “Invite” to make an invite for them.",
   "multiplayer.split.relay_only_strict": "“Relays only” can’t open this room: the AMBER_SPLIT developer switch asks for a strict split, which needs a direct main path. Pick another way to connect, or set AMBER_SPLIT to auto.",
+  "multiplayer.split.relay_only_mine": "Jay didn't join: this room sends part of its traffic only over a direct connection, and “Always use relays only” is on, so the host would see your address. To join it, turn that off in Settings › Multiplayer first.",
   "multiplayer.lobby.join.server": "Join and save",
   "multiplayer.lobby.join.friend": "Add friend",
   "multiplayer.lobby.join.network": "Add network",

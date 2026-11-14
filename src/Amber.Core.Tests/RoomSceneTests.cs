@@ -371,6 +371,62 @@ public sealed class RoomSceneTests : IDisposable
         vm.LeaveTestRoom();
     });
 
+    private sealed class FakeTunSession(EasyTierOptions options) : IEasyTierSession
+    {
+        public EasyTierOptions Options { get; } = options;
+        public bool HasExited { get; private set; }
+        public IReadOnlyList<string> RecentOutput => [];
+        public Task<List<PeerInfo>> PeersAsync(CancellationToken ct = default) => Task.FromResult(new List<PeerInfo>());
+        public void Dispose() => HasExited = true;
+    }
+
+    /// <summary>
+    /// Full-LAN mode keeps EasyTier running when game forwarding is switched: Jay's own transport takes the new setting
+    /// through the real switch path, and whatever restarts later (another exit, another network) starts from it too.
+    /// </summary>
+    [Fact]
+    public void InFullLanModeForwardingSwitchesTakeEffectAndStay() => UiTestThread.Run(() =>
+    {
+        var (service, vm, room) = Create();
+        using var s = service;
+        vm.Confirm = (_, _, _) => Task.FromResult(true);
+        vm.EnterTestRoom(room, host: true);
+        AddGuest(vm, "Alex", Key(1));
+        Dispatcher.UIThread.RunJobs();
+        vm.SelectedPerson = vm.People.Single(p => p.Name == "Alex");
+        var started = new EasyTierOptions(room, true, [], 0, Tun: true) { AllowProxy = true };
+        var session = new FakeTunSession(started);
+        vm.UseTestSession(session, started);
+        var transports = new List<EasyTierOptions>();
+        vm.TestStartTransport = o => { transports.Add(o); return true; };
+        Assert.True(vm.SharingGameProxy);
+        Assert.True(vm.CanShareGameProxy);
+
+        // Off: the transport restarts without forwarding, EasyTier keeps running, and the room says it's off.
+        Wait(vm.SetGameProxySharingAsync(false));
+        Assert.False(Assert.Single(transports).AllowProxy);
+        Assert.True(transports[0].Tun);
+        Assert.False(session.HasExited);
+        Assert.False(vm.SharingGameProxy);
+        Assert.Equal("multiplayer.share.proxy.turned_off", vm.StatusInfo?.Key);
+        // A later restart starts from "off", not from what EasyTier was started with.
+        Assert.False(vm.CurrentSessionOptionsForTest!.AllowProxy);
+        Assert.True(session.Options.AllowProxy);
+
+        // On again: the same path the other way.
+        Wait(vm.SetGameProxySharingAsync(true));
+        Assert.True(transports[^1].AllowProxy);
+        Assert.True(vm.SharingGameProxy);
+        Assert.True(vm.CurrentSessionOptionsForTest!.AllowProxy);
+
+        // A transport that can't start says forwarding didn't change.
+        vm.TestStartTransport = _ => false;
+        Wait(vm.SetGameProxySharingAsync(false));
+        Assert.NotEqual("multiplayer.share.proxy.turned_off", vm.StatusInfo?.Key);
+        vm.TestStartTransport = null;
+        vm.LeaveTestRoom();
+    });
+
     [Fact]
     public void TheTwoSwitchesThatRestartTheComponentNeverRunTogether() => UiTestThread.Run(() =>
     {
@@ -487,12 +543,32 @@ public sealed class RoomSceneTests : IDisposable
         Wait(vm.SetRelayOnlyAsync(true));
         Assert.False(vm.MyRelayOnly);
         Assert.False(switched);
-        // My "relays only" default leaves such a room as it is (on relays only it would never connect), not others.
-        vm.DefaultRelayOnly = true;
-        Assert.False(vm.WithMyRelayChoice(strict).RelayOnly);
-        Assert.True(vm.WithMyRelayChoice(room).RelayOnly);
         vm.LeaveTestRoom();
         Assert.Equal("", vm.RelayOnlyNote);
+
+        // With my "relays only" default on, such a room is not joined at all: nothing starts, nothing is probed, and my
+        // setting stays as it is. An ordinary room still starts, on relays only.
+        vm.DefaultRelayOnly = true;
+        var started = new List<EasyTierOptions>();
+        vm.TestStartSession = o => { started.Add(o); return false; };
+        foreach (var split in new[] { SplitSettings.Create(SplitPolicy.Strict, SplitPolicy.Off), SplitSettings.Create(SplitPolicy.Off, SplitPolicy.Strict),
+                     SplitSettings.Create(SplitPolicy.Strict, SplitPolicy.Strict) })
+        {
+            var hostRoom = room with { Split = split };
+            Assert.True(vm.RefusesForMyRelayChoice(hostRoom));
+            Assert.False(vm.StartJoinForTest(hostRoom));
+            Assert.Equal("multiplayer.split.relay_only_mine", vm.StatusInfo?.Key);
+            Assert.Empty(started);
+            Assert.True(vm.IsIdle);
+            Assert.True(service.Settings.MultiplayerRelayOnly);
+        }
+        // A room whose own rule is relays only is joined as it is.
+        Assert.False(vm.RefusesForMyRelayChoice(strict with { RelayOnly = true }));
+        vm.StartJoinForTest(room);
+        Assert.True(Assert.Single(started).Room.RelayOnly);
+        // With my default off, the strict room is joined as before.
+        vm.DefaultRelayOnly = false;
+        Assert.False(vm.RefusesForMyRelayChoice(strict));
     });
 
     [Fact]
@@ -672,6 +748,27 @@ public sealed class RoomSceneTests : IDisposable
         Assert.True(JayInvite.TryParse(vm.TestInviteText ?? "", out var secondCode));
         Assert.NotEqual(monthCode.LobbyKey, secondCode.LobbyKey);
         Assert.NotEqual(monthCode.Token, secondCode.Token);
+        vm.LeaveTestRoom();
+    });
+
+    [Fact]
+    public void AThirtyDayInviteWhoseLobbyCannotStartSaysSoAndWaitsForTheNextRoom() => UiTestThread.Run(() =>
+    {
+        var (service, vm, room) = Create();
+        using var s = service;
+        vm.EnterTestRoom(room, host: true, lobby: true);
+        vm.LobbyUpdateForTest = () => Task.FromException(new System.Net.Sockets.SocketException(10048));
+        vm.PickInviteChoices(InviteLife.ThirtyDays, InviteUse.Once);
+        vm.LongInviteLabel = "Bob";
+        Wait(vm.CreateInviteCommand.ExecuteAsync(null));
+        Dispatcher.UIThread.RunJobs();
+
+        // The invite is kept for the next room, the lobby's error stays on screen, and nothing says "created".
+        var item = Assert.Single(vm.LongInviteItems);
+        Assert.Equal("Bob", item.Label);
+        Assert.Equal("multiplayer.invite.lobby_failed", vm.StatusInfo?.Key);
+        Assert.NotEqual(L.T("multiplayer.longinvite.created"), vm.Status);
+        Assert.True(vm.ShowInviteNextRoomNote);
         vm.LeaveTestRoom();
     });
 

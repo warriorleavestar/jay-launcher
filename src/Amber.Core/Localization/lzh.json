@@ -3278,6 +3278,7 @@
   "multiplayer.open.server": "開常在之服器…",
   "multiplayer.room.created_relay_only": "房已立（唯經轉驛：Jay 不使室中人直通）。按「邀」生邀碼而遣之。",
   "multiplayer.split.relay_only_strict": "「唯經轉驛」不能立此房：開發之開關 AMBER_SPLIT 求嚴分流，嚴分流須主路直達。易他連法，或改 AMBER_SPLIT 為 auto。",
+  "multiplayer.split.relay_only_mine": "未入：此室有流但行直連，而君已設「恆唯經轉驛」，入則室主得見君之址。欲入者，先於 設置 › 聯機 中止之。",
   "multiplayer.lobby.join.server": "赴而存之",
   "multiplayer.lobby.join.friend": "增知交",
   "multiplayer.lobby.join.network": "增網",
