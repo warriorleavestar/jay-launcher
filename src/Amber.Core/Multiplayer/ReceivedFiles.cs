@@ -7,6 +7,9 @@ public static class ReceivedFiles
     {
         ".exe", ".com", ".bat", ".cmd", ".ps1", ".psm1", ".vbs", ".vbe", ".js", ".jse", ".wsf", ".hta", ".msi", ".msp", ".scr", ".pif", ".cpl",
         ".lnk", ".reg", ".dll", ".jar", ".sh", ".bash", ".command", ".app", ".pkg", ".dmg", ".run", ".bin", ".appimage", ".deb", ".rpm", ".py",
+        // Launchers, app packages and files that Windows, macOS or a Linux desktop opens by running something.
+        ".desktop", ".msix", ".msixbundle", ".appx", ".appxbundle", ".appinstaller", ".application", ".msc", ".chm", ".url", ".scf",
+        ".wsh", ".wsc", ".ps1xml", ".jnlp", ".gadget", ".scpt", ".workflow",
     };
 
     /// <summary>True for programs, installers and scripts (by extension; "a.txt.exe" counts, "exe.txt" does not).</summary>

@@ -91,6 +91,45 @@ public sealed class LongLivedInviteTests : IDisposable
         Assert.Equal(0, store.SeedInto(book, TunnelSettings.Default));
     }
 
+    /// <summary>The app seeds a running room again after each new invite: what the book already holds is not added a second time.</summary>
+    [Fact]
+    public void SeedingARunningRoomAgainAddsOnlyTheNewInvites()
+    {
+        var store = Store();
+        store.Create("Bob");
+        var book = new InviteBook(() => _now);
+        Assert.Equal(1, store.SeedInto(book, TunnelSettings.Default));
+        Assert.Equal(0, store.SeedInto(book, TunnelSettings.Default));
+        Assert.Single(book.Pending);
+        var carol = store.Create("Carol");
+        Assert.Equal(1, store.SeedInto(book, TunnelSettings.Default));
+        Assert.Equal(2, book.Pending.Count);
+        Assert.Contains(book.Pending, p => p.Invite.Token.AsSpan().SequenceEqual(carol.Token));
+    }
+
+    /// <summary>A time in the file that no calendar holds is a damaged file like any other, not an exception out of the constructor.</summary>
+    [Theory]
+    [InlineData("expires")]
+    [InlineData("created")]
+    public void ATimeOutsideTheCalendarStartsEmpty(string field)
+    {
+        var store = Store();
+        store.Create("Bob");
+        var root = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(FilePath))!;
+        root["invites"]![0]![field] = 999_999_999_999_999_999;
+        File.WriteAllText(FilePath, root.ToJsonString());
+        Assert.Empty(Store().Active);
+    }
+
+    [Fact]
+    public void TheFileIsPrivateFromTheMomentItIsCreated()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        Store().Create("Bob");
+        Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(FilePath));
+        Assert.False(File.Exists(FilePath + ".tmp"));
+    }
+
     [Fact]
     public void DamagedFileStartsEmpty()
     {

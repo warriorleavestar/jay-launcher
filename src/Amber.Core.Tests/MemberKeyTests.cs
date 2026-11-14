@@ -246,6 +246,36 @@ public sealed class MemberKeyTests : IDisposable
         Assert.Equal(0, hub.MemberCount);
     }
 
+    /// <summary>
+    /// A member that has finished the handshake but never sends Join is dropped after FirstFrameTimeout, even while it
+    /// keeps sending control frames: they no longer move the deadline, so such connections cannot fill the pending slots.
+    /// </summary>
+    [Fact]
+    public async Task ControlFramesBeforeJoinDoNotExtendTheDeadline()
+    {
+        var credentials = Credentials(_host.PublicKey.ToArray(), TunnelSettings.Default);
+        var table = new MemberTable();
+        var hostRoom = credentials.ToHostRoom(table, "Host");
+        var alice = table.Issue(_alice.PublicKey, "Alice");
+        await using var hub = new ChatHub(hostRoom, 0) { FirstFrameTimeout = TimeSpan.FromMilliseconds(500) };
+        using var tcp = new System.Net.Sockets.TcpClient();
+        await tcp.ConnectAsync("127.0.0.1", hub.Port);
+        var stream = await MemberChannel.ConnectAsync(tcp.GetStream(), alice.Key, MemberChannel.ChatProfile(TunnelSettings.Default.Mode), "chat", []);
+        Assert.True(await WaitAsync(() => hub.ConnectionCount == 1));
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var dropped = false;
+        while (watch.Elapsed < TimeSpan.FromSeconds(3))
+        {
+            try { await RoomChat.WriteFrameAsync(stream, ChatWire.KickedAck(), default); }
+            catch (Exception e) when (e is IOException or ObjectDisposedException or System.Net.Sockets.SocketException) { dropped = true; break; }
+            if (hub.ConnectionCount == 0) { dropped = true; break; }
+            await Task.Delay(150);
+        }
+        Assert.True(dropped, "a connection that never joins stayed for 3 s");
+        Assert.True(await WaitAsync(() => hub.ConnectionCount == 0));
+        Assert.Equal(0, hub.MemberCount);
+    }
+
     [Fact]
     public async Task HostsOwnChatClientUsesItsEntry()
     {
