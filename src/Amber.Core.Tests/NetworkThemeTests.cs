@@ -101,6 +101,25 @@ public class NetworkThemeTests : IDisposable
     }
 
     [Fact]
+    public async Task InlineTokensCanSayTheyAreFormat2()
+    {
+        const string tokens = """{ "sizes": { "FontDisplay": 40 } }""";
+        // Without "format" the tokens are format 1 and upgraded (FontDisplay meant the headline size then).
+        var old = await NetworkTheme.GetAsync(new HttpClient(new Handler([])), NetworkTheme.Parse(Json($$"""{ "inline": {{tokens}} }""")), _dir);
+        Assert.True(old.Upgraded);
+        Assert.Equal(40, old.Numbers["FontHeadline"]);
+        // "format": 2 keeps the author's format 2 names as written.
+        var spec = NetworkTheme.Parse(Json($$"""{ "inline": {{tokens}}, "format": 2 }"""));
+        Assert.Equal(2, spec.InlineFormat);
+        var pack = await NetworkTheme.GetAsync(new HttpClient(new Handler([])), spec, _dir);
+        Assert.False(pack.Upgraded);
+        Assert.Equal(40, pack.Numbers["FontDisplay"]);
+        Assert.False(pack.Numbers.ContainsKey("FontHeadline"));
+        foreach (var bad in new[] { "0", "3", "\"2\"", "1.5" })
+            Assert.Equal("bad_network_ui", Assert.Throws<ThemePackException>(() => NetworkTheme.Parse(Json($$"""{ "inline": {}, "format": {{bad}} }"""))).Code);
+    }
+
+    [Fact]
     public void PruneKeepsOnlyTheThemeInUse()
     {
         var keep = new string('a', 64);

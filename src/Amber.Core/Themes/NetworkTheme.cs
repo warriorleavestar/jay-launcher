@@ -9,7 +9,7 @@ namespace Amber.Core.Themes;
 /// 联机网络配置文件里带的界面主题（配置的 "ui" 字段）。格式和联机那边约定好：
 /// <code>
 /// "ui": { "sha256": "64 位十六进制", "size": 字节数, "url": "https://…/x.jaytheme", "scope": "network" | "global" }
-/// "ui": { "inline": { tokens.json 的内容 }, "scope": "network" }   // 只有配色字号，≤ 64 KB
+/// "ui": { "inline": { tokens.json 的内容 }, "scope": "network", "format": 2 }   // 只有配色字号，≤ 64 KB；format 可选，默认 1
 /// </code>
 /// 网址只能是 https，由网络的主人自己托管（目录服务不存文件）。下载时限制大小，下完先核对大小和 sha256，
 /// 对不上整个丢掉。主题包本身照常按导入规则检查（只有数据、没有代码）。
@@ -17,6 +17,9 @@ namespace Amber.Core.Themes;
 /// </summary>
 public sealed record NetworkThemeSpec(string Scope, string? Url, string? Sha256, long? Size, string? InlineTokens)
 {
+    /// <summary>The theme format the inline tokens are written in (the ui block's optional "format"; 1 when absent).</summary>
+    public int InlineFormat { get; init; } = 1;
+
     public bool IsInline => InlineTokens is not null;
 }
 
@@ -38,7 +41,12 @@ public static partial class NetworkTheme
             if (inline.ValueKind != JsonValueKind.Object) throw new ThemePackException("bad_network_ui", "inline");
             var text = inline.GetRawText();
             if (Encoding.UTF8.GetByteCount(text) > MaxInlineBytes) throw new ThemePackException("bad_network_ui", "inline too large");
-            return new NetworkThemeSpec(scope, null, null, null, text);
+            // Inline tokens written before formats existed are format 1; a network that writes format 2 names says so.
+            var format = 1;
+            if (ui.TryGetProperty("format", out var fm)
+                && (fm.ValueKind != JsonValueKind.Number || !fm.TryGetInt32(out format) || format < 1 || format > ThemePackReader.FormatVersion))
+                throw new ThemePackException("bad_network_ui", "format");
+            return new NetworkThemeSpec(scope, null, null, null, text) { InlineFormat = format };
         }
         var url = ui.TryGetProperty("url", out var u) && u.ValueKind == JsonValueKind.String ? u.GetString()! : "";
         if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps || uri.UserInfo.Length > 0)
@@ -58,7 +66,7 @@ public static partial class NetworkTheme
     public static async Task<ThemePack> GetAsync(HttpClient http, NetworkThemeSpec spec, string cacheRoot, CancellationToken ct = default)
     {
         using var scope = Amber.Core.Net.NetworkPolicy.Scope(Amber.Core.Net.NetworkCategory.Multiplayer);
-        if (spec.IsInline) return ReadInline(spec.InlineTokens!);
+        if (spec.IsInline) return ReadInline(spec.InlineTokens!, spec.InlineFormat);
         var store = new ThemeStore(Path.Combine(cacheRoot, spec.Sha256!));
         if (store.List().FirstOrDefault() is { } cached && store.TryLoad(cached.Id) is { } pack) return pack;
 
@@ -126,11 +134,11 @@ public static partial class NetworkTheme
     }
 
     /// <summary>内联主题只有 tokens（配色、字号、圆角、系统字体名），没有字体文件、图片、样式和排版。</summary>
-    public static ThemePack ReadInline(string tokensJson)
+    public static ThemePack ReadInline(string tokensJson, int format = 1)
     {
         var files = new Dictionary<string, byte[]>
         {
-            ["theme.json"] = Encoding.UTF8.GetBytes("""{ "format": 1, "id": "network-inline", "name": "Network" }"""),
+            ["theme.json"] = Encoding.UTF8.GetBytes($$"""{ "format": {{format}}, "id": "network-inline", "name": "Network" }"""),
             ["tokens.json"] = Encoding.UTF8.GetBytes(tokensJson),
         };
         // 内联的没有附带文件：引用字体文件、背景图的那几项读不到，会被当成缺文件丢掉；系统字体名照常可用。
