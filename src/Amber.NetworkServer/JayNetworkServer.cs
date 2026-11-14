@@ -28,7 +28,6 @@ public sealed class JayNetworkServerBuilder
     internal List<string> Seeds = [];
     internal int ListenPort = 11010;
     internal (string Core, string Cli)? EasyTier;
-    internal bool DownloadEasyTier = true;
     internal IPEndPoint? DirectOnly;
     internal bool SeedOnlyMode;
     internal int DirectoryIndex = 1;
