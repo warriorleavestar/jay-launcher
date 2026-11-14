@@ -282,8 +282,11 @@ public sealed partial class LibraryViewModel : PageViewModel
         }
         foreach (var card in _all)
         {
-            // An instance whose version files cannot be read: its page offers Repair, Open folder and Delete.
-            var state = card.Entry.Unreadable ? "broken" : _service.MetaOf(card.Id)?.State;
+            // An instance whose version files cannot be read: its page offers Repair, Open folder and Delete (or Resume
+            // install when its install never finished, which is what it is then called here too).
+            var state = card.Entry.Unreadable
+                ? _service.Directory.StateOf(card.Id) == Amber.Core.Game.InstanceState.Incomplete ? "incomplete" : "broken"
+                : _service.MetaOf(card.Id)?.State;
             if (state is null) continue;
             var key = state == "incomplete" ? "library.need.incomplete" : "library.need.broken";
             Needs.Add(new NeedItem(L.F(key, card.Name), L.T("library.need.view"), state != "incomplete", () => OpenInstance(card.Id)));

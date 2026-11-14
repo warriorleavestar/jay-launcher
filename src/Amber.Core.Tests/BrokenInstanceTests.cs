@@ -137,4 +137,26 @@ public sealed class BrokenInstanceTests : IDisposable
         Assert.True(card.Entry.Unreadable);
         Assert.Contains(library.Needs, n => n.Text.Contains("broken", StringComparison.Ordinal) && n.IsError);
     });
+
+    [Fact]
+    public void AnUnfinishedInstallIsListedAsUnfinishedNotBroken() => UiTestThread.Run(() =>
+    {
+        // The install stopped before the version file was complete: the instance cannot be read, but it is unfinished.
+        CorruptInstance("half");
+        File.WriteAllText(Path.Combine(_root, "versions", "half", GameDirectory.IncompleteMarker), "");
+        using var service = NewService();
+        var home = new HomeViewModel(service, new LogViewModel());
+        var library = new LibraryViewModel(service, home, new ActivityViewModel(service));
+        library.Refresh();
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (!library.IsLoaded && DateTime.UtcNow < deadline)
+        {
+            Dispatcher.UIThread.RunJobs();
+            Thread.Sleep(10);
+        }
+        Assert.True(library.IsLoaded);
+        var need = Assert.Single(library.Needs);
+        Assert.Equal(Amber.Core.Localization.L.F("library.need.incomplete", "half"), need.Text);
+        Assert.False(need.IsError);
+    });
 }
