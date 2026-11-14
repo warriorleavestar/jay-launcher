@@ -83,7 +83,7 @@ public sealed class DirectInviteTests
         var book = new InviteBook { KeepLobbyKey = true };
         var text = book.Create(1, TimeSpan.FromMinutes(10), false, credentials.Tunnel).Invite.ToString();
         Assert.StartsWith(JayInvite.Prefix, text);
-        Assert.False(OldDirectCodes.Contains(text));
+        Assert.NotEqual(PastedCodeKind.OldDirect, PastedCode.Detect(text));
         Assert.DoesNotMatch(@"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}", text);
         Assert.DoesNotContain("25565", text);
         foreach (var secret in room.Secrets) Assert.DoesNotContain(secret, text, StringComparison.OrdinalIgnoreCase);
@@ -106,7 +106,6 @@ public sealed class DirectInviteTests
     [InlineData("AMBREPLY1-eyJhIjoxfQ")]
     public void OldDirectCodesAreRefused(string text)
     {
-        Assert.True(OldDirectCodes.Contains(text));
         Assert.Equal(PastedCodeKind.OldDirect, PastedCode.Detect(text));
         Assert.False(JayInvite.TryParse(text, out _));
     }

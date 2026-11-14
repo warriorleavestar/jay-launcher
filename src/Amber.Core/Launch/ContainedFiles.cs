@@ -65,6 +65,17 @@ public static partial class ContainedFiles
 
     internal static IOException Blocked(string path) => new(L.F("core.launch.link_blocked", path));
 
+    /// <summary>
+    /// A full Windows path in the form that takes no length limit and no further parsing: <c>\\?\C:\…</c>, and
+    /// <c>\\?\UNC\server\share\…</c> for a network share; a path that already has a device prefix stays as it is.
+    /// </summary>
+    internal static string LongPath(string path)
+    {
+        if (path.StartsWith(@"\\?\", StringComparison.Ordinal) || path.StartsWith(@"\\.\", StringComparison.Ordinal)) return path;
+        if (path.StartsWith(@"\\", StringComparison.Ordinal)) return @"\\?\UNC\" + path[2..];
+        return @"\\?\" + path;
+    }
+
     private static string Decode(byte[] bytes, int length)
     {
         var text = new UTF8Encoding(false).GetString(bytes, 0, length);
@@ -163,12 +174,12 @@ public static partial class ContainedFiles
 
         // Not shared for delete: while Jay holds a level, it cannot be renamed, removed or replaced by a link.
         private static SafeFileHandle Open(string path, uint access, uint disposition, uint flags) =>
-            CreateFile(@"\\?\" + path, access, ShareRead | ShareWrite, 0, disposition, flags | OpenReparsePoint, 0);
+            CreateFile(LongPath(path), access, ShareRead | ShareWrite, 0, disposition, flags | OpenReparsePoint, 0);
 
         public static SafeHandle OpenRoot(string path)
         {
             // The root itself is trusted (it may be a junction the player set up); only what is below it is checked.
-            var handle = CreateFile(@"\\?\" + path, FileReadAttributes, ShareRead | ShareWrite, 0, OpenExisting, BackupSemantics, 0);
+            var handle = CreateFile(LongPath(path), FileReadAttributes, ShareRead | ShareWrite, 0, OpenExisting, BackupSemantics, 0);
             if (handle.IsInvalid) throw new Win32Exception(Marshal.GetLastPInvokeError(), path);
             return handle;
         }
@@ -238,6 +249,7 @@ public static partial class ContainedFiles
         private static int NoFollow => Mac ? 0x100 : Arm ? 0x8000 : 0x20000;
         private static int CloseOnExec => Mac ? 0x1000000 : 0x80000;
         private const int ReadOnly = 0;
+        private static int NonBlocking => Mac ? 0x4 : 0x800;
         private static int AtCwd => Mac ? -2 : -100;
         private static int Loop => Mac ? 62 : 40;
         private const int NotFound = 2, Exists = 17, NotDirectory = 20;
@@ -257,6 +269,29 @@ public static partial class ContainedFiles
         private static int Fd(SafeHandle handle) => (int)handle.DangerousGetHandle();
 
         private static SafeFileHandle Wrap(int fd) => new(fd, ownsHandle: true);
+
+        /// <summary>
+        /// Reads an ordinary file through its handle. Positioned reads only work on files that can seek: a FIFO, a
+        /// socket or a terminal fails at once (<see cref="NotSupportedException"/>) instead of waiting for data.
+        /// </summary>
+        private static byte[] ReadRegular(SafeFileHandle handle, string path)
+        {
+            long length;
+            try { length = RandomAccess.GetLength(handle); }
+            catch (NotSupportedException) { throw new IOException(L.F("core.launch.not_a_file", path)); }
+            if (length > MaxTextBytes) throw new IOException(L.F("core.launch.file_too_big", path));
+            var buffer = new byte[(int)length + 1];
+            var read = 0;
+            try
+            {
+                int n;
+                while (read < buffer.Length && (n = RandomAccess.Read(handle, buffer.AsSpan(read), read)) > 0) read += n;
+            }
+            catch (NotSupportedException) { throw new IOException(L.F("core.launch.not_a_file", path)); }
+            // It grew while being read: more than its size said.
+            if (read > length) throw new IOException(L.F("core.launch.file_too_big", path));
+            return buffer[..read];
+        }
 
         public static SafeHandle OpenRoot(string path)
         {
@@ -286,7 +321,8 @@ public static partial class ContainedFiles
         {
             var path = System.IO.Path.Combine(chain.Path, file);
             var text = "";
-            var fd = OpenAt(Fd(chain.Last), file, ReadOnly | NoFollow | CloseOnExec);
+            // Non-blocking: opening a FIFO with no writer would otherwise wait forever.
+            var fd = OpenAt(Fd(chain.Last), file, ReadOnly | NoFollow | NonBlocking | CloseOnExec);
             if (fd < 0)
             {
                 var error = Marshal.GetLastPInvokeError();
@@ -295,8 +331,8 @@ public static partial class ContainedFiles
             }
             else
             {
-                using var stream = new FileStream(Wrap(fd), FileAccess.Read);
-                var bytes = ReadAll(stream, path);
+                using var handle = Wrap(fd);
+                var bytes = ReadRegular(handle, path);
                 text = Decode(bytes, bytes.Length);
             }
             var updated = update(text);
