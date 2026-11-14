@@ -75,7 +75,8 @@ public static class RuntimeArchiveInstaller
             await using (var input = await openArchive(descriptor, ct))
                 await WriteArchiveAsync(input, archivePath, descriptor, progress, ct);
 
-            var files = ExtractVerifiedFiles(archivePath, staging, descriptor, progress, ct);
+            // Decompressing and hashing the runtime takes a while; keep it off the caller's (UI) thread.
+            var files = await Task.Run(() => ExtractVerifiedFiles(archivePath, staging, descriptor, progress, ct), ct);
             RequireRuntimeFiles(files);
             var manifest = new RuntimeBundleManifest(
                 RuntimeBundleManifest.CurrentFormat,
