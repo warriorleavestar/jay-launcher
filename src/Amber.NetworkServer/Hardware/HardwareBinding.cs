@@ -404,10 +404,14 @@ public sealed class NodeIntegrityException(IReadOnlyList<string> problems) : IOE
 /// </summary>
 public sealed class NodeHardwareGuard(string dataDir)
 {
+    /// <summary>Tests only: count or replace the machine TPM probe.</summary>
+    internal NodeHardwareGuard(string dataDir, Func<ITpmSealer> probeTpm) : this(dataDir) => _probeTpm = probeTpm;
+
     public IHardwareSource Hardware { get; init; } = SystemHardwareSource.Instance;
+    private readonly Func<ITpmSealer> _probeTpm = TpmSealers.ForThisMachine;
     private ITpmSealer? _tpm;
     /// <summary>The machine's TPM, probed only when a bound node first needs it (an unbound node never touches it).</summary>
-    public ITpmSealer Tpm { get => _tpm ??= TpmSealers.ForThisMachine(); init => _tpm = value; }
+    public ITpmSealer Tpm { get => _tpm ??= _probeTpm(); init => _tpm = value; }
     public IRuntimeIntegrity Integrity { get; init; } = RuntimeIntegrity.Instance;
     /// <summary>
     /// Who must have signed hardware.cert: the network's root quorum (<see cref="JayTrust"/> for the built-in network,

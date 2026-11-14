@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using System.Text.RegularExpressions;
 using Amber.NetworkServer;
 using Amber.Server;
 
@@ -102,14 +103,74 @@ public sealed class AdminPanelTests : IAsyncDisposable
         Assert.DoesNotContain("https://", html);
     }
 
+    /// <summary>The elements the panel shows or hides by sign-in state.</summary>
+    private static readonly string[] SignInToggled = ["login", "app", "logout", "refresh"];
+
     [Fact]
-    public void PanelStylesheetKeepsHiddenElementsHidden()
+    public void PanelShowsOnlyWhatTheSignInStateAllows()
     {
-        // The panel shows and hides its sections with the hidden attribute; author display rules (#app { display: grid })
-        // beat the browser's own [hidden] rule unless the stylesheet restates it.
+        var html = Encoding.UTF8.GetString(AdminPanel.Find("/")!.Bytes);
+        var js = Encoding.UTF8.GetString(AdminPanel.Find("/panel.js")!.Bytes);
         var css = Encoding.UTF8.GetString(AdminPanel.Find("/panel.css")!.Bytes);
-        Assert.Matches(@"\[hidden\]\s*\{\s*display:\s*none\s*!important;?\s*\}", css);
+
+        // Before the script decides, nothing that needs a sign-in shows (and no empty sign-in card flashes either).
+        foreach (var id in new[] { "login", "app", "logout", "login-error", "toast" })
+            Assert.True(HasHiddenAttribute(html, id), $"#{id} should start hidden");
+        Assert.False(HasHiddenAttribute(html, "refresh"));
+
+        // Not signed in, or signed out: only the sign-in card. Signed in: the app and its header buttons, no sign-in card.
+        var signedOut = new Dictionary<string, bool> { ["login"] = false, ["app"] = true, ["logout"] = true, ["refresh"] = true };
+        var signedIn = new Dictionary<string, bool> { ["login"] = true, ["app"] = false, ["logout"] = false, ["refresh"] = false };
+        Assert.Equal(signedOut, HiddenAssignments(FunctionBody(js, "function showLogin(")));
+        Assert.Equal(signedIn, HiddenAssignments(FunctionBody(js, "async function refresh(")));
+        // Every way out of a session lands on the same sign-in state and forgets the token.
+        var signOut = FunctionBody(js, "function signOut(");
+        Assert.Contains("token = null", signOut);
+        Assert.Contains("storeToken(null)", signOut);
+        Assert.Contains("showLogin(", signOut);
+        Assert.Contains("$(\"logout\").addEventListener(\"click\", () => signOut())", js);
+        Assert.Matches(@"response\.status === 401\) \{ signOut\(", FunctionBody(js, "async function api("));
+        Assert.Contains("if (initial) signIn(initial); else showLogin();", js);
+        // Only those two functions flip these elements, so no other path can show the app while signed out.
+        foreach (var id in SignInToggled)
+            Assert.Equal(2, Regex.Matches(js, $@"\$\(""{id}""\)\.hidden\s*=").Count);
+
+        // The browser's own [hidden] rule loses to any author display rule (#app is a grid, .card and buttons get
+        // display too), so the stylesheet restates it at the top level with !important and nothing overrides it.
+        var rule = Regex.Match(css, @"(?<![\w-])\[hidden\]\s*\{\s*display:\s*none\s*!important;?\s*\}");
+        Assert.True(rule.Success, "panel.css must keep [hidden] { display: none !important; }");
+        Assert.Equal(0, css[..rule.Index].Count(c => c == '{') - css[..rule.Index].Count(c => c == '}'));
+        Assert.Single(Regex.Matches(css, "!important"));
+        Assert.DoesNotMatch(@":not\(\[hidden\]\)", css);
+        Assert.Matches(@"#app\s*\{[^}]*display:\s*grid", css);
     }
+
+    private static bool HasHiddenAttribute(string html, string id)
+    {
+        var tag = Regex.Match(html, $@"<\w+\b[^>]*\bid=""{Regex.Escape(id)}""[^>]*>");
+        Assert.True(tag.Success, $"index.html has no #{id}");
+        return Regex.IsMatch(tag.Value, @"\shidden(?=[\s>])");
+    }
+
+    /// <summary>The body of a top-level function in panel.js, by brace matching from its declaration.</summary>
+    private static string FunctionBody(string js, string declaration)
+    {
+        var start = js.IndexOf(declaration, StringComparison.Ordinal);
+        Assert.True(start >= 0, $"panel.js has no {declaration}");
+        var open = js.IndexOf('{', js.IndexOf(')', start));
+        for (int i = open, depth = 0; i < js.Length; i++)
+        {
+            depth += js[i] == '{' ? 1 : js[i] == '}' ? -1 : 0;
+            if (depth == 0) return js[(open + 1)..i];
+        }
+        throw new InvalidDataException("unbalanced " + declaration);
+    }
+
+    /// <summary>The literal <c>$("id").hidden = true|false</c> assignments to the sign-in toggled elements in a code block.</summary>
+    private static Dictionary<string, bool> HiddenAssignments(string body) =>
+        Regex.Matches(body, @"\$\(""([\w-]+)""\)\.hidden\s*=\s*(true|false)\s*;")
+            .Where(m => SignInToggled.Contains(m.Groups[1].Value))
+            .ToDictionary(m => m.Groups[1].Value, m => m.Groups[2].Value == "true");
 
     [Fact]
     public async Task NodePanelCommandPrintsALoginLink()
