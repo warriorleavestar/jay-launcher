@@ -225,7 +225,7 @@ public sealed partial class ToolsViewModel : PageViewModel
         }
         try
         {
-            // Privacy plan item 2: a newer release is offered only when 2 of the 3 Jay trustees signed it.
+            // Privacy plan item 2: a newer release is offered only when enough Jay release keys signed it.
             var update = await new UpdateCheck(service.Http, AppSettings.DataDir).CheckAsync(feed, UpdateChecker.CurrentVersion);
             (UpdateStatus, UpdateUrl) = DescribeUpdate(feed, update);
         }
