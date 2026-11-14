@@ -273,8 +273,12 @@ public static partial class PortMapping
             log(L.T("core.mp.natpmp.nogateway"));
             return null;
         }
+        return await MapNatPmpAsync(localPort, new IPEndPoint(gateway, 5351), log, ct);
+    }
+
+    internal static async Task<PortMappingResult?> MapNatPmpAsync(int localPort, IPEndPoint target, Action<string> log, CancellationToken ct)
+    {
         using var udp = new UdpClient(AddressFamily.InterNetwork);
-        var target = new IPEndPoint(gateway, 5351);
         var address = await PmpRequestAsync(udp, target, [0, 0], 12, ct);
         if (address is null)
         {

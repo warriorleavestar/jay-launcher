@@ -63,6 +63,9 @@ public sealed class DirectSession : IAsyncDisposable
     /// <summary>测试用：代替真的启动 EasyTier。</summary>
     internal Func<EasyTierOptions, CancellationToken, Task<IEasyTierSession>>? StartForTest { get; init; }
 
+    /// <summary>Tests: stands in for gathering this side's addresses (STUN and the router mapping).</summary>
+    internal Func<Socket, CancellationToken, Task<DirectGatherer.Gathered>>? GatherForTest { get; init; }
+
     /// <summary>测试用：保留真实的新会话模式选择，只替代最后的进程创建。</summary>
     internal Func<bool, EasyTierOptions, IEasyTierSession>? CreateSessionForTest { get; init; }
 
@@ -161,7 +164,7 @@ public sealed class DirectSession : IAsyncDisposable
         else
         {
             // No bridge owns the socket yet: when gathering is cancelled or fails, close it here, or its port stays bound.
-            try { _gathered = await DirectGatherer.GatherAsync(socket, Options.StunServers, Options.TryPortMapping, Log, ct); }
+            try { _gathered = await (GatherForTest?.Invoke(socket, ct) ?? DirectGatherer.GatherAsync(socket, Options.StunServers, Options.TryPortMapping, Log, ct)); }
             catch { socket.Dispose(); throw; }
         }
         Log(L.F("core.mp.session.nat", DirectText.Nat(_gathered.Nat)));

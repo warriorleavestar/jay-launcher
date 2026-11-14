@@ -111,6 +111,53 @@ public sealed class DirectInviteTests
         Assert.Equal(port, ((IPEndPoint)again.LocalEndPoint!).Port);
     }
 
+    /// <summary>
+    /// Removing the router mapping fails with an I/O or format error while the session closes: DisposeAsync still
+    /// completes, and EasyTier and the bridge socket are released.
+    /// </summary>
+    [Theory]
+    [InlineData("io")]
+    [InlineData("data")]
+    public async Task AFailingMappingRemovalDoesNotBreakTheSessionCleanup(string error)
+    {
+        var removals = 0;
+        var mapping = new PortMappingResult("UPnP", IPEndPoint.Parse("203.0.113.5:40000"), async () =>
+        {
+            Interlocked.Increment(ref removals);
+            await Task.Yield();
+            throw error == "io" ? new IOException("gateway closed the connection") : new InvalidDataException("bad gateway reply");
+        });
+        using var hostKey = X25519KeyPair.Generate();
+        var room = RoomCredentials.Create(hostKey.PublicKey, 25565, TunnelSettings.Default).ToHostRoom(new MemberTable(), "Host");
+        FakeEasyTier? easyTier = null;
+        var port = 0;
+        var host = new DirectSession(null!, Path.Combine(Path.GetTempPath(), "amber-direct-" + Guid.NewGuid().ToString("N")), room, true,
+            new DirectOptions([], true, [], false, false, false), new DiagnosticLog())
+        {
+            BridgeKey = DirectTestKeys.Bridge,
+            StartForTest = (o, _) => Task.FromResult<IEasyTierSession>(easyTier = new FakeEasyTier(o)),
+            SpeedTestPortForTest = 0,
+            GatherForTest = (socket, _) =>
+            {
+                port = ((IPEndPoint)socket.LocalEndPoint!).Port;
+                return Task.FromResult(new DirectGatherer.Gathered([new Candidate(PathKind.Lan, new IPEndPoint(IPAddress.Loopback, port))], NatKind.Cone, "test", mapping));
+            },
+        };
+        await host.PrepareAsync();
+        Assert.NotNull(host.Bridge);
+        Assert.NotEqual(0, port);
+        Assert.NotNull(easyTier);
+        Assert.False(easyTier.HasExited);
+
+        await host.DisposeAsync().AsTask().WaitAsync(Deadline);
+
+        Assert.Equal(1, removals);
+        Assert.True(easyTier.HasExited);
+        // The bridge closed the punching socket: its port can be bound again.
+        using var again = DirectBridge.CreateSocket(port);
+        Assert.Equal(port, ((IPEndPoint)again.LocalEndPoint!).Port);
+    }
+
     /// <summary>A direct room hands out a plain JAY2 invite: no IP, no port, no room secret, no member key.</summary>
     [Fact]
     public void DirectRoomInviteCarriesNoAddressOrSecret()
