@@ -229,7 +229,7 @@ public sealed class InstanceSettingsTrustTests : IDisposable
     {
         var store = UsePrivateStore();
         var heldDuringSave = false;
-        InstanceSettingsTrust.Trust(Dir, new InstanceSettings { GameArgs = "--" + _marker }, () =>
+        InstanceSettingsTrust.Trust(Dir, new InstanceSettings { GameArgs = "--" + _marker }, _ =>
         {
             try { using var probe = new FileStream(store + ".lock", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None); }
             catch (IOException) { heldDuringSave = true; }
@@ -290,6 +290,168 @@ public sealed class InstanceSettingsTrustTests : IDisposable
         Assert.Equal("-De=" + _marker, InstanceSettings.Load(Dir, "y").JvmArgs);
         WriteRaw("x", $$"""{"JvmArgs":"-Da={{_marker}}"}""");
         Assert.True(InstanceSettings.Load(Dir, "x").DroppedUnknownValues);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void AFolderThatIsAwayKeepsItsSettingsThroughATrim(bool wholeFolder)
+    {
+        UsePrivateStore();
+        InstanceSettingsTrust.MaxTrusted = 2;
+        var far = _game + "-far";
+        try
+        {
+            var farDir = new GameDirectory(far);
+            new InstanceSettings { JvmArgs = "-Dfar=" + _marker }.Save(farDir, "f");
+            new InstanceSettings { JvmArgs = "-Dold=" + _marker }.Save(Dir, "x");
+            // The drive is unplugged (the whole folder is gone), or only its mount point is left (no versions folder).
+            var away = wholeFolder ? far : Path.Combine(far, "versions");
+            Directory.Move(away, away + "-away");
+            // Saves elsewhere push the record over its limit several times.
+            for (var i = 0; i < 4; i++) new InstanceSettings { JvmArgs = $"-Dn{i}=" + _marker }.Save(Dir, "x");
+            Directory.Move(away + "-away", away);
+            var back = InstanceSettings.Load(farDir, "f");
+            Assert.False(back.DroppedUnknownValues);
+            Assert.Equal("-Dfar=" + _marker, back.JvmArgs);
+            // The record still stays bounded: values nothing uses any more were dropped.
+            WriteRaw("x", $$"""{"JvmArgs":"-Dold={{_marker}}"}""");
+            Assert.True(InstanceSettings.Load(Dir, "x").DroppedUnknownValues);
+        }
+        finally
+        {
+            foreach (var d in new[] { far, far + "-away" }) try { Directory.Delete(d, true); } catch (IOException) { }
+        }
+    }
+
+    [Fact]
+    public void ChecksOfARecordedFolderDoNotWaitForAnotherJay()
+    {
+        var store = UsePrivateStore();
+        new InstanceSettings { PreLaunchCommand = "echo " + _marker, MaxMemoryMb = 2048 }.Save(Dir, "a");
+        WriteRaw("b", $$"""{"PreLaunchCommand":"calc {{_marker}}"}""");
+        using (new FileStream(store + ".lock", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
+        {
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            var loaded = InstanceSettings.Load(Dir, "a");
+            Assert.Equal("echo " + _marker, loaded.PreLaunchCommand);
+            Assert.False(loaded.DroppedUnknownValues);
+            Assert.True(InstanceSettingsTrust.IsTrusted(Dir, new InstanceSettings { PreLaunchCommand = "echo " + _marker }));
+            // Still fails closed for values Jay did not save.
+            Assert.False(InstanceSettingsTrust.IsTrusted(Dir, new InstanceSettings { PreLaunchCommand = "calc " + _marker }));
+            Assert.Equal(InstanceSettingsDrop.NotSavedByJay, InstanceSettings.Load(Dir, "b").DropReason);
+            Assert.Null(InstanceSettings.Load(Dir, "none").PreLaunchCommand);
+            Assert.True(clock.ElapsedMilliseconds < 500, $"took {clock.ElapsedMilliseconds} ms");
+        }
+    }
+
+    [Fact]
+    public void ASaveGivesUpSoonWhenAnotherJayKeepsTheRecord()
+    {
+        var store = UsePrivateStore();
+        new InstanceSettings { MaxMemoryMb = 2048 }.Save(Dir, "a");
+        var other = _game + "-new";
+        try
+        {
+            var otherDir = new GameDirectory(other);
+            Directory.CreateDirectory(Path.Combine(other, "versions", "o"));
+            File.WriteAllText(Path.Combine(other, "versions", "o", InstanceSettings.FileName), $$"""{"GameArgs":"--{{_marker}}"}""");
+            using (new FileStream(store + ".lock", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
+            {
+                var clock = System.Diagnostics.Stopwatch.StartNew();
+                var e = Assert.Throws<IOException>(() => new InstanceSettings { PreLaunchCommand = "echo " + _marker }.Save(Dir, "a"));
+                Assert.InRange(clock.ElapsedMilliseconds, 500, 3000);
+                Assert.Equal(Amber.Core.Localization.L.T("core.launch.settings_record_busy"), e.Message);
+                Assert.Null(InstanceSettings.Load(Dir, "a").PreLaunchCommand);
+                // A folder seen for the first time can't be adopted now: it is reported as unchecked, not as foreign.
+                var first = InstanceSettings.Load(otherDir, "o");
+                Assert.Equal(InstanceSettingsDrop.RecordUnavailable, first.DropReason);
+                Assert.Null(first.GameArgs);
+            }
+            // Once the other Jay lets go, the folder is adopted as it was.
+            Assert.Equal("--" + _marker, InstanceSettings.Load(otherDir, "o").GameArgs);
+        }
+        finally
+        {
+            try { Directory.Delete(other, true); } catch (IOException) { }
+        }
+    }
+
+    [Fact]
+    public void ReadsDuringSavesSeeAWholeRecord()
+    {
+        var store = UsePrivateStore();
+        new InstanceSettings { JvmArgs = "-Dkeep=" + _marker }.Save(Dir, "keep");
+        var saves = Task.Run(() =>
+        {
+            InstanceSettingsTrust.StorePathOverride = store;
+            for (var i = 0; i < 60; i++) new InstanceSettings { JvmArgs = $"-Dn={i} {_marker}" }.Save(Dir, "busy" + (i % 4));
+        });
+        while (!saves.IsCompleted) Assert.Equal("-Dkeep=" + _marker, InstanceSettings.Load(Dir, "keep").JvmArgs);
+        saves.GetAwaiter().GetResult();
+    }
+
+    [Fact]
+    public void ValuesDroppedOnLoadSurviveTheNextSaveUntrusted()
+    {
+        UsePrivateStore();
+        new InstanceSettings { JvmArgs = "-Dmine=" + _marker, MaxMemoryMb = 2048 }.Save(Dir, "a");
+        // Changing values the player saw keeps no copy.
+        new InstanceSettings { JvmArgs = "-Dmine2=" + _marker, MaxMemoryMb = 2048 }.Save(Dir, "a");
+        Assert.Empty(InstanceSettings.UnconfirmedCopies(Dir, "a"));
+
+        var foreign = $$"""{"MaxMemoryMb":3072,"JvmArgs":"-Dforeign={{_marker}}","JavaPath":"/tmp/{{_marker}}/java"}""";
+        WriteRaw("a", foreign);
+        var loaded = InstanceSettings.Load(Dir, "a");
+        Assert.Equal(InstanceSettingsDrop.NotSavedByJay, loaded.DropReason);
+        Assert.False(loaded.HasUnconfirmedValues);
+        // The player changes something else and saves: what the file held is kept aside, as it was.
+        loaded.MaxMemoryMb = 4096;
+        loaded.Save(Dir, "a");
+        Assert.False(loaded.DroppedUnknownValues);
+        Assert.True(loaded.HasUnconfirmedValues);
+        var copy = Assert.Single(InstanceSettings.UnconfirmedCopies(Dir, "a"));
+        Assert.Equal(foreign, File.ReadAllText(copy));
+        var kept = InstanceSettings.ReadUnconfirmed(copy)!;
+        Assert.Equal("-Dforeign=" + _marker, kept.JvmArgs);
+        // ...and nothing takes them for Jay's own.
+        Assert.False(InstanceSettingsTrust.IsTrusted(Dir, kept));
+        var next = InstanceSettings.Load(Dir, "a");
+        Assert.Null(next.JvmArgs);
+        Assert.Null(next.JavaPath);
+        Assert.Equal(4096, next.MaxMemoryMb);
+        Assert.True(next.HasUnconfirmedValues);
+        // Saving again keeps no second copy; different foreign values get their own.
+        next.Save(Dir, "a");
+        Assert.Single(InstanceSettings.UnconfirmedCopies(Dir, "a"));
+        WriteRaw("a", $$"""{"GameArgs":"--other {{_marker}}"}""");
+        new InstanceSettings { MaxMemoryMb = 1024 }.Save(Dir, "a");
+        Assert.Equal(2, InstanceSettings.UnconfirmedCopies(Dir, "a").Count);
+        Assert.Equal(foreign, File.ReadAllText(InstanceSettings.UnconfirmedCopies(Dir, "a")[0]));
+    }
+
+    [Fact]
+    public void ValuesJayCouldNotCheckAreKeptWhenASaveFollows()
+    {
+        var store = UsePrivateStore();
+        new InstanceSettings { PreLaunchCommand = "echo " + _marker, MaxMemoryMb = 2048 }.Save(Dir, "a");
+        var original = File.ReadAllText(FileOf("a"));
+        // The record can't be read for a moment.
+        File.Move(store, store + ".aside");
+        Directory.CreateDirectory(store);
+        var loaded = InstanceSettings.Load(Dir, "a");
+        Assert.Equal(InstanceSettingsDrop.RecordUnavailable, loaded.DropReason);
+        Assert.Null(loaded.PreLaunchCommand);
+        Directory.Delete(store);
+        File.Move(store + ".aside", store);
+        // The page saves a new object built from what it showed (no command): the command is kept aside, not lost.
+        new InstanceSettings { MaxMemoryMb = 3072 }.Save(Dir, "a");
+        var copy = Assert.Single(InstanceSettings.UnconfirmedCopies(Dir, "a"));
+        Assert.Equal(original, File.ReadAllText(copy));
+        var next = InstanceSettings.Load(Dir, "a");
+        Assert.Null(next.PreLaunchCommand);
+        Assert.Equal(3072, next.MaxMemoryMb);
+        Assert.True(next.HasUnconfirmedValues);
     }
 
     private string VersionWith(string id, string mainClass, bool legacy = false, string? logArg = null)

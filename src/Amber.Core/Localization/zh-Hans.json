@@ -381,6 +381,7 @@
   "core.launch.script.editnote": "启动参数位于文件末尾的 JSON 数组中，可按 JSON 字符串规则编辑令牌占位符。",
   "core.launch.script.invaliddata": "启动路径和参数不能包含 NUL。",
   "core.launch.settings_file_unreadable": "Jay 现在读不了这个游戏文件夹里的某个实例设置（{0}），暂时没法核对。请关掉正在占用这个文件的程序，然后再试一次。",
+  "core.launch.settings_record_busy": "另一个 Jay 窗口正在更新“哪些实例设置是自己写的”这份记录。请稍等一下，然后再试一次。",
   "core.launch.settings_record_unwritable": "Jay 没法保存“哪些实例设置是自己写的”这份记录（{0}）。请确认 Jay 的数据文件夹可以写入，然后再试一次。",
   "core.launch.update.missingversion": "更新地址返回的内容里没有版本号",
   "core.mp.attest.hostfailed": "对面没能证明自己是这个房间的房主电脑（可能有人拿着房间凭据冒充房主），已断开",

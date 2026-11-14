@@ -381,6 +381,7 @@
   "core.launch.script.editnote": "啟動參數位於檔案末尾的 JSON 陣列中，可按 JSON 字串規則編輯權杖預留位置。",
   "core.launch.script.invaliddata": "啟動路徑和參數不能包含 NUL。",
   "core.launch.settings_file_unreadable": "Jay 現在讀不了這個遊戲資料夾裡的某個實例設定（{0}），暫時沒辦法核對。請關掉正在占用這個檔案的程式，然後再試一次。",
+  "core.launch.settings_record_busy": "另一個 Jay 視窗正在更新「哪些實例設定是自己寫的」這份記錄。請稍等一下，然後再試一次。",
   "core.launch.settings_record_unwritable": "Jay 沒辦法保存「哪些實例設定是自己寫的」這份記錄（{0}）。請確認 Jay 的資料資料夾可以寫入，然後再試一次。",
   "core.launch.update.missingversion": "更新網址回傳的內容中沒有版本號碼",
   "core.mp.attest.hostfailed": "對面沒能證明自己是這個房間的房主電腦（可能有人拿著房間憑據冒充房主），已斷開",

@@ -381,6 +381,7 @@
   "core.launch.script.editnote": "ファイル末尾の配列で、JSON 文字列の規則に従ってトークンのプレースホルダーを編集できます。",
   "core.launch.script.invaliddata": "起動パスと引数に NUL を含めることはできません。",
   "core.launch.settings_file_unreadable": "このゲームフォルダーのインスタンス設定の一つを今は読み込めないため（{0}）、まだ確認できません。そのファイルを使っているものを閉じてから、もう一度試してください。",
+  "core.launch.settings_record_busy": "別の Jay ウィンドウが、どのインスタンス設定を自身で保存したかの記録を更新しています。少し待ってから、もう一度試してください。",
   "core.launch.settings_record_unwritable": "どのインスタンス設定を Jay 自身が保存したかの記録を保存できません（{0}）。Jay のデータフォルダーに書き込めるか確かめてから、もう一度試してください。",
   "core.launch.update.missingversion": "更新 URL の応答にバージョン番号がありません",
   "core.mp.attest.hostfailed": "相手がこのルームのホストデバイスであることを証明できませんでした（漏れた認証情報でホストになりすましている可能性があります）。切断しました",

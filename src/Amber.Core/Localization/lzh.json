@@ -378,6 +378,7 @@
   "core.launch.script.editnote": "啟動之參在檔末 JSON 陣列中，可依 JSON 字串之規修權杖之位。",
   "core.launch.script.invaliddata": "啟動之徑與參不可含 NUL。",
   "core.launch.settings_file_unreadable": "此遊戲夾中某實例設定今不可讀（{0}），故未能核之。請閉佔此檔者，而後再試。",
+  "core.launch.settings_record_busy": "別一 Jay 窗方更「何實例設定為己所書」之錄。請稍候，而後再試。",
   "core.launch.settings_record_unwritable": "Jay 不能存「何實例設定為己所書」之錄（{0}）。請察 Jay 之資料夾可書，而後再試。",
   "core.launch.update.missingversion": "更新之址所報無版號",
   "core.mp.chat.invalidlength": "訊長 {0} 逾限",
