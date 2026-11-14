@@ -134,8 +134,10 @@ internal sealed class EntryListeners : IAsyncDisposable
                 _fixed = Open(FixedPort, quiet: _fixedFailed);
                 _fixedFailed = _fixed is null;
             }
-            else if (!open && _fixed is not null)
+            else if (!open)
             {
+                // Turned off on purpose: the next failure to open it is news again and is logged.
+                _fixedFailed = false;
                 closing = _fixed;
                 _fixed = null;
             }
