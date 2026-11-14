@@ -183,7 +183,9 @@ public sealed record ThemeScene
         var (fx, fy) = (0.5, 0.5);
         if (s.TryGetProperty("focus", out var focus))
         {
+            // Each element is checked to be a number first: TryGetDouble throws on a string, a bool, null, an object or an array.
             if (focus.ValueKind == JsonValueKind.Array && focus.GetArrayLength() == 2
+                && focus[0].ValueKind == JsonValueKind.Number && focus[1].ValueKind == JsonValueKind.Number
                 && focus[0].TryGetDouble(out var x) && focus[1].TryGetDouble(out var y) && double.IsFinite(x) && double.IsFinite(y))
                 (fx, fy) = (Math.Clamp(x, 0, 1), Math.Clamp(y, 0, 1));
             else pack.Problems.Add(new("bad_value", where + ".focus"));

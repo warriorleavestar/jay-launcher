@@ -138,6 +138,14 @@ internal sealed partial class SelfTest
                 await Task.Delay(300);
                 Check("减少动画：场景不跟着指针动", scene.Offsets.All(v => v == default));
                 SystemMotion.Apply(Amber.Core.Layout.MotionPreference.Off);
+                // Standing still, a light/dark switch still repaints the dim over the scene.
+                var drawn = scene.Renders;
+                Application.Current!.RequestedThemeVariant = Application.Current.ActualThemeVariant == Avalonia.Styling.ThemeVariant.Dark
+                    ? Avalonia.Styling.ThemeVariant.Light : Avalonia.Styling.ThemeVariant.Dark;
+                await Task.Delay(400);
+                Check("指针不动时切换深浅色：场景也重画了", scene.Renders > drawn, $"{drawn} → {scene.Renders}");
+                Application.Current.RequestedThemeVariant = Avalonia.Styling.ThemeVariant.Default;
+                await Task.Delay(200);
             }
             var privacyRow = window.GetVisualDescendants().OfType<PrivacyRow>().FirstOrDefault(r => r.IsEffectivelyVisible);
             Check("场景在内容下面：隐私行还在最上面看得见", privacyRow is not null && privacyRow.IsEffectivelyVisible);
@@ -176,6 +184,22 @@ internal sealed partial class SelfTest
                 figure.Settle();
                 await WaitAsync(() => Math.Abs(figure.Angle - SkinTurntable.RestAngle) < 0.5, 3);
                 Check("指针离开：停下并转回原来的角度", !figure.Spinning && Math.Abs(figure.Angle - SkinTurntable.RestAngle) < 0.5, $"{figure.Angle:0.#}");
+                // Turned off while it turns: it stops and goes back, without waiting for the pointer to leave.
+                Check("再转起来", figure.StartSpin() && figure.Spinning);
+                settings.Effects3D = false;
+                await WaitAsync(() => !figure.Spinning && Math.Abs(figure.Angle - SkinTurntable.RestAngle) < 0.5, 3);
+                Check("转着的时候关掉立体效果：马上停下并回到原角度", !figure.Spinning && Math.Abs(figure.Angle - SkinTurntable.RestAngle) < 0.5, $"{figure.Angle:0.#}");
+                settings.Effects3D = true;
+                await Task.Delay(200);
+                // A drag whose pointer capture is taken away ends there: moving the pointer afterwards doesn't turn it.
+                var mouse = new Pointer(Pointer.GetNextFreeId(), PointerType.Mouse, true);
+                var props = new PointerPointProperties(RawInputModifiers.LeftMouseButton, PointerUpdateKind.LeftButtonPressed);
+                figure.RaiseEvent(new PointerPressedEventArgs(figure, mouse, figure, new Point(20, 20), 0, props, KeyModifiers.None));
+                figure.RaiseEvent(new PointerCaptureLostEventArgs(figure, mouse));
+                var before = figure.Angle;
+                figure.RaiseEvent(new PointerEventArgs(InputElement.PointerMovedEvent, figure, mouse, figure, new Point(80, 20), 0, props, KeyModifiers.None));
+                Check("拖动中指针被别处拿走：之后移动不再转", Math.Abs(figure.Angle - before) < 0.01, $"{before:0.#} → {figure.Angle:0.#}");
+                figure.Settle();
                 SystemMotion.Apply(Amber.Core.Layout.MotionPreference.On);
                 Check("减少动画：不会自己转", !figure.StartSpin() && !figure.Spinning);
                 figure.TurnBy(40);

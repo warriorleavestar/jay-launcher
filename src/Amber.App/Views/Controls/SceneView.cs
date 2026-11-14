@@ -30,6 +30,8 @@ public sealed class SceneView : Control
         base.OnAttachedToVisualTree(e);
         ThemeService.Changed += Reload;
         Depth3D.Changed += Reload;
+        // The dim over the scene is the page colour: a light/dark switch repaints it even when nothing moves.
+        ActualThemeVariantChanged += OnThemeVariantChanged;
         _top = TopLevel.GetTopLevel(this);
         _top?.AddHandler(PointerMovedEvent, OnPointer, Avalonia.Interactivity.RoutingStrategies.Tunnel, handledEventsToo: true);
         Reload();
@@ -39,10 +41,13 @@ public sealed class SceneView : Control
     {
         ThemeService.Changed -= Reload;
         Depth3D.Changed -= Reload;
+        ActualThemeVariantChanged -= OnThemeVariantChanged;
         _top?.RemoveHandler(PointerMovedEvent, OnPointer);
         _top = null;
         base.OnDetachedFromVisualTree(e);
     }
+
+    private void OnThemeVariantChanged(object? sender, EventArgs e) => InvalidateVisual();
 
     private void Reload()
     {
@@ -63,8 +68,12 @@ public sealed class SceneView : Control
         InvalidateVisual();
     }
 
+    /// <summary>Self-check: how many times the scene was drawn.</summary>
+    internal int Renders { get; private set; }
+
     public override void Render(DrawingContext context)
     {
+        Renders++;
         var layers = Depth3D.SceneLayers;
         if (layers.Count == 0 || Bounds.Width <= 0 || Bounds.Height <= 0) { Offsets = []; return; }
         var scene = Depth3D.Scene!;

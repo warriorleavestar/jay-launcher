@@ -1069,6 +1069,8 @@
   "settings.java.rescan": "重新掃描",
   "settings.language.label": "語言 / Language",
   "settings.language.system": "跟隨系統 / System",
+  "settings.motion3d": "立體效果",
+  "settings.motion3d.hint": "卡片跟著指標微微傾斜，新頁面從後面浮上來，主題的場景跟著指標移動。開啟「減少動畫」時全部關掉；安全卡片始終不動。",
   "settings.privacy.hint": "Jay 沒有遙測、雲端控制或強制更新，也不會產生裝置識別碼。地區資訊僅用於選擇預設下載來源。",
   "settings.privacy.title": "隱私與網路連線",
   "settings.save": "儲存設定",
@@ -3495,6 +3497,8 @@
   "content.install.target_prefix": "裝到：",
   "shell.nav.people": "朋友",
   "shell.nav.people_short": "朋友",
+  "me.skin.figure": "你的外觀：拖曳轉一轉，或按 ← →",
+  "me.skin.figure.tip": "拖曳轉一轉",
   "me.title": "我",
   "me.accounts.title": "遊戲帳號",
   "me.code.hint": "傳給朋友，對方就能請求加你。它不能讓任何人進你的房間，也不包含你的位置。",
@@ -3755,9 +3759,5 @@
   "settings.ul.cache": "快取：{0}",
   "settings.ul.developers": "給開發者",
   "settings.ul.upgrade_note": "裝了新版本的載入器以後，每個實例第一次開始時都會重新準備一遍模組，這一次會比平時久。這是正常的。",
-  "instance.ul.downloading": "正在下載通用載入器……",
-  "settings.motion3d": "立體效果",
-  "settings.motion3d.hint": "卡片跟著指標微微傾斜，新頁面從後面浮上來，主題的場景跟著指標移動。開啟「減少動畫」時全部關掉；安全卡片始終不動。",
-  "me.skin.figure": "你的外觀：拖曳轉一轉，或按 ← →",
-  "me.skin.figure.tip": "拖曳轉一轉"
+  "instance.ul.downloading": "正在下載通用載入器……"
 }

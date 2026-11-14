@@ -144,4 +144,20 @@ public sealed class Motion3DTests
         var none = Read("""{ "slots": { "scene": { "layers": [ { "image": "assets/missing.png" } ] } } }""");
         Assert.Null(none.Scene);
     }
+
+    [Theory]
+    [InlineData("[\"0.5\", 1]")]
+    [InlineData("[true, 1]")]
+    [InlineData("[0.5, null]")]
+    [InlineData("[{}, 1]")]
+    [InlineData("[0.5, []]")]
+    [InlineData("[0.5]")]
+    [InlineData("\"middle\"")]
+    public void AFocusThatIsNotTwoNumbersIsNotedAndIgnored(string focus)
+    {
+        var pack = Read($$"""{ "slots": { "scene": { "image": "assets/scene.png", "focus": {{focus}} } } }""", "assets/scene.png");
+        Assert.NotNull(pack.Scene);
+        Assert.Equal((0.5, 0.5), (pack.Scene!.FocusX, pack.Scene.FocusY));
+        Assert.Contains(pack.Problems, p => p.Code == "bad_value" && p.Detail.EndsWith(".focus"));
+    }
 }

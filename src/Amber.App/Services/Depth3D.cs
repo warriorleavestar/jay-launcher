@@ -89,27 +89,54 @@ public static class Depth3D
     /// </summary>
     public static void EnterPage(Control host)
     {
-        var depth = Current.PageDepth;
-        if (depth <= 0 || PageEnterSuppressed) return;
-        PageEnters++;
+        if (Current.PageDepth <= 0 || PageEnterSuppressed) return;
         var duration = Application.Current?.TryGetResource("MotionSlow", null, out var d) == true && d is TimeSpan t ? t : TimeSpan.FromMilliseconds(240);
+        EnterPage(host, Current.PageDepth, duration);
+    }
+
+    /// <summary>The longest a page takes to come forward, whatever a theme sets for its slow motion.</summary>
+    internal static readonly TimeSpan MaxPageEnter = TimeSpan.FromMilliseconds(400);
+
+    /// <summary>
+    /// <see cref="EnterPage(Control)"/> with its numbers. Locked safety surfaces are never scaled or faded: a page that
+    /// has one comes in flat, and a run stops (the page at full size and fully opaque) as soon as one shows up in it.
+    /// </summary>
+    internal static void EnterPage(Control host, double depth, TimeSpan duration)
+    {
+        depth = Math.Clamp(depth, 0, Motion3D.MaxPageDepth);
+        if (depth <= 0 || HasSafetySurface(host)) return;
+        if (duration > MaxPageEnter) duration = MaxPageEnter;
+        PageEnters++;
         var scale = new ScaleTransform(1 - depth, 1 - depth);
         host.RenderTransformOrigin = RelativePoint.Center;
         host.RenderTransform = scale;
         host.Opacity = 0;
-        Animate(host, duration, k =>
-        {
-            var s = 1 - depth * (1 - k);
-            scale.ScaleX = scale.ScaleY = s;
-            host.Opacity = Math.Min(1, k * 1.6);
-        }, () =>
+        var flat = false;
+        void Flatten()
         {
             host.RenderTransform = null;
             host.Opacity = 1;
-        });
+        }
+        Animate(host, duration, k =>
+        {
+            if (flat) return;
+            if (HasSafetySurface(host))
+            {
+                flat = true;
+                Flatten();
+                return;
+            }
+            var s = 1 - depth * (1 - k);
+            scale.ScaleX = scale.ScaleY = s;
+            host.Opacity = Math.Min(1, k * 1.6);
+        }, Flatten);
     }
 
-    private static readonly Dictionary<Control, DispatcherTimer> Running = [];
+    private static bool HasSafetySurface(Control host) =>
+        host is Controls.Safety.SafetySurface or Controls.Safety.SafetyButton or Controls.Safety.PrivacyRow
+        || Avalonia.VisualTree.VisualExtensions.GetVisualDescendants(host).Any(v => v is Controls.Safety.SafetySurface or Controls.Safety.SafetyButton or Controls.Safety.PrivacyRow);
+
+    private static readonly Dictionary<Control, (DispatcherTimer Timer, Action Tick)> Running = [];
 
     /// <summary>
     /// Runs <paramref name="step"/> from 0 to 1 with an ease-out over <paramref name="duration"/>, about 60 times a second.
@@ -117,7 +144,7 @@ public static class Depth3D
     /// </summary>
     internal static void Animate(Control control, TimeSpan duration, Action<double> step, Action? done = null)
     {
-        if (Running.Remove(control, out var old)) old.Stop();
+        if (Running.Remove(control, out var old)) old.Timer.Stop();
         if (duration <= TimeSpan.Zero)
         {
             step(1);
@@ -126,7 +153,7 @@ public static class Depth3D
         }
         var start = DateTime.UtcNow;
         var timer = new DispatcherTimer(DispatcherPriority.Render) { Interval = TimeSpan.FromMilliseconds(16) };
-        timer.Tick += (_, _) =>
+        void Tick()
         {
             var t = Math.Min(1, (DateTime.UtcNow - start) / duration);
             step(1 - Math.Pow(1 - t, 3));
@@ -134,15 +161,22 @@ public static class Depth3D
             timer.Stop();
             Running.Remove(control);
             done?.Invoke();
-        };
-        Running[control] = timer;
+        }
+        timer.Tick += (_, _) => Tick();
+        Running[control] = (timer, Tick);
         step(0);
         timer.Start();
+    }
+
+    /// <summary>Tests: one frame of the run on this control now, if there is one.</summary>
+    internal static void TickForTest(Control control)
+    {
+        if (Running.TryGetValue(control, out var run)) run.Tick();
     }
 
     /// <summary>Stops a run started by <see cref="Animate"/> without finishing it.</summary>
     internal static void Stop(Control control)
     {
-        if (Running.Remove(control, out var old)) old.Stop();
+        if (Running.Remove(control, out var old)) old.Timer.Stop();
     }
 }

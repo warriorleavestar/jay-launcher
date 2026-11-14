@@ -93,6 +93,13 @@ public sealed class SkinFigure : Control
         e.Pointer.Capture(null);
     }
 
+    /// <summary>The system or another control took the pointer mid-drag: the drag ends here, no release will come.</summary>
+    protected override void OnPointerCaptureLost(PointerCaptureLostEventArgs e)
+    {
+        base.OnPointerCaptureLost(e);
+        _drag = null;
+    }
+
     protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
@@ -104,11 +111,25 @@ public sealed class SkinFigure : Control
         }
     }
 
+    protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnAttachedToVisualTree(e);
+        Depth3D.Changed += OnDepthChanged;
+    }
+
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
+        Depth3D.Changed -= OnDepthChanged;
         StopSpin();
         Depth3D.Stop(this);
+        _drag = null;
         base.OnDetachedFromVisualTree(e);
+    }
+
+    /// <summary>The theme or the settings turned the turntable off (or reduced motion): a figure turning by itself stops.</summary>
+    internal void OnDepthChanged()
+    {
+        if (Spinning && !Depth3D.Current.Turntable) Settle();
     }
 
     /// <summary>Turns the figure by <paramref name="degrees"/>, kept within one turn.</summary>
@@ -128,6 +149,12 @@ public sealed class SkinFigure : Control
         Depth3D.Stop(this);
         _spin ??= new DispatcherTimer(TimeSpan.FromMilliseconds(33), DispatcherPriority.Render, (_, _) =>
         {
+            // Checked every frame too, so a change that came in any other way still stops it.
+            if (!Depth3D.Current.Turntable)
+            {
+                Settle();
+                return;
+            }
             var now = DateTime.UtcNow;
             TurnBy(SpinSpeed * (now - _spinLast).TotalSeconds);
             _spinLast = now;

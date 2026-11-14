@@ -1069,6 +1069,8 @@
   "settings.java.rescan": "重新扫描",
   "settings.language.label": "语言 / Language",
   "settings.language.system": "跟随系统 / System",
+  "settings.motion3d": "立体效果",
+  "settings.motion3d.hint": "卡片跟着指针微微倾斜，新页面从后面浮上来，主题的场景跟着指针移动。打开“减少动画”时全部关掉；安全卡片始终不动。",
   "settings.privacy.hint": "Jay 没有遥测、没有云控、没有强制更新，不生成设备识别码，地区只用来挑默认下载源。",
   "settings.privacy.title": "隐私和联网",
   "settings.save": "保存设置",
@@ -3495,6 +3497,8 @@
   "content.install.target_prefix": "装到：",
   "shell.nav.people": "朋友",
   "shell.nav.people_short": "朋友",
+  "me.skin.figure": "你的皮肤：拖动转一转，或者按 ← →",
+  "me.skin.figure.tip": "拖动转一转",
   "me.title": "我",
   "me.accounts.title": "游戏账号",
   "me.code.hint": "发给朋友，对方就能请求加你。它不能让任何人进你的房间，也不包含你的位置。",
@@ -3755,9 +3759,5 @@
   "settings.ul.cache": "缓存：{0}",
   "settings.ul.developers": "给开发者",
   "settings.ul.upgrade_note": "装了新版本的加载器以后，每个实例第一次开始时都会重新准备一遍模组，这一次会比平时久。这是正常的。",
-  "instance.ul.downloading": "正在下载通用加载器……",
-  "settings.motion3d": "立体效果",
-  "settings.motion3d.hint": "卡片跟着指针微微倾斜，新页面从后面浮上来，主题的场景跟着指针移动。打开“减少动画”时全部关掉；安全卡片始终不动。",
-  "me.skin.figure": "你的皮肤：拖动转一转，或者按 ← →",
-  "me.skin.figure.tip": "拖动转一转"
+  "instance.ul.downloading": "正在下载通用加载器……"
 }
