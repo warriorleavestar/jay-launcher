@@ -584,22 +584,39 @@ public sealed partial class MultiplayerViewModel
         }
         lobby.Book.Game = await HostGameAsync();
         if (_lobby != lobby) return false;
-        IReadOnlyList<Contact> devices = askFirst ? [.. item.Devices.Where(d => d.Verified)] : item.Devices;
+        // The contact list may have changed while waiting: only devices that are still there (and still verified, for
+        // "friends can knock") get an invite, and each is checked again around its send.
+        bool StillWanted(Contact device) => Contacts.Find(device.PublicKey) is { } now && (!askFirst || now.Verified);
+        IReadOnlyList<Contact> devices = [.. item.Devices.Where(StillWanted)];
         if (devices.Count == 0) return false;
-        var pendings = devices.Select(d => (Device: d, Invite: lobby.Book.Create(uses, lifetime, !askFirst && Child.MayAutoAdmit(d.MayBeAutoAdmitted), credentials.Tunnel, boundTo: d.PublicKey))).ToList();
+        var pendings = devices.Select(d => (Device: d, Invite: lobby.Book.Create(uses, lifetime, !askFirst && Child.MayAutoAdmit(d.MayBeAutoAdmitted), credentials.Tunnel,
+            boundTo: d.PublicKey, askEachTime: askFirst))).ToList();
         foreach (var (_, pending) in pendings) _friendInvites.Add(pending);
         RefreshInvites();
         try
         {
             await lobby.UpdateAsync();
+            var mailed = 0;
             foreach (var (device, pending) in pendings)
             {
+                if (pending.Revoked || !StillWanted(device))
+                {
+                    DropFriendInvite(lobby, pending);
+                    continue;
+                }
                 var id = await send(device, pending.Invite, DateTimeOffset.UtcNow + lifetime);
+                if (!StillWanted(device))
+                {
+                    DropFriendInvite(lobby, pending);
+                    continue;
+                }
+                mailed++;
                 // Only the newest device's receipt counts: an older computer that's switched off shouldn't raise "held back".
                 if (!ReferenceEquals(device, devices[0])) continue;
                 if (!quiet) _sentInvites[id] = item.Name;
                 NoteInviteSent(item, id);
             }
+            if (mailed == 0) return false;
             if (!quiet) SetStatus(StatusMessage.Success("multiplayer.contacts.invite.sent", item.Name));
             return true;
         }
@@ -614,6 +631,13 @@ public sealed partial class MultiplayerViewModel
             if (!quiet) SetStatus(StatusMessage.Failure("multiplayer.contacts.mail_failed", e, ErrorText.Of(e)));
             return false;
         }
+    }
+
+    private void DropFriendInvite(HostLobby lobby, PendingInvite invite)
+    {
+        lobby.Book.Revoke(invite);
+        _friendInvites.Remove(invite);
+        RefreshInvites();
     }
 
     /// <summary>Tests: stands in for mailing an invite over the connected network (device, invite, expiry; returns the mail id).</summary>
