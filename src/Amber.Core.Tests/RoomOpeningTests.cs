@@ -8,7 +8,7 @@ namespace Amber.Core.Tests;
 /// <summary>The four choices of opening a room: what each maps to and when it cannot be picked.</summary>
 public sealed class RoomOpeningTests
 {
-    private static readonly RoomOpeningContext Ready = new(ChildMode: false, NetworkConnected: true, VerifiedFriends: 2, FullLanAvailable: true, HybridSupported: true);
+    private static readonly RoomOpeningContext Ready = new(ChildMode: false, NetworkConnected: true, VerifiedFriends: 2, FullLanAvailable: true);
 
     [Fact]
     public void ProtectionLevelsMapToTransportSettingsAndBack()
@@ -32,7 +32,7 @@ public sealed class RoomOpeningTests
     [Fact]
     public void InvitedCanAlwaysBePicked()
     {
-        var worst = new RoomOpeningContext(true, false, 0, false, false);
+        var worst = new RoomOpeningContext(true, false, 0, false);
         foreach (var route in Enum.GetValues<RoomRoute>())
             Assert.Null(RoomOpening.Blocked(RoomAccess.Invited, route, worst));
     }
@@ -64,8 +64,7 @@ public sealed class RoomOpeningTests
         foreach (var level in new[] { RoomProtection.Standard, RoomProtection.Stronger, RoomProtection.Highest })
             Assert.Equal("multiplayer.open.blocked.protection_serverless", RoomOpening.Blocked(level, RoomRoute.Serverless, Ready));
         Assert.Null(RoomOpening.Blocked(RoomProtection.Highest, RoomRoute.Auto, Ready));
-        Assert.Equal("multiplayer.open.blocked.highest", RoomOpening.Blocked(RoomProtection.Highest, RoomRoute.RelayOnly, Ready with { HybridSupported = false }));
-        Assert.Null(RoomOpening.Blocked(RoomProtection.Stronger, RoomRoute.Auto, Ready with { HybridSupported = false }));
+        Assert.Null(RoomOpening.Blocked(RoomProtection.Highest, RoomRoute.RelayOnly, Ready));
     }
 
     [Fact]
@@ -82,7 +81,7 @@ public sealed class RoomOpeningTests
         Assert.Equal(RoomAccess.Public, RoomOpening.Usable(RoomAccess.Public, RoomRoute.Auto, Ready));
         Assert.Equal(RoomAccess.Invited, RoomOpening.Usable(RoomAccess.Public, RoomRoute.Serverless, Ready));
         Assert.Equal(RoomAccess.Invited, RoomOpening.Usable(RoomAccess.Friends, RoomRoute.Auto, Ready with { NetworkConnected = false }));
-        Assert.Equal(RoomProtection.Stronger, RoomOpening.Usable(RoomProtection.Highest, RoomRoute.Auto, Ready with { HybridSupported = false }));
+        Assert.Equal(RoomProtection.Highest, RoomOpening.Usable(RoomProtection.Highest, RoomRoute.Auto, Ready));
         // A serverless room keeps the level for when the route changes back.
         Assert.Equal(RoomProtection.Highest, RoomOpening.Usable(RoomProtection.Highest, RoomRoute.Serverless, Ready));
         Assert.Equal(RoomScope.Game, RoomOpening.Usable(RoomScope.WholeLan, Ready with { FullLanAvailable = false }));
@@ -91,7 +90,7 @@ public sealed class RoomOpeningTests
     [Fact]
     public void EveryReasonHasText()
     {
-        foreach (var key in new[] { "child", "serverless", "network", "no_friends", "protection_serverless", "highest", "whole_lan" })
+        foreach (var key in new[] { "child", "serverless", "network", "no_friends", "protection_serverless", "whole_lan" })
             Assert.NotEqual("multiplayer.open.blocked." + key, L.T("multiplayer.open.blocked." + key));
     }
 

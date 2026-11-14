@@ -180,7 +180,6 @@ public class TunnelTests
     [MemberData(nameof(Modes))]
     public async Task RoundTrip_AllModes(TransportMode mode, bool disguise)
     {
-        if (mode == TransportMode.Extreme && !NoiseHandshake.HybridSupported) return;
         var (c, s, a, b) = await PairAsync();
         using (a)
         using (b)

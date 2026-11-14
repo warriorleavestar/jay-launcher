@@ -152,7 +152,7 @@ public sealed partial class MultiplayerViewModel
     public bool ShowPublicOptions => OpenAccess == RoomAccess.Public;
 
     private RoomOpeningContext OpenContext => new(Child.InviteOnly, IsPublicConnected,
-        ContactList.Count(f => f.Devices.Any(d => d.Verified)), CanUseFullLan, NoiseHandshake.HybridSupported);
+        ContactList.Count(f => f.Devices.Any(d => d.Verified)), CanUseFullLan);
 
     private void InitOpenRoom()
     {

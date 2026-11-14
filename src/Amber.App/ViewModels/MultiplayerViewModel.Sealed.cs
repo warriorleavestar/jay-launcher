@@ -158,12 +158,6 @@ public sealed partial class MultiplayerViewModel
         {
             IsKnocking = false;
         }
-        if (opened.Invite.Tunnel.Mode == TransportMode.Extreme && !NoiseHandshake.HybridSupported)
-        {
-            opened.Dispose();
-            SetStatus(StatusMessage.Warning("multiplayer.room.extreme_unsupported"));
-            return;
-        }
         var bridgeKey = DirectKeys.Bridge(opened.Invite.LobbyKey);
         var direct = new DirectSession(_service.EasyTier, EasyTierWorkRoot, null, false, MakeDirectOptions(), _diag) { BridgeKey = bridgeKey };
         System.Security.Cryptography.CryptographicOperations.ZeroMemory(bridgeKey);
@@ -227,11 +221,6 @@ public sealed partial class MultiplayerViewModel
                 if (outcome.Credentials is not { } credentials)
                 {
                     SetStatus(StatusMessage.Warning(KnockReasonKey(outcome.Reason)));
-                    return null;
-                }
-                if (credentials.Tunnel.Mode == TransportMode.Extreme && !NoiseHandshake.HybridSupported)
-                {
-                    SetStatus(StatusMessage.Warning("multiplayer.room.extreme_unsupported"));
                     return null;
                 }
                 HostFingerprint = outcome.HostFingerprint;
