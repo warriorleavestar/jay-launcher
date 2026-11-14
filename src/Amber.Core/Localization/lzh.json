@@ -3293,6 +3293,7 @@
   "multiplayer.sees.relay_only.restart": "易之則重連此室，須臾而已，語自復通。",
   "multiplayer.sees.relay_only.room_rule": "此室開時已擇「唯經轉驛」，室中諸人皆然。",
   "multiplayer.sees.relay_only.direct_room": "此室不經諸伺服器，無轉驛可由。",
+  "multiplayer.sees.relay_only.strict_split": "此室分流數路，主路必直達，故此機於此不能唯經轉驛。",
   "multiplayer.sees.relay_only.turned_on": "已改唯經轉驛：室中之人不見汝 IP。",
   "multiplayer.sees.relay_only.turned_off": "已罷唯經轉驛：可直連時 Jay 則直連。",
   "multiplayer.settings.relay_only": "恆唯經轉驛",

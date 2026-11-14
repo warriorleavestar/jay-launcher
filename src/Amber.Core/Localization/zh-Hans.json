@@ -3437,6 +3437,7 @@
   "multiplayer.sees.relay_only.restart": "切换时会重新连一下房间，几秒钟，聊天会自己接上。",
   "multiplayer.sees.relay_only.room_rule": "这个房间开的时候选了“只走中转”，房间里每个人都是这样。",
   "multiplayer.sees.relay_only.direct_room": "这个房间不经任何服务器，没有中转可走。",
+  "multiplayer.sees.relay_only.strict_split": "这个房间的流量分几路走，主路径必须是直连，所以这台电脑在这里不能只走中转。",
   "multiplayer.sees.relay_only.turned_on": "已改成只走中转：房间里的人看不到你的 IP。",
   "multiplayer.sees.relay_only.turned_off": "已关掉只走中转：能直连时 Jay 会直连。",
   "multiplayer.settings.relay_only": "默认只走中转",

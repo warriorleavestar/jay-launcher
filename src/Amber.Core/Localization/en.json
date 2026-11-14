@@ -3512,6 +3512,7 @@
   "multiplayer.sees.relay_only.restart": "Changing it reconnects you to the room for a few seconds; chat comes back by itself.",
   "multiplayer.sees.relay_only.room_rule": "This room was opened as “Relays only”, so it is on for everyone in it.",
   "multiplayer.sees.relay_only.direct_room": "This room uses no server at all, so there is no relay to go through.",
+  "multiplayer.sees.relay_only.strict_split": "This room splits its traffic and needs a direct main path, so this computer can’t go through relays only here.",
   "multiplayer.sees.relay_only.turned_on": "Relays only is on: people in the room can't see your IP.",
   "multiplayer.sees.relay_only.turned_off": "Relays only is off: Jay connects directly when it can.",
   "multiplayer.settings.relay_only": "Always use relays only",
