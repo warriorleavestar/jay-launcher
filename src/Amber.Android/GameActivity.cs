@@ -512,6 +512,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     private readonly Dictionary<int, LongPressIndicator> _longPressIndicators = [];
     private readonly HashSet<int> _hotbarPointers = [];
     private readonly HashSet<Keycode> _hardwareKeys = [];
+    private readonly HashSet<TouchControlAction> _hardwareActions = [];
     private bool _settingsOpen;
     private bool _layoutEditing;
     private int? _editingPointer;
@@ -520,6 +521,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     private float _lastMouseX;
     private float _lastMouseY;
     private bool _hasMousePosition;
+    private bool? _lastGameplayControlsActive;
 
     public TouchControlOverlay(Context context) : base(context)
     {
@@ -548,6 +550,13 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         // otherwise some Android GPU drivers retain the previous joystick knob position.
         canvas.DrawColor(Color.Transparent, PorterDuff.Mode.Clear);
         var gameplayControlsActive = NativeJvmHost.GameplayControlsActive;
+        if (_lastGameplayControlsActive != gameplayControlsActive)
+        {
+            if (_lastGameplayControlsActive == true && !gameplayControlsActive)
+                ReleaseHardwareInput();
+            _lastGameplayControlsActive = gameplayControlsActive;
+            UpdateHardwareCapture(HasWindowFocus);
+        }
         _stroke.SetStyle(Paint.Style.Stroke);
         ApplyControlOpacity();
         foreach (var control in _profile.Controls)
@@ -1145,7 +1154,27 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         // profile controls visibility of touch buttons; it must not gate keyboard events.
         if (e is null || Visibility != ViewStates.Visible) return false;
         var pressed = e.Action == KeyEventActions.Down;
-        if (e.Action is not (KeyEventActions.Down or KeyEventActions.Up)) return true;
+        if (e.Action is not (KeyEventActions.Down or KeyEventActions.Up)) return false;
+
+        // Menu and chat screens need ordinary key/character delivery before gameplay
+        // bindings. Otherwise W/A/S/D and E/Q/T disappear from typed text.
+        if (!NativeJvmHost.GameplayControlsActive)
+        {
+            if (!pressed) return GlfwKey(e.KeyCode) is not null || e.UnicodeChar > 0;
+            var handled = false;
+            if (GlfwKey(e.KeyCode) is { } menuKey)
+            {
+                NativeJvmHost.AddKey(menuKey);
+                handled = true;
+            }
+            if (e.UnicodeChar > 0)
+            {
+                NativeJvmHost.AddCodePoint(e.UnicodeChar);
+                handled = true;
+            }
+            return handled;
+        }
+
         if (pressed) _hardwareKeys.Add(e.KeyCode); else _hardwareKeys.Remove(e.KeyCode);
 
         if (IsMovementKey(e.KeyCode))
@@ -1156,14 +1185,13 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
 
         if (HardwareAction(e.KeyCode) is { } action)
         {
+            if (pressed) _hardwareActions.Add(action); else _hardwareActions.Remove(action);
             AndroidGameInputBridge.SetAction(action, pressed);
             return true;
         }
 
-        if (!pressed || e.RepeatCount > 0) return true;
-        if (GlfwKey(e.KeyCode) is { } glfw) NativeJvmHost.AddKey(glfw);
-        if (!NativeJvmHost.GameplayControlsActive && e.UnicodeChar > 0)
-            NativeJvmHost.AddCodePoint(e.UnicodeChar);
+        if (GlfwKey(e.KeyCode) is not { } glfw) return false;
+        if (pressed && e.RepeatCount == 0) NativeJvmHost.AddKey(glfw);
         return true;
     }
 
@@ -1173,6 +1201,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
 
         if (e.ActionMasked == MotionEventActions.Scroll)
         {
+            if (!NativeJvmHost.GameplayControlsActive) return false;
             var scroll = e.GetAxisValue(Axis.Vscroll);
             if (Math.Abs(scroll) > 0.01f)
             {
@@ -1202,7 +1231,11 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
             // this). Synchronize the menu cursor before delivering the click.
             if (!NativeJvmHost.GameplayControlsActive && Width > 0 && Height > 0)
                 AndroidGameInputBridge.SetPointer(e.GetX() / Width, e.GetY() / Height, false);
-            if (action is { } mapped) AndroidGameInputBridge.SetAction(mapped, pressed);
+            if (action is { } mapped)
+            {
+                if (pressed) _hardwareActions.Add(mapped); else _hardwareActions.Remove(mapped);
+                AndroidGameInputBridge.SetAction(mapped, pressed);
+            }
             return true;
         }
 
@@ -1239,7 +1272,8 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         if (Build.VERSION.SdkInt < BuildVersionCodes.O) return;
 #pragma warning disable CA1416
         if (hasWindowFocus && Visibility == ViewStates.Visible &&
-            _profile.Mode == TouchControlMode.ExternalKeyboardMouse)
+            _profile.Mode == TouchControlMode.ExternalKeyboardMouse &&
+            NativeJvmHost.GameplayControlsActive)
         {
             RequestFocus();
             RequestPointerCapture();
@@ -1251,16 +1285,11 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
 
     public void ReleaseHardwareInput()
     {
-        if (_hardwareKeys.Count == 0 && _profile.Mode != TouchControlMode.ExternalKeyboardMouse) return;
         _hardwareKeys.Clear();
         AndroidGameInputBridge.SetMovement(0, 0);
-        foreach (var action in new[]
-                 {
-                     TouchControlAction.Jump, TouchControlAction.Sneak, TouchControlAction.Sprint,
-                     TouchControlAction.Inventory, TouchControlAction.Menu, TouchControlAction.Keyboard,
-                     TouchControlAction.Drop, TouchControlAction.PrimaryAction, TouchControlAction.SecondaryAction
-                 })
+        foreach (var action in _hardwareActions.ToArray())
             AndroidGameInputBridge.SetAction(action, false);
+        _hardwareActions.Clear();
         _hasMousePosition = false;
     }
 
