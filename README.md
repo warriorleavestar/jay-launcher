@@ -238,7 +238,7 @@ dotnet publish Amber.App -c Release -r osx-arm64 --self-contained -p:PublishSing
 
 There is also a command-line version, for example `dotnet run --project Amber.Cli -- list-remote`.
 
-The experimental [Android](docs/android.md) and [iOS](docs/ios.md) projects provide Jay Server enrollment and a localhost gateway. Android now has Jay's own full-screen game surface and touch-control foundation; its independent JVM and graphics runtime is still under development. iOS still needs a separate compatible client.
+The experimental [Android](docs/android.md) and [iOS](docs/ios.md) projects provide Jay Server enrollment and a localhost gateway. Android can download its own verified Java runtime and run Minecraft 1.21.11 with an offline name and touch controls; see [docs/android.md](docs/android.md). iOS still needs a separate compatible client.
 
 New to the code? Start with [docs/CODEMAP.md](docs/CODEMAP.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
 </details>
