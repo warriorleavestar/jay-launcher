@@ -379,7 +379,7 @@ public sealed partial class HomeViewModel : PageViewModel
             var mods = new ModManager(instance.ModsDir).CountEnabled();
             VersionInfo = _service.WithStateNote(value, L.F("home.version.info", instance.McVersion, loader, mods == 0 ? "" : L.P("home.version.mod_count", mods, mods)));
         }
-        catch (Exception e) when (e is IOException or System.Text.Json.JsonException or InvalidDataException)
+        catch (Exception e) when (Amber.Core.Game.GameDirectory.IsUnreadable(e))
         {
             VersionInfo = L.F("home.version.read_failed", e.Message);
         }
@@ -861,7 +861,7 @@ public sealed partial class HomeViewModel : PageViewModel
         if (ctx.Directory.StateOf(id) != Amber.Core.Game.InstanceState.Broken) return;
         Amber.Core.Game.VersionJson own;
         try { own = ctx.Directory.ReadVersion(id); }
-        catch (Exception e) when (e is IOException or System.Text.Json.JsonException or InvalidDataException)
+        catch (Exception e) when (Amber.Core.Game.GameDirectory.IsUnreadable(e))
         {
             throw new InvalidDataException(L.T("instance.state.broken"), e);
         }

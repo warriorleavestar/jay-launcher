@@ -165,7 +165,7 @@ public sealed partial class LibraryViewModel : PageViewModel
             var meta = metas.GetValueOrDefault(id);
             GameInstance? instance = null;
             try { instance = _service.GetInstance(id); }
-            catch (Exception e) when (e is IOException or InvalidDataException or UnauthorizedAccessException or System.Text.Json.JsonException or InvalidOperationException) { }
+            catch (Exception e) when (e is InvalidOperationException || Amber.Core.Game.GameDirectory.IsUnreadable(e)) { }
             var mods = 0;
             if (instance is { Loader: not null })
             {
@@ -173,7 +173,7 @@ public sealed partial class LibraryViewModel : PageViewModel
                 catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
             }
             var entry = new LibraryEntry(id, meta?.DisplayName ?? id, instance?.McVersion ?? id, instance?.Loader, meta?.Pinned ?? false, meta?.LastPlayed,
-                HasProblem: instance is null || meta?.State is not null || crashed.Contains(id), IsRunning: running.Contains(id));
+                HasProblem: instance is null || meta?.State is not null || crashed.Contains(id), IsRunning: running.Contains(id), Unreadable: instance is null);
             rows.Add((entry, mods, meta?.PlayMinutes ?? 0));
         }
         return rows;
@@ -270,7 +270,8 @@ public sealed partial class LibraryViewModel : PageViewModel
         }
         foreach (var card in _all)
         {
-            var state = _service.MetaOf(card.Id)?.State;
+            // An instance whose version files cannot be read: its page offers Repair, Open folder and Delete.
+            var state = card.Entry.Unreadable ? "broken" : _service.MetaOf(card.Id)?.State;
             if (state is null) continue;
             var key = state == "incomplete" ? "library.need.incomplete" : "library.need.broken";
             Needs.Add(new NeedItem(L.F(key, card.Name), L.T("library.need.view"), state != "incomplete", () => OpenInstance(card.Id)));
