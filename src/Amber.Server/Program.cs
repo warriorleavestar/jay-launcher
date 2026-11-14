@@ -35,7 +35,7 @@ public static class Program
           jay-server cancel-invite <编号>
           jay-server revoke <用户名> [<设备码前几位>]          撤销设备（不写设备码就撤销全部）
           jay-server disable <用户名> / enable <用户名>
-          jay-server remove <用户名>
+          jay-server remove <用户名>                          移出名单，并作废给这个名字的邀请
           jay-server online-mode on|off                        正版验证（默认 off：离线账号，由网关核对用户名）
 
         隐私+（玩家经两个不同节点各走一半，源站地址不外传）：
@@ -1128,8 +1128,18 @@ public static class Program
                 return 0;
             case "revoke":
             {
-                var n = store.RevokeDevices(Arg(0, "用户名"), options.Positional.ElementAtOrDefault(1));
+                var name = Arg(0, "用户名");
+                var n = store.RevokeDevices(name, options.Positional.ElementAtOrDefault(1));
                 output.WriteLine(n == 0 ? "没找到要撤销的设备。" : $"撤销了 {n} 台设备，它们之后进不来了（网关在运行时，几秒内会断开它们在线的连接）。");
+                var open = store.OpenInvitesFor(name);
+                if (n > 0 && open.Count > 0)
+                {
+                    // Invites made before the revoke now only serve devices they turned away for the device limit.
+                    output.WriteLine($"{name} 还有没用完的邀请（之前因设备满了被拒的设备仍可以用它们重试，新设备不行）：");
+                    foreach (var i in open)
+                        output.WriteLine($"    {i.Id}  剩 {i.UsesLeft} 次  到期 {i.Expires.ToLocalTime():yyyy-MM-dd HH:mm}");
+                    output.WriteLine("不想让它们再用，就作废：jay-server cancel-invite <编号>");
+                }
                 return 0;
             }
             case "disable":
@@ -1137,8 +1147,12 @@ public static class Program
                 output.WriteLine(store.SetDisabled(Arg(0, "用户名"), options.Command == "disable") ? "好了。" : "名单里没有这个人。");
                 return 0;
             case "remove":
-                output.WriteLine(store.RemoveMember(Arg(0, "用户名")) ? "已从名单移除。" : "名单里没有这个人。");
+            {
+                var (removed, cancelled) = store.RemoveMemberAndInvites(Arg(0, "用户名"));
+                output.WriteLine(removed ? "已从名单移除。" : "名单里没有这个人。");
+                if (cancelled.Count > 0) output.WriteLine($"同时作废了给这个名字的 {cancelled.Count} 份邀请：{string.Join(", ", cancelled)}");
                 return 0;
+            }
             case "online-mode":
             {
                 var on = Arg(0, "on 或 off") switch { "on" => true, "off" => false, _ => throw new ArgumentException("只能是 on 或 off") };

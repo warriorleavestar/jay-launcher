@@ -128,6 +128,86 @@ public sealed class GateRecordTests : IAsyncLifetime
         Assert.Equal(L.T("core.gate.record.not_found"), e.Message);
     }
 
+    private sealed class FakeJoined(RoomDirectoryClient directories) : GateRecordPublisher.IJoined
+    {
+        public RoomDirectoryClient Directories => directories;
+        public bool HasExited => false;
+        public bool Disposed { get; private set; }
+        public void Dispose() => Disposed = true;
+    }
+
+    private static async Task Until(Func<Task<bool>> condition)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(15);
+        while (!await condition())
+        {
+            Assert.True(DateTime.UtcNow < deadline, "timed out");
+            await Task.Delay(50);
+        }
+    }
+
+    private async Task<GateInvite?> TryResolve(GateInvite invite)
+    {
+        try { return await GateRecord.ResolveAsync(Directories(), invite, default); }
+        catch (IOException) { return null; }
+    }
+
+    /// <summary>A record publish that fails in an unexpected way is logged and tried again, not left to end publishing.</summary>
+    [Fact]
+    public async Task RecordPublishingRetriesAfterAnyFailure()
+    {
+        _store.EnableRecords("jay");
+        var attempts = 0;
+        var log = new List<string>();
+        await using (GateRecordPublisher.Start(_store, _store.LoadConfig(), (_, _) =>
+        {
+            Interlocked.Increment(ref attempts);
+            throw new NotSupportedException("unexpected");
+        }, line => { lock (log) log.Add(line); }, TimeSpan.FromMilliseconds(10), TimeSpan.FromMilliseconds(10)))
+        {
+            await Until(() => Task.FromResult(Volatile.Read(ref attempts) >= 3));
+        }
+        lock (log) Assert.True(log.Count(l => l.Contains("unexpected", StringComparison.Ordinal)) >= 3);
+    }
+
+    /// <summary>A running gate follows records on/off and republishes when its entries change, without a restart.</summary>
+    [Fact]
+    public async Task RunningPublisherFollowsTheRecordsSetting()
+    {
+        var joins = new List<FakeJoined>();
+        var log = new List<string>();
+        await using (var publisher = GateRecordPublisher.Start(_store, _store.LoadConfig(), (_, _) =>
+        {
+            var j = new FakeJoined(Directories());
+            lock (joins) joins.Add(j);
+            return Task.FromResult<GateRecordPublisher.IJoined>(j);
+        }, line => { lock (log) log.Add(line); }, TimeSpan.FromMilliseconds(50), TimeSpan.FromMilliseconds(50)))
+        {
+            await Task.Delay(300);
+            lock (joins) Assert.Empty(joins);
+
+            // Turned on while running: published without a restart.
+            _store.EnableRecords("jay");
+            var invite = GateInvite.TryParse(Invite().Encode(), out _)!;
+            await Until(async () => await TryResolve(invite) is not null);
+            Assert.Null((await TryResolve(invite))!.Rotation);
+
+            // Entries changed: put again.
+            _store.EnableRotation(GateRotation.Default, TimeSpan.FromHours(1));
+            await Until(async () => (await TryResolve(invite))?.Rotation is not null);
+
+            // Turned off: the network is left and nothing more is put.
+            _store.DisableRecords();
+            await Until(() => Task.FromResult(joins.All(j => j.Disposed)));
+            int published;
+            lock (log) published = log.Count;
+            _store.DisableRotation();
+            await Task.Delay(300);
+            lock (log) Assert.Equal(published, log.Count);
+            lock (joins) Assert.Single(joins);
+        }
+    }
+
     [Fact]
     public void RecordsTurnOffAndBackOnWithTheSameLocator()
     {

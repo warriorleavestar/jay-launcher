@@ -79,20 +79,4 @@ public sealed class JayServerRunnerTests : IDisposable
         Assert.Equal("first", error.Message);
         Assert.Equal([1, 2, 3], ran);
     }
-
-    /// <summary>A record publish that fails in an unexpected way is logged and tried again, not left to end publishing.</summary>
-    [Fact]
-    public async Task RecordPublishingRetriesAfterAnyFailure()
-    {
-        using var cts = new CancellationTokenSource();
-        var attempts = 0;
-        var log = new List<string>();
-        await GateRecordPublisher.RetryAsync(_ =>
-        {
-            if (++attempts >= 3) cts.Cancel();
-            throw new NotSupportedException("unexpected");
-        }, l => { lock (log) log.Add(l); }, TimeSpan.FromMilliseconds(10), cts.Token);
-        Assert.Equal(3, attempts);
-        lock (log) Assert.Equal(3, log.Count(l => l.Contains("unexpected", StringComparison.Ordinal)));
-    }
 }

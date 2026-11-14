@@ -66,6 +66,19 @@ public sealed class GateServer : IAsyncDisposable
     }
 
     /// <summary>
+    /// The key the per-address handshake limit counts by: an IPv4 address as it is, an IPv6 address by its /64 prefix,
+    /// since one host usually has a whole /64 and could otherwise use a new address for every connection.
+    /// </summary>
+    internal static IPAddress RateKey(IPAddress address)
+    {
+        address = address.MapToIPv6();
+        if (address.IsIPv4MappedToIPv6) return address;
+        var bytes = address.GetAddressBytes();
+        Array.Clear(bytes, 8, 8);
+        return new IPAddress(bytes);
+    }
+
+    /// <summary>
     /// 入口端口轮换：普通模式下开了轮换就关掉固定端口，只听当前前后三个时间窗的端口。
     /// 隐私+/++ 下玩家连的是节点，网关的固定端口留给节点转发（用防火墙只放行节点），轮换交给节点去做。
     /// 从隐私+/++ 降回普通模式时，节点还在转发到固定端口：配着节点就让固定端口一直开着，但过渡期后只收节点转来的连接（见 <see cref="FixedPortClosedTo"/>）。
@@ -97,7 +110,7 @@ public sealed class GateServer : IAsyncDisposable
     {
         using (client)
         {
-            var remote = (client.Client.RemoteEndPoint as IPEndPoint)?.Address.MapToIPv6() ?? IPAddress.IPv6None;
+            var address = (client.Client.RemoteEndPoint as IPEndPoint)?.Address.MapToIPv6() ?? IPAddress.IPv6None;
             Pump.Tune(client);
             GateState state;
             try { state = _store.Read(); }
@@ -110,7 +123,7 @@ public sealed class GateServer : IAsyncDisposable
                 return;
             }
             var plus = state.Privacy.IsSplit();
-            var fromRelay = state.Relays.Count > 0 && RelaySources(state).Contains(remote);
+            var fromRelay = state.Relays.Count > 0 && RelaySources(state).Contains(address);
             if (FixedPortClosedTo(client, state, fromRelay))
             {
                 Interlocked.Increment(ref Rejected);
@@ -118,8 +131,8 @@ public sealed class GateServer : IAsyncDisposable
                 return;
             }
             // 节点转来的连接共用节点的 IP，不按 IP 限握手数（总数仍受 MaxConnections 限制）。
-            if (fromRelay) remote = IPAddress.None;
-            else if (_handshaking.AddOrUpdate(remote, 1, (_, n) => n + 1) > _config.MaxHandshakesPerIp)
+            var remote = fromRelay ? IPAddress.None : RateKey(address);
+            if (!fromRelay && _handshaking.AddOrUpdate(remote, 1, (_, n) => n + 1) > _config.MaxHandshakesPerIp)
             {
                 Release(remote);
                 Pump.Abort(client);
@@ -227,6 +240,9 @@ public sealed class GateServer : IAsyncDisposable
                     if (login.Intent != McLogin.Intent.Status)
                     {
                         name = names.FirstOrDefault(n => string.Equals(n, login.Username, StringComparison.OrdinalIgnoreCase));
+                        // Any casing may log in, but the server gets the bound spelling: an offline-mode server treats each
+                        // casing as a different player, which would sidestep its bans and whitelist.
+                        if (name is not null) login = login.WithUsername(name);
                         if (name is null)
                         {
                             await WriteLoginDisconnectAsync(session, L.F("core.gate.mc.name_not_bound", login.Username!), timeout.Token);

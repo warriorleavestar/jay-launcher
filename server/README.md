@@ -35,10 +35,10 @@ jay-server invite Steve
 
 邀请码里只写服务器的域名，不写 IP，也不写用户名。服务器只有 IP、没有域名时，发出来的是加密的 `JAYSS1-…` 码和一个 16 位数字口令：口令换个方式告诉 Steve（打电话、当面），别和邀请码发在一起。
 
-没有域名又不想用口令：`jay-server records on`（默认 Jay 公共网络，也可以 `--network <.jaynet 文件>`）。之后的邀请码只写一个记录编号，服务运行时会在公共网络的目录里放一份签名的地址记录（每 12 小时续一次），玩家入服时 Jay 去查。服务没开着时玩家查不到地址；手机版暂时还要用口令加密的邀请码。
+没有域名又不想用口令：`jay-server records on`（默认 Jay 公共网络，也可以 `--network <.jaynet 文件>`）。之后的邀请码只写一个记录编号，服务运行时会在公共网络的目录里放一份签名的地址记录（每 12 小时续一次；运行中改开关或入口，一分钟内生效，不用重启），玩家入服时 Jay 去查。服务没开着时玩家查不到地址；手机版暂时还要用口令加密的邀请码。
 
 - 邀请码默认 **24 小时、只能用 1 次**（`--ttl 7d`、`--uses 3` 可以改），绑定一个用户名。
-- 每个用户名最多绑定 **2 台设备**。换电脑时，给他发一个新邀请。名额满了就先 `revoke` 一台旧的。
+- 每个用户名最多绑定 **2 台设备**。换电脑时，给他发一个新邀请。名额满了就先 `revoke` 一台旧的，再让他用同一个邀请重试。撤销之后，之前发的邀请只能给当时因名额满被拒的设备用，别的设备要新邀请。
 - 防火墙或云服务商的安全组里只需要放行网关端口（TCP 47670）。**不要**放行 25565。
 
 ## 管理命令
@@ -50,7 +50,7 @@ jay-server invite Steve
 | `jay-server invites` / `cancel-invite <编号>` | 查看或作废还没用掉的邀请 |
 | `jay-server revoke <用户名> [设备码前几位]` | 撤销设备（不写设备码就撤销全部） |
 | `jay-server disable <用户名>` / `enable <用户名>` | 暂时停用或恢复 |
-| `jay-server remove <用户名>` | 从名单移除 |
+| `jay-server remove <用户名>` | 从名单移除，并作废给这个名字的邀请 |
 | `jay-server online-mode on\|off` | 正版验证（默认 off） |
 | `jay-server privacy basic\|plus\|plusplus` | 隐私等级（见下面的隐私+） |
 | `jay-server relays add\|remove\|list` | 管理节点 |
@@ -162,6 +162,8 @@ sudo -u jay JAY_SERVER_DIR=/var/lib/jay-server /opt/jay-server/jay-server invite
 ## Windows / 局域网电脑
 
 解压后，在这个文件夹里打开终端，执行上面“快速开始”的命令。第一次运行时，Windows 防火墙可能会询问是否允许 jay-server 访问网络：只在局域网里用就勾“专用网络”。保持 `run` 的窗口开着，服务器就一直在线。
+
+数据文件夹里的 `gate`（服务器私钥、访问密钥、邀请）只给当前 Windows 用户、SYSTEM 和管理员打开，相当于 Linux 上的 0700 / 0600；节点的 `relay.key` 也一样。要用另一个账户（比如服务账户）跑 `run`，就用那个账户执行 `init`。
 
 ## 能防什么、不能防什么
 
