@@ -93,7 +93,7 @@ public sealed partial class MultiplayerViewModel
         {
             if (_service.Settings.MultiplayerRequestPopup == value) return;
             _service.Settings.MultiplayerRequestPopup = value;
-            _service.Settings.Save();
+            _service.TrySaveSettings();
             OnPropertyChanged();
         }
     }

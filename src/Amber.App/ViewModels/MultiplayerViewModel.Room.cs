@@ -374,7 +374,7 @@ public sealed partial class MultiplayerViewModel
         {
             if (value is null) return;
             _service.Settings.MultiplayerKnockWait = value.Wait.ToSetting();
-            _service.Settings.Save();
+            _service.TrySaveSettings();
             OnPropertyChanged();
             if (_roomKnockWait is null) OnPropertyChanged(nameof(SelectedRoomKnockWait));
         }

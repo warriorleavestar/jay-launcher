@@ -178,9 +178,18 @@ public sealed partial class OnboardingViewModel : ObservableObject
     {
         var name = PlayerName.Trim();
         if (!OfflineNameRules.Check(name).Ok) return;
-        var account = _service.Accounts.AddOffline(name);
-        _service.Accounts.Store.SelectedId = account.Id;
-        _service.Accounts.Store.Save();
+        try
+        {
+            var account = _service.Accounts.AddOffline(name);
+            _service.Accounts.Store.SelectedId = account.Id;
+            _service.Accounts.Store.Save();
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            // An account file that cannot be written: nothing is added, the name stays for another try.
+            Message = StatusMessage.Failure("common.save_file_failed", e, AppSettings.DataDir, ErrorText.Of(e));
+            return;
+        }
         PlayerName = "";
         _service.NotifyAccountsChanged();
     }

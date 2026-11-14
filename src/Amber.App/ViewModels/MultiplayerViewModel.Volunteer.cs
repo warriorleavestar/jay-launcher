@@ -84,7 +84,7 @@ public partial class MultiplayerViewModel
         s.VolunteerAddress = VolunteerAddress.Trim();
         s.VolunteerPort = port;
         s.VolunteerLimitKBps = limit;
-        s.Save();
+        _service.TrySaveSettings();
         if (!VolunteerEnabled) StopVolunteering();
         VolunteerStatus = VolunteerEnabled ? L.T("multiplayer.volunteer.status_next_connect") : "";
         // Listening needs a restart of the public-network EasyTier, which happens on the next connect.

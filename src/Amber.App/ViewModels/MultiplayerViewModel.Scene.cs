@@ -194,7 +194,7 @@ public sealed partial class MultiplayerViewModel
         {
             if (_service.Settings.MultiplayerRelayOnly == value) return;
             _service.Settings.MultiplayerRelayOnly = value;
-            _service.Settings.Save();
+            _service.TrySaveSettings();
             OnPropertyChanged();
         }
     }

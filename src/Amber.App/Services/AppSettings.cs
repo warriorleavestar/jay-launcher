@@ -322,18 +322,20 @@ public sealed class AppSettings
             }
             catch (JsonException)
             {
-                // 设置文件损坏时回到默认值，原文件保留一份方便排查。
-                try { File.Copy(path, path + ".broken", true); }
-                catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+                // 设置文件损坏时回到默认值，原文件保留一份方便排查。Each damage keeps its own dated copy, so an earlier
+                // one is never overwritten; startup says where it is.
+                string? copy = path + ".broken-" + DateTime.Now.ToString("yyyyMMdd-HHmmss", System.Globalization.CultureInfo.InvariantCulture);
+                try { File.Copy(path, copy, false); }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException) { copy = null; }
                 // Only a real new install gets the daily check by default; a file that exists but can't be read keeps it off.
-                return new AppSettings { AutoUpdateCheckSaved = false };
+                return new AppSettings { AutoUpdateCheckSaved = false, LoadProblem = SettingsLoadProblem.Corrupt, BrokenCopy = copy };
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException)
             {
                 // Locked by a sync client or antivirus: retry briefly, then run on defaults without
                 // ever saving over the real file (ReadOnly), so nothing the user set is lost.
                 if (attempt < 3) { Thread.Sleep(200); continue; }
-                return new AppSettings { ReadOnly = true, AutoUpdateCheckSaved = false };
+                return new AppSettings { ReadOnly = true, AutoUpdateCheckSaved = false, LoadProblem = SettingsLoadProblem.Locked };
             }
         }
     }
@@ -341,6 +343,14 @@ public sealed class AppSettings
     /// <summary>The settings file could not be read at startup: this session runs on defaults and never writes it.</summary>
     [System.Text.Json.Serialization.JsonIgnore]
     public bool ReadOnly { get; private init; }
+
+    /// <summary>Why this session runs on defaults although a settings file exists (startup says so); null when it loaded.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public SettingsLoadProblem? LoadProblem { get; private init; }
+
+    /// <summary>Where the damaged settings file was copied, when <see cref="LoadProblem"/> is Corrupt and the copy worked.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string? BrokenCopy { get; private init; }
 
     /// <summary>测试用：这份设置存到别的文件（不序列化）。</summary>
     internal string? SavePathForTest { get; set; }
@@ -402,6 +412,9 @@ public sealed class LastRoom
     public string? Protection { get; set; }
     public string? Scope { get; set; }
 }
+
+/// <summary>Why the settings file was not used at startup.</summary>
+public enum SettingsLoadProblem { Corrupt, Locked }
 
 [System.Text.Json.Serialization.JsonSerializable(typeof(AppSettings))]
 internal sealed partial class AppJsonContext : System.Text.Json.Serialization.JsonSerializerContext;

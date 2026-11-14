@@ -382,7 +382,7 @@ public partial class InstancePage : UserControl
             FileTypeFilter = [new FilePickerFileType(filterName) { Patterns = patterns }],
         });
         var paths = files.Select(f => f.TryGetLocalPath()).OfType<string>().ToList();
-        if (paths.Count > 0) vm.AddFiles(paths, target);
+        if (paths.Count > 0) await vm.AddFilesAsync(paths, target);
     }
 
     private async void AddMods_Click(object? sender, RoutedEventArgs e) =>
@@ -404,7 +404,7 @@ public partial class InstancePage : UserControl
             FileTypeFilter = [new FilePickerFileType(L.T("instance.picker.datapacks_filter")) { Patterns = ["*.zip"] }],
         });
         var paths = files.Select(f => f.TryGetLocalPath()).OfType<string>().ToList();
-        if (paths.Count > 0) vm.AddDatapacks(paths);
+        if (paths.Count > 0) await vm.AddDatapacksAsync(paths);
     }
 
     private async void ImportWorld_Click(object? sender, RoutedEventArgs e)
@@ -415,7 +415,7 @@ public partial class InstancePage : UserControl
             Title = L.T("instance.worlds.picker"),
             FileTypeFilter = [new FilePickerFileType(L.T("common.archive")) { Patterns = ["*.zip"] }],
         });
-        if (files.Count > 0 && files[0].TryGetLocalPath() is { } path) vm.ImportWorld(path);
+        if (files.Count > 0 && files[0].TryGetLocalPath() is { } path) await vm.ImportWorldAsync(path);
     }
 
     /// <summary>【⋯ 更多】→“导出整合包…”：按当前实例填好选项，打开对话框。</summary>

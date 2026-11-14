@@ -128,7 +128,7 @@ public sealed partial class MultiplayerViewModel
             }
             IsBreakerCounting = false;
             _service.Settings.LastBreakerRestart = DateTimeOffset.UtcNow;
-            _service.Settings.Save();
+            _service.TrySaveSettings();
             RestartApp();
         }
         catch (OperationCanceledException)

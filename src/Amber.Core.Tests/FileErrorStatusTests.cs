@@ -79,6 +79,18 @@ public sealed class FileErrorStatusTests : IDisposable
         AssertSaveFailed(home, path);
     });
 
+    /// <summary>Runs the UI thread's queue until an async view-model call (whose file work is off the UI thread) is done.</summary>
+    private static void Wait(Task task)
+    {
+        var until = DateTime.UtcNow.AddSeconds(20);
+        while (!task.IsCompleted && DateTime.UtcNow < until)
+        {
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            Thread.Sleep(5);
+        }
+        task.GetAwaiter().GetResult();
+    }
+
     [Fact]
     public void OneUnreadableFileDoesNotStopTheRestBeingAdded() => UiTestThread.Run(() =>
     {
@@ -91,7 +103,7 @@ public sealed class FileErrorStatusTests : IDisposable
         var missing = Path.Combine(source, "gone.jar");
         var target = Path.Combine(_root, "mods");
 
-        vm.AddFiles([missing, good], target);
+        Wait(vm.AddFilesAsync([missing, good], target));
 
         Assert.True(File.Exists(Path.Combine(target, "good.jar")));
         var status = vm.StatusInfo;
@@ -110,7 +122,7 @@ public sealed class FileErrorStatusTests : IDisposable
         var file = Path.Combine(target, "same.jar");
         File.WriteAllText(file, "jar");
 
-        vm.AddFiles([file], target);
+        Wait(vm.AddFilesAsync([file], target));
 
         Assert.Equal("jar", File.ReadAllText(file));
         Assert.NotEqual(StatusKind.Error, vm.StatusInfo?.Kind);

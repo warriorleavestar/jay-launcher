@@ -63,7 +63,7 @@ public sealed partial class SettingsViewModel
     private void SaveFiles(Action<Amber.App.Services.AppSettings> change)
     {
         change(_service.Settings);
-        _service.Settings.Save();
+        _service.TrySaveSettings();
         Multiplayer?.ApplyFileSettings();
         NotifyFiles();
         RefreshAdvanced();
@@ -84,7 +84,7 @@ public sealed partial class SettingsViewModel
         s.FilesQueueOffline = d.FilesQueue;
         s.FilesSpeed = d.FilesSpeed;
         s.FilesNotifyDone = d.FilesNotify;
-        s.Save();
+        _service.TrySaveSettings();
         Multiplayer?.ApplyFileSettings();
         NotifyFiles();
     }

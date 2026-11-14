@@ -345,6 +345,7 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
             }
             if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") is "host-server" or "host-exit" or "jay-client")
             {
+                if (!GameDirIsTestFolder()) return;
                 var scope = Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE");
                 if (scope == "host-server") await HostServerAsync();
                 else if (scope == "host-exit") await HostExitAsync();
@@ -355,6 +356,7 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
             }
             if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "game")
             {
+                if (!GameDirIsTestFolder()) return;
                 await GameLifecycleAsync();
                 Log("DONE");
                 window.Close();
@@ -362,6 +364,7 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
             }
             if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "multiplayer")
             {
+                if (!GameDirIsTestFolder()) return;
                 await MultiplayerAsync();
                 await DirectRoomAsync();
                 Log("DONE");
@@ -393,6 +396,14 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
                 window.Close();
                 return;
             }
+            // A misspelt scope would otherwise fall through to the full run, which installs and launches.
+            if (!SelfTestGuard.IsFullFlowScope(Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE")))
+            {
+                Check("未知的自检范围", false, Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") ?? "");
+                window.Close();
+                return;
+            }
+            if (!GameDirIsTestFolder()) return;
             // 必须在布局检查遍历所有页面之前验证，免得漏掉首次进入资源页的空列表。
             await ContentAutoLoadAsync();
             if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "content")
@@ -1019,6 +1030,15 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
 
     private string GameRoot() => Page<SettingsViewModel>().GameDirectory;
 
+    /// <summary>The scopes that install or launch in the configured game folder stop here when it is the real one.</summary>
+    private bool GameDirIsTestFolder()
+    {
+        if (SelfTestGuard.GameDirProblem(GameRoot(), GameDirectory.DefaultRoot()) is not { } problem) return true;
+        Check("测试用的游戏目录", false, problem);
+        window.Close();
+        return false;
+    }
+
     private async Task InstanceAsync()
     {
         var instance = Page<InstanceViewModel>();
@@ -1270,7 +1290,7 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
             using (var w = new StreamWriter(archive.CreateEntry("pack.mcmeta").Open())) w.Write("""{"pack":{"pack_format":48,"description":"自检数据包"}}""");
             using (var w = new StreamWriter(archive.CreateEntry("data/selftest/function/hi.mcfunction").Open())) w.Write("say hi");
         }
-        instance.AddDatapacks([zip]);
+        await instance.AddDatapacksAsync([zip]);
         var item = instance.Datapacks.FirstOrDefault(d => d.Name == "selftest-datapack.zip");
         Check("添加数据包", item is { Enabled: true } && item.Meta.Contains("自检数据包"), instance.Status);
         if (item is not null)

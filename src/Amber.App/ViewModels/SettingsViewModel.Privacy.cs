@@ -44,7 +44,7 @@ public sealed partial class SettingsViewModel
         var before = Child.ChangedAt;
         change();
         if (Child.ChangedAt == before) return;
-        _service.Settings.Save();
+        _service.TrySaveSettings();
         foreach (var name in (string[])[nameof(ChildMode), nameof(ChildNoRemote), nameof(ChildNoPublic), nameof(ChildNoExit), nameof(ChildFriendsFiles),
                      nameof(ChildAlwaysAsk), nameof(ChildQuietNotify), nameof(ChildModeStatusText)])
             OnPropertyChanged(name);
@@ -62,7 +62,7 @@ public sealed partial class SettingsViewModel
         {
             if (_service.Settings.StrongSandbox == value) return;
             _service.Settings.StrongSandbox = value;
-            _service.Settings.Save();
+            _service.TrySaveSettings();
             SandboxChanged();
         }
     }
@@ -75,7 +75,7 @@ public sealed partial class SettingsViewModel
         {
             if (_service.Settings.LaunchWithoutSandbox == value) return;
             _service.Settings.LaunchWithoutSandbox = value;
-            _service.Settings.Save();
+            _service.TrySaveSettings();
             SandboxChanged();
         }
     }

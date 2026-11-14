@@ -336,7 +336,7 @@ public sealed partial class MultiplayerViewModel
         {
             if (_service.Settings.MultiplayerAllowModSync == value) return;
             _service.Settings.MultiplayerAllowModSync = value;
-            _service.Settings.Save();
+            _service.TrySaveSettings();
             OnPropertyChanged();
         }
     }

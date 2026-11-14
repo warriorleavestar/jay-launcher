@@ -151,4 +151,64 @@ public sealed class NetworkStringTests
         // 选的网络不在了：回到内置的 Jay 网络。
         Assert.True(list.Current("gone", null).IsBuiltIn);
     }
+
+    // A key a test machine accepts through AMBER_TEST_REGISTRY_KEY.
+    private static readonly TrustSigner TestKey = TrustSigner.Generate(out _);
+    private static readonly TrustQuorum TestQuorum = new([TestKey.Id], 1);
+
+    [Fact]
+    public void ANetworkSignedOnlyByATestKeyIsNotReviewed()
+    {
+        var list = new PublicNetworkList(null, Trusted, test: TestQuorum);
+        var text = NetworkString.Create(Info("lab"), TestKey);
+        Assert.Equal(NetworkAddResult.NeedsConfirm, list.Add(text, false, out var parsed));
+        Assert.True(list.IsTestSigned(parsed));
+        Assert.Empty(list.Networks);
+        Assert.Equal(NetworkAddResult.Added, list.Add(text, true, out _));
+        Assert.True(list.IsTestSigned(list.Find("lab")!));
+        // A real review still needs no confirmation, also when a test key signed too.
+        Assert.Equal(NetworkAddResult.Added, list.Add(NetworkString.Create(Info(), Registry), false, out var reviewed));
+        Assert.False(list.IsTestSigned(reviewed));
+        Assert.Equal(NetworkAddResult.Added, list.Add(NetworkString.Create(Info("both"), TestKey, Registry), false, out var both));
+        Assert.False(list.IsTestSigned(both));
+        // Without test keys nothing is test-signed.
+        Assert.False(new PublicNetworkList(null, Trusted).IsTestSigned(reviewed));
+    }
+
+    [Fact]
+    public void TheJayNetworkSignedOnlyByATestKeyIsAddedOnlyAfterConfirming()
+    {
+        var jay = Info("jay") with { NetworkName = PublicNetworkProfile.JayNetworkName };
+        var list = new PublicNetworkList(null, Trusted, test: TestQuorum);
+        var text = NetworkString.Create(jay, TestKey);
+        Assert.Equal(NetworkAddResult.NeedsConfirm, list.Add(text, false, out _));
+        Assert.DoesNotContain("tcp://node1.example.org:11010", list.Current(null, null).Nodes);
+        Assert.Equal(NetworkAddResult.Added, list.Add(text, true, out _));
+        Assert.Contains("tcp://node1.example.org:11010", list.Current(null, null).Nodes);
+        Assert.True(list.IsTestSigned(list.Find("jay")!));
+
+        // Each later test-signed update is confirmed again, even from the same key.
+        var update = NetworkString.Create(jay with { Seq = 2, Nodes = ["tcp://node2.example.org:11010"] }, TestKey);
+        Assert.Equal(NetworkAddResult.NeedsConfirm, list.Add(update, false, out _));
+        Assert.Equal(1, list.Find("jay")!.Info.Seq);
+        Assert.Equal(NetworkAddResult.Updated, list.Add(update, true, out _));
+        Assert.Contains("tcp://node2.example.org:11010", list.Current(null, null).Nodes);
+
+        // Saved after confirming: loads again on a test machine, and stays marked.
+        var reloaded = new PublicNetworkList(list.ToSaved(), Trusted, test: TestQuorum);
+        Assert.True(reloaded.IsTestSigned(reloaded.Find("jay")!));
+        // Without the test key it is refused as before.
+        Assert.Equal(NetworkAddResult.Reserved, new PublicNetworkList(null, Trusted).Add(text, true, out _));
+        Assert.Null(new PublicNetworkList(list.ToSaved(), Trusted).Find("jay"));
+    }
+
+    [Fact]
+    public void AReviewedJayUpdateNeedsNoConfirmation()
+    {
+        var jay = Info("jay") with { NetworkName = PublicNetworkProfile.JayNetworkName };
+        var list = new PublicNetworkList(null, Trusted, test: TestQuorum);
+        Assert.Equal(NetworkAddResult.Added, list.Add(NetworkString.Create(jay, Registry), false, out _));
+        Assert.Equal(NetworkAddResult.Updated, list.Add(NetworkString.Create(jay with { Seq = 2 }, Registry), false, out _));
+        Assert.False(list.IsTestSigned(list.Find("jay")!));
+    }
 }

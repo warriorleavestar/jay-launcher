@@ -276,8 +276,8 @@ public sealed partial class AccountsViewModel
     {
         if (item?.Account.JayAddress is null) return;
         item.Account.JayAddress = null;
-        _service.Accounts.Store.Save();
-        SetStatus(StatusMessage.Success("accounts.status.jay_unbound", item.Name));
+        if (SaveAccounts(_service.Accounts.Store.Save))
+            SetStatus(StatusMessage.Success("accounts.status.jay_unbound", item.Name));
         Changed();
     }
 
@@ -296,7 +296,12 @@ public sealed partial class AccountsViewModel
     {
         if (item is null) return;
         foreach (var account in _service.Accounts.Store.Accounts.Where(a => a.JayAddress == item.Address)) account.JayAddress = null;
-        _service.Accounts.Store.Save();
+        // The bindings must be written before the account goes: otherwise the file keeps pointing at a removed account.
+        if (!SaveAccounts(_service.Accounts.Store.Save))
+        {
+            Changed();
+            return;
+        }
         _service.JayAccounts.Remove(item.Address);
         SetStatus(StatusMessage.Success("accounts.status.jay_removed", item.ShortAddress));
         Changed();

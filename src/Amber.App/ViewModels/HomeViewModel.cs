@@ -351,7 +351,9 @@ public sealed partial class HomeViewModel : PageViewModel
         UpdateRunState();
         if (_refreshingAccounts || value is null || value.Id == _service.Accounts.Store.SelectedId) return;
         _service.Accounts.Store.SelectedId = value.Id;
-        _service.Accounts.Store.Save();
+        // Chosen for this session even when the accounts file cannot be written right now.
+        try { _service.Accounts.Store.Save(); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { System.Diagnostics.Trace.WriteLine("Jay: saving the selected account failed: " + e.Message); }
         _service.NotifyAccountsChanged();
     }
 

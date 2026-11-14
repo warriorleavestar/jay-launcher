@@ -30,6 +30,14 @@ public class NetworkOverviewTests
     }
 
     [Fact]
+    public void TheBuiltInNetworkWithATestSignedUpdateSaysSo()
+    {
+        var rows = NetworkOverview.Build([Jay with { Nodes = 2, TestReviewed = true }, Club with { TestReviewed = true }], "jay", true, false, false, false);
+        Assert.Equal(NetworkTrust.TestReviewed, rows[1].Trust);
+        Assert.Equal(NetworkTrust.TestReviewed, rows[2].Trust);
+    }
+
+    [Fact]
     public void OnlyTheCurrentNetworkIsConnectedOrConnecting()
     {
         var rows = NetworkOverview.Build([Club, Shed], "shed", connected: false, connecting: true, false, false);

@@ -489,7 +489,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         {
             if (_service.Settings.UseBuiltInNodes == value) return;
             _service.Settings.UseBuiltInNodes = value;
-            _service.Settings.Save();
+            _service.TrySaveSettings();
             OnPropertyChanged();
             NotifyNodesChanged();
             // 关掉后一个节点都没有了：展开节点区，让人看到要加节点。
@@ -519,7 +519,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
     {
         var list = Nodes.Select(n => n.Url).ToList();
         _service.Settings.MultiplayerPeers = list.Count == 0 ? null : list;
-        _service.Settings.Save();
+        _service.TrySaveSettings();
     }
 
     [RelayCommand]
@@ -586,7 +586,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
                 await new Amber.Core.Multiplayer.Public.RoomDirectoryClient(network).PutRecordAsync(
                     Amber.Core.Multiplayer.Public.RelayRecord.Make(identity, null, urls, DateTimeOffset.UtcNow), default);
                 _service.Settings.RelayRecordNetwork = network.Profile.Id;
-                _service.Settings.Save();
+                _service.TrySaveSettings();
                 ShareCodeText = Amber.Core.Multiplayer.Public.RelayRecord.Encode(identity.Locator(network.Profile.Id));
                 SharePassphrase = "";
                 await Amber.App.Services.AvaloniaClipboard.TrySetTextAsync(ShareCodeText);

@@ -195,6 +195,19 @@ public class DesignTokenTests
         Assert.All(used, k => Assert.Contains(k, keys));
     }
 
+    [Fact]
+    public void EveryDynamicResourceKeyIsDefined()
+    {
+        // A misspelt or removed key does not fail the build: the control silently loses its colour.
+        var files = Directory.EnumerateFiles(AppFile(), "*.axaml", SearchOption.AllDirectories)
+            .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}") && !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}"))
+            .Select(File.ReadAllText).ToList();
+        var defined = files.SelectMany(t => System.Text.RegularExpressions.Regex.Matches(t, "x:Key=\"([^\"]+)\"").Select(m => m.Groups[1].Value)).ToHashSet();
+        var missing = files.SelectMany(t => System.Text.RegularExpressions.Regex.Matches(t, @"\{DynamicResource ([A-Za-z0-9_.]+)\}").Select(m => m.Groups[1].Value))
+            .Where(k => !defined.Contains(k)).Distinct().ToList();
+        Assert.Empty(missing);
+    }
+
     private static string AppFile(params string[] parts) =>
         Path.Combine([AppContext.BaseDirectory, "..", "..", "..", "..", "Amber.App", .. parts]);
 }

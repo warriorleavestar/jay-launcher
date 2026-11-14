@@ -104,7 +104,9 @@ public sealed partial class FirstRunViewModel : ObservableObject
     /// </summary>
     public bool ShouldOpen()
     {
-        var decision = Decide(_service.Settings.FirstRunDone, _service.Accounts.Store.Accounts.Count > 0, _service.InstalledVersions().Count > 0,
+        // An accounts file that could not be read is someone's accounts, not a new install.
+        var hasAccount = _service.Accounts.Store.Accounts.Count > 0 || _service.Accounts.Store.Unreadable;
+        var decision = Decide(_service.Settings.FirstRunDone, hasAccount, _service.InstalledVersions().Count > 0,
             Environment.GetEnvironmentVariable("AMBER_SELFTEST"), Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE"),
             Environment.GetEnvironmentVariable("AMBER_SNAPSHOT_DIR"));
         if (decision == FirstRunDecision.AlreadySetUp) MarkDone();
@@ -130,7 +132,7 @@ public sealed partial class FirstRunViewModel : ObservableObject
     private void MarkDone()
     {
         _service.Settings.FirstRunDone = true;
-        try { _service.Settings.Save(); } catch (IOException) { }
+        _service.TrySaveSettings();
     }
 
     private void Close()
@@ -163,7 +165,7 @@ public sealed partial class FirstRunViewModel : ObservableObject
         if (value < 0 || value >= LanguageCodes.Length || LanguageCodes[value] == L.Language) return;
         _service.Settings.Language = LanguageCodes[value];
         L.SetLanguage(LanguageCodes[value]);
-        try { _service.Settings.Save(); } catch (IOException) { }
+        _service.TrySaveSettings();
     }
 
     // —— Steps ——

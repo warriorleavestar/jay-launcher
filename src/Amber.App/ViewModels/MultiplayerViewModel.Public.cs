@@ -120,7 +120,7 @@ public sealed partial class MultiplayerViewModel
             return;
         }
         _service.Settings.PublicNetworkNodes = nodes.Distinct().ToList();
-        _service.Settings.Save();
+        _service.TrySaveSettings();
         // Saving the nodes is how the user accepts a new directory key for the built-in network (its directory moved, or
         // its owner re-keyed it; core.mp.public.directory_changed): the network can't be removed and added again. Only
         // matters while the built-in network trusts its directory on first use (no trustee roots yet).
@@ -200,7 +200,7 @@ public sealed partial class MultiplayerViewModel
     private async Task AcceptPublicNoticeAsync()
     {
         _service.Settings.PublicNetworkNoticeAccepted = true;
-        _service.Settings.Save();
+        _service.TrySaveSettings();
         PublicNoticeOpen = false;
         await ConnectPublicAsync();
     }

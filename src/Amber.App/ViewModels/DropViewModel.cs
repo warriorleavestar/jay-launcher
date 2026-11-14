@@ -158,11 +158,11 @@ public sealed partial class DropViewModel(LauncherService service) : ObservableO
             case DropKind.Shader:
                 return [Copy(L.F("drop.shader", instance.Id), instance.ShaderPacksDir)];
             case DropKind.World:
-                return [new DropTarget(group.Kind, L.F("drop.world", instance.Id), Files(), () =>
+                return [new DropTarget(group.Kind, L.F("drop.world", instance.Id), Files(), async () =>
                 {
-                    var names = paths.Select(p => WorldManager.Import(p, instance.SavesDir)).ToList();
+                    // Unpacking a world takes a while: off the UI thread, so the window keeps responding.
+                    var names = await Task.Run(() => paths.Select(p => WorldManager.Import(p, instance.SavesDir)).ToList());
                     Done(L.P("drop.world.done", names.Count, names.Count, instance.Id));
-                    return Task.CompletedTask;
                 })];
             case DropKind.Datapack:
                 // A datapack belongs to one world: pick it in the instance's Worlds tab.
@@ -173,11 +173,13 @@ public sealed partial class DropViewModel(LauncherService service) : ObservableO
 
         string Files() => count == 1 ? Path.GetFileName(paths[0]) : L.P("drop.files", count, count);
 
-        DropTarget Copy(string label, string directory) => new(group.Kind, label, Files(), () =>
+        DropTarget Copy(string label, string directory) => new(group.Kind, label, Files(), async () =>
         {
-            foreach (var p in paths) DropClassifier.CopyInto(p, directory);
+            await Task.Run(() =>
+            {
+                foreach (var p in paths) DropClassifier.CopyInto(p, directory);
+            });
             Done(L.P("drop.copied", count, count, instance.Id));
-            return Task.CompletedTask;
         });
     }
 

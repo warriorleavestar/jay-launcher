@@ -128,7 +128,8 @@ internal sealed partial class SelfTest
             var autoMemory = settings.AutoMemory;
             settings.AutoMemory = false;
             settings.MaxMemoryMb = 3072;
-            await Task.Delay(200);
+            // The slider's value is written once the drag pauses (300 ms).
+            await Task.Delay(700);
             Check("游戏默认 › 内存：关掉“自动”后滑块能拖，改的数存进设置",
                 Dispatcher.UIThread.Invoke(() => page.MemoryBox.IsEffectivelyEnabled && Math.Abs(page.MemoryBox.Value - 3072) < 1)
                 && File.ReadAllText(AppSettings.FilePath).Contains("\"MaxMemoryMb\": 3072", StringComparison.Ordinal),

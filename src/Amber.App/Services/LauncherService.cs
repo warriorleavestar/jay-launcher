@@ -80,14 +80,18 @@ public sealed class LauncherService : IDisposable
     private Amber.Core.Multiplayer.Public.PublicNetworkList? _networks;
 
     /// <summary>Quorums that make a network reviewed (the self-check swaps in test keys; null = the Jay trustees).</summary>
-    internal IReadOnlyList<Amber.Core.Multiplayer.Public.TrustQuorum>? TrustedNetworkKeys { get; set; } = TestRegistryKeys.Count > 0
-        ? [Amber.Core.Multiplayer.Public.JayTrust.Quorum, new(TestRegistryKeys, 1)]
-        : null;
+    internal IReadOnlyList<Amber.Core.Multiplayer.Public.TrustQuorum>? TrustedNetworkKeys { get; set; }
+
+    /// <summary>
+    /// The keys from AMBER_TEST_REGISTRY_KEY, or null. Networks vouched for only by them are test-signed: added only after
+    /// the unreviewed-network confirmation (the "jay" network too) and never shown as reviewed.
+    /// </summary>
+    internal Amber.Core.Multiplayer.Public.TrustQuorum? TestNetworkKeys { get; set; } = TestRegistryKeys.Count > 0 ? new(TestRegistryKeys, 1) : null;
 
     /// <summary>
     /// Developer switch for test machines: AMBER_TEST_REGISTRY_KEY holds one or more registry public keys
-    /// (base64, comma separated) that this Jay also trusts. Networks signed by them are shown as "test review",
-    /// never as properly reviewed.
+    /// (base64, comma separated) that this Jay also accepts. Networks signed only by them are shown as "test review",
+    /// never as properly reviewed, and are added only after the same confirmation as an unreviewed network.
     /// </summary>
     internal static readonly IReadOnlyList<byte[]> TestRegistryKeys = ParseTestKeys(Environment.GetEnvironmentVariable("AMBER_TEST_REGISTRY_KEY"));
 
@@ -105,12 +109,8 @@ public sealed class LauncherService : IDisposable
         return keys;
     }
 
-    /// <summary>Reviewed only because of a key that AMBER_TEST_REGISTRY_KEY trusts, not by the Jay trustees.</summary>
-    internal static bool IsTestReviewed(IReadOnlyList<byte[]> signers) =>
-        !Amber.Core.Multiplayer.Public.JayTrust.Quorum.IsMet(signers) && new Amber.Core.Multiplayer.Public.TrustQuorum(TestRegistryKeys, 1).IsMet(signers);
-
     /// <summary>保存的公共网络（设置里的连接串验签后的结果，改了设置要 <see cref="ReloadNetworks"/>）。</summary>
-    public Amber.Core.Multiplayer.Public.PublicNetworkList Networks => _networks ??= new(Settings.PublicNetworks, TrustedNetworkKeys);
+    public Amber.Core.Multiplayer.Public.PublicNetworkList Networks => _networks ??= new(Settings.PublicNetworks, TrustedNetworkKeys, test: TestNetworkKeys);
 
     public void ReloadNetworks() => _networks = null;
 
@@ -143,10 +143,25 @@ public sealed class LauncherService : IDisposable
             }
         }
         MigrateBakeRuntime(settings);
-        if (MigratesPlayerName(store.Accounts.Count, settings.PlayerName, settings.IsFresh,
+        // Defaults standing in for a settings file that could not be read carry no old player name, and an accounts
+        // file that could not be read is not empty: neither makes an account.
+        if (!store.Unreadable && MigratesPlayerName(store.Accounts.Count, settings.PlayerName, settings.IsFresh || settings.LoadProblem is not null,
                 Environment.GetEnvironmentVariable("AMBER_SELFTEST"), Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE")))
-            Accounts.AddOffline(settings.PlayerName);
+            MigrateOfflineAccount(Accounts, settings.PlayerName);
         Reload();
+    }
+
+    /// <summary>
+    /// Turns an old player name into an offline account. An accounts file that cannot be written must not stop Jay from
+    /// starting: the account holds for this run, and the next start migrates the name again.
+    /// </summary>
+    internal static void MigrateOfflineAccount(AccountService accounts, string playerName)
+    {
+        try { accounts.AddOffline(playerName); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            System.Diagnostics.Trace.WriteLine("Jay: saving the migrated offline account failed: " + e.Message);
+        }
     }
 
     /// <summary>
@@ -263,7 +278,7 @@ public sealed class LauncherService : IDisposable
         }
         if (meta.ModsDifferFromHost == host) return;
         meta.ModsDifferFromHost = host;
-        Settings.Save();
+        TrySaveSettings();
     }
 
     private InstanceMeta EnsureMeta(string id)
@@ -331,8 +346,42 @@ public sealed class LauncherService : IDisposable
         CurrentInstanceChanged?.Invoke();
     }
 
+    /// <summary>
+    /// What went wrong reading Jay's own files at startup, as localized sentences for a notice that stays until closed:
+    /// a damaged or locked settings file, a locked accounts file.
+    /// </summary>
+    public IReadOnlyList<string> StartupProblems()
+    {
+        var list = new List<string>();
+        if (Settings.LoadProblem == SettingsLoadProblem.Corrupt)
+            list.Add(Amber.Core.Localization.L.F("settings.load_corrupt", Settings.BrokenCopy is { } copy ? Path.GetFileName(copy) : "settings.json.broken"));
+        else if (Settings.LoadProblem == SettingsLoadProblem.Locked)
+            list.Add(Amber.Core.Localization.L.T("settings.load_locked"));
+        if (Accounts.Store.Unreadable) list.Add(Amber.Core.Localization.L.T("accounts.load_locked"));
+        return list;
+    }
+
     /// <summary>设置文件写不进去（参数：异常）。界面弹个不挡操作的提示。</summary>
     public event Action<Exception>? SettingsSaveFailed;
+
+    /// <summary>
+    /// Saves the settings file. When it cannot be written (read-only, locked, no permission) the change still applies
+    /// for this run, the window says so once, and the caller goes on: false means it was not written.
+    /// </summary>
+    public bool TrySaveSettings()
+    {
+        try
+        {
+            Settings.Save();
+            return true;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            System.Diagnostics.Trace.WriteLine("Jay: saving settings failed: " + e.Message);
+            SettingsSaveFailed?.Invoke(e);
+            return false;
+        }
+    }
 
     /// <summary>实例的状态（安装未完成、已损坏）可能变了：安装开始、完成、取消、失败、修复之后调用。参数：实例 ID。</summary>
     public event Action<string>? InstanceStateChanged;
@@ -555,7 +604,7 @@ public sealed class LauncherService : IDisposable
             if (!undo)
             {
                 Settings.StrongSandboxFolders = [.. Settings.StrongSandboxFolders.Concat(folders).Distinct(StringComparer.OrdinalIgnoreCase)];
-                Settings.Save();
+                TrySaveSettings();
             }
             return process.ExitCode == 0 ? null : Failed($"exit {process.ExitCode}");
         }
@@ -592,7 +641,7 @@ public sealed class LauncherService : IDisposable
         if (error is not null) return error;
         Settings.StrongSandboxFolders = [];
         Settings.StrongSandbox = false;
-        Settings.Save();
+        TrySaveSettings();
         SandboxStateChanged?.Invoke();
         return null;
     }
@@ -602,7 +651,7 @@ public sealed class LauncherService : IDisposable
         if (Settings.StrongSandboxFallback == reason && Settings.StrongSandboxFallbackDetail == detail) return;
         Settings.StrongSandboxFallback = reason;
         Settings.StrongSandboxFallbackDetail = detail;
-        Settings.Save();
+        TrySaveSettings();
         SandboxStateChanged?.Invoke();
     }
 
@@ -612,7 +661,7 @@ public sealed class LauncherService : IDisposable
         Settings.StrongSandboxFallback = null;
         Settings.StrongSandboxFallbackDetail = null;
         Settings.StrongSandbox = true;
-        Settings.Save();
+        TrySaveSettings();
         SandboxStateChanged?.Invoke();
     }
 
@@ -826,7 +875,7 @@ public sealed class LauncherService : IDisposable
             if (AnyRunning) throw new Amber.Core.Bake.BakeException(Amber.Core.Localization.L.T("core.bake.gc_busy"), []);
             var package = await Task.Run(() => Amber.Core.Bake.BakePackage.InstallFromZip(zipPath, BakeLoaderInstallRoot), ct);
             Settings.BakeLoaderPath = package.Root;
-            Settings.Save();
+            TrySaveSettings();
             return package;
         }
         finally

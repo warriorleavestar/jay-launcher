@@ -132,7 +132,11 @@ public sealed partial class ActivityViewModel : ObservableObject
     public ActivityViewModel(LauncherService service)
     {
         _service = service;
-        service.Tasks.Changed += _ => Dispatcher.UIThread.Post(SyncTasks);
+        // Progress reports come many times a second: one sync is queued at a time and picks up all of them.
+        service.Tasks.Changed += _ =>
+        {
+            if (Interlocked.Exchange(ref _syncQueued, 1) == 0) Dispatcher.UIThread.Post(SyncQueuedTasks);
+        };
         service.Tasks.Completed += t => Dispatcher.UIThread.Post(() =>
         {
             if (t.State == TaskState.Failed) HasUnseenFailure = true;
@@ -222,15 +226,25 @@ public sealed partial class ActivityViewModel : ObservableObject
 
     public string ActivityTip => HasRunningTasks ? L.F("activity.tip.running", Tasks.Count(t => t.IsRunning)) : L.T("activity.tip");
 
+    private int _syncQueued;
+
+    private void SyncQueuedTasks()
+    {
+        // Cleared before the sync reads the list, so a change during the sync queues another one.
+        Volatile.Write(ref _syncQueued, 0);
+        SyncTasks();
+    }
+
     private void SyncTasks()
     {
         var all = _service.Tasks.All.Reverse().ToList();
+        var current = all.ToHashSet();
         for (var i = Tasks.Count - 1; i >= 0; i--)
-            if (!all.Contains(Tasks[i].Handle)) Tasks.RemoveAt(i);
+            if (!current.Contains(Tasks[i].Handle)) Tasks.RemoveAt(i);
+        var shown = Tasks.ToDictionary(t => t.Handle);
         foreach (var (h, i) in all.Select((h, i) => (h, i)))
         {
-            var existing = Tasks.FirstOrDefault(t => t.Handle == h);
-            if (existing is null) Tasks.Insert(Math.Min(i, Tasks.Count), new TaskItem(h));
+            if (!shown.TryGetValue(h, out var existing)) Tasks.Insert(Math.Min(i, Tasks.Count), new TaskItem(h));
             else existing.Refresh();
         }
         RaiseIndicators();

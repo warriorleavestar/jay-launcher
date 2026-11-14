@@ -8,12 +8,15 @@ using System.Collections.ObjectModel;
 
 namespace Amber.App.ViewModels;
 
-/// <summary>公共网络下拉框的一项：内置的 Jay 公共网络，或者自己加的连接串网络。</summary>
+/// <summary>
+/// 公共网络下拉框的一项：内置的 Jay 公共网络，或者自己加的连接串网络。<paramref name="TestReviewed"/>: signed only by a test
+/// key (AMBER_TEST_REGISTRY_KEY); on the built-in Jay network it means relays from a test-signed "jay" update are in use.
+/// </summary>
 public sealed record NetworkChoice(string Id, string Name, bool Reviewed, int NodeCount, string? Signer, bool TestReviewed = false) : LocalizedRecord
 {
     public bool IsBuiltIn => Id == "jay";
     public string Label => TestReviewed ? Name + " 🧪" : Reviewed ? Name : Name + " ⚠";
-    public string Detail => IsBuiltIn ? L.T("multiplayer.network.builtin")
+    public string Detail => IsBuiltIn ? L.T(TestReviewed ? "multiplayer.network.builtin_test" : "multiplayer.network.builtin")
         : (TestReviewed ? L.T("multiplayer.network.test_reviewed")
             : Reviewed ? L.T("multiplayer.network.reviewed") : L.F("multiplayer.network.unreviewed", Signer ?? ""))
           + " · " + L.P("multiplayer.network.nodes", NodeCount, NodeCount);
@@ -44,10 +47,13 @@ public sealed partial class MultiplayerViewModel
         {
             NetworkChoices.Clear();
             var jay = PublicNetworkProfile.Jay(_service.Settings.PublicNetworkNodes);
-            NetworkChoices.Add(new NetworkChoice("jay", jay.Name, true, _service.PublicNetwork.IsBuiltIn ? _service.PublicNetwork.Nodes.Count : jay.Nodes.Count, null));
-            foreach (var n in _service.Networks.Networks.Where(n => n.Info.Id != "jay"))
+            var networks = _service.Networks;
+            var jayTest = networks.Find("jay") is { } jayUpdate && networks.IsTestSigned(jayUpdate);
+            NetworkChoices.Add(new NetworkChoice("jay", jay.Name, true, _service.PublicNetwork.IsBuiltIn ? _service.PublicNetwork.Nodes.Count : jay.Nodes.Count, null,
+                TestReviewed: jayTest));
+            foreach (var n in networks.Networks.Where(n => n.Info.Id != "jay"))
                 NetworkChoices.Add(new NetworkChoice(n.Info.Id, n.Info.Name, n.Reviewed, n.Info.Nodes.Count, n.SignerFingerprint,
-                    n.Reviewed && LauncherService.IsTestReviewed(n.Signers)));
+                    networks.IsTestSigned(n)));
             var current = _service.PublicNetwork.Id;
             SelectedNetworkChoice = NetworkChoices.FirstOrDefault(c => c.Id == current) ?? NetworkChoices[0];
         }
@@ -65,7 +71,7 @@ public sealed partial class MultiplayerViewModel
         // 换网络：先断开旧的（房主公开的房间也会撤下），再存设置；要用时重新点“连接”。
         if (IsPublicConnected || IsPublicConnecting) DisconnectPublic();
         _service.Settings.PublicNetworkId = id;
-        _service.Settings.Save();
+        _service.TrySaveSettings();
         NetworkChanged();
         SetStatus(StatusMessage.Success("multiplayer.network.switched", value.Name));
     }
@@ -109,7 +115,7 @@ public sealed partial class MultiplayerViewModel
         {
             case NetworkAddResult.NeedsConfirm:
                 _pendingNetworkText = text;
-                NetworkConfirmText = L.F("multiplayer.network.confirm", network.Info.Name, network.SignerFingerprint);
+                NetworkConfirmText = ConfirmText(network);
                 NetworkConfirmOpen = true;
                 return result;
             case NetworkAddResult.Conflict:
@@ -123,7 +129,7 @@ public sealed partial class MultiplayerViewModel
                 return result;
         }
         _service.Settings.PublicNetworks = _service.Networks.ToSaved();
-        _service.Settings.Save();
+        _service.TrySaveSettings();
         NetworkInput = "";
         var wasCurrent = _service.PublicNetwork.Id == network.Info.Id;
         LoadNetworks();
@@ -134,6 +140,12 @@ public sealed partial class MultiplayerViewModel
         SetStatus(StatusMessage.Success(result == NetworkAddResult.Added ? "multiplayer.network.added" : "multiplayer.network.updated", network.Info.Name));
         return result;
     }
+
+    /// <summary>What the confirmation says: unreviewed, signed only by a test key, or a test-signed update of the Jay network.</summary>
+    private string ConfirmText(SignedNetwork network) =>
+        !_service.Networks.IsTestSigned(network) ? L.F("multiplayer.network.confirm", network.Info.Name, network.SignerFingerprint)
+        : network.Info.Id == "jay" ? L.F("multiplayer.network.confirm_test_jay", network.SignerFingerprint)
+        : L.F("multiplayer.network.confirm_test", network.Info.Name, network.SignerFingerprint);
 
     [RelayCommand]
     private void RemoveNetwork()
@@ -146,7 +158,7 @@ public sealed partial class MultiplayerViewModel
         _service.Networks.Remove(choice.Id);
         _service.Settings.PublicNetworks = _service.Networks.ToSaved();
         if (_service.Settings.PublicNetworkId == choice.Id) _service.Settings.PublicNetworkId = null;
-        _service.Settings.Save();
+        _service.TrySaveSettings();
         LoadNetworks();
         NetworkChanged();
         SetStatus(StatusMessage.Success("multiplayer.network.removed", choice.Name));

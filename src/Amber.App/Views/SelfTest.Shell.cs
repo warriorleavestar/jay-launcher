@@ -186,6 +186,17 @@ internal sealed partial class SelfTest
         Press(Key.D1, KeyModifiers.Control);
         await Task.Delay(300);
         Check("Ctrl+1 回游戏库", main.CurrentPage is LibraryViewModel && shell.SelectedSection?.Id == "library");
+        // §8.5: over the first-run wizard the shell underneath takes no shortcut, except going back to the default look.
+        Dispatcher.UIThread.Invoke(() => main.FirstRun.IsOpen = true);
+        await Task.Delay(200);
+        Press(Key.D2, KeyModifiers.Control);
+        Press(Key.OemComma, KeyModifiers.Control);
+        await Task.Delay(300);
+        Check("首次启动向导盖着时 Ctrl+2、Ctrl+, 不换外壳下面的页", main.CurrentPage is LibraryViewModel && shell.SelectedSection?.Id == "library");
+        Check("向导盖着时只放行回默认外观和退出游戏", MainWindow.AllowedOverBlockingOverlay(Key.T, KeyModifiers.Control | KeyModifiers.Alt | KeyModifiers.Shift)
+            && !MainWindow.AllowedOverBlockingOverlay(Key.V, KeyModifiers.Control) && !MainWindow.AllowedOverBlockingOverlay(Key.D1, KeyModifiers.Control));
+        Dispatcher.UIThread.Invoke(() => main.FirstRun.IsOpen = false);
+        await Task.Delay(200);
 
         // Inside the library there are no sub-page tabs: new instance, then the focused instance; back and forward walk
         // the library's own history, and the top bar's breadcrumb leads home.

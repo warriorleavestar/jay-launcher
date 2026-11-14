@@ -85,7 +85,7 @@
                     <TextBlock Grid.Column="1" Margin="8,0,0,0" Text="{l:T accounts.current.label}" IsVisible="{Binding IsCurrent}" Foreground="{DynamicResource AccentText}" />
                   </Grid>
                   <TextBlock Text="{Binding KindText}" Classes="hint" FontSize="12" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding KindText}" />
-                  <TextBlock Text="{l:T accounts.external.insecure_saved}" IsVisible="{Binding InsecureServer}" Foreground="{DynamicResource AmberAccent}"
+                  <TextBlock Text="{l:T accounts.external.insecure_saved}" IsVisible="{Binding InsecureServer}" Foreground="{DynamicResource WarningText}"
                              FontSize="12" TextWrapping="Wrap" />
                   <TextBlock Text="{Binding JayText}" IsVisible="{Binding HasJay}" Classes="hint" FontSize="12" TextTrimming="CharacterEllipsis" />
                 </StackPanel>

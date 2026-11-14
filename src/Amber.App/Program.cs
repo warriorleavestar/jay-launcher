@@ -1,3 +1,4 @@
+using Amber.App.Services;
 using Avalonia;
 using Avalonia.Media;
 
@@ -6,6 +7,9 @@ namespace Amber.App;
 internal static class Program
 {
     private static System.Runtime.InteropServices.PosixSignalRegistration? _ignoreHangUp;
+
+    /// <summary>This Jay's hold on its data folder (null for unattended developer runs).</summary>
+    internal static SingleInstance? Instance { get; private set; }
 
     [STAThread]
     public static void Main(string[] args)
@@ -24,6 +28,21 @@ internal static class Program
             Environment.Exit(Amber.Core.Multiplayer.WindowsElevatedGuardHost.Run(args));
         // Linux：先确认 ICU 和图形界面要用的库都在（缺了给出看得懂的提示）。必须排在任何区域、格式化代码之前。
         LinuxStartup.BeforeAnything(args);
+        // One Jay per data folder: a second start brings the first one's window forward instead. Unattended developer
+        // runs (self-checks, snapshots) use their own folders and are left out.
+        if (!DevCrashGuard.Unattended)
+        {
+            // A restart waits for the Jay that started it to finish closing (it saves on the way out).
+            SingleInstance.WaitForExit(args, TimeSpan.FromSeconds(30));
+            var patience = SingleInstance.WaitPid(args) is null ? TimeSpan.Zero : TimeSpan.FromSeconds(10);
+            Instance = SingleInstance.Acquire(Services.AppSettings.DataDir, patience);
+            if (Instance is null)
+            {
+                SingleInstance.RequestActivation(Services.AppSettings.DataDir, TimeSpan.FromSeconds(2));
+                return;
+            }
+        }
+        args = [.. SingleInstance.WithoutWaitPid(args)];
         // Local-only breadcrumbs for exits that leave no crash report or console output (see ExitTrail).
         Amber.Core.Diagnostics.ExitTrail.Start(Services.AppSettings.DataDir);
         // Started from the Dock, Finder or a desktop menu, Jay has no terminal to hang up. macOS then sends SIGHUP to a whole

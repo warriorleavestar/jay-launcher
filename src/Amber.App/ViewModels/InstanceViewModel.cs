@@ -937,7 +937,19 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
         await LoadModsAsync();
     }
 
-    public void AddFiles(IEnumerable<string> paths, string targetDir)
+    /// <summary>Copies picked files into a folder of this instance, off the UI thread (a shader pack can be large).</summary>
+    public async Task AddFilesAsync(IEnumerable<string> paths, string targetDir)
+    {
+        var list = paths.ToList();
+        Status = L.T("instance.files.adding");
+        var (count, failure) = await Task.Run(() => CopyFiles(list, targetDir));
+        if (failure is not null) SetStatus(failure);
+        else Status = L.P("instance.files.added", count, count);
+        _loadedTabs.Clear();
+        LoadTab(TabIndex);
+    }
+
+    private static (int Count, StatusMessage? Failure) CopyFiles(IEnumerable<string> paths, string targetDir)
     {
         var count = 0;
         StatusMessage? failure = null;
@@ -959,10 +971,7 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
                 failure ??= StatusMessage.Failure("instance.files.add_failed", e, Path.GetFileName(path), ErrorText.Of(e));
             }
         }
-        if (failure is not null) SetStatus(failure);
-        else Status = L.P("instance.files.added", count, count);
-        _loadedTabs.Clear();
-        LoadTab(TabIndex);
+        return (count, failure);
     }
 
     public string? ModsDir => Current?.ModsDir;
@@ -1032,17 +1041,22 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
         Worlds.Remove(item);
     }
 
-    public void ImportWorld(string zipPath)
+    /// <summary>Unpacks a world archive into this instance's saves, off the UI thread (a world can be large).</summary>
+    public async Task ImportWorldAsync(string zipPath)
     {
         if (Current is not { } c) return;
         try
         {
-            System.IO.Directory.CreateDirectory(c.SavesDir);
-            var folder = WorldManager.Import(zipPath, c.SavesDir);
+            Status = L.F("instance.worlds.importing", Path.GetFileName(zipPath));
+            var folder = await Task.Run(() =>
+            {
+                System.IO.Directory.CreateDirectory(c.SavesDir);
+                return WorldManager.Import(zipPath, c.SavesDir);
+            });
             SetStatus(StatusMessage.Success("instance.worlds.imported", folder));
             LoadWorlds();
         }
-        catch (Exception e) when (e is IOException or InvalidDataException)
+        catch (Exception e) when (e is IOException or InvalidDataException or UnauthorizedAccessException)
         {
             SetStatus(StatusMessage.Failure("instance.worlds.import_failed", e, ErrorText.Of(e)));
         }
@@ -1104,23 +1118,30 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
         if (Current is { } c && DatapackWorld is { } w) NavigateToDatapacks?.Invoke(c.Id, w.World.FolderName);
     }
 
-    public void AddDatapacks(IEnumerable<string> paths)
+    /// <summary>Adds data packs to the chosen world, off the UI thread.</summary>
+    public async Task AddDatapacksAsync(IEnumerable<string> paths)
     {
         if (DatapackWorld is not { } w) return;
-        var added = 0;
-        var errors = new List<string>();
-        foreach (var path in paths)
+        var list = paths.ToList();
+        Status = L.T("instance.files.adding");
+        var (added, errors) = await Task.Run(() =>
         {
-            try
+            var copied = 0;
+            var problems = new List<string>();
+            foreach (var path in list)
             {
-                DatapackManager.Add(w.World.Path, path);
-                added++;
+                try
+                {
+                    DatapackManager.Add(w.World.Path, path);
+                    copied++;
+                }
+                catch (Exception e) when (e is IOException or InvalidDataException or UnauthorizedAccessException)
+                {
+                    problems.Add(e.Message);
+                }
             }
-            catch (Exception e) when (e is IOException or InvalidDataException or UnauthorizedAccessException)
-            {
-                errors.Add(e.Message);
-            }
-        }
+            return (copied, problems);
+        });
         Status = errors.Count > 0
             ? L.F("instance.datapacks.added_with_errors", L.P("instance.datapacks.added", added, added), string.Join(L.T("common.error_separator"), errors))
             : L.P("instance.datapacks.added", added, added);

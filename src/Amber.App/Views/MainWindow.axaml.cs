@@ -23,6 +23,18 @@ public partial class MainWindow : Window
         InitLazyOverlays();
         Amber.App.Services.ThemeService.AttachMainWindow(this);
         Amber.App.Services.DensityService.Attach(this);
+        // Jay started again on the same data folder: that start ends, and this window comes forward.
+        if (Program.Instance is { } instance)
+        {
+            void Forward() => Dispatcher.UIThread.Post(() =>
+            {
+                if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
+                Show();
+                Activate();
+            });
+            instance.ActivationRequested += Forward;
+            Closed += (_, _) => instance.ActivationRequested -= Forward;
+        }
         AttachShell();
         AttachDrop();
         AttachTips();
@@ -62,6 +74,8 @@ public partial class MainWindow : Window
                 e.Handled = true;
             }
             else if (e.Key == Avalonia.Input.Key.Escape) Controls.ConfirmButton.CancelAll();
+            // Nothing below acts on the shell behind the first-run wizard or the breaker countdown.
+            else if (DataContext is MainViewModel covered && BlockingOverlayOpen(covered)) return;
             // Ctrl+Enter 启动当前实例；焦点在输入框里（JVM 参数这类）时不触发，免得边填参数边把游戏启动了。
             else if (e.Key == Avalonia.Input.Key.Enter && e.KeyModifiers == Avalonia.Input.KeyModifiers.Control)
             {
@@ -91,6 +105,14 @@ public partial class MainWindow : Window
         if (Environment.GetEnvironmentVariable("AMBER_SELFTEST") is { Length: > 0 } report)
             Opened += async (_, _) =>
             {
+                // Never against this computer's own settings: every scope changes them.
+                if (SelfTestGuard.DataDirProblem(Environment.GetEnvironmentVariable("AMBER_DATA_DIR")) is { } refused)
+                {
+                    Directory.CreateDirectory(report);
+                    File.WriteAllText(Path.Combine(report, "report.txt"), $"FAIL {refused}{Environment.NewLine}");
+                    Close();
+                    return;
+                }
                 if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "content-layout")
                     await new ContentPageSelfTest(this, (MainViewModel)DataContext!, report).RunAsync();
                 else if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "remote")
@@ -218,6 +240,9 @@ public partial class MainWindow : Window
         // 多开时一局崩了、另一局还在跑：GameExited 不会来，这里单独把窗口拿回来并提示。
         home.GameCrashed += id => Dispatcher.UIThread.Post(() => OnGameCrashed(home, id));
         home.Service.SettingsSaveFailed += e => Dispatcher.UIThread.Post(() => OnSettingsSaveFailed(e));
+        // A damaged or locked settings file, a locked accounts file: said once at startup, and the notice stays until closed.
+        foreach (var problem in home.Service.StartupProblems())
+            Toasts.Show(problem, Avalonia.Controls.Notifications.NotificationType.Error);
     }
 
     private void OnGameCrashed(HomeViewModel home, string id)
