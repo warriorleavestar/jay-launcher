@@ -342,7 +342,8 @@ public sealed class GamePortRelayTests
     public async Task PlayersBeyondTheLimitAreClosedAtOnce()
     {
         using var game = new EchoGame(0xE1);
-        await using var relay = new GamePortRelay();
+        // The total on its own (new connections are capped separately, see AFloodOfNewConnections…).
+        await using var relay = new GamePortRelay { MaxNewForTest = int.MaxValue };
         relay.SetTarget(game.Port);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         relay.BeforeConnectForTest = () => release.Task;
@@ -499,6 +500,50 @@ public sealed class GamePortRelayTests
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
         while (relay.OpenConnectionsTo(port) > 0 && DateTime.UtcNow < deadline) await Task.Delay(20);
         Assert.Equal(0, relay.OpenConnectionsTo(port));
+    }
+
+    [Fact]
+    public async Task AFloodOfNewConnectionsOnlyDelaysNewPlayersAndBigRoomsStillFill()
+    {
+        using var game = new EchoGame(0xE3);
+        await using var relay = new GamePortRelay { NewFor = TimeSpan.FromMilliseconds(800) };
+        relay.SetTarget(game.Port);
+        // Callers on loopback can't be told apart: only so many new connections at once, the rest closed straight away.
+        var first = new List<TcpClient>();
+        for (var i = 0; i < GamePortRelay.MaxNewUnidentified; i++) first.Add(await PlayerAsync(relay, (byte)i));
+        Assert.Null(await RoundTripAsync(relay.Port, [99]));
+
+        // Once they are no longer new, more get in, up to the room's total; the first ones are still there.
+        var all = new List<TcpClient>(first);
+        while (all.Count < GamePortRelay.MaxConnections)
+        {
+            await Task.Delay(900);
+            for (var i = 0; i < GamePortRelay.MaxNewUnidentified && all.Count < GamePortRelay.MaxConnections; i++)
+                all.Add(await PlayerAsync(relay, (byte)all.Count));
+        }
+        Assert.Equal(GamePortRelay.MaxConnections, relay.OpenConnectionsTo(game.Port));
+        foreach (var (player, i) in first.Select((p, i) => (p, i)))
+        {
+            await player.GetStream().WriteAsync(new byte[] { (byte)(100 + i) });
+            var back = new byte[2];
+            await player.GetStream().ReadExactlyAsync(back);
+            Assert.Equal(new byte[] { 0xE3, (byte)(100 + i) }, back);
+        }
+        foreach (var p in all) p.Dispose();
+    }
+
+    /// <summary>A player through the relay, checked with one round trip and kept open.</summary>
+    private static async Task<TcpClient> PlayerAsync(GamePortRelay relay, byte value)
+    {
+        var client = new TcpClient();
+        await client.ConnectAsync(IPAddress.Loopback, relay.Port);
+        var stream = client.GetStream();
+        await stream.WriteAsync(new[] { value });
+        var back = new byte[2];
+        using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await stream.ReadExactlyAsync(back, limit.Token);
+        Assert.Equal(value, back[1]);
+        return client;
     }
 
     [Fact]

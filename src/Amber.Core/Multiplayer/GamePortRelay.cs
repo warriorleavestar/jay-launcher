@@ -45,6 +45,22 @@ public sealed class GamePortRelay : IAsyncDisposable
     /// </summary>
     internal TimeSpan IdleTimeout { get; init; } = TimeSpan.FromSeconds(120);
 
+    /// <summary>
+    /// New connections from callers that can't be told apart (loopback) allowed at once: a connection counts as new for
+    /// <see cref="NewFor"/>. Minecraft drops a connection that hasn't logged in by then and a world takes a limited number
+    /// of players, so a flood of fresh connections only delays new players; players already in are never pushed out, and
+    /// a room can still pass on <see cref="MaxConnections"/>.
+    /// </summary>
+    internal const int MaxNewUnidentified = 16;
+
+    internal TimeSpan NewFor { get; init; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>Tests: the cap on new unidentified connections (raised to test the total limit on its own).</summary>
+    internal int MaxNewForTest { get; init; } = MaxNewUnidentified;
+
+    // Unidentified connections still counted as new (under _gate).
+    private int _newUnidentified;
+
     private readonly TimeSpan _connectTimeout;
     private int _target;
 
@@ -226,6 +242,13 @@ public sealed class GamePortRelay : IAsyncDisposable
     {
         using var inbound = client;
         int port;
+        // 1 while this unidentified connection still counts as new; whoever sets it to 0 first gives the place back.
+        var isNew = 0;
+        void NoLongerNew()
+        {
+            if (Interlocked.Exchange(ref isNew, 0) == 1)
+                lock (_gate) _newUnidentified--;
+        }
         // The target is read and the caller counted for it under the same lock ClearTargetIfIdle takes, so a game that
         // is taking a player right now is never dropped between the two.
         lock (_gate)
@@ -240,9 +263,16 @@ public sealed class GamePortRelay : IAsyncDisposable
                 if (_perSource.GetValueOrDefault(source) >= MaxPerSource) return;
                 _perSource[source] = _perSource.GetValueOrDefault(source) + 1;
             }
+            else
+            {
+                if (_newUnidentified >= MaxNewForTest) return;
+                _newUnidentified++;
+                isNew = 1;
+            }
             port = target;
             _connecting[port] = _connecting.GetValueOrDefault(port) + 1;
         }
+        if (isNew == 1) _ = Task.Delay(NewFor, _cts.Token).ContinueWith(_ => NoLongerNew(), TaskScheduler.Default);
         var connecting = true;
         Socket? outbound = null;
         (TcpClient, Socket, int)? entry = null;
@@ -288,6 +318,7 @@ public sealed class GamePortRelay : IAsyncDisposable
                 }
             }
             outbound?.Dispose();
+            NoLongerNew();
         }
 
         // No longer connecting (once): the caller is now open, or gone.
