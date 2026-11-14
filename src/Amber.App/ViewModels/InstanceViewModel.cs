@@ -689,6 +689,9 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
         _ = LoadJavaChoicesAsync(s.JavaPath);
     }
 
+    /// <summary>Counts Java list loads, so a scan that returns after a newer load does not overwrite its list.</summary>
+    private int _javaLoad;
+
     private async Task LoadJavaChoicesAsync(string? current)
     {
         // The scan takes a while. Until it returns, the list holds the automatic entry and this instance's stored path,
@@ -698,7 +701,10 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
         JavaChoices.Add(new JavaChoice("", null));
         if (current is not null) JavaChoices.Add(new JavaChoice(current, current));
         SelectedJava = JavaChoices[^1];
+        var load = ++_javaLoad;
         var found = await _service.Java.ScanAsync();
+        // Another instance's settings were loaded meanwhile: its own scan fills the list.
+        if (load != _javaLoad) return;
         var wasLoading = _loadingSettings;
         _loadingSettings = true;
         JavaChoices.Clear();
