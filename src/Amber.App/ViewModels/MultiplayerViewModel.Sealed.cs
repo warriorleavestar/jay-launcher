@@ -113,13 +113,21 @@ public sealed partial class MultiplayerViewModel
         SetStatus(StatusMessage.Info("multiplayer.direct.punching"));
         try
         {
-            SetStatus(await direct.AddGuestAsync(guest)
+            var ok = await direct.AddGuestAsync(guest);
+            // The room may have ended during the punch (up to a minute): then there is nothing to report here.
+            if (_direct != direct) return;
+            SetStatus(ok
                 ? StatusMessage.Success("multiplayer.sealed.punched")
                 : StatusMessage.Warning("multiplayer.sealed.punch_failed"));
         }
-        catch (DirectFailedException e)
+        catch (DirectFailedException e) when (_direct == direct)
         {
             SetStatus(StatusMessage.Plain(e.Message, StatusKind.Error));
+        }
+        catch (Exception e) when (e is DirectFailedException or OperationCanceledException or IOException or System.Net.Sockets.SocketException or ObjectDisposedException)
+        {
+            // Ended with the room (its bridge was closed): note it for diagnostics instead of failing the command.
+            _diag.Add(L.T("multiplayer.invite.diagnostics_category"), e.Message);
         }
     }
 
