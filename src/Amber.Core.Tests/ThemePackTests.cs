@@ -367,6 +367,8 @@ public class ThemePackTests : IDisposable
     [InlineData("inset 1 1 0 0 #FFFFFF", "inset 1 1 0 0 #FFFFFF")]
     [InlineData("0 2 6 #66000000", null)]
     [InlineData("0 2 -6 0 #000000", null)]
+    [InlineData("NaN 0 0 0 #000000", null)]
+    [InlineData("0 Infinity 0 0 #000000", null)]
     [InlineData("1 1 1 1 #000000, 2 2 2 2 #000000, 3 3 3 3 #000000", null)]
     public void ParsesShadows(string text, string? expected) => Assert.Equal(expected, ThemeStyles.ParseShadow(text));
 

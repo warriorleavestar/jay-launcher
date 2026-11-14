@@ -81,6 +81,16 @@ public class ThemeLayoutTests
     }
 
     [Fact]
+    public void InstancesPageKnowsTheLastRunRegion()
+    {
+        // The instance page's regions match the names the app and docs use (instances.lastrun is the last-run panel).
+        Assert.Contains("instances.lastrun", ThemeLayout.Regions["instances"].Required);
+        var pack = Read(("layout/pages/instances.json", """{ "type": "stack", "children": [ "instances.header", "instances.lastrun", "instances.details", "instances.status" ] }"""));
+        Assert.DoesNotContain(pack.Problems, p => p.Code == "unknown_region");
+        Assert.Equal(["instances.header", "instances.lastrun", "instances.details", "instances.status"], RegionsIn(ThemeLayout.TreeFor(pack.Pages["instances"], "wide")!));
+    }
+
+    [Fact]
     public void MeAndPeoplePagesCanBeLaidOut()
     {
         var pack = Read(
