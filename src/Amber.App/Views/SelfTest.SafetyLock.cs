@@ -120,6 +120,7 @@ internal sealed class SafetyLockSelfTest(MainWindow window, MainViewModel main, 
             ImageTheme.Write(noisePack, "selftest-noise-sidebar", "Noise sidebar", ImageTheme.Extract([]),
                 new Dictionary<string, ImageThemeSlot> { [ThemeSlots.Sidebar] = new(new ThemeSlot { Image = "", Dim = 0 }, NoisePng(480, 1400), ".png") });
             var sidebarRow = window.GetVisualDescendants().OfType<PrivacyRow>().First(r => r.Name == "PrivacyRow");
+            var (windowWidth, windowHeight) = (window.ClientSize.Width, window.ClientSize.Height);
             foreach (var (w, h) in new[] { (1280, 800), (600, 420) })
             {
                 window.Width = w;
@@ -144,6 +145,8 @@ internal sealed class SafetyLockSelfTest(MainWindow window, MainViewModel main, 
             }
             settings.ResetThemePackCommand.Execute(null);
             Application.Current!.RequestedThemeVariant = ThemeVariant.Default;
+            // Back to the size the baseline was taken at, so the later comparisons see the same layout.
+            (window.Width, window.Height) = (windowWidth, windowHeight);
             window.Content = stage;
             await Task.Delay(300);
 
