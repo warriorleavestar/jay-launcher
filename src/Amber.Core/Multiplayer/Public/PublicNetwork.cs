@@ -211,6 +211,15 @@ public sealed class PublicNetworkSession : IPublicNetwork, IDisposable
     public bool HasExited => _process.HasExited;
     public event Action<string>? Output;
 
+    /// <summary>
+    /// Raised once, on a thread-pool thread, when EasyTier exits on its own (not when this session is disposed). The session
+    /// never restarts it: whoever owns the session decides what to do.
+    /// </summary>
+    public event Action? Exited;
+
+    private volatile bool _disposed;
+    private int _exitRaised;
+
     private PublicNetworkSession(Process process, IDisposable? job, string cliPath, PublicNetworkOptions options)
     {
         _process = process;
@@ -228,9 +237,19 @@ public sealed class PublicNetworkSession : IPublicNetwork, IDisposable
         var session = new PublicNetworkSession(process, job, cliPath, options);
         process.OutputDataReceived += (_, e) => session.OnLine(e.Data);
         process.ErrorDataReceived += (_, e) => session.OnLine(e.Data);
+        process.EnableRaisingEvents = true;
+        process.Exited += (_, _) => session.OnExited();
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
+        // It may have ended before the handler was attached.
+        if (process.HasExited) session.OnExited();
         return session;
+    }
+
+    private void OnExited()
+    {
+        if (_disposed || Interlocked.Exchange(ref _exitRaised, 1) != 0) return;
+        Exited?.Invoke();
     }
 
     public IReadOnlyList<string> RecentOutput { get { lock (_output) return _output.ToList(); } }
@@ -315,6 +334,7 @@ public sealed class PublicNetworkSession : IPublicNetwork, IDisposable
 
     public void Dispose()
     {
+        _disposed = true;
         try
         {
             EasyTierProcessGuard.Stop(_process);

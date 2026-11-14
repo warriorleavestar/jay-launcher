@@ -170,6 +170,9 @@ public sealed partial class MultiplayerViewModel
             IsPublicConnected = true;
             // Keep this network's directory snapshot fresh on a fixed schedule: lookups and the room list read it locally.
             var connected = _public;
+            // EasyTier ending on its own (crash, killed) disconnects: the page must not keep showing a network that is gone.
+            connected.Exited += () => Dispatcher.UIThread.Post(() => OnPublicExited(connected));
+            if (connected.HasExited) Dispatcher.UIThread.Post(() => OnPublicExited(connected));
             // The same copy every DirectoryClient(connected) reads (one per network), so lookups never ask on their own.
             _snapshotPolling?.Dispose();
             _snapshotPolling = DirectoryClient(connected).Snapshots.StartPolling(() => DirectoryClient(connected));
@@ -207,6 +210,15 @@ public sealed partial class MultiplayerViewModel
 
     [RelayCommand]
     private void ClosePublicNotice() => PublicNoticeOpen = false;
+
+    /// <summary>The public network's EasyTier exited while connected: disconnect and say why. No automatic reconnect.</summary>
+    internal void OnPublicExited(PublicNetworkSession session)
+    {
+        if (_public != session) return;
+        var reason = session.RecentOutput.LastOrDefault() ?? "";
+        DisconnectPublic();
+        SetStatus(new StatusMessage("common.raw", [L.F("core.mp.public.exited", reason)], StatusKind.Warning));
+    }
 
     [RelayCommand]
     private void DisconnectPublic()
