@@ -73,7 +73,9 @@ elif command -v firewall-cmd >/dev/null && firewall-cmd --state >/dev/null 2>&1;
 fi
 
 systemctl daemon-reload
-systemctl enable --now jay-network
+systemctl enable jay-network
+# restart, not start: a re-run must replace a node that is already running with the new settings.
+systemctl restart jay-network
 echo
 echo "装好了。看日志：journalctl -u jay-network -f"
 echo "看状态：sudo -u jay JAY_SERVER_DIR=$DATA $BIN_DIR/jay-server node status"

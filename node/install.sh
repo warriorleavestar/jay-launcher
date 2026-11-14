@@ -132,7 +132,9 @@ UNIT
 chmod 0600 "/etc/systemd/system/${SERVICE}.service"
 
 systemctl daemon-reload
-systemctl enable --now "$SERVICE" >/dev/null
+systemctl enable "$SERVICE" >/dev/null
+# restart, not start: a re-run must replace a node that is already running with the new settings.
+systemctl restart "$SERVICE"
 sleep 2
 systemctl is-active --quiet "$SERVICE" || { journalctl -u "$SERVICE" -n 30 --no-pager; die "服务没有启动 / service failed to start"; }
 
