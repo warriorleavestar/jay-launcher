@@ -217,12 +217,99 @@ public sealed class SplitRoomTests
 
     /// <summary>
     /// The places for legs in their handshake are shared across all ports: when stalled legs hold every one, the oldest
-    /// makes room, so a member still gets a split connection.
+    /// makes room, so a member still gets a split connection. Every leg that arrives while all places are taken closes
+    /// exactly one stalled connection.
     /// </summary>
     [Fact]
     public async Task StalledLegsAreCappedAcrossPorts()
     {
+        // A leg gives its place back as soon as its own handshake is done, before the other legs pair with it. Left to the
+        // scheduler, one leg can finish its handshake before the next leg is even accepted (a slow or busy machine, or
+        // paths with different latency), and that next leg then finds a free place and rightly closes nobody (see
+        // ALegAfterAnotherFinishedItsHandshakeTakesTheFreedPlace). So each leg waits here, right after taking its place,
+        // until every leg has taken one: all of them are in their handshake together and each needs room.
+        ManualResetEventSlim? allTaken = null;
+        var legCount = 0;
+        var taken = 0;
+        var metInTime = true;
+        await using var rig = await Rig.StartAsync(SplitSettings.Create(SplitPolicy.Auto, SplitPolicy.Auto), Wrapped, beforeServe: _ =>
+        {
+            if (Volatile.Read(ref allTaken) is not { } gate) return;
+            if (Interlocked.Increment(ref taken) >= Volatile.Read(ref legCount)) gate.Set();
+            if (!gate.Wait(TimeSpan.FromSeconds(20))) Volatile.Write(ref metInTime, false);
+        });
+        var ports = rig.Server.Ports;
+        using var barrier = new ManualResetEventSlim();
+        var idle = await FillHandshakePlacesAsync(rig);
+        try
+        {
+            Volatile.Write(ref legCount, ports.Count);
+            Volatile.Write(ref allTaken, barrier);
+            var connector = rig.Connector(TunnelService.Game);
+            await using (var stream = await connector.OpenAsync(CancellationToken.None))
+            {
+                Assert.IsType<SplitStream>(stream);
+                await EchoesAsync(stream);
+            }
+            Assert.True(Volatile.Read(ref metInTime));
+            Assert.Equal(ports.Count, rig.LegOpens);
+            Assert.Equal(ports.Count, rig.Server.Evicted);
+            Assert.True(rig.Server.PendingHandshakes <= SplitTunnelServer.MaxPendingHandshakes);
+        }
+        finally
+        {
+            foreach (var c in idle) c.Dispose();
+        }
+        Assert.True(await WaitAsync(() => rig.Server.PendingHandshakes == 0, 20));
+    }
+
+    /// <summary>
+    /// A leg that arrives after another leg of its connection finished its handshake takes the place that leg gave back:
+    /// only legs that find every place taken close a stalled connection.
+    /// </summary>
+    [Fact]
+    public async Task ALegAfterAnotherFinishedItsHandshakeTakesTheFreedPlace()
+    {
         await using var rig = await Rig.StartAsync(SplitSettings.Create(SplitPolicy.Auto, SplitPolicy.Auto), Wrapped);
+        var ports = rig.Server.Ports;
+        var idle = await FillHandshakePlacesAsync(rig);
+        try
+        {
+            // The first leg closes one stalled connection; once that one has ended and the first leg's handshake is done,
+            // one place is free.
+            var oneFree = false;
+            IReadOnlyList<Func<CancellationToken, Task<Stream>>> legs =
+            [
+                ct => TunnelClient.Raw("127.0.0.1", ports[0], ct),
+                async ct =>
+                {
+                    oneFree = await WaitAsync(() => rig.Server.PendingHandshakes == SplitTunnelServer.MaxPendingHandshakes - 1, 20);
+                    return await TunnelClient.Raw("127.0.0.1", ports[1], ct);
+                },
+            ];
+            var connector = new SplitConnector(rig.Member, TunnelService.Game, _ => throw new IOException("no single path here"), legs)
+            {
+                AutoBudget = Timeout.InfiniteTimeSpan,
+            };
+            await using (var stream = await connector.OpenAsync(CancellationToken.None))
+            {
+                Assert.IsType<SplitStream>(stream);
+                await EchoesAsync(stream);
+            }
+            Assert.True(oneFree);
+            Assert.Equal(1, rig.Server.Evicted);
+            Assert.True(rig.Server.PendingHandshakes <= SplitTunnelServer.MaxPendingHandshakes);
+        }
+        finally
+        {
+            foreach (var c in idle) c.Dispose();
+        }
+        Assert.True(await WaitAsync(() => rig.Server.PendingHandshakes == 0, 20));
+    }
+
+    /// <summary>Takes every handshake place with idle connections spread over the leg ports.</summary>
+    private static async Task<List<TcpClient>> FillHandshakePlacesAsync(Rig rig)
+    {
         var ports = rig.Server.Ports;
         var idle = new List<TcpClient>();
         try
@@ -236,24 +323,22 @@ public sealed class SplitRoomTests
             }
             Assert.True(await WaitAsync(() => rig.Server.PendingHandshakes == SplitTunnelServer.MaxPendingHandshakes, 60));
             Assert.Equal(0, rig.Server.Evicted);
-            var connector = rig.Connector(TunnelService.Game);
-            await using (var stream = await connector.OpenAsync(CancellationToken.None))
-            {
-                Assert.IsType<SplitStream>(stream);
-                await stream.WriteAsync(new byte[] { 5 });
-                await stream.FlushAsync();
-                var back = new byte[1];
-                Assert.True(await SecureStream.ReadExactAsync(stream, back, CancellationToken.None));
-                Assert.Equal(5, back[0]);
-            }
-            Assert.Equal(ports.Count, rig.Server.Evicted);
-            Assert.True(rig.Server.PendingHandshakes <= SplitTunnelServer.MaxPendingHandshakes);
+            return idle;
         }
-        finally
+        catch
         {
             foreach (var c in idle) c.Dispose();
+            throw;
         }
-        Assert.True(await WaitAsync(() => rig.Server.PendingHandshakes == 0, 20));
+    }
+
+    private static async Task EchoesAsync(Stream stream)
+    {
+        await stream.WriteAsync(new byte[] { 5 });
+        await stream.FlushAsync();
+        var back = new byte[1];
+        Assert.True(await SecureStream.ReadExactAsync(stream, back, CancellationToken.None));
+        Assert.Equal(5, back[0]);
     }
 
     /// <summary>A leg that says nothing and never closes is let go after the handshake deadline.</summary>
