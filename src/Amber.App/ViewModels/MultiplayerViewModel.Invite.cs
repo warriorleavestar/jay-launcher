@@ -218,10 +218,27 @@ public sealed partial class MultiplayerViewModel
     private IReadOnlyList<string> LobbyPeers(bool host) =>
         [.. (host ? TestListeners ?? [] : []), .. TestPeers ?? _service.MultiplayerPeers];
 
+    /// <summary>
+    /// A "No server" room reaches no relay, its knock lobby included: guests knock over the direct bridge, which hands
+    /// them to the lobby on loopback. Only the tests' local listeners are kept.
+    /// </summary>
+    private IReadOnlyList<string> ServerlessLobbyPeers() => [.. TestListeners ?? []];
+
+    /// <summary>Tests: prepares the host's knock lobby as opening a room does (it starts nothing until an invite exists).</summary>
+    internal void StartHostLobbyForTest(RoomCredentials credentials, MemberTable members, InviteBook? book = null, DirectSession? direct = null) =>
+        StartHostLobby(credentials, members, book, direct?.LobbyUdpPort, direct: direct);
+
+    /// <summary>Tests: closes the host's knock lobby.</summary>
+    internal void StopHostLobbyForTest() => StopHostLobby();
+
+    /// <summary>Tests: the nodes the host's knock lobby would connect to.</summary>
+    internal IReadOnlyList<string>? HostLobbyPeersForTest => _hostLobbyPeers?.Invoke();
+    private Func<IReadOnlyList<string>>? _hostLobbyPeers;
+
     /// <summary>房间开好之后：准备大厅（有邀请时才真的启动）。</summary>
     /// <param name="book">直连房间：大厅密钥不换的邀请簿。</param>
     /// <param name="listenUdpPort">直连房间：大厅 EasyTier 在本机回环上监听的 UDP 端口（直连桥把没批准的加入方转发到这里）。</param>
-    /// <param name="peers">大厅连哪些节点；默认是房间的节点（直连房间也一样：加入方经中继或局域网敲门）。</param>
+    /// <param name="peers">The nodes the lobby connects to; the room's nodes by default. A direct room ("No server") never takes any, whatever is passed.</param>
     /// <param name="direct">
     /// Direct rooms: approved guests get this session's addresses inside the encrypted knock reply, and the addresses they
     /// send back in the encrypted ack start the host's side of the punch.
@@ -233,7 +250,9 @@ public sealed partial class MultiplayerViewModel
         _members = members;
         ConfigureSecurity(members);
         var jayCertificate = JayCertificate;
-        var lobby = HostLobby.Create(_service.EasyTier, Path.Combine(EasyTierWorkRoot, "lobby"), peers ?? (() => LobbyPeers(host: true)),
+        var lobbyPeers = direct is not null ? ServerlessLobbyPeers : peers ?? (() => LobbyPeers(host: true));
+        _hostLobbyPeers = lobbyPeers;
+        var lobby = HostLobby.Create(_service.EasyTier, Path.Combine(EasyTierWorkRoot, "lobby"), lobbyPeers,
             Identity.KeyPair, () => _credentials ?? throw new InvalidOperationException(), pub => !Child.AlwaysAskKnock && Trusted.IsTrusted(pub), AskApprovalAsync, members,
             line => _diag.Add(L.T("multiplayer.invite.diagnostics_category"), line), book, listenUdpPort, () => HostDevicePolicy, () => HostAccountPolicy,
             () => RoomKnockWait.ToTimeSpan(), request => Dispatcher.UIThread.Post(() => OnKnockTimedOut(request)),
@@ -304,6 +323,7 @@ public sealed partial class MultiplayerViewModel
     {
         var lobby = _lobby;
         _lobby = null;
+        _hostLobbyPeers = null;
         _credentials = null;
         _members?.Clear();
         _members = null;
