@@ -342,8 +342,8 @@ public sealed class RunLifecycleTests : IDisposable
     public void CurrentInstanceSurvivesSaveFailure()
     {
         var settingsPath = Path.Combine(_game, "locked", "settings.json");
-        // 临时文件的位置被一个文件夹占着：写设置时抛 UnauthorizedAccessException。
-        Directory.CreateDirectory(settingsPath + ".tmp");
+        // The settings file's own path is taken by a folder: replacing it with the written temp file fails.
+        Directory.CreateDirectory(settingsPath);
         // 此用例只验证实例设置保存，不应触发共享测试账号库的旧玩家名迁移。
         var service = new LauncherService(new AppSettings
         {
