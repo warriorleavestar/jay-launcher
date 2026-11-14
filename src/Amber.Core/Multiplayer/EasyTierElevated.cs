@@ -115,6 +115,7 @@ public sealed class EasyTierElevatedSession : IEasyTierSession, IHotspotSharingS
     /// 旧版本（写文件传参数）留下的 run-lan 目录：参数、重启文件和日志里都可能有房间密钥，启动时清掉，只删这几种文件。
     /// 每个都先覆盖再删（尽量不在磁盘上留下原文）。不跟着联接或符号链接走：目录本身、上一级、子目录和文件是重解析点的都跳过；
     /// 有不止一个硬链接的文件不覆盖（覆盖会改到别处的同一份内容），只删掉 run-lan 里的这个名字。一个文件或目录出错只跳过它。
+    /// Keep this: the public releases v0.5.3 to v0.5.8 used the file-based guard and wrote these files, room key included.
     /// </summary>
     internal static class LegacyFiles
     {
