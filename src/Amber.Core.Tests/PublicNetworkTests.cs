@@ -219,6 +219,21 @@ public sealed class PublicNetworkTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task OneDirectoryNamingAFarOffTimeDoesNotSetTheVersion()
+    {
+        // Two directories that don't hold the room both say the host's clock is behind; one names a time a month away.
+        var far = _now + TimeSpan.FromDays(30);
+        await using var other = new RoomDirectoryServer(IPAddress.Loopback, 0, clock: () => far);
+        _net.Map[("10.235.0.2", PublicNetworkProfile.DirectoryPort)] = other.Port;
+        var client = new RoomDirectoryClient(_net, [PublicNetworkProfile.DirectoryIp, "10.235.0.2"]);
+        long? told = null;
+        await Assert.ThrowsAsync<DirectoryRejectedException>(() =>
+            client.AnnounceAsync(new RoomSigner().Sign(Listing(), _now - TimeSpan.FromHours(3)), true, [], default, behind: t => told = t));
+        // The host signs after the earlier time, which the other directories agree with.
+        Assert.Equal(_now.ToUnixTimeMilliseconds(), told);
+    }
+
+    [Fact]
     public async Task TheAnnouncerSignsAgainWhenTheDirectorySaysItsClockIsBehind()
     {
         // This directory's clock is hours ahead of the wall clock the announcer signs with.

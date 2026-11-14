@@ -1292,12 +1292,12 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
         return results;
     }
 
-    /// <summary>至少一个目录收下就算成功；都不收时，有明确拒绝就报拒绝，否则报连不上。</summary>
     /// <summary>The directory's time from a "stale" reply that says the listing was too old, when it is ahead of <paramref name="seq"/>.</summary>
     private static long? DirectoryTimeIfTooOld(JsonObject? reply, long seq) =>
         reply is not null && !IsOk(reply) && reply["error"] is JsonValue e && e.TryGetValue<string>(out var code) && code == "stale"
         && reply["now"] is JsonValue n && n.TryGetValue<long>(out var now) && now > seq ? now : null;
 
+    /// <summary>至少一个目录收下就算成功；都不收时，有明确拒绝就报拒绝，否则报连不上。</summary>
     private static List<JsonObject> NeedOne(List<(JsonObject? Reply, Exception? Error)> results)
     {
         var ok = results.Where(r => r.Reply?["ok"]?.GetValue<bool>() == true).Select(r => r.Reply!).ToList();
@@ -1468,7 +1468,10 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
         if (searchKey is not null) request["fp"] = Convert.ToHexStringLower(searchKey);
         if (account is not null) request["account"] = account;
         var results = await FanOutAsync(request, ct);
-        if (behind is not null && results.Select(r => DirectoryTimeIfTooOld(r.Reply, listing.Seq)).Max() is { } directoryNow) behind(directoryNow);
+        // The earliest time any directory gave: honest directories agree within minutes, so signing after it satisfies them
+        // all, and one directory that names a far-off time can't push the room's versions there on its own (which would
+        // make the other directories leave out its hidden entries as a wrong clock).
+        if (behind is not null && results.Select(r => DirectoryTimeIfTooOld(r.Reply, listing.Seq)).Min() is { } directoryNow) behind(directoryNow);
         var replies = NeedOne(results);
         if (replies.Any(r => r["warn"]?.GetValue<string>() == "clock")) return AnnounceWarning.Clock;
         return replies.Any(r => r["warn"]?.GetValue<string>() == "lookup") ? AnnounceWarning.Lookup : null;
