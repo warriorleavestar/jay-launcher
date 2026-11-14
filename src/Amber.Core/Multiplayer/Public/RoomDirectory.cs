@@ -293,19 +293,34 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
                 client.Dispose();
                 continue;
             }
+            var slot = new SlotLease(_slots);
             _ = Task.Run(async () =>
             {
-                try { await HandleAsync(client); }
+                try { await HandleAsync(client, slot); }
                 finally
                 {
                     client.Dispose();
-                    _slots.Release();
+                    slot.Release();
                 }
             });
         }
     }
 
-    private async Task HandleAsync(TcpClient client)
+    /// <summary>General slots free right now (tests).</summary>
+    internal int FreeSlots => _slots.CurrentCount;
+
+    /// <summary>A connection's general slot, given back once: when the connection ends, or earlier (see <see cref="SnapshotAsync"/>).</summary>
+    private sealed class SlotLease(SemaphoreSlim slots)
+    {
+        private int _released;
+
+        public void Release()
+        {
+            if (Interlocked.Exchange(ref _released, 1) == 0) slots.Release();
+        }
+    }
+
+    private async Task HandleAsync(TcpClient client, SlotLease slot)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
         deadline.CancelAfter(RoomDirectoryProtocol.RequestTimeout);
@@ -320,7 +335,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             if (await DirectoryChannel.AcceptAsync(stream, first[0], Identity ?? _ephemeralIdentity.Value, NetworkSecret, deadline.Token, Certificate) is not { } secure) return;
             if (Text(secure.Request["op"]) == "snap")
             {
-                await SnapshotAsync(secure, Source(client));
+                await SnapshotAsync(secure, Source(client), slot);
                 return;
             }
             await secure.Reply(Handle(secure.Request, Source(client)), deadline.Token);
@@ -350,7 +365,12 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
     /// the reply is serialized once per version and sent in chunks, each of which must go out within
     /// <see cref="RoomDirectoryProtocol.RequestTimeout"/> (a reader that stops reading is dropped, one that reads slowly isn't).
     /// </summary>
-    private async Task SnapshotAsync((JsonObject Request, DirectoryReply Reply, DirectorySnapshotReply Snapshot) secure, string? source)
+    /// <param name="general">
+    /// The connection's general slot: given back once the send holds a snapshot slot, so slow readers (bounded by the
+    /// snapshot slots) don't also hold the slots every other op needs.
+    /// </param>
+    private async Task SnapshotAsync((JsonObject Request, DirectoryReply Reply, DirectorySnapshotReply Snapshot) secure, string? source,
+        SlotLease? general = null)
     {
         using var quick = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
         quick.CancelAfter(RoomDirectoryProtocol.RequestTimeout);
@@ -403,6 +423,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
                 await secure.Reply(Error("busy"), quick.Token);
                 return;
             }
+            general?.Release();
             SnapshotPlan plan;
             try { plan = PlanSnapshot(secure.Request); }
             finally { Flush(); }
@@ -528,13 +549,42 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             ? new JsonObject { ["ok"] = false, ["error"] = "version", ["min"] = min.ToString() }
             : null;
 
+    /// <summary>Logins checked at once. Each costs a slow password hash, so a flood of them can't take every core.</summary>
+    public const int MaxConcurrentLogins = 2;
+
+    /// <summary>Failed logins the whole directory takes per minute; after that every login gets "busy" until the minute ends.</summary>
+    public const int MaxFailedLoginsPerMinute = 60;
+
+    /// <summary><see cref="MaxFailedLoginsPerMinute"/>, or fewer in tests.</summary>
+    internal int FailedLoginsPerMinute { get; init; } = MaxFailedLoginsPerMinute;
+
+    private readonly SemaphoreSlim _loginSlots = new(MaxConcurrentLogins, MaxConcurrentLogins);
+    private readonly Lock _loginGate = new();
+    private DateTimeOffset _failedLoginsSince = DateTimeOffset.MinValue;
+    private int _failedLogins;
+
     private JsonObject LoginRequest(LoginAuthority login, JsonObject request)
     {
-        var reply = login.Handle(request);
-        var ok = reply["ok"]?.GetValue<bool>() == true;
-        var error = reply["error"]?.GetValue<string>();
-        lock (_gate) _events.Add(o => o.OnLogin(ok, error));
-        return reply;
+        // Callers over the network can't be told apart, so these limits are directory-wide. Names that exist and names
+        // that don't are treated the same, so "busy" says nothing about which accounts exist.
+        if (!_loginSlots.Wait(0)) return Error("busy");
+        try
+        {
+            lock (_loginGate)
+            {
+                var now = _now();
+                if (now - _failedLoginsSince >= TimeSpan.FromMinutes(1) || now < _failedLoginsSince) (_failedLoginsSince, _failedLogins) = (now, 0);
+                if (_failedLogins >= FailedLoginsPerMinute) return Error("busy");
+            }
+            var reply = login.Handle(request);
+            var ok = reply["ok"]?.GetValue<bool>() == true;
+            var error = reply["error"]?.GetValue<string>();
+            if (error is "wrong" or "locked" or "disabled")
+                lock (_loginGate) _failedLogins++;
+            lock (_gate) _events.Add(o => o.OnLogin(ok, error));
+            return reply;
+        }
+        finally { _loginSlots.Release(); }
     }
 
     private JsonObject Extend(IDirectoryExtension extension, JsonObject request)

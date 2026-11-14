@@ -2054,6 +2054,7 @@
   "core.mp.account.locked": "密碼錯太多次，這個帳號暫時鎖住了，5 分鐘後再試",
   "core.mp.account.disabled": "這個帳號被網路管理員停用了",
   "core.mp.account.time": "電腦時間和這個網路差太多，請先校準時間",
+  "core.mp.account.busy": "這個網路現在同時登入的人太多，請過一分鐘再試",
   "core.mp.account.unsupported": "這個網路沒有開帳號登入",
   "core.mp.account.failed": "登入失敗，這個網路的回覆不對",
   "core.mp.knock.account": "沒有登入這個公共網路的帳號",

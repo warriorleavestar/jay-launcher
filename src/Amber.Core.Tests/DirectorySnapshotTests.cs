@@ -537,6 +537,20 @@ public sealed class DirectorySnapshotTests : IAsyncDisposable
         return await DirectoryChannel.CallAsync(stream, new DirectoryTrust { Network = "" }, "", "", request, default, snapshotLength: _ => { });
     }
 
+    [Fact]
+    public async Task ASnapshotBeingSentHoldsNoGeneralSlot()
+    {
+        int? free = null;
+        using var client = new TcpClient();
+        await client.ConnectAsync(IPAddress.Loopback, _directory.Port);
+        await using var stream = client.GetStream();
+        var reply = await DirectoryChannel.CallAsync(stream, new DirectoryTrust { Network = "" }, "", "", new JsonObject { ["op"] = "snap", ["jay"] = "9.9.9" },
+            default, snapshotLength: _ => free = _directory.FreeSlots);
+        Assert.True(reply["ok"]!.GetValue<bool>());
+        // The length arrives once the send holds a snapshot slot: by then the connection's general slot is free again.
+        Assert.Equal(RoomDirectoryServer.MaxConcurrent, free);
+    }
+
     /// <summary>Fills the directory with public rooms until a full snapshot is a large reply.</summary>
     private void FillPastSmall()
     {

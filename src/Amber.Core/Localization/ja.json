@@ -2054,6 +2054,7 @@
   "core.mp.account.locked": "パスワードを何度も間違えたため、このアカウントは 5 分間ロックされています",
   "core.mp.account.disabled": "このアカウントはネットワーク管理者によって無効にされています",
   "core.mp.account.time": "PC の時刻がこのネットワークと大きくずれています。先に時刻を合わせてください",
+  "core.mp.account.busy": "このネットワークでは今ログインが混み合っています。1 分ほどしてからもう一度試してください",
   "core.mp.account.unsupported": "このネットワークはアカウントログインに対応していません",
   "core.mp.account.failed": "ログインに失敗しました：ネットワークの応答が正しくありません",
   "core.mp.knock.account": "この公開ネットワークにログインしていません",

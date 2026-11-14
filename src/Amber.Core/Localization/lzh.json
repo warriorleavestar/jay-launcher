@@ -1824,6 +1824,7 @@
   "core.mp.public.err_gone": "此房已不存矣",
   "core.mp.public.err_other": "目錄服拒其求（{0}）",
   "core.mp.public.err_busy": "目錄方忙，Jay 少頃自再試。",
+  "core.mp.account.busy": "此網方多人同登，請待一分再試。",
   "core.mp.public.err_clock": "此機之時與目錄相去太遠，請正系統之時而再試。",
   "core.mp.public.warn_lookup": "目錄中用此房之邀者他房已眾。閉房復開，則易新邀",
   "core.mp.public.hidden_warning": "隱，然持邀者暫不能經公共網路尋之：{0}",

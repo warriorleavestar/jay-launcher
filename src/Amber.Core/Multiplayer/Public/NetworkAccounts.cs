@@ -444,6 +444,7 @@ public static class NetworkLoginClient
                 "disabled" => "core.mp.account.disabled",
                 "factor_setup" => "core.mp.factor.setup",
                 "time" => "core.mp.account.time",
+                "busy" => "core.mp.account.busy",
                 "op" => "core.mp.account.unsupported",
                 _ => "core.mp.account.failed",
             }));

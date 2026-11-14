@@ -2054,6 +2054,7 @@
   "core.mp.account.locked": "密码错太多次，这个账号暂时锁住了，5 分钟后再试",
   "core.mp.account.disabled": "这个账号被网络管理员停用了",
   "core.mp.account.time": "电脑时间和这个网络差太多，请先校准时间",
+  "core.mp.account.busy": "这个网络现在同时登录的人太多，请过一分钟再试",
   "core.mp.account.unsupported": "这个网络没有开账号登录",
   "core.mp.account.failed": "登录失败，这个网络的回复不对",
   "core.mp.knock.account": "没有登录这个公共网络的账号",
