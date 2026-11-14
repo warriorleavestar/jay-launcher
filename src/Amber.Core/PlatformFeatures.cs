@@ -14,6 +14,6 @@ public static class PlatformFeatures
     /// <summary>A desktop (Windows, macOS, Linux): not a phone or tablet, which the stores update and which have no desktop-only settings.</summary>
     public static bool IsDesktop { get; } = !(OperatingSystem.IsAndroid() || OperatingSystem.IsIOS());
 
-    /// <summary>这台电脑能被远程看 / 控制：Windows、macOS、Linux 的 X11 桌面（Wayland 还不行）。看别人在哪都行。</summary>
+    /// <summary>这台电脑能被远程看 / 控制：Windows、macOS、Linux（X11 桌面，或系统门户提供 ScreenCast / RemoteDesktop 的 Wayland 会话）。看别人在哪都行。</summary>
     public static bool RemoteControl => global::Amber.Core.RemoteControl.RemotePlatform.Supported;
 }

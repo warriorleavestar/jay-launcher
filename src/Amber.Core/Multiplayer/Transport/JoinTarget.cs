@@ -8,7 +8,11 @@ namespace Amber.Core.Multiplayer.Transport;
 /// “进入服务器”的地址，经出口转发前的处理：拆出主机和端口（含 [IPv6]:端口），没写端口时像游戏一样查 _minecraft._tcp 的 SRV 记录；
 /// 本机、局域网这类地址不经出口转（出口也会拒绝，这里直接不转，游戏照常直连）。
 /// </summary>
-/// <summary>经出口进服务器：实际连 Connect 这个地址；MC 握手包里写 Handshake 这个（和直接进时一样，是用户写的那个名字）。</summary>
+/// <summary>
+/// Joining a server through the exit: connect to the Connect pair and write the Handshake pair into the Minecraft handshake.
+/// Today the two pairs are always equal: as when the game joins directly, a name with an SRV record is replaced by the
+/// SRV host and port in both.
+/// </summary>
 public sealed record RelayPlan(string ConnectHost, int ConnectPort, string HandshakeHost, int HandshakePort);
 
 public static partial class JoinTarget
@@ -80,6 +84,13 @@ public static partial class JoinTarget
             if (!ExitPolicy.IsGloballyRoutable(typedIp)) return Skip(L.F("core.mp.join.local_address", typedHost));
             if (!IsIPv4(typedIp)) return Skip(IPv6Only);
             return new RelayPlan(typedHost, typedPort, typedHost, typedPort);
+        }
+        // A name in another script goes out as its ASCII (punycode) form, as the game itself resolves it: the relay
+        // and the SRV lookup only understand ASCII names.
+        if (!System.Text.Ascii.IsValid(typedHost))
+        {
+            try { typedHost = new System.Globalization.IdnMapping().GetAscii(typedHost.TrimEnd('.')); }
+            catch (ArgumentException) { return Skip(L.F("core.mp.join.invalid_address", server)); }
         }
         if (IsLocalName(typedHost)) return Skip(L.F("core.mp.join.local_name", typedHost));
         if (typedHost.Length > 253) return Skip(L.T("core.mp.join.name_too_long"));

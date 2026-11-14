@@ -416,6 +416,12 @@ public class SecurityReviewFixTests
         Assert.Null(await JoinTarget.ResolveForRelayAsync("localhost:25565", default, Public, NoSrv));
         Assert.Null(await JoinTarget.ResolveForRelayAsync("192.168.1.5:25565", default, Public, NoSrv));
         Assert.Equal(new RelayPlan("1.2.3.4", 25565, "1.2.3.4", 25565), await JoinTarget.ResolveForRelayAsync("1.2.3.4", default, Public, NoSrv));
+        // A name in another script is sent and looked up in its ASCII form.
+        string? srvAsked = null;
+        (string, int)? SrvSpy(string name) { srvAsked = name; return null; }
+        Assert.Equal(new RelayPlan("xn--bcher-kva.example.org", 25565, "xn--bcher-kva.example.org", 25565),
+            await JoinTarget.ResolveForRelayAsync("bücher.example.org", default, Public, SrvSpy));
+        Assert.Equal("_minecraft._tcp.xn--bcher-kva.example.org", srvAsked);
         // 本机名字不去查 SRV。
         var asked = false;
         (string, int)? Spy(string _) { asked = true; return null; }

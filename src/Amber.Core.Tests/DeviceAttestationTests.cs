@@ -255,6 +255,58 @@ public sealed class DeviceAttestationTests
     public void BadNetworkPolicyIsRefused(string json) =>
         Assert.Throws<InvalidDataException>(() => SecurityPolicy.Parse(JsonNode.Parse(json)));
 
+    [Fact]
+    public async Task AFailedAttestationClosesTheEncryptedStream()
+    {
+        using var hostDevice = X25519KeyPair.Generate();
+        using var memberDevice = X25519KeyPair.Generate();
+        var (table, entry) = HostTable(hostDevice, memberDevice.PublicKey);
+        var (client, server, a, b) = await PairAsync();
+        using (a)
+        using (b)
+        {
+            var spy = new DisposeSpy(server);
+            var profile = MemberChannel.ChatProfile(TransportMode.High);
+            var accept = MemberChannel.AcceptAsync(spy, table, profile, "chat");
+            // The member completes the handshake with the right key, then hangs up before sending its proof.
+            await MemberChannel.ConnectAsync(client, entry.Key, profile, "chat", []);
+            a.Client.Close();
+            await Assert.ThrowsAnyAsync<Exception>(() => accept);
+            Assert.True(await spy.Disposed.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+        }
+    }
+
+    private sealed class DisposeSpy(Stream inner) : Stream
+    {
+        public TaskCompletionSource<bool> Disposed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public override bool CanRead => inner.CanRead;
+        public override bool CanSeek => false;
+        public override bool CanWrite => inner.CanWrite;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() => inner.Flush();
+        public override Task FlushAsync(CancellationToken ct) => inner.FlushAsync(ct);
+        public override int Read(byte[] buffer, int offset, int count) => inner.Read(buffer, offset, count);
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default) => inner.ReadAsync(buffer, ct);
+        public override void Write(byte[] buffer, int offset, int count) => inner.Write(buffer, offset, count);
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken ct = default) => inner.WriteAsync(buffer, ct);
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) { inner.Dispose(); Disposed.TrySetResult(true); }
+            base.Dispose(disposing);
+        }
+
+        public override async ValueTask DisposeAsync()
+        {
+            await inner.DisposeAsync();
+            Disposed.TrySetResult(true);
+            await base.DisposeAsync();
+        }
+    }
+
     private static (MemberTable Table, MemberEntry Entry) HostTable(X25519KeyPair hostDevice, byte[] memberPublic)
     {
         var table = new MemberTable { Attestation = (hostDevice, AttestationScheme.Default) };
