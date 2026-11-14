@@ -374,6 +374,8 @@
   "core.launch.game.legacyappdata": "[Jay] 旧版本：这次游戏的 APPDATA 指向 {0}（其中 .minecraft 就是实例目录），不会写到你自己的 .minecraft",
   "core.launch.game.legacyhome": "[Jay] 旧版本：这次游戏的系统家目录指向 {0}，不会写到你自己的 minecraft 目录",
   "core.launch.game.missingmainclass": "{0} 没有 mainClass",
+  "core.launch.game.bad_main_class": "{0} 的版本文件里写的主类 Jay 用不了（会被当成 Java 选项）。请重新安装这个版本。",
+  "core.launch.settings_record_unwritable": "Jay 没法保存“哪些实例设置是自己写的”这份记录（{0}）。请确认 Jay 的数据文件夹可以写入，然后再试一次。",
   "core.launch.paths.homejunctionfailed": "[Jay] 建不了旧版本用的家目录联接：{0}",
   "core.launch.paths.junctionfallback": "路径里有当前系统语言表示不了的字符，改用联接 {0} → {1}",
   "core.launch.paths.junctionunavailable": "路径里有当前系统语言表示不了的字符，而且建不了英文名的联接，游戏可能启动不了",

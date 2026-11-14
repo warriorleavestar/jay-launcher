@@ -45,7 +45,12 @@ public sealed class InstanceSettings
     public static InstanceSettings Load(GameDirectory dir, string id)
     {
         var path = Path.Combine(dir.VersionDir(id), FileName);
-        if (!File.Exists(path)) return new InstanceSettings();
+        if (!File.Exists(path))
+        {
+            // Nothing to check, but the folder is still recorded as seen now, before a game from it can write here.
+            try { InstanceSettingsTrust.EnsureAdopted(dir); } catch (IOException) { }
+            return new InstanceSettings();
+        }
         var settings = ReadFile(path) ?? new InstanceSettings();
         if (!InstanceSettingsTrust.IsTrusted(dir, settings))
         {
@@ -72,6 +77,10 @@ public sealed class InstanceSettings
         }
     }
 
+    /// <summary>
+    /// Writes the settings. Throws <see cref="IOException"/> when Jay cannot record them as its own (see
+    /// <see cref="InstanceSettingsTrust"/>); the file is then left as it was.
+    /// </summary>
     public void Save(GameDirectory dir, string id)
     {
         Directory.CreateDirectory(dir.VersionDir(id));

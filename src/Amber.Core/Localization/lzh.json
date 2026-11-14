@@ -371,6 +371,8 @@
   "core.launch.game.legacyappdata": "[Jay] 舊版：此局之 APPDATA 指 {0}（其中 .minecraft 即實例之目錄），不書君自有之 .minecraft",
   "core.launch.game.legacyhome": "[Jay] 舊版：此局系統之家目錄指 {0}，不書君自有之 minecraft 目錄",
   "core.launch.game.missingmainclass": "{0} 中無 mainClass",
+  "core.launch.game.bad_main_class": "{0} 之版本檔所書主類，Jay 不能用（將被視為 Java 選項）。請重裝此版本。",
+  "core.launch.settings_record_unwritable": "Jay 不能存「何實例設定為己所書」之錄（{0}）。請察 Jay 之資料夾可書，而後再試。",
   "core.launch.paths.homejunctionfailed": "[Jay] 不能立舊版所須之家目錄連結：{0}",
   "core.launch.paths.junctionfallback": "徑有今系統之語不能表之字，改用目錄連結 {0} → {1}",
   "core.launch.paths.junctionunavailable": "徑有今系統之語不能表之字，且不能立英文名之目錄連結，戲或不能啟",

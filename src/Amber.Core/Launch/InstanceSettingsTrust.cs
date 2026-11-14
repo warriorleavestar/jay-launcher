@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Amber.Core.Game;
+using Amber.Core.Localization;
 
 namespace Amber.Core.Launch;
 
@@ -14,16 +15,25 @@ namespace Amber.Core.Launch;
 /// <para>
 /// The record is by value, not by path, so copying or renaming an instance keeps its settings. The first time Jay
 /// sees a game folder (the first run after this check was added, or a newly added folder) it accepts the settings
-/// already there, since they were written before any game ran under this check.
+/// already there, since they were written before any game ran under this check. Jay adopts a folder before it starts
+/// any game from it (see <see cref="EnsureAdopted"/>), so nothing a game wrote can be adopted this way.
+/// </para>
+/// <para>
+/// Several Jay processes (the app, the CLI) can share the record, so every read-change-write holds a lock file next to
+/// it. A failure to record is reported to the caller: a save then fails, and a launch does not start.
 /// </para>
 /// </summary>
 internal static class InstanceSettingsTrust
 {
-    private const int MaxTrusted = 4096;
+    private static readonly AsyncLocal<string?> StoreOverride = new();
+    private static readonly AsyncLocal<int?> MaxOverride = new();
     private static readonly Lock Gate = new();
 
-    /// <summary>The record file; tests point it elsewhere.</summary>
-    internal static string? StorePathOverride { get; set; }
+    /// <summary>The record file; tests point it elsewhere (for their own async flow only).</summary>
+    internal static string? StorePathOverride { get => StoreOverride.Value; set => StoreOverride.Value = value; }
+
+    /// <summary>How many records are kept before old ones that no instance uses any more are dropped.</summary>
+    internal static int MaxTrusted { get => MaxOverride.Value ?? 4096; set => MaxOverride.Value = value; }
 
     internal static string StorePath => StorePathOverride ?? Path.Combine(
         Environment.GetEnvironmentVariable("AMBER_DATA_DIR") is { Length: > 0 } dir
@@ -40,27 +50,60 @@ internal static class InstanceSettingsTrust
         return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes("jay-instance-settings-v1\0" + text)));
     }
 
-    /// <summary>True when Jay wrote these values (or they have no value that leaves the sandbox).</summary>
+    /// <summary>
+    /// Records the game folder as seen, accepting the settings already in it, unless that was done before. Called
+    /// before any game starts from the folder; throws <see cref="IOException"/> when the record cannot be kept.
+    /// </summary>
+    internal static void EnsureAdopted(GameDirectory dir) => Change(store => AdoptIfNew(dir, store));
+
+    /// <summary>
+    /// True when Jay wrote these values (or they have no value that leaves the sandbox). Fails closed: when the record
+    /// cannot be read, values that leave the sandbox are not trusted.
+    /// </summary>
     internal static bool IsTrusted(GameDirectory dir, InstanceSettings settings)
     {
-        if (Fingerprint(settings) is not { } print) return true;
-        lock (Gate)
+        var print = Fingerprint(settings);
+        try
         {
-            var store = Read();
-            if (AdoptIfNew(dir, store)) Write(store);
-            return store.Trusted.Contains(print);
+            var trusted = false;
+            Change(store =>
+            {
+                var changed = AdoptIfNew(dir, store);
+                trusted = print is null || store.Trusted.Contains(print);
+                return changed;
+            }, keepGoingIfUnwritable: true);
+            return trusted;
+        }
+        catch (IOException)
+        {
+            return print is null;
         }
     }
 
-    /// <summary>Records the values Jay is about to save.</summary>
-    internal static void Trust(GameDirectory dir, InstanceSettings settings)
+    /// <summary>Records the values Jay is about to save. Throws <see cref="IOException"/> when they cannot be recorded.</summary>
+    internal static void Trust(GameDirectory dir, InstanceSettings settings) => Change(store =>
+    {
+        var changed = AdoptIfNew(dir, store);
+        if (Fingerprint(settings) is { } print) changed |= Add(store, print);
+        return changed;
+    });
+
+    /// <summary>Reads the record, applies <paramref name="change"/> and writes it back if it changed, all under the lock.</summary>
+    private static void Change(Func<Store, bool> change, bool keepGoingIfUnwritable = false)
     {
         lock (Gate)
         {
+            using var held = TakeLock();
             var store = Read();
-            var changed = AdoptIfNew(dir, store);
-            if (Fingerprint(settings) is { } print) changed |= Add(store, print);
-            if (changed) Write(store);
+            if (!change(store)) return;
+            try
+            {
+                Write(store);
+            }
+            catch (IOException) when (keepGoingIfUnwritable)
+            {
+                // Only a check: its answer stands for this read. Launching still needs the record (EnsureAdopted).
+            }
         }
     }
 
@@ -70,16 +113,29 @@ internal static class InstanceSettingsTrust
         var root = Key(dir.Root);
         if (store.Roots.Contains(root)) return false;
         store.Roots.Add(root);
-        if (Directory.Exists(dir.VersionsDir))
-        {
-            foreach (var folder in Directory.EnumerateDirectories(dir.VersionsDir))
-            {
-                var file = Path.Combine(folder, InstanceSettings.FileName);
-                if (!File.Exists(file)) continue;
-                if (InstanceSettings.ReadFile(file) is { } existing && Fingerprint(existing) is { } print) Add(store, print);
-            }
-        }
+        foreach (var print in PrintsIn(dir.Root)) Add(store, print);
         return true;
+    }
+
+    /// <summary>The fingerprints of the instance settings in a game folder now.</summary>
+    private static IEnumerable<string> PrintsIn(string root)
+    {
+        var versions = Path.Combine(root, "versions");
+        IEnumerable<string> folders;
+        try
+        {
+            folders = Directory.Exists(versions) ? Directory.EnumerateDirectories(versions).ToList() : [];
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            yield break;
+        }
+        foreach (var folder in folders)
+        {
+            var file = Path.Combine(folder, InstanceSettings.FileName);
+            if (File.Exists(file) && InstanceSettings.ReadFile(file) is { } existing && Fingerprint(existing) is { } print)
+                yield return print;
+        }
     }
 
     private static bool Add(Store store, string print)
@@ -88,8 +144,24 @@ internal static class InstanceSettingsTrust
         if (index == store.Trusted.Count - 1 && index >= 0) return false;
         if (index >= 0) store.Trusted.RemoveAt(index);
         store.Trusted.Add(print);
-        if (store.Trusted.Count > MaxTrusted) store.Trusted.RemoveRange(0, store.Trusted.Count - MaxTrusted);
+        if (store.Trusted.Count > MaxTrusted) Trim(store);
         return true;
+    }
+
+    /// <summary>
+    /// Over the limit: drop the oldest records that no instance in a known game folder uses now. A record still in use
+    /// is kept even past the limit, so trimming never turns a player's own settings into unknown ones. Only records
+    /// already in the list are kept this way; nothing new is trusted.
+    /// </summary>
+    private static void Trim(Store store)
+    {
+        var inUse = new HashSet<string>(store.Roots.SelectMany(PrintsIn), StringComparer.Ordinal);
+        // The newest record is the one being added; it always stays.
+        for (var i = 0; i < store.Trusted.Count - 1 && store.Trusted.Count > MaxTrusted;)
+        {
+            if (inUse.Contains(store.Trusted[i])) i++;
+            else store.Trusted.RemoveAt(i);
+        }
     }
 
     private static string Key(string root)
@@ -104,21 +176,61 @@ internal static class InstanceSettingsTrust
         public List<string> Trusted { get; } = [];
     }
 
+    /// <summary>Holds the lock file next to the record, waiting a few seconds for another Jay process to let go.</summary>
+    private static FileStream TakeLock()
+    {
+        var path = StorePath + ".lock";
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                return new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            }
+            catch (IOException) when (attempt < 200)
+            {
+                Thread.Sleep(25);
+            }
+            catch (UnauthorizedAccessException e)
+            {
+                throw Unavailable(e);
+            }
+            catch (IOException e)
+            {
+                throw Unavailable(e);
+            }
+        }
+    }
+
     private static Store Read()
     {
         var store = new Store();
+        string text;
         try
         {
-            if (JsonNode.Parse(File.ReadAllText(StorePath)) is JsonObject json)
+            text = File.ReadAllText(StorePath);
+        }
+        catch (Exception e) when (e is FileNotFoundException or DirectoryNotFoundException)
+        {
+            // Not there yet: folders are adopted as they are now.
+            return store;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            // There but unreadable: starting again would accept whatever the folders hold now, so stop instead.
+            throw Unavailable(e);
+        }
+        try
+        {
+            if (JsonNode.Parse(text) is JsonObject json)
             {
                 foreach (var r in json["roots"] as JsonArray ?? []) if (r?.GetValueKind() == JsonValueKind.String) store.Roots.Add(r.GetValue<string>());
                 foreach (var t in json["trusted"] as JsonArray ?? []) if (t?.GetValueKind() == JsonValueKind.String) store.Trusted.Add(t.GetValue<string>());
             }
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException)
+        catch (JsonException)
         {
-            // Missing or unreadable: start again. Folders are then adopted again as they are now, which is no worse
-            // than the first run.
+            // Damaged (only Jay writes this file, and only whole): start again, which is no worse than the first run.
         }
         return store;
     }
@@ -140,7 +252,10 @@ internal static class InstanceSettingsTrust
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
-            // Not recorded: the values are ignored at the next launch and the player sets them again.
+            throw Unavailable(e);
         }
     }
+
+    private static IOException Unavailable(Exception inner) =>
+        new(L.F("core.launch.settings_record_unwritable", inner.Message), inner);
 }
