@@ -121,22 +121,34 @@ public sealed class JayServerRunner : IAsyncDisposable
         if (Interlocked.Exchange(ref _stopped, 1) != 0) return;
         // Every step runs even when an earlier one fails (above all, the MC server is still told to stop and save);
         // the first error is rethrown at the end.
-        Exception? first = null;
-        try { if (_records is not null) await _records.DisposeAsync(); }
-        catch (Exception e) { first ??= e; }
-        try { await Gate.DisposeAsync(); }
-        catch (Exception e) { first ??= e; }
         try
         {
-            if (Mc is not null)
-            {
-                try { await Mc.StopAsync(timeout ?? TimeSpan.FromSeconds(60)); }
-                finally { Mc.Dispose(); }
-            }
+            await RunAllAsync(
+                async () => { if (_records is not null) await _records.DisposeAsync(); },
+                async () => await Gate.DisposeAsync(),
+                async () =>
+                {
+                    if (Mc is null) return;
+                    try { await Mc.StopAsync(timeout ?? TimeSpan.FromSeconds(60)); }
+                    finally { Mc.Dispose(); }
+                });
         }
-        catch (Exception e) { first ??= e; }
-        _key.Dispose();
-        _exited.TrySetResult();
+        finally
+        {
+            _key.Dispose();
+            _exited.TrySetResult();
+        }
+    }
+
+    /// <summary>Runs every step in order even when one fails, then rethrows the first failure.</summary>
+    internal static async Task RunAllAsync(params Func<Task>[] steps)
+    {
+        Exception? first = null;
+        foreach (var step in steps)
+        {
+            try { await step(); }
+            catch (Exception e) { first ??= e; }
+        }
         if (first is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(first);
     }
 

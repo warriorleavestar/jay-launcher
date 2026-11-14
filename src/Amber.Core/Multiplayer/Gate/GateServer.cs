@@ -404,32 +404,71 @@ public sealed class GateServer : IAsyncDisposable
         {
             try { await Task.Delay(CheckInterval, ct); }
             catch (OperationCanceledException) { return; }
+            GateState state;
             try
             {
-                var state = _store.Read();
+                state = _store.Read();
                 ReportStateError(null);
-                Check(state);
-                SyncListeners(state);
-                PushRotation(state);
-                if (tick++ % 5 == 0) WriteHealth();
             }
             catch (Exception e) when (e is IOException or System.Text.Json.JsonException or UnauthorizedAccessException)
             {
                 // 状态文件正被管理命令改写：下一秒再看。A file that stays unreadable is logged once.
                 ReportStateError(e);
+                continue;
+            }
+            try
+            {
+                Check(state);
+                SyncListeners(state);
+                PushRotation(state);
+            }
+            catch (Exception e) when (e is IOException or System.Text.Json.JsonException or UnauthorizedAccessException)
+            {
+                // A listener that can't be opened this second is tried again on the next check.
+            }
+            if (tick++ % 5 == 0)
+            {
+                try
+                {
+                    WriteHealth();
+                    ReportHealthError(null);
+                }
+                catch (Exception e) when (e is IOException or System.Text.Json.JsonException or UnauthorizedAccessException)
+                {
+                    ReportHealthError(e);
+                }
             }
         }
     }
 
     private string? _stateError;
+    private string? _healthError;
 
     /// <summary>Logs an unreadable state.json once per distinct error; null after a good read clears it.</summary>
     private void ReportStateError(Exception? e)
     {
-        var message = e?.Message;
-        if (Interlocked.Exchange(ref _stateError, message) == message || message is null) return;
-        _log(L.F("core.gate.log.state_unreadable", message));
+        var reason = e is null ? null : Reason(e);
+        if (Interlocked.Exchange(ref _stateError, reason) == reason || reason is null) return;
+        _log(L.F("core.gate.log.state_unreadable", reason));
     }
+
+    /// <summary>Logs a health.json that can't be written once per distinct error; null after a good write clears it.</summary>
+    private void ReportHealthError(Exception? e)
+    {
+        var reason = e is null ? null : Reason(e);
+        if (Interlocked.Exchange(ref _healthError, reason) == reason || reason is null) return;
+        _log(L.F("core.gate.log.health_unwritable", reason));
+    }
+
+    /// <summary>
+    /// What went wrong, without the file system message: those name full paths, and with them the computer account name,
+    /// and the log is shown in the app and printed by jay-server. A JSON error says only where in the file it is.
+    /// </summary>
+    internal static string Reason(Exception e) => e switch
+    {
+        System.Text.Json.JsonException json => json.Message,
+        _ => e.GetType().Name,
+    };
 
     /// <summary>每秒看一次：纪元号变了（吊销了节点）就全员断开；隐私++ 下健康节点不够就熔断，连续健康一段时间后恢复。</summary>
     internal void Check(GateState state)

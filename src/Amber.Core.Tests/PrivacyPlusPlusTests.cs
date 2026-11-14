@@ -156,6 +156,34 @@ public sealed class PrivacyPlusPlusTests : IAsyncLifetime
         _store.SetPrivacy(PrivacyLevel.PlusPlus);
     }
 
+    /// <summary>The breaker's event (the server saves the world on it) fires even when health.json can't be written.</summary>
+    [Fact]
+    public void TheBreakerEventFiresWhenTheHealthFileCannotBeWritten()
+    {
+        _store.AddRelay(new GateEndpoint("127.0.0.1", 1), null);
+        _store.AddRelay(new GateEndpoint("127.0.0.1", 2), null);
+        _store.IssueRelayCode("127.0.0.1:1", _serverKey.PublicKey);
+        _store.IssueRelayCode("127.0.0.1:2", _serverKey.PublicKey);
+        _store.SetPrivacy(PrivacyLevel.PlusPlus);
+        var health = Path.Combine(_root, "gate", GateServer.HealthFile);
+        for (var i = 0; i < 20 && !Directory.Exists(health); i++)
+        {
+            try
+            {
+                if (File.Exists(health)) File.Delete(health);
+                Directory.CreateDirectory(health);
+            }
+            catch (IOException) { Thread.Sleep(50); }
+        }
+        Assert.True(Directory.Exists(health));
+        // A server that isn't started, so only this test drives its checks.
+        var server = new GateServer(_store, _store.LoadConfig(), _serverKey, _ => { });
+        var opened = new List<bool>();
+        server.BreakerChanged += (open, _) => opened.Add(open);
+        server.Check(_store.Read());
+        Assert.Equal([true], opened);
+    }
+
     [Fact]
     public async Task HealthyRelaysLetPlayersInThroughTwoPaths()
     {
