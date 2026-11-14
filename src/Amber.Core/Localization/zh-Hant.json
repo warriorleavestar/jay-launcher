@@ -2774,6 +2774,8 @@
   "core.bake.platform_incomplete": "這個實例的 {0} 沒裝完整（缺：{1}），請重新安裝實例再烘焙",
   "core.bake.platform_link_blocked": "無法連結遊戲函式庫：{0} 是一般資料夾，刪掉它後再烘焙。",
   "core.launch.link_blocked": "Jay 沒有動 {0}：它是指向別處的連結。刪掉它後再啟動。",
+  "core.launch.not_a_file": "{0} 不是一般檔案，Jay 沒有動它。刪掉它後再啟動。",
+  "core.launch.sandbox.win.strong_running": "有一個強沙盒裡的遊戲還開著，而且和這個遊戲用到同樣的檔案。先關掉它，或者也用強沙盒啟動這個遊戲。",
   "core.launch.file_too_big": "{0} 太大，不像設定檔，Jay 沒有改它。",
   "core.launch.open_failed": "打不開 {0}（錯誤 {1}）。",
   "core.bake.download_unavailable": "需要先下載 {0}",

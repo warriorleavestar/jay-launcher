@@ -590,11 +590,13 @@ public sealed class GameSandboxTests : IDisposable
     public void Windows_StandardLevel_LeavesTheContainerAloneWhileAStrongGameRuns()
     {
         // A standard launch while a strong game of the same container still runs: taking the container's entries off the
-        // folders above its grants would break the running game, so they stay until no strong game runs.
+        // folders above its grants would break the running game, and leaving them keeps the low-integrity game from
+        // reading those folders. That start stops with a plain reason; one that touches nothing of the strong game's runs.
         if (!OperatingSystem.IsWindows() || WindowsSandbox.DerivedContainerSid() is not { } sid) return;
         var game = Dir("strong-game");
         var libraries = Dir("strong-game", "libraries");
         var instance = Dir("strong-game", "versions", "B");
+        var elsewhere = Dir("other-game", "versions", "C");
         bool Named(string path) => new DirectoryInfo(path).GetAccessControl()
             .GetAccessRules(true, false, typeof(System.Security.Principal.SecurityIdentifier))
             .OfType<System.Security.AccessControl.FileSystemAccessRule>().Any(r => r.IdentityReference == sid);
@@ -605,8 +607,12 @@ public sealed class GameSandboxTests : IDisposable
         {
             WindowsSandbox.TrackStrong(strong);
             Assert.True(WindowsSandbox.StrongGameRunning);
-            WindowsSandbox.Prepare(new SandboxGrants { ReadWrite = [instance], ReadOnly = [libraries] }, WindowsSandboxLevel.Standard);
+            var e = Assert.Throws<SandboxUnavailableException>(() =>
+                WindowsSandbox.Prepare(new SandboxGrants { ReadWrite = [instance], ReadOnly = [libraries] }, WindowsSandboxLevel.Standard));
+            Assert.Equal(L.T("core.launch.sandbox.win.strong_running"), e.Message);
             Assert.True(Named(game));
+            // A game in another folder, which the strong game does not share: starts as usual.
+            WindowsSandbox.Prepare(new SandboxGrants { ReadWrite = [elsewhere] }, WindowsSandboxLevel.Standard);
         }
         finally
         {
@@ -614,6 +620,10 @@ public sealed class GameSandboxTests : IDisposable
             strong.WaitForExit(10_000);
             strong.Dispose();
         }
+        // The strong game leaves the list when it exits, without anyone asking.
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (WindowsSandbox.StrongGamesListed > 0 && DateTime.UtcNow < deadline) Thread.Sleep(20);
+        Assert.Equal(0, WindowsSandbox.StrongGamesListed);
         Assert.False(WindowsSandbox.StrongGameRunning);
         WindowsSandbox.Prepare(new SandboxGrants { ReadWrite = [instance], ReadOnly = [libraries] }, WindowsSandboxLevel.Standard);
         Assert.False(Named(game));

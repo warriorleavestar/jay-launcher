@@ -2774,6 +2774,8 @@
   "core.bake.platform_incomplete": "このインスタンスの {0} のインストールが不完全です（不足：{1}）。インスタンスを再インストールしてからベイクしてください",
   "core.bake.platform_link_blocked": "ゲームのライブラリーをリンクできません：{0} は通常のフォルダーです。削除してからもう一度ベイクしてください。",
   "core.launch.link_blocked": "Jay は {0} に触れませんでした：別の場所へのリンクです。削除してからもう一度起動してください。",
+  "core.launch.not_a_file": "{0} は通常のファイルではないため、Jay は変更しませんでした。削除してからもう一度起動してください。",
+  "core.launch.sandbox.win.strong_running": "強力サンドボックスで動いているゲームが同じファイルを使っています。先にそれを閉じるか、こちらも強力サンドボックスで起動してください。",
   "core.launch.file_too_big": "{0} は設定ファイルにしては大きすぎるため、Jay は変更しませんでした。",
   "core.launch.open_failed": "{0} を開けませんでした（エラー {1}）。",
   "core.bake.download_unavailable": "先に {0} をダウンロードする必要があります",

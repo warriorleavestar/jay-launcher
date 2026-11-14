@@ -2835,6 +2835,8 @@
   "core.bake.platform_incomplete": "The {0} install of this instance is incomplete (missing: {1}); reinstall the instance, then bake again",
   "core.bake.platform_link_blocked": "Cannot link the game libraries: {0} is an ordinary folder. Delete it and bake again.",
   "core.launch.link_blocked": "Jay did not touch {0}: it is a link to somewhere else. Delete it, then start again.",
+  "core.launch.not_a_file": "{0} is not an ordinary file, so Jay left it as it is. Delete it, then start again.",
+  "core.launch.sandbox.win.strong_running": "A game in the strong sandbox is still running and uses the same files. Close it first, or start this one in the strong sandbox too.",
   "core.launch.file_too_big": "{0} is too big to be a settings file, so Jay left it as it is.",
   "core.launch.open_failed": "Could not open {0} (error {1}).",
   "core.bake.download_unavailable": "{0} needs to be downloaded first",

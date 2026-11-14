@@ -73,6 +73,43 @@ public sealed class ContainedFilesTests : IDisposable
         Assert.Equal(before, File.ReadAllBytes(sentinel));
     }
 
+    [Theory]
+    [InlineData(@"C:\Games\.minecraft", @"\\?\C:\Games\.minecraft")]
+    [InlineData(@"\\nas\games\.minecraft", @"\\?\UNC\nas\games\.minecraft")]
+    [InlineData(@"\\?\C:\Games", @"\\?\C:\Games")]
+    [InlineData(@"\\?\UNC\nas\games", @"\\?\UNC\nas\games")]
+    [InlineData(@"\\.\C:\Games", @"\\.\C:\Games")]
+    public void WindowsPathsKeepTheirKind(string path, string expected) => Assert.Equal(expected, ContainedFiles.LongPath(path));
+
+    [Fact]
+    public void AnAlreadyLongGameFolderStillWorks()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        BakePlatform.DisableLegacyForgeUpdateCheck(@"\\?\" + _work);
+        Assert.Contains("B:Global=false", File.ReadAllText(Path.Combine(_work, "config", "forge.cfg")));
+    }
+
+    [Fact]
+    public void AFifoInsteadOfTheConfigFileIsRefusedAtOnce()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var config = Directory.CreateDirectory(Path.Combine(_work, "config")).FullName;
+        var fifo = Path.Combine(config, "forge.cfg");
+        using (var mk = System.Diagnostics.Process.Start("mkfifo", [fifo])) mk.WaitForExit();
+        // No writer: opening it would wait forever; with one that never sends, reading would. Neither may happen.
+        var noWriter = Task.Run(() => Assert.Throws<IOException>(() => BakePlatform.DisableLegacyForgeUpdateCheck(_work)));
+        Assert.True(noWriter.Wait(TimeSpan.FromSeconds(5)), "the launch waited on a FIFO");
+        using var writer = new FileStream(new Microsoft.Win32.SafeHandles.SafeFileHandle(OpenWriterNonBlocking(fifo), true), FileAccess.Write);
+        var silent = Task.Run(() => Assert.Throws<IOException>(() => BakePlatform.DisableLegacyForgeUpdateCheck(_work)));
+        Assert.True(silent.Wait(TimeSpan.FromSeconds(5)), "the launch waited for data from a FIFO");
+    }
+
+    [System.Runtime.InteropServices.DllImport("libc", EntryPoint = "open", SetLastError = true)]
+    private static extern int OpenRaw(string path, int flags);
+
+    /// <summary>A write end that does not wait for a reader (O_RDWR on a FIFO never blocks on Linux and macOS).</summary>
+    private static nint OpenWriterNonBlocking(string fifo) => OpenRaw(fifo, 2);
+
     [Fact]
     public void AConfigFolderThatIsALinkIsNotWrittenThrough()
     {

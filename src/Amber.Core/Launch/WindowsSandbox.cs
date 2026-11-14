@@ -79,11 +79,20 @@ public static unsafe class WindowsSandbox
         var container = level == WindowsSandboxLevel.Strong ? ContainerSid() : null;
         // A strong launch left the container's rights on these folders. Low-integrity processes were seen to be refused
         // reading anything whose ACL names a specific container SID, so the standard level takes them off again.
-        // Not while a strong game is still running in that container: it reads through the same folders (the ones
-        // above its grants above all), and taking its rights away under it breaks it. The next standard launch with no
-        // strong game running takes them off.
-        if (container is null && !StrongGameRunning && DerivedContainerSid() is { } previous)
-            foreach (var path in UngrantTargets(grants.ReadWrite.Concat(grants.ReadOnly))) Ungrant(path, previous);
+        if (container is null && DerivedContainerSid() is { } previous)
+        {
+            var targets = UngrantTargets(grants.ReadWrite.Concat(grants.ReadOnly)).ToList();
+            // A strong game still running reads through the same folders (the ones above its grants above all): taking
+            // its rights away would break it, and leaving them would keep this game from reading them. Neither works,
+            // so this start stops with a plain reason. Where nothing of this launch names the container, both run.
+            if (StrongGameRunning)
+            {
+                if (targets.Any(p => NamesExplicitly(p, previous)))
+                    throw new SandboxUnavailableException(L.T("core.launch.sandbox.win.strong_running"));
+            }
+            else
+                foreach (var path in targets) Ungrant(path, previous);
+        }
         // Grants first, hidden folders after: a hidden folder inside a granted one keeps its own label.
         foreach (var path in grants.ReadWrite)
         {
@@ -124,9 +133,33 @@ public static unsafe class WindowsSandbox
         }
     }
 
+    /// <summary>How many strong games are listed, without tidying up (tests).</summary>
+    internal static int StrongGamesListed
+    {
+        get { lock (StrongGames) return StrongGames.Count; }
+    }
+
+    /// <summary>Lists a strong game until it exits: it leaves the list itself then, so nothing is kept after.</summary>
     internal static void TrackStrong(Process process)
     {
-        lock (StrongGames) StrongGames.Add(process);
+        void Gone(object? sender, EventArgs e)
+        {
+            process.Exited -= Gone;
+            lock (StrongGames) StrongGames.Remove(process);
+        }
+        lock (StrongGames)
+        {
+            StrongGames.RemoveAll(HasExited);
+            StrongGames.Add(process);
+        }
+        try
+        {
+            process.Exited += Gone;
+            process.EnableRaisingEvents = true;
+        }
+        catch (Exception e) when (e is InvalidOperationException or Win32Exception) { }
+        // Exited before the handler was in place: the event does not come.
+        if (HasExited(process)) Gone(null, EventArgs.Empty);
     }
 
     private static bool HasExited(Process process)
@@ -279,6 +312,18 @@ public static unsafe class WindowsSandbox
             }
             else if (File.Exists(path) && seen.Add(path)) yield return path;
         }
+    }
+
+    /// <summary>The path's own (not inherited) entries name <paramref name="sid"/>; false when it cannot be told.</summary>
+    internal static bool NamesExplicitly(string path, SecurityIdentifier sid)
+    {
+        try
+        {
+            FileSystemSecurity acl = Directory.Exists(path) ? new DirectoryInfo(path).GetAccessControl(AccessControlSections.Access)
+                : File.Exists(path) ? new FileInfo(path).GetAccessControl(AccessControlSections.Access) : null!;
+            return acl is not null && acl.GetAccessRules(true, false, typeof(SecurityIdentifier)).OfType<FileSystemAccessRule>().Any(r => r.IdentityReference == sid);
+        }
+        catch (Exception e) when (e is UnauthorizedAccessException or IOException or PrivilegeNotHeldException or InvalidOperationException) { return false; }
     }
 
     internal static void Ungrant(string path, SecurityIdentifier sid)
