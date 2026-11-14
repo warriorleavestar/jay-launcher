@@ -258,6 +258,8 @@ public partial class MainWindow : Window
     private void RememberPlacement()
     {
         if (_settings is null || Environment.GetEnvironmentVariable("AMBER_SELFTEST") is { Length: > 0 }) return;
+        // A minimized window reports an off-screen position (about -32000 on Windows): keep the last real placement.
+        if (WindowState == WindowState.Minimized) return;
         var maximized = WindowState == WindowState.Maximized;
         var old = _settings.LauncherWindow;
         var placement = new WindowPlacement
