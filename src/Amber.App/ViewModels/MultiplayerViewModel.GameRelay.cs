@@ -160,6 +160,8 @@ public sealed partial class MultiplayerViewModel
             return;
         }
         relay.SetTarget(port);
+        // A new link, even back to a port linked before: checks still running are about the old one.
+        _gameLink++;
         _relayGameLabel = manual is not null ? L.F("multiplayer.guide.port_label", port) : game?.Label ?? "";
         _relayTyped = manual is not null;
         var wasWaiting = IsWaitingForGame;
@@ -205,8 +207,9 @@ public sealed partial class MultiplayerViewModel
 
     private DateTime _gameTargetCheckedAt;
     private int _gameTargetMisses;
-    private GamePortRelay? _gameTargetRelay;
-    private int? _gameTargetPort;
+    // Counts every link the relay makes; misses count for one link only.
+    private int _gameLink;
+    private int _gameTargetLink;
     private bool _gameTargetChecking;
 
     /// <summary>
@@ -218,15 +221,21 @@ public sealed partial class MultiplayerViewModel
     {
         if (_gameTargetChecking) return;
         if (_gameRelay is not { } relay || relay.Target is not { } target) { _gameTargetMisses = 0; return; }
-        // Misses count for one linked port: a game linked since then starts again from none.
-        if (!ReferenceEquals(relay, _gameTargetRelay) || target != _gameTargetPort)
+        // Misses count for one link: a game linked since then (even the same port again) starts again from none.
+        var link = _gameLink;
+        if (link != _gameTargetLink)
         {
-            _gameTargetRelay = relay;
-            _gameTargetPort = target;
+            _gameTargetLink = link;
             _gameTargetMisses = 0;
         }
-        // Only connections to the linked port count: ones to a world linked before can outlive a switch.
-        if (relay.OpenConnectionsTo(target) > 0 || DateTime.UtcNow - _gameTargetCheckedAt < GameTargetCheckInterval) return;
+        // Only connections to the linked port count: ones to a world linked before can outlive a switch. A game a player
+        // is using answers, so earlier misses no longer count either.
+        if (relay.OpenConnectionsTo(target) > 0)
+        {
+            _gameTargetMisses = 0;
+            return;
+        }
+        if (DateTime.UtcNow - _gameTargetCheckedAt < GameTargetCheckInterval) return;
         _gameTargetChecking = true;
         _gameTargetCheckedAt = DateTime.UtcNow;
         bool alive;
@@ -238,13 +247,14 @@ public sealed partial class MultiplayerViewModel
         {
             _gameTargetChecking = false;
         }
-        // Switched (or the room changed) while checking: the result is about a game that is no longer linked.
-        if (_gameRelay != relay || relay.Target != target || _gameTargetPort != target) return;
+        // Linked again (or the room changed) while checking: the result is about a link that is gone.
+        if (_gameRelay != relay || relay.Target != target || _gameLink != link) return;
         if (alive) { _gameTargetMisses = 0; return; }
         if (++_gameTargetMisses < GameTargetMisses) return;
         _gameTargetMisses = 0;
-        // Only the link is dropped: a switch to another port that is being checked right now carries on.
-        relay.ClearTarget();
+        // Only the link is dropped: a switch to another port that is being checked right now carries on. A game that
+        // came back on the same port and took a player while the check ran is in use: keep it and start counting again.
+        if (!relay.ClearTargetIfIdle(target)) return;
         var label = _relayGameLabel ?? L.F("multiplayer.guide.port_label", target);
         _relayGameLabel = null;
         // Forget the closed world, so finding it again on the same port links it again. A world still picked from

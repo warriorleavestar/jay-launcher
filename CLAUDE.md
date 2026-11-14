@@ -43,11 +43,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/run-selftest.ps1 -Repo
 只验证联机（邀请、敲门、房间、直连）时设置 `AMBER_SELFTEST_SCOPE=multiplayer`。
 只验证混合整合包（通用加载器跑别的生态的模组）时设置 `AMBER_SELFTEST_SCOPE=mixed-content`：在报告目录里建临时游戏目录和手写的 NeoForge 1.21.1 实例，再放一个只描述自己的替身加载器包，检查烘焙关时搜索不变、装只有 Forge 版的模组后提示【下载加载器】/【开启烘焙】、点【开启烘焙】、烘焙就绪后按实例搜得到并带“经通用加载器”标记、有原生版的模组不带标记、混合整合包预览，截图；联网搜 Modrinth 并下载一个小模组到测试目录。`AMBER_SELFTEST_SCOPE=mixed-e2e` 是端到端的浏览器半程：`AMBER_SELFTEST_MIXED_GAME` 和 `AMBER_SELFTEST_MIXED_INSTANCE` 指向测试游戏目录里的 NeoForge 1.21.1 实例（设置里开烘焙、选真实加载器包），经发现页装一个 Fabric 模组（连 Fabric 依赖）和一个 NeoForge 模组；之后用 CLI `launch … --bake <包> --smoke` 启动到标题画面。
 只验证光影检查时设置 `AMBER_SELFTEST_SCOPE=shader`：在报告目录里建一个临时游戏目录（Fabric 和原版两个手写版本），检查实例光影页和资源页在缺 Iris、已装 Iris、原版三种情况下的提示和【安装 Iris】，不联网。
-只看控件库和新配色时设置 `AMBER_SELFTEST_SCOPE=gallery`：控件库每一格和现有每一页在深浅两色下截图，检查琥珀按钮每屏最多一个、图标都解析得到，以及美术风格的几条（按钮只有一种形状、状态灯是小方块、翅膀条纹只在选中的页签 / 导航指示条 / 进度条上、选中的分段是浅色调不是实心强调色、版本标签用像素数字、像素头像和像素封面都排出来）；不碰游戏目录、不联网。
+只看控件库和新配色时设置 `AMBER_SELFTEST_SCOPE=gallery`：控件库每一格和现有每一页在深浅两色下截图，检查琥珀按钮每屏最多一个、图标都解析得到，以及美术风格的几条（按钮只有一种形状、状态灯是小方块、翅膀条纹只在选中的页签 / 导航指示条 / 进度条上、选中的分段是浅色调不是实心强调色、版本标签用像素数字、像素头像和像素封面都排出来），每个图标都保留 24×24 的画布、每一页按钮里的文字和图标都居中；不碰游戏目录、不联网。
 只验证新外壳时设置 `AMBER_SELFTEST_SCOPE=shell`：600×420 到 1440×900 四种窗口 × 四种语言截图，检查隐私行、四个入口（游戏库、发现、联机、朋友）、设置和头像、顶栏的网络状态都看得见，侧栏只在宽窗口展开；再走快捷键、返回前进、面包屑（游戏库 › 实例，点前一段回主页）、旧的九页都能走到（启动页、日志页、工具箱走到取代它们的地方，`library/start` `library/logs` `settings/tools` 这些旧路由也是）、`settings#字段` 定位和带上下文返回；头像打开“我”页（游戏账号、Jay 账户、好友码、设备、外观五块，深浅色和语言跟设置同步，旧路由 `accounts` 落在这里）、朋友页（空状态、一个人一行、设备和安全码、送达行、三种宽度、“给孩子用”时只留说明）、顶栏网络面板（基础中转一行、加一个没审核的网络后多一行和开关、缺东西时去公开房间页问、开着房间时写“基础中转”，不建立连接）；快捷键范围（§8.5）：任何地方 Ctrl+N 进新建实例、输入框里和输入法组字时不触发、没在玩时 Ctrl+Shift+Q 不做事、F6 / Shift+F6 在侧栏 / 顶栏 / 请求条 / 内容区之间轮换、Ctrl+Alt+Shift+T 回默认外观且能撤销。不碰游戏目录、不联网。
 只验证游戏库主页时设置 `AMBER_SELFTEST_SCOPE=library`：在报告目录里建一个临时游戏目录（五个手写版本），检查继续玩、需要你处理、固定排前、搜索、筛选、排序、封面和列表视图、打开、固定、空状态，三种宽度两种语言截图，不联网。
 只验证模组页签时设置 `AMBER_SELFTEST_SCOPE=mods`：在报告目录里建临时游戏目录和手写的模组 jar，检查搜索、筛选、检查器（宽档一栏、其余盖在右边）、勾选和批量栏、批量禁用 / 启用 / 删除和撤销、表格快捷键、检查出更新后才有【全部更新】、原版空状态，三种宽度两种语言截图；不联网。
-只验证实例详情页时设置 `AMBER_SELFTEST_SCOPE=instance`：在报告目录里建临时游戏目录，模拟开始按钮的每个状态（没账号、就绪、准备中、进入中、正在玩、退出中、崩溃后、没装完）和开始按钮下面的进度行（步骤、百分比、速度、剩余时间），检查“上一局”面板的就地修复（调内存、禁用模组、关光影）、概览页签、Alt+数字和 Ctrl+Tab，三种宽度两种语言截图；不启动游戏、不联网。
+只验证实例详情页时设置 `AMBER_SELFTEST_SCOPE=instance`：在报告目录里建临时游戏目录，模拟开始按钮的每个状态（没账号、就绪、准备中、进入中、正在玩、退出中、崩溃后、没装完）和开始按钮下面的进度行（步骤、百分比、速度、剩余时间），正在玩时英雄区按钮里的文字和图标居中，检查“上一局”面板的就地修复（调内存、禁用模组、关光影）、概览页签、Alt+数字和 Ctrl+Tab，三种宽度两种语言截图；不启动游戏、不联网。
 只验证新建实例面板时设置 `AMBER_SELFTEST_SCOPE=new-instance`：在报告目录里建临时游戏目录，检查来源栏随宽度变分段、版本类型芯片、加载器按版本置灰并写原因、名字行内检查挡住【安装】、整合包文件预览、进发现页、复制实例（带不带存档）、其他启动器的游戏文件夹、Esc 关闭，三种宽度两种语言截图；只联网取版本列表和 Fabric 版本，不安装。
 只验证“最近删除”时设置 `AMBER_SELFTEST_SCOPE=recycle`：在报告目录里建临时游戏目录，把模组、世界、实例移进回收目录，检查设置里的列表（类型、来自哪个实例、剩几天）、【恢复】回原位（实例不改名）、保留天数、【永久删除】和【清空…】走锁定确认；不联网。
 只验证资源包和光影页签时设置 `AMBER_SELFTEST_SCOPE=packs`：在报告目录里建临时游戏目录和 Fabric 实例，检查已启用 / 未启用两栏（按 options.txt，越靠上越优先）、勾选和 ↑↓ / Alt+↑↓ 写回 options.txt、版本旧 / 版本新标签、删除进最近删除、没装 Iris 时的横幅、选光影写 iris.properties 和【不用光影】，宽窄两种宽度两种语言截图；不联网。
@@ -83,7 +83,7 @@ Other developer switches are environment variables:
 | `AMBER_STARTUP_LOG` | Write startup timing |
 | `AMBER_ET_VERBOSE` | Verbose EasyTier output |
 | `AMBER_ET_QUIC` | `0`: turn off EasyTier's QUIC proxy for room traffic without a TUN device (on by default; much faster single connections at high latency) |
-| `AMBER_SPLIT` | Host: split new wrapped invite rooms over several paths, `game,chat[,paths]` with `off`, `auto` or `strict` (for example `auto,auto,2`); until the setting is in the app |
+| `AMBER_SPLIT` | Host: split new wrapped invite rooms over several paths, `game,chat[,paths]` with `off`, `auto` or `strict` (for example `auto,auto,2`; without a path count the room uses 2–3 paths, one per independent relay group plus the direct one); until the setting is in the app |
 | `AMBER_THEME_DEV` | Use an unpacked theme folder and reload it on every save (same as `--theme-dev <dir>`) |
 
 ## Rules

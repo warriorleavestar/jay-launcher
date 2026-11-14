@@ -14,6 +14,8 @@ public final class AndroidGameBootstrap {
     private static Field minecraftMouse;
     private static Field minecraftKeyboard;
     private static Field minecraftWindow;
+    private static Field minecraftScreen;
+    private static Field minecraftHitResult;
     private static Field mouseX;
     private static Field mouseY;
     private static Method windowHandle;
@@ -25,6 +27,9 @@ public final class AndroidGameBootstrap {
     private static Method mouseScroll;
     private static Method keyboardKey;
     private static Method keyboardChar;
+    private static Method startAttack;
+    private static Method startUseItem;
+    private static Class<?> blockHitType;
     private static boolean inputBridgeReady;
     private static boolean inputBridgeFailed;
     private static boolean inputDispatchErrorLogged;
@@ -48,6 +53,8 @@ public final class AndroidGameBootstrap {
             minecraftMouse = accessible(minecraftType.getDeclaredField("n"));
             minecraftKeyboard = accessible(minecraftType.getDeclaredField("o"));
             minecraftWindow = accessible(minecraftType.getDeclaredField("O"));
+            minecraftScreen = accessible(minecraftType.getDeclaredField("x"));
+            minecraftHitResult = accessible(minecraftType.getDeclaredField("u"));
             mouseX = accessible(mouseType.getDeclaredField("h"));
             mouseY = accessible(mouseType.getDeclaredField("i"));
             windowHandle = accessible(windowType.getDeclaredMethod("h"));
@@ -64,6 +71,9 @@ public final class AndroidGameBootstrap {
                 "a", long.class, int.class, int.class, int.class, int.class));
             keyboardChar = accessible(keyboardType.getDeclaredMethod(
                 "a", long.class, int.class, int.class));
+            startAttack = accessible(minecraftType.getDeclaredMethod("bu"));
+            startUseItem = accessible(minecraftType.getDeclaredMethod("bv"));
+            blockHitType = Class.forName("fti");
             inputBridgeReady = true;
             return true;
         } catch (ReflectiveOperationException | RuntimeException error) {
@@ -107,12 +117,33 @@ public final class AndroidGameBootstrap {
             mouseY.setDouble(mouse, y);
             mouseMove.invoke(mouse, handle, x, y);
             for (int index = 0; index < clicks; index++) {
-                mouseButton.invoke(mouse, handle, mouseInput.newInstance(0, 0), 1);
-                mouseButton.invoke(mouse, handle, mouseInput.newInstance(0, 0), 0);
+                if (minecraftScreen.get(minecraft) == null) {
+                    Object hitResult = minecraftHitResult.get(minecraft);
+                    if (hitResult != null && blockHitType.isInstance(hitResult))
+                        startUseItem.invoke(minecraft);
+                    else
+                        startAttack.invoke(minecraft);
+                } else {
+                    mouseButton.invoke(mouse, handle, mouseInput.newInstance(0, 0), 1);
+                    mouseButton.invoke(mouse, handle, mouseInput.newInstance(0, 0), 0);
+                }
             }
             return true;
         } catch (ReflectiveOperationException | RuntimeException error) {
             return reportInputError(error);
+        }
+    }
+
+    /** True only while normal gameplay is aiming at a block that can be mined. */
+    public static boolean isBlockTarget() {
+        if (!prepareInputBridge()) return false;
+        try {
+            Object minecraft = minecraft();
+            return minecraft != null
+                && minecraftScreen.get(minecraft) == null
+                && blockHitType.isInstance(minecraftHitResult.get(minecraft));
+        } catch (ReflectiveOperationException | RuntimeException error) {
+            return false;
         }
     }
 

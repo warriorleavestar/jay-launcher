@@ -416,7 +416,7 @@ CI 的单元测试只在 `windows-latest` 上跑。有一些测试本身按 `Ope
 | 12 | Mojang 运行时的符号链接 | `Java/JavaRuntimeInstaller.cs` | 处理清单里 `type: link` 的条目：校验 `target` 在运行时目录内，用 `File.CreateSymbolicLink` 建 | Mac 上新下载的运行时和官方启动器下载的文件结构一致 |
 | 13 | Linux ARM64 自动下载 Java | `Java/JavaRuntimeInstaller.cs` | Mojang 没有 Linux ARM64 运行时。可以加一个备用来源：Adoptium API（`api.adoptium.net`，有 SHA-256）。这是新的联网地址，属于“用户发起的下载”，要写进 README 隐私一节；默认先问用户 | Linux ARM64 上能一键装好对应版本的 Java |
 | 14 | Native AOT 独立构建 | `.github/workflows/build.yml` | 只有在有足够内存/时间的独立 runner 上才恢复；先在真机跑全套自检，且不得阻塞 ReadyToRun 包 | AOT 失败时标准包仍可发布 |
-| 15 | macOS `.app` 进 CI | `scripts/publish-macos.sh`、`build.yml` | 在 macOS runner 上跑这个脚本，发布 `Jay-osx-*.zip`（.app）。正式签名和公证要 Apple 开发者账号（年费），由 Yuma 决定；没有时保持 ad-hoc 签名 | 下载后双击 `Jay.app` 能打开 |
+| 15 | macOS `.app` 进 CI | `scripts/publish-macos.sh`、`build.yml` | 在 macOS runner 上跑这个脚本，发布 `Jay-osx-*.zip`（.app）。正式签名和公证要 Apple 开发者账号（年费），由维护者决定；没有时保持 ad-hoc 签名 | 下载后双击 `Jay.app` 能打开 |
 | 16 | Linux 桌面集成（可选） | 新增 | 提供 `.desktop` 文件和图标，或者出 AppImage | 能从应用菜单启动 |
 | 17 | 测试跑在三个平台 | `build.yml` 的 `validate` | 加 macOS、Linux runner 跑 `dotnet test`；没有 IPv6 的 runner 上那些直连测试要按环境跳过（检测环境，不是按平台一刀切） | 三个平台单元测试都绿 |
 | 18 | 自检脚本 | `tools/` | 加 `run-selftest.sh`（设 `AMBER_SELFTEST` 运行 `Jay`） | Mac/Linux 上一条命令跑完界面自检 |
