@@ -897,7 +897,9 @@ public sealed class DirectSession : IAsyncDisposable
                 Log(fullLan ? L.T("core.mp.matrix.elevated") : L.T("core.mp.matrix.elevationdeclined"));
             }
             var members = (await (EasyTier?.PeersAsync(ct) ?? Task.FromResult(new List<PeerInfo>()))).Count(p => p.Ip.StartsWith(EasyTierArgs.Subnet, StringComparison.Ordinal));
-            var plan = TestMatrix.Plan(new MatrixInputs(_gathered!.Candidates, _guestCandidates, members, Options.FallbackNodes.Count > 0, fullLan, Options.Simulated));
+            // The NAT kinds each side announced: they decide whether a punch sprays (see DirectBridge.PunchAsync).
+            var plan = TestMatrix.Plan(new MatrixInputs(_gathered!.Candidates, _guestCandidates, members, Options.FallbackNodes.Count > 0, fullLan, Options.Simulated,
+                LocalAddresses?.Nat ?? _gathered.Nat, _guestNat));
             // 加入方没同意把房主当出口：出口那几步不测。
             if (!guestExit) plan = [.. plan.Where(s => !s.Exit).Select((s, i) => s with { Index = i + 1 })];
             Log(L.P("core.mp.matrix.plan", plan.Count, plan.Count));

@@ -204,10 +204,15 @@ public class TestMatrixTests
         var host = new[] { C(PathKind.IPv6, "[2408::1]:1"), C(PathKind.Punch, "203.0.113.5:1"), C(PathKind.Lan, "192.168.1.5:1") };
         var guest = new[] { C(PathKind.Punch, "198.51.100.7:1"), C(PathKind.Lan, "10.0.0.5:1") };
         var steps = TestMatrix.Plan(new MatrixInputs(host, guest, 2, false, false));
-        Assert.Equal([PathKind.Punch, PathKind.PunchSpray], steps.Select(s => s.Path!.Value));
+        // Neither side is symmetric: spraying would send nothing extra, so there is no spray step.
+        Assert.Equal([PathKind.Punch], steps.Select(s => s.Path!.Value));
         Assert.All(steps, s => Assert.False(s.FullLan));
+        Assert.Equal([PathKind.Punch, PathKind.PunchSpray],
+            TestMatrix.Plan(new MatrixInputs(host, guest, 2, false, false, HostNat: NatKind.Cone, GuestNat: NatKind.Symmetric)).Select(s => s.Path!.Value));
+        Assert.Equal([PathKind.Punch, PathKind.PunchSpray],
+            TestMatrix.Plan(new MatrixInputs(host, guest, 2, false, false, HostNat: NatKind.Symmetric, GuestNat: NatKind.Open)).Select(s => s.Path!.Value));
 
-        var full = TestMatrix.Plan(new MatrixInputs(host, [.. guest, C(PathKind.IPv6, "[2409::2]:1")], 3, true, true));
+        var full = TestMatrix.Plan(new MatrixInputs(host, [.. guest, C(PathKind.IPv6, "[2409::2]:1")], 3, true, true, GuestNat: NatKind.Symmetric));
         // IPv6、打洞、喷洒、中转、节点，各 3 步（经别人上网只有 Windows 能用，其他系统各 2 步）
         Assert.Equal((PlatformFeatures.FullTrafficExit ? 3 : 2) * 5, full.Count);
         if (PlatformFeatures.FullTrafficExit) Assert.Contains(full, s => s.Route == RouteKind.Relay && s.FullLan && s.Exit);
