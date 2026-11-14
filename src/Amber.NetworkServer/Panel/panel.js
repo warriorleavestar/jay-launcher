@@ -112,6 +112,9 @@ const DURATIONS = [["forever", null], ["h1", 3600], ["d1", 86400], ["d7", 604800
 const TOKEN_KEY = "jay-node-token";
 
 let token = null;
+// Counts sign-ins and sign-outs. Signing out and in again with the same token is a new session, which the token alone
+// cannot tell apart; an answer is used only while the session it was asked in is still the current one.
+let session = 0;
 
 function el(tag, text, className) {
   const e = document.createElement(tag);
@@ -146,7 +149,7 @@ function storeToken(value) {
 
 async function api(method, path, body) {
   // The session this request belongs to: an answer that comes back after that session ended changes nothing.
-  const asked = token;
+  const asked = token, mine = session;
   const response = await fetch(path, {
     method,
     headers: { Authorization: "Bearer " + asked, ...(body ? { "Content-Type": "application/json" } : {}) },
@@ -155,7 +158,7 @@ async function api(method, path, body) {
     credentials: "omit",
   });
   const data = await response.json().catch(() => ({ ok: false, error: "bad" }));
-  if (token !== asked) throw new Error("ended");
+  if (session !== mine) throw new Error("ended");
   if (response.status === 401) { signOut(T("bad_token")); throw new Error("token"); }
   return data;
 }
@@ -172,6 +175,7 @@ function showLogin(error) {
 }
 
 function signOut(error) {
+  session++;
   token = null;
   storeToken(null);
   clearSession();
@@ -297,11 +301,11 @@ function renderBans(data) {
 }
 
 async function refresh() {
-  const asked = token;
+  const mine = session;
   try {
     const [stats, rooms, nodes, bans] = await Promise.all([api("GET", "/stats"), api("GET", "/rooms"), api("GET", "/nodes"), api("GET", "/bans")]);
     // Signed out (or signed in again) while this was on its way: its answers belong to that old session.
-    if (!asked || token !== asked) return;
+    if (!token || session !== mine) return;
     $("login").hidden = true;
     $("app").hidden = false;
     $("logout").hidden = false;
@@ -311,7 +315,7 @@ async function refresh() {
     renderNodes(nodes.ok ? nodes : { enabled: false, nodes: [] });
     renderBans(bans.ok ? bans : { bans: [] });
   } catch (e) {
-    if (e.message !== "token" && token === asked) (token ? toast : showLogin)(T("unreachable"), true);
+    if (e.message !== "token" && session === mine) (token ? toast : showLogin)(T("unreachable"), true);
   }
 }
 
@@ -346,6 +350,7 @@ function unban(b) {
 function signIn(value) {
   const v = (value || "").trim();
   if (!/^[0-9a-f]{64}$/i.test(v)) { showLogin(T("bad_token")); return; }
+  session++;
   token = v;
   storeToken(v);
   refresh();

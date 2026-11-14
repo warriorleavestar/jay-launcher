@@ -139,15 +139,18 @@ public sealed class AdminPanelTests : IAsyncDisposable
         Assert.True(HasHiddenAttribute(html, "state"), "the status pill should start hidden");
         // A refresh still on its way when the session ends must not bring the old data back.
         var refresh = FunctionBody(js, "async function refresh(");
-        Assert.Contains("const asked = token;", refresh);
-        AssertInOrder(refresh, "if (!asked || token !== asked) return;", "$(\"app\").hidden = false");
+        Assert.Contains("const mine = session;", refresh);
+        AssertInOrder(refresh, "if (!token || session !== mine) return;", "$(\"app\").hidden = false");
+        // Signing in and out each start a new session, even with the same token (see SignInAgainIgnoresTheOldSession).
+        Assert.Contains("session++;", signOut);
+        Assert.Contains("session++;", FunctionBody(js, "function signIn("));
         Assert.Contains("$(\"logout\").addEventListener(\"click\", () => signOut())", js);
         // Every request belongs to the session that sent it: a late answer (a 401 among them) from a session that has
         // already ended must not sign out again, which would wipe the token the user is typing for the next one.
         var api = FunctionBody(js, "async function api(");
-        Assert.Contains("const asked = token;", api);
+        Assert.Contains("const asked = token, mine = session;", api);
         Assert.Contains("\"Bearer \" + asked", api);
-        AssertInOrder(api, "if (token !== asked) throw", "response.status === 401) { signOut(");
+        AssertInOrder(api, "if (session !== mine) throw", "response.status === 401) { signOut(");
         Assert.Contains("if (initial) signIn(initial); else showLogin();", js);
         // Only those two functions flip these elements, so no other path can show the app while signed out.
         foreach (var id in SignInToggled)
@@ -161,6 +164,80 @@ public sealed class AdminPanelTests : IAsyncDisposable
         Assert.Single(Regex.Matches(css, "!important"));
         Assert.DoesNotMatch(@":not\(\[hidden\]\)", css);
         Assert.Matches(@"#app\s*\{[^}]*display:\s*grid", css);
+    }
+
+    /// <summary>
+    /// Runs the panel's own sign-in, sign-out and request code in Node: signing out and in again with the same token
+    /// while answers are still on their way. The old session's answers, a 401 among them, are not used and do not sign
+    /// the new session out. Skipped where Node is not installed.
+    /// </summary>
+    [Fact]
+    public async Task SignInAgainIgnoresTheOldSession()
+    {
+        var node = FindOnPath(OperatingSystem.IsWindows() ? "node.exe" : "node");
+        if (node is null) return;
+        var js = Encoding.UTF8.GetString(AdminPanel.Find("/panel.js")!.Bytes);
+        var script = $$"""
+            let token = null;
+            let session = 0;
+            const T = (key) => key;
+            function storeToken() {}
+            function clearSession() {}
+            function showLogin() {}
+            function refresh() {}
+            const pending = [];
+            globalThis.fetch = () => new Promise((resolve) => pending.push(resolve));
+            {{FunctionSource(js, "function signIn(")}}
+            {{FunctionSource(js, "function signOut(")}}
+            {{FunctionSource(js, "async function api(")}}
+            const answer = (status, v) => ({ status, json: async () => ({ v }) });
+            const outcome = async (p) => { try { return "used:" + (await p).v; } catch (e) { return e.message; } };
+            (async () => {
+              const t = "a".repeat(64);
+              signIn(t);
+              const old = api("GET", "/stats");
+              const oldDenied = api("GET", "/bans");
+              signOut();
+              signIn(t);
+              const fresh = api("GET", "/stats");
+              pending[2](answer(200, "new"));
+              console.log("fresh=" + await outcome(fresh));
+              pending[0](answer(200, "old"));
+              console.log("old=" + await outcome(old));
+              pending[1](answer(401, "x"));
+              console.log("401=" + await outcome(oldDenied));
+              console.log("token=" + (token === t ? "kept" : "lost"));
+            })();
+            """;
+        var path = Path.Combine(Path.GetTempPath(), "jay-panel-" + Guid.NewGuid().ToString("N") + ".js");
+        await File.WriteAllTextAsync(path, script);
+        try
+        {
+            var info = new System.Diagnostics.ProcessStartInfo(node, path) { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
+            using var process = System.Diagnostics.Process.Start(info)!;
+            var stdout = process.StandardOutput.ReadToEndAsync();
+            var stderr = process.StandardError.ReadToEndAsync();
+            await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(30));
+            var output = (await stdout).Replace("\r", "");
+            Assert.True(process.ExitCode == 0, output + await stderr);
+            Assert.Equal("fresh=used:new\nold=ended\n401=ended\ntoken=kept\n", output);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    private static string? FindOnPath(string name) =>
+        (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
+            .Select(dir => Path.Combine(dir, name)).FirstOrDefault(File.Exists);
+
+    /// <summary>A top-level function in panel.js, declaration and body.</summary>
+    private static string FunctionSource(string js, string declaration)
+    {
+        var start = js.IndexOf(declaration, StringComparison.Ordinal);
+        var body = FunctionBody(js, declaration);
+        return js.Substring(start, js.IndexOf(body, start, StringComparison.Ordinal) + body.Length + 1 - start);
     }
 
     /// <summary><paramref name="first"/> and <paramref name="second"/> are both in <paramref name="code"/>, in that order.</summary>
