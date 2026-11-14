@@ -231,6 +231,14 @@ public sealed class JayServerCliTests
     }
 
     /// <summary>The invite the CLI printed: an IP-only test server prints a sealed code and its passphrase.</summary>
+
+    [Fact]
+    public void ReleaseVerifyStatesTheRealReleaseQuorum()
+    {
+        var text = Program.DescribeVerdict(new Amber.Core.Launch.ReleaseCheck(Amber.Core.Launch.ReleaseVerdict.NotEnoughSignatures, "v0.8.0", 1), "Jay.zip");
+        Assert.Contains($"{Amber.Core.Multiplayer.Public.JayTrust.ReleaseKeys.Count} 把里要 {Amber.Core.Multiplayer.Public.JayTrust.ReleaseNeed} 把", text);
+        Assert.DoesNotContain("3 人", text);
+    }
     private static GateInvite ReadInvite(string output)
     {
         var passphrase = System.Text.RegularExpressions.Regex.Match(output, @"\d{4} \d{4} \d{4} \d{4}").Value;
