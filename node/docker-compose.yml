@@ -7,9 +7,9 @@
 # 只转发 Jay 房间：relay-network-whitelist 是 jay-* 和 amber-*（一个参数，空格隔开）；想转发所有 EasyTier 网络就改成 '*'。
 # Relays Jay rooms only (jay-* and amber-*, one argument, separated by a space); change the whitelist to '*' to relay every EasyTier network.
 
-# 镜像在本机构建：下载 Jay 加固版 EasyTier 的固定版本并校验 SHA-256（和 install.sh 相同），不用上游镜像。需要 Docker Compose 2.17 或更新；换版本后用 docker compose up -d --build 重新构建。
+# 镜像在本机构建：下载 Jay 加固版 EasyTier 的固定版本并校验 SHA-256（和 install.sh 相同），不用上游镜像；只支持 x86_64 和 arm64 主机。需要 Docker Compose 2.17 或更新；换版本后用 docker compose up -d --build 重新构建。
 # The image is built locally from Jay's hardened EasyTier build, pinned and checked by SHA-256 (the same pins as
-# install.sh), not from the upstream image. Needs Docker Compose 2.17 or later; after a version change run docker compose up -d --build.
+# install.sh), not from the upstream image; x86_64 and arm64 hosts only. Needs Docker Compose 2.17 or later; after a version change run docker compose up -d --build.
 
 services:
   amber-node:
