@@ -778,6 +778,8 @@ public sealed partial class SettingsViewModel : PageViewModel
             if (selected) SelectedJava = replacement;
         });
         var s = service.Settings;
+        _builtCore = CoreKey(s);
+        _shownDefaults = InstanceDefaultsKey(s);
         GameDirectory = s.GameDirectory;
         SourceIndex = Math.Max(0, Array.IndexOf(SourceKeys, s.DownloadSource));
         service.SettingsChangedElsewhere += () => Dispatcher.UIThread.Post(() =>
@@ -851,6 +853,9 @@ public sealed partial class SettingsViewModel : PageViewModel
     protected override void OnFirstActivated() => _ = LoadJavaAsync(false);
 
     protected override void OnBecameCurrent() { Recycle.Refresh(); RefreshPrivacy(); RefreshUniversalLoader(); }
+
+    // Leaving the page writes a memory value still waiting out its drag pause.
+    protected override void OnLeftCurrent() => FlushMemorySave();
 
     public Amber.App.Localization.OptionItem[] ThemeOptions { get; } = Amber.App.Localization.OptionItem.Keys("settings.theme.system", "settings.theme.light", "settings.theme.dark");
     private static readonly string[] ThemeKeys = ["system", "light", "dark"];
@@ -1160,7 +1165,25 @@ public sealed partial class SettingsViewModel : PageViewModel
     }
     partial void OnIsolateVersionsChanged(bool value) => Persist();
     partial void OnAutoMemoryChanged(bool value) => Persist();
-    partial void OnMaxMemoryMbChanged(int value) => Persist();
+    partial void OnMaxMemoryMbChanged(int value)
+    {
+        if (_loading) return;
+        // The slider snaps every 512 MB while dragged: the value counts at once (a save made elsewhere, such as on
+        // close, writes it), and the file is written once the drag pauses.
+        if (value >= 1024) _service.Settings.MaxMemoryMb = value;
+        _memorySave ??= new DispatcherTimer(TimeSpan.FromMilliseconds(300), DispatcherPriority.Background, (_, _) => FlushMemorySave());
+        _memorySave.Stop();
+        _memorySave.Start();
+    }
+
+    private DispatcherTimer? _memorySave;
+
+    private void FlushMemorySave()
+    {
+        if (_memorySave is not { IsEnabled: true } timer) return;
+        timer.Stop();
+        Persist();
+    }
     partial void OnConcurrencyChanged(string value) => Persist();
     partial void OnWindowWidthChanged(string value) => Persist();
     partial void OnWindowHeightChanged(string value) => Persist();
@@ -1213,10 +1236,24 @@ public sealed partial class SettingsViewModel : PageViewModel
     }
 
     /// <summary>把通过校验的字段写进设置并保存；没通过的字段留在设置里的旧值，提示写在字段下面。</summary>
+    /// <summary>What <see cref="LauncherService.Reload"/> builds the downloader, installers and content providers from.</summary>
+    private static object CoreKey(AppSettings s) =>
+        (s.GameDirectory, s.DownloadSource, s.DownloadConcurrency, s.AutoJavaDownload, s.CurseForgeApiRoot, s.CurseForgeApiKey);
+
+    /// <summary>The global defaults every instance page and the library show or launch with.</summary>
+    private static object InstanceDefaultsKey(AppSettings s) =>
+        (s.IsolateVersions, s.JavaPath, s.AutoMemory, s.MaxMemoryMb, s.JvmArgs, s.GameArgs, s.WindowWidth,
+         (s.WindowHeight, s.Fullscreen, s.PreLaunchCommand, s.PostExitCommand, s.ExperimentalBake, s.BakeLoaderPath));
+
+    /// <summary>What the services were last built from, and the defaults the pages last refreshed for.</summary>
+    private object _builtCore, _shownDefaults;
+
     private void Persist()
     {
         if (_loading) return;
         var s = _service.Settings;
+        // The memory value this save writes; a pending drag-pause save has nothing left to do.
+        _memorySave?.Stop();
         if (SourceIndex >= 0) s.DownloadSource = SourceKeys[Math.Min(SourceIndex, SourceKeys.Length - 1)];
         if (SettingInput.TryParsePositiveInt(Concurrency, out var c, 128) && c is not null)
         {
@@ -1281,7 +1318,14 @@ public sealed partial class SettingsViewModel : PageViewModel
             SetStatus(StatusMessage.Failure("settings.error.save_failed", e, ErrorText.Of(e)));
             return;
         }
-        _service.Reload();
+        // Rebuilding every service and rescanning the game folder on each change (a theme, a sidebar switch, each step of
+        // the memory slider) was most of the cost: rebuild only when what the services are built from changed, and let
+        // the pages refresh only when a default they show changed.
+        var core = CoreKey(s);
+        var defaults = InstanceDefaultsKey(s);
+        if (!Equals(core, _builtCore)) _service.Reload();
+        else if (!Equals(defaults, _shownDefaults)) _service.NotifyInstalledChanged();
+        (_builtCore, _shownDefaults) = (core, defaults);
         if (HasConcurrencyError || HasWindowError || HasJvmArgsError || HasGameArgsError)
             SetStatus(StatusMessage.Warning("settings.saved_with_errors"));
         else
