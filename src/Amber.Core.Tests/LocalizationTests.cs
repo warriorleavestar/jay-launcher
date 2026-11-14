@@ -299,6 +299,21 @@ public partial class LocalizationTests
         return null;
     }
 
+    /// <summary>
+    /// Classical Chinese is written in traditional characters (its interface falls back to zh-Hant): no value uses a
+    /// character that only exists in simplified Chinese.
+    /// </summary>
+    [Fact]
+    public void ClassicalChineseUsesTraditionalCharacters()
+    {
+        const string simplifiedOnly = "这们说时会对过还没开关门问题网络设启动备账号码钥发现显应该请让为从样实选项给听记录种类简资帮语数据统计远无广颜亲长条将专东车读写书报纸页难点线进运连认识证换与产买卖头岁乐阳阴节电话气风爱两层态径载辑览错误删饰组戏调变";
+        using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllBytes(Path.Combine(Src, "Amber.Core", "Localization", "lzh.json")));
+        var simplified = doc.RootElement.EnumerateObject()
+            .Where(p => p.Value.ValueKind == System.Text.Json.JsonValueKind.String && p.Value.GetString()!.Any(c => simplifiedOnly.Contains(c)))
+            .Select(p => p.Name).ToList();
+        Assert.Empty(simplified);
+    }
+
     /// <summary>同一个 JSON 文件里重复的键（后一个会悄悄盖掉前一个）。</summary>
     [Theory]
     [InlineData("zh-Hans")]
