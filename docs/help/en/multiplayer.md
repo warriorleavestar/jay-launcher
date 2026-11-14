@@ -19,7 +19,7 @@ The Multiplayer page has no tabs: it is the lobby until you are in a room, and t
 - Relays only: everything goes through relays, so people in the room don't see each other's IP address. It is a little slower. A friend whose Jay is too old to know this setting is turned away and asked to update.
 - No server: the button becomes **Make a sealed direct code**. Send the code, and tell the passphrase another way. The two computers connect straight to each other and never fall back to a relay. To find your address, Jay asks the STUN servers listed in Settings › Network, and they see your IP address.
 - Where to play: rooms your friends invited you to, public rooms and servers you saved are one list. Filter it with **All / Friends / Public / Servers**.
-- Someone knocks: a card appears in your room; click **Allow** or **Decline** (Alt+Y / Alt+N).
+- Someone knocks: a card appears in your room; click **Let them in** or **Deny** (Alt+Y / Alt+N). **Deny** is the default.
 - Safety code: if both of you see the same safety code, nobody is pretending to be someone else in between.
 - The first time, multiplayer needs one extra download. The button reads "Install the multiplayer component first": click once to install it, then again to open the room or join.
 
@@ -31,5 +31,5 @@ The Multiplayer page has no tabs: it is the lobby until you are in a room, and t
 - **Enter the game**: someone who joined clicks it to go straight into the friend's world with the instance they picked.
 
 ## If something goes wrong
-- Cannot connect: run "Check network"; it tells you which step fails.
+- Cannot connect: open **Connection problems?** (Ctrl+Shift+D) and click **Check my network**; it tells you which step fails.
 - For a child: remote help, public networks and more can be turned off; see [For a child](help:child-mode).
