@@ -9,13 +9,13 @@ internal static class LocalSecretKey
     {
         if (File.Exists(path)) return Read(path, description);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        var created = RandomNumberGenerator.GetBytes(32);
+        var created = RandomNumberGenerator.GetBytes(LocalKeyProtection.KeyLength);
         var options = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write, Share = FileShare.None };
         if (!OperatingSystem.IsWindows()) options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
         try
         {
             using var stream = new FileStream(path, options);
-            stream.Write(created);
+            stream.Write(LocalKeyProtection.Encode(created));
             stream.Flush(true);
         }
         catch (IOException) when (File.Exists(path))
@@ -30,8 +30,8 @@ internal static class LocalSecretKey
 
     private static byte[] Read(string path, string description)
     {
-        var key = File.ReadAllBytes(path);
-        if (key.Length != 32) throw new CryptographicException($"Invalid {description} key");
+        var key = LocalKeyProtection.Decode(File.ReadAllBytes(path), description, out var reseal);
+        if (reseal) LocalKeyProtection.TryReseal(path, key, (file, data) => Multiplayer.MemberIdentity.WritePrivate(file, data));
         return key;
     }
 }
