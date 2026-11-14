@@ -46,7 +46,15 @@ public sealed class EasyTierElevatedSession : IEasyTierSession, IHotspotSharingS
     public Task<List<PeerInfo>> PeersAsync(CancellationToken ct = default) => EasyTierSession.QueryPeersAsync(_cliPath, Options.RpcPort, ct);
 
     /// <summary>弹出 UAC 确认。用户拒绝时抛 <see cref="OperationCanceledException"/>。workDir 只用来清掉旧版本留下的文件（旧版本把参数写在这里）。</summary>
-    public static EasyTierElevatedSession Start(EasyTierInstaller installer, EasyTierOptions options, string workDir)
+    public static EasyTierElevatedSession Start(EasyTierInstaller installer, EasyTierOptions options, string workDir) =>
+        StartAsync(installer, options, workDir).GetAwaiter().GetResult();
+
+    /// <summary>
+    /// Like <see cref="Start"/>, but the caller's thread is free while the permission prompt is open (the Mac/Linux password
+    /// dialog doesn't cover the screen, so a blocked window would just look frozen). Cancelling closes the Mac/Linux
+    /// dialog; a Windows prompt can't be closed from here, so a session it grants after cancelling is ended at once.
+    /// </summary>
+    public static async Task<EasyTierElevatedSession> StartAsync(EasyTierInstaller installer, EasyTierOptions options, string workDir, CancellationToken ct = default)
     {
         if (!PlatformFeatures.FullLan) throw new PlatformNotSupportedException(L.T("core.mp.component.windowsonly"));
         if (!options.Tun) throw new ArgumentException(L.T("core.mp.component.tunrequired"));
@@ -54,12 +62,19 @@ public sealed class EasyTierElevatedSession : IEasyTierSession, IHotspotSharingS
         if (OperatingSystem.IsWindows())
         {
             LegacyFiles.Remove(workDir);
-            guard = ElevatedGuard.Start(installer.CorePath, EasyTierArgs.Build(options), EasyTierArgs.Environment(options), elevate: true, network: ExitNetworkPlan.Create(options));
+            var (args, env, network) = (EasyTierArgs.Build(options), EasyTierArgs.Environment(options), ExitNetworkPlan.Create(options));
+            ct.ThrowIfCancellationRequested();
+            guard = await Task.Run(() => ElevatedGuard.Start(installer.CorePath, args, env, elevate: true, network: network), CancellationToken.None).ConfigureAwait(false);
+            if (ct.IsCancellationRequested)
+            {
+                guard.Dispose();
+                ct.ThrowIfCancellationRequested();
+            }
         }
         else
         {
             // Mac/Linux：经 pkexec（Linux）或系统管理员密码框（macOS）以 root 运行 Jay 自己的守护模式，见 UnixElevatedGuard。
-            guard = UnixElevatedGuard.Start(installer.CorePath, EasyTierArgs.Build(options), EasyTierArgs.Environment(options), ExitNetworkPlan.Create(options), EasyTierArgs.VirtualIp(options));
+            guard = await UnixElevatedGuard.StartAsync(installer.CorePath, EasyTierArgs.Build(options), EasyTierArgs.Environment(options), ExitNetworkPlan.Create(options), EasyTierArgs.VirtualIp(options), ct).ConfigureAwait(false);
         }
         return new EasyTierElevatedSession(options, installer.CliPath, guard);
     }
