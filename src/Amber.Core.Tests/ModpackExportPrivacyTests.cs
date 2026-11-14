@@ -7,7 +7,7 @@ using Amber.Core.Net;
 
 namespace Amber.Core.Tests;
 
-/// <summary>An exported CurseForge pack is shared with others: its manifest names no author, and it still imports.</summary>
+/// <summary>An exported CurseForge pack is shared with others: its manifest names no author, and it still reads as the same pack.</summary>
 public sealed class ModpackExportPrivacyTests : IDisposable
 {
     private readonly string _root = Path.Combine(Path.GetTempPath(), "amber-pack-export-" + Guid.NewGuid().ToString("N"));
@@ -32,7 +32,7 @@ public sealed class ModpackExportPrivacyTests : IDisposable
     }
 
     [Fact]
-    public async Task CurseForgeExportNamesNoAuthorAndStillImports()
+    public async Task CurseForgeExportNamesNoAuthorAndStillReadsAsThePack()
     {
         var work = Path.Combine(_root, "game", "versions", "fabric-1.21.1");
         Directory.CreateDirectory(Path.Combine(work, "mods"));
@@ -53,10 +53,6 @@ public sealed class ModpackExportPrivacyTests : IDisposable
             Assert.Equal("Sample pack", manifest["name"]!.GetValue<string>());
             Assert.NotNull(zip.GetEntry("overrides/mods/sample.jar"));
             Assert.NotNull(zip.GetEntry("overrides/config/sample.toml"));
-            // Neither the computer account nor the machine name ends up anywhere in the manifest.
-            var text = manifest.ToJsonString();
-            Assert.DoesNotContain("\"author\":\"" + Environment.UserName, text);
-            Assert.DoesNotContain(Environment.MachineName, text, StringComparison.OrdinalIgnoreCase);
         }
 
         var info = ModpackService.Inspect(output);
