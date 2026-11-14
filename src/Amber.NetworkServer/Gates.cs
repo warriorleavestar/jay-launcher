@@ -80,11 +80,19 @@ public sealed class BanList : IRoomGate
         var stamp = File.GetLastWriteTimeUtc(_path);
         var bans = new Dictionary<string, Ban>(StringComparer.OrdinalIgnoreCase);
         var o = JsonNode.Parse(File.ReadAllText(_path)) as JsonObject ?? throw new InvalidDataException(_path);
-        foreach (var item in o["bans"] as JsonArray ?? [])
-            if (item is JsonObject b && b["kind"]?.GetValue<string>() is { } kind && Kinds.Contains(kind) && b["value"]?.GetValue<string>() is { Length: > 0 } value)
-                bans[Key(kind, value)] = new Ban(kind, value, b["reason"]?.GetValue<string>(),
-                    DateTimeOffset.FromUnixTimeSeconds(b["at"]?.GetValue<long>() ?? 0),
-                    b["until"]?.GetValue<long>() is { } until ? DateTimeOffset.FromUnixTimeSeconds(until) : null);
+        try
+        {
+            foreach (var item in o["bans"] as JsonArray ?? [])
+                if (item is JsonObject b && b["kind"]?.GetValue<string>() is { } kind && Kinds.Contains(kind) && b["value"]?.GetValue<string>() is { Length: > 0 } value)
+                    bans[Key(kind, value)] = new Ban(kind, value, b["reason"]?.GetValue<string>(),
+                        DateTimeOffset.FromUnixTimeSeconds(b["at"]?.GetValue<long>() ?? 0),
+                        b["until"]?.GetValue<long>() is { } until ? DateTimeOffset.FromUnixTimeSeconds(until) : null);
+        }
+        // A field of the wrong JSON type or a time outside the calendar is a broken file like any other.
+        catch (Exception e) when (e is InvalidOperationException or FormatException or ArgumentException)
+        {
+            throw new InvalidDataException(_path, e);
+        }
         _bans = bans;
         _loadedStamp = stamp;
     }

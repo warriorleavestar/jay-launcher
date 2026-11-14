@@ -9,6 +9,38 @@ public class ChatTests
     private static readonly RoomCode Room = new("K7Q2M9XD", "4HZP8RW2N6TC", 25565);
 
     [Fact]
+    public void ParseRoster_KeepsOneEntryPerMember()
+    {
+        var key = Amber.Core.Multiplayer.Transport.X25519KeyPair.Generate().PublicKey;
+        var fp = MemberIdentity.FingerprintOf(key);
+        var pk = Convert.ToHexStringLower(key);
+        var json = new System.Text.Json.Nodes.JsonObject
+        {
+            ["m"] = new System.Text.Json.Nodes.JsonArray(
+                new System.Text.Json.Nodes.JsonObject { ["fp"] = fp, ["pk"] = pk, ["name"] = "A" },
+                new System.Text.Json.Nodes.JsonObject { ["fp"] = fp, ["pk"] = pk, ["name"] = "B" }),
+        };
+        var roster = ChatWire.ParseRoster(json);
+        Assert.Equal("A", Assert.Single(roster).Name);
+    }
+
+    [Fact]
+    public void ParseRoster_ABrokenEntryDoesNotHideAGoodOneForTheSameMember()
+    {
+        var key = Amber.Core.Multiplayer.Transport.X25519KeyPair.Generate().PublicKey;
+        var fp = MemberIdentity.FingerprintOf(key);
+        var pk = Convert.ToHexStringLower(key);
+        var json = new System.Text.Json.Nodes.JsonObject
+        {
+            ["m"] = new System.Text.Json.Nodes.JsonArray(
+                new System.Text.Json.Nodes.JsonObject { ["fp"] = fp, ["pk"] = pk, ["name"] = 42 },
+                new System.Text.Json.Nodes.JsonObject { ["fp"] = fp, ["pk"] = pk, ["name"] = "B" }),
+        };
+        var roster = ChatWire.ParseRoster(json);
+        Assert.Equal("B", Assert.Single(roster).Name);
+    }
+
+    [Fact]
     public void Cipher_RoundTripAndOpaque()
     {
         var cipher = new ChatCipher(Room);

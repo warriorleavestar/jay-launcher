@@ -31,14 +31,12 @@ public sealed class GateRelay : IAsyncDisposable
 
     /// <summary>心跳通道现在是不是连着。</summary>
     public bool HeartbeatConnected { get; private set; }
-    public long HeartbeatsSent;
 
     /// <summary>固定端口（Start 之后才有）。</summary>
     public int Port => _listeners?.FixedPort ?? throw new InvalidOperationException();
     public IReadOnlyList<int> RotatingPorts => _listeners?.RotatingPorts ?? [];
     public bool FixedPortOpen => _listeners?.FixedOpen ?? false;
     public int Active;
-    public long Forwarded;
 
     /// <param name="code">节点码（隐私++ 的心跳）；不给就只转发。</param>
     /// <param name="key">节点自己的长期密钥（给了节点码就必须给）。</param>
@@ -136,7 +134,6 @@ public sealed class GateRelay : IAsyncDisposable
                 while (!ct.IsCancellationRequested)
                 {
                     await GateProtocol.WriteHeartbeatAsync(channel, ++counter, ct);
-                    Interlocked.Increment(ref HeartbeatsSent);
                     await Task.Delay(_heartbeatInterval, ct);
                 }
             }
@@ -237,8 +234,7 @@ public sealed class GateRelay : IAsyncDisposable
                 Interlocked.Increment(ref Active);
                 try
                 {
-                    var (up, down) = await Pump.RunAsync(client.GetStream(), origin.GetStream(), ct);
-                    Interlocked.Add(ref Forwarded, up + down);
+                    await Pump.RunAsync(client.GetStream(), origin.GetStream(), ct);
                 }
                 finally
                 {

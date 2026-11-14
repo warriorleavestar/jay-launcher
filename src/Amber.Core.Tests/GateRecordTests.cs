@@ -93,6 +93,8 @@ public sealed class GateRecordTests : IAsyncLifetime
         Assert.Equal(locator.Id, parsed.Locator!.Id);
         Assert.Equal(locator.SignerHash, parsed.Locator.SignerHash);
         Assert.Equal(invite.Token, parsed.Token);
+        Assert.NotNull(GateInvite.TryParse(code + " thanks, see you at 8", out _));
+        Assert.NotNull(GateInvite.TryParse(code + "\nJoin tonight", out _));
 
         // Not published yet: nothing to find.
         var directories = Directories();
@@ -148,6 +150,24 @@ public sealed class GateRecordTests : IAsyncLifetime
     {
         try { return await GateRecord.ResolveAsync(Directories(), invite, default); }
         catch (IOException) { return null; }
+    }
+
+    /// <summary>A record publish that fails in an unexpected way is logged and tried again, not left to end publishing.</summary>
+    [Fact]
+    public async Task RecordPublishingRetriesAfterAnyFailure()
+    {
+        _store.EnableRecords("jay");
+        var attempts = 0;
+        var log = new List<string>();
+        await using (GateRecordPublisher.Start(_store, _store.LoadConfig(), (_, _) =>
+        {
+            Interlocked.Increment(ref attempts);
+            throw new NotSupportedException("unexpected");
+        }, line => { lock (log) log.Add(line); }, TimeSpan.FromMilliseconds(10), TimeSpan.FromMilliseconds(10)))
+        {
+            await Until(() => Task.FromResult(Volatile.Read(ref attempts) >= 3));
+        }
+        lock (log) Assert.True(log.Count(l => l.Contains("unexpected", StringComparison.Ordinal)) >= 3);
     }
 
     /// <summary>A running gate follows records on/off and republishes when its entries change, without a restart.</summary>
