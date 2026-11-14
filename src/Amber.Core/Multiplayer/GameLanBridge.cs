@@ -32,8 +32,15 @@ public static class GameLanBridge
     /// <summary>How long a control connection waits for Jay to learn which process its launch started.</summary>
     private static readonly TimeSpan BindTimeout = TimeSpan.FromSeconds(10);
 
-    /// <summary>Connections still sending their first line; more are closed at once.</summary>
-    private const int MaxHandshakes = 32;
+    /// <summary>
+    /// Connections still sending their first line, per launched game process; more are closed at once. A connection from
+    /// any other process is closed before it is read, except while a launch's process isn't known yet (just started):
+    /// then a few may wait in a small shared budget, which the agent retries past if it is full.
+    /// </summary>
+    internal const int MaxHandshakesPerGame = 16, MaxUnknownHandshakes = 4;
+
+    /// <summary>The budget key for connections whose process isn't a known game's.</summary>
+    private const int Unknown = -1;
 
     /// <summary>
     /// Players passed on through agents at once, per game and in all (the agent has its own limit too). A slot is taken
@@ -44,14 +51,18 @@ public static class GameLanBridge
     private static int _active;
 
     private static readonly object Gate = new();
-    private static readonly SemaphoreSlim Handshakes = new(MaxHandshakes, MaxHandshakes);
+    // Handshakes in progress, by game process (or Unknown), under Gate.
+    private static readonly Dictionary<int, int> Handshakes = [];
     private static TcpListener? _listener;
     private static readonly Dictionary<string, Launch> Launches = new(StringComparer.Ordinal);
     private static readonly ConcurrentDictionary<long, Request> Pending = new();
 
     /// <summary>One game launch: its token, the process it started (once known) and that process's agent.</summary>
-    private sealed class Launch
+    private sealed class Launch(string token)
     {
+        public string Token { get; } = token;
+        /// <summary>Proves to the agent that it reached the Jay that started it (the token alone it sends itself).</summary>
+        public byte[] Key { get; } = RandomNumberGenerator.GetBytes(16);
         public TaskCompletionSource<int> Pid { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public Agent? Agent { get; set; }
     }
@@ -79,8 +90,9 @@ public static class GameLanBridge
         if (jar.Contains('=')) return null;
         var port = Start();
         var token = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(16));
-        lock (Gate) Launches[token] = new Launch();
-        return $"-javaagent:{jar}={port}:{token}";
+        var launch = new Launch(token);
+        lock (Gate) Launches[token] = launch;
+        return $"-javaagent:{jar}={port}:{token}:{Convert.ToHexStringLower(launch.Key)}";
     }
 
     /// <summary>
@@ -120,9 +132,8 @@ public static class GameLanBridge
     {
         foreach (var a in arguments)
         {
-            if (!a.StartsWith("-javaagent:", StringComparison.Ordinal)) continue;
-            var colon = a.LastIndexOf(':');
-            if (colon > 0 && a[(colon + 1)..] is { Length: 32 } token)
+            if (!a.StartsWith("-javaagent:", StringComparison.Ordinal) || a.IndexOf('=') is not (> 0 and var equals)) continue;
+            if (a[(equals + 1)..].Split(':') is [_, { Length: 32 } token, _])
                 lock (Gate)
                     if (Launches.ContainsKey(token)) return token;
         }
@@ -350,22 +361,58 @@ public static class GameLanBridge
                 socket.Dispose();
                 continue;
             }
-            if (!Handshakes.Wait(0))
+            if (TakeHandshake(socket) is not { } budget)
             {
                 socket.Dispose();
                 continue;
             }
-            _ = Task.Run(() => HandshakeAsync(socket));
+            _ = Task.Run(() => HandshakeAsync(socket, budget));
         }
     }
 
-    private static async Task HandshakeAsync(Socket socket)
+    /// <summary>
+    /// Takes a handshake place for a new connection, by the process that made it (read from Windows' connection table
+    /// before a byte is read): a launched game's own budget, the small shared one while some launch's process isn't known
+    /// yet, else none (closed at once, so other programs can't crowd out the games' agents).
+    /// </summary>
+    private static int? TakeHandshake(Socket socket)
+    {
+        int? pid = null;
+        if (OperatingSystem.IsWindows())
+        {
+            try { pid = LocalPortOwners.ConnectionPid((IPEndPoint)socket.RemoteEndPoint!, (IPEndPoint)socket.LocalEndPoint!); }
+            catch (Exception e) when (e is SocketException or ObjectDisposedException) { return null; }
+        }
+        lock (Gate)
+        {
+            var games = Launches.Values.Where(l => l.Pid.Task.IsCompletedSuccessfully).Select(l => l.Pid.Task.Result).ToHashSet();
+            int budget;
+            if (pid is { } p && games.Contains(p)) budget = p;
+            else if (Launches.Values.Any(l => !l.Pid.Task.IsCompleted) || !OperatingSystem.IsWindows()) budget = Unknown;
+            else return null;
+            var taken = Handshakes.GetValueOrDefault(budget);
+            if (taken >= (budget == Unknown ? MaxUnknownHandshakes : MaxHandshakesPerGame)) return null;
+            Handshakes[budget] = taken + 1;
+            return budget;
+        }
+    }
+
+    private static void GiveBackHandshake(int budget)
+    {
+        lock (Gate)
+        {
+            if (Handshakes.GetValueOrDefault(budget) <= 1) Handshakes.Remove(budget);
+            else Handshakes[budget]--;
+        }
+    }
+
+    private static async Task HandshakeAsync(Socket socket, int budget)
     {
         var keep = false;
         var released = false;
         void Release()
         {
-            if (!released) Handshakes.Release();
+            if (!released) GiveBackHandshake(budget);
             released = true;
         }
         try
@@ -393,7 +440,7 @@ public static class GameLanBridge
                 if (await launch.Pid.Task.WaitAsync(wait.Token) != pid) return;
             Release();
             keep = true;
-            await ServeControlAsync(new Agent(launch, socket, pid.Value));
+            await ServeControlAsync(new Agent(launch, socket, pid.Value), hello.Nonce!);
         }
         catch (Exception e) when (e is SocketException or OperationCanceledException or ObjectDisposedException or IOException or TimeoutException)
         {
@@ -405,7 +452,7 @@ public static class GameLanBridge
         }
     }
 
-    private static async Task ServeControlAsync(Agent agent)
+    private static async Task ServeControlAsync(Agent agent, string nonce)
     {
         Agent? replaced = null;
         try
@@ -413,7 +460,7 @@ public static class GameLanBridge
             // Tells the agent it was accepted. The agent takes nothing but "ok" first, so it is sent before the agent is
             // published: no "open" from another thread can get in ahead of it.
             if (BeforeOkForTest is { } hold) await hold();
-            if (!await SendAsync(agent, "ok\n", CancellationToken.None)) return;
+            if (!await SendAsync(agent, $"ok {Proof(agent.Launch.Key, agent.Launch.Token, nonce)}\n", CancellationToken.None)) return;
             lock (Gate)
             {
                 // One control connection per launch: a new one replaces the old.
@@ -442,18 +489,28 @@ public static class GameLanBridge
         }
     }
 
-    /// <summary>The first line of a connection from an agent: its launch token, and for a data connection the request id.</summary>
-    internal static (string Token, long? Data)? Parse(string line)
+    /// <summary>
+    /// The first line of a connection from an agent: its launch token, and for a control connection the agent's fresh
+    /// nonce (answered with <see cref="Proof"/>), for a data connection the request id.
+    /// </summary>
+    internal static (string Token, long? Data, string? Nonce)? Parse(string line)
     {
         var parts = line.Split(' ');
-        if (parts.Length < 3 || parts[0] != Magic || parts[1].Length != 32 || !parts[1].All(char.IsAsciiHexDigitLower)) return null;
+        if (parts.Length < 3 || parts[0] != Magic || !IsHex32(parts[1])) return null;
         return parts switch
         {
-            [_, var token, "control"] => (token, null),
-            [_, var token, "data", var id] when long.TryParse(id, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var n) => (token, n),
+            [_, var token, "control", var nonce] when IsHex32(nonce) => (token, null, nonce),
+            [_, var token, "data", var id] when long.TryParse(id, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var n) => (token, n, null),
             _ => null,
         };
+
+        static bool IsHex32(string s) => s.Length == 32 && s.All(char.IsAsciiHexDigitLower);
     }
+
+    /// <summary>What the agent expects after "ok": HMAC-SHA256 under the launch key of its token and nonce, lowercase hex.</summary>
+    internal static string Proof(byte[] key, string token, string nonce) =>
+        Convert.ToHexStringLower(HMACSHA256.HashData(key, Encoding.ASCII.GetBytes($"jay-lan ok {token} {nonce}")));
+
 
     /// <summary>Reads one ASCII line byte by byte (so nothing after it is consumed); null at the end of the stream.</summary>
     private static async Task<string?> ReadLineAsync(Socket socket, CancellationToken ct)

@@ -39,8 +39,8 @@ public sealed partial class MultiplayerViewModel
         : _relayTyped ? L.F("multiplayer.relay.linked_port", _gameRelay.Target ?? 0)
         : L.F("multiplayer.relay.linked", _relayGameLabel ?? "", _gameRelay.Target ?? 0);
 
-    /// <summary>Tests: stands in for "a game with a LAN bridge agent is running" (a real one needs the Windows sandbox).</summary>
-    internal Func<bool>? BridgedGameRunningForTest { get; set; }
+    /// <summary>Tests: stands in for "this port is a game with a LAN bridge agent" (a real one needs the Windows sandbox).</summary>
+    internal Func<int, bool>? BridgedForTest { get; set; }
 
     /// <summary>Tests: the game port and relay a new room would use.</summary>
     internal Task<(int Port, GamePortRelay? Relay)?> HostGamePortForTest(bool checkManual = false) => HostGamePortAsync(checkManual);
@@ -69,9 +69,10 @@ public sealed partial class MultiplayerViewModel
                 return null;
             }
             // A game in the strong sandbox can't be reached by EasyTier, the direct bridge or (in a whole-LAN room) a
-            // guest on the virtual address, only through Jay (GameLanBridge): put the relay in front of the game whenever
-            // such a game is running. The caller decides where it listens (RelayOnAdapter), as for a relay without a game.
-            if ((BridgedGameRunningForTest ?? (() => GameLanBridge.HasAgents))())
+            // guest on the virtual address, only through Jay (GameLanBridge): put the relay in front of the game when
+            // the chosen port is such a game's. Other games are reached directly as before. The caller decides where it
+            // listens (RelayOnAdapter), as for a relay without a game.
+            if ((BridgedForTest ?? GameLanBridge.IsBridged)(known))
             {
                 var front = new GamePortRelay();
                 front.SetTarget(known);

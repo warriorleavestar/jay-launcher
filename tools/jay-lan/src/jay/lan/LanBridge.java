@@ -8,25 +8,33 @@ import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
+import java.security.GeneralSecurityException;
+import java.security.MessageDigest;
+import java.security.SecureRandom;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicLong;
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 
 /**
  * Jay's LAN bridge for the Windows strong sandbox. A game in an AppContainer cannot be reached from outside it over
  * loopback, so Jay cannot connect to the world the player opened to LAN. It may still connect out, and the game may
- * connect to its own ports. This agent runs inside the game and keeps one control connection out to Jay (port and
- * this launch's token on the command line: {@code -javaagent:jay-lan.jar=<port>:<token>}). When a room member arrives, Jay asks
+ * connect to its own ports. This agent runs inside the game and keeps one control connection out to Jay (port, this
+ * launch's token and key on the command line: {@code -javaagent:jay-lan.jar=<port>:<token>:<key>}). When a room member arrives, Jay asks
  * for the game's port; the agent connects to that port on 127.0.0.1 (its own process), opens a second connection out
  * to Jay for that member, and passes bytes between the two. Nothing in the game listens for Jay and nothing is opened
  * to the network.
  * <p>
- * Lines are ASCII: the agent sends {@code JAYLAN1 <token> control} or {@code JAYLAN1 <token> data <id>};
- * Jay answers an accepted control connection with {@code ok}, then sends {@code open <id> <port>}; the agent answers a
- * failed open with {@code fail <id>}. Jay accepts both kinds only from the process it started with this token.
+ * Lines are ASCII: the agent sends {@code JAYLAN1 <token> control <nonce>} or {@code JAYLAN1 <token> data <id>};
+ * Jay answers an accepted control connection with {@code ok <proof>}, an HMAC-SHA256 under the launch key of the token
+ * and the agent's fresh nonce, then sends {@code open <id> <port>}; the agent answers a failed open with
+ * {@code fail <id>}. Jay accepts both kinds only from the process it started with this token, and the agent takes
+ * requests only from a listener that proved it holds the key (the token is sent first, so it proves nothing).
  * <p>
- * The control connection is made once. When it ends (Jay closed or restarted) the bridge stops for good and the game
- * has to be restarted to host rooms: reconnecting would hand this launch's token to whatever listens on the old port
- * by then, which can be another program, and let it ask for connections to the game. At most {@link #MAX_ACTIVE}
+ * Until a control connection is accepted, the agent tries again a few times (Jay may turn it away while it is busy).
+ * Once an accepted one ends (Jay closed or restarted) the bridge stops for good and the game has to be restarted to
+ * host rooms: a new Jay doesn't know this launch's key, and whatever else listens on the old port by then must not be
+ * able to ask for connections to the game. At most {@link #MAX_ACTIVE}
  * players are passed on at once, each with two threads, and a connection quiet in both directions for
  * {@link #IDLE_MS} is closed (Minecraft sends keep-alives every few seconds).
  */
@@ -40,12 +48,16 @@ public final class LanBridge implements Runnable {
     private volatile boolean stopped;
     private final int jayPort;
     private final String secret;
+    private final byte[] key;
+    /** Waits between attempts while no control connection has been accepted yet, in milliseconds. */
+    static final int[] RETRY_MS = {500, 1000, 2000, 4000, 8000, 8000, 8000, 8000};
     private final Object writeLock = new Object();
     private OutputStream control;
 
-    private LanBridge(int jayPort, String secret) {
+    private LanBridge(int jayPort, String secret, byte[] key) {
         this.jayPort = jayPort;
         this.secret = secret;
+        this.key = key;
     }
 
     public static void premain(String args) {
@@ -58,9 +70,11 @@ public final class LanBridge implements Runnable {
         } catch (NumberFormatException e) {
             return;
         }
-        String secret = args.substring(colon + 1);
-        if (port <= 0 || port > 65535 || !secret.matches("[0-9a-f]{32}")) return;
-        daemon(new LanBridge(port, secret), "Jay LAN bridge");
+        String[] rest = args.substring(colon + 1).split(":", -1);
+        if (rest.length != 2) return;
+        String secret = rest[0];
+        if (port <= 0 || port > 65535 || !secret.matches("[0-9a-f]{32}") || !rest[1].matches("[0-9a-f]{32}")) return;
+        daemon(new LanBridge(port, secret, hex(rest[1])), "Jay LAN bridge");
     }
 
     private static void daemon(Runnable work, String name) {
@@ -69,22 +83,31 @@ public final class LanBridge implements Runnable {
         thread.start();
     }
 
+    /** Outcome of one control connection. */
+    private enum Outcome { NOT_ACCEPTED, ENDED, IMPOSTOR }
+
     /**
-     * Serves the one control connection to Jay, then stops for good (see the class comment): the game's log says once
-     * that the game has to be restarted to host a room again.
+     * Serves the one accepted control connection to Jay, then stops for good (see the class comment): the game's log
+     * says once that the game has to be restarted to host a room again.
      */
     @Override
     public void run() {
         try {
-            Socket socket = connectToJay();
-            try {
-                serve(socket);
-            } finally {
-                stop();
-                closeQuietly(socket);
+            for (int attempt = 0; ; attempt++) {
+                Outcome outcome = Outcome.NOT_ACCEPTED;
+                Socket socket = null;
+                try {
+                    socket = connectToJay();
+                    outcome = serve(socket);
+                } catch (IOException ignored) {
+                    // Jay is not there, or turned this connection away before accepting it.
+                } finally {
+                    closeQuietly(socket);
+                }
+                if (outcome != Outcome.NOT_ACCEPTED || attempt >= RETRY_MS.length) break;
+                Thread.sleep(RETRY_MS[attempt]);
             }
-        } catch (IOException ignored) {
-            // Jay is not there (any more).
+        } catch (InterruptedException ignored) {
         } catch (RuntimeException ignored) {
         } catch (Error e) {
             // Out of threads or memory: the bridge stops, the game keeps running.
@@ -114,13 +137,21 @@ public final class LanBridge implements Runnable {
     }
 
     /** Serves the control connection until it ends. */
-    private void serve(Socket socket) throws IOException {
+    private Outcome serve(Socket socket) throws IOException {
+        byte[] nonce = new byte[16];
+        new SecureRandom().nextBytes(nonce);
+        String challenge = toHex(nonce);
         OutputStream out = socket.getOutputStream();
-        out.write(("JAYLAN1 " + secret + " control\n").getBytes(StandardCharsets.US_ASCII));
+        out.write(("JAYLAN1 " + secret + " control " + challenge + "\n").getBytes(StandardCharsets.US_ASCII));
         out.flush();
         InputStream in = socket.getInputStream();
+        socket.setSoTimeout(15000);
         String first = readLine(in);
-        if (!"ok".equals(first)) return;
+        socket.setSoTimeout(0);
+        if (first == null) return Outcome.NOT_ACCEPTED;
+        // Whatever listens there answered without knowing the key: not the Jay that started this game.
+        if (!first.startsWith("ok ") || !MessageDigest.isEqual(proof(challenge).getBytes(StandardCharsets.US_ASCII),
+                first.substring(3).getBytes(StandardCharsets.US_ASCII))) return Outcome.IMPOSTOR;
         synchronized (writeLock) {
             control = out;
         }
@@ -158,6 +189,30 @@ public final class LanBridge implements Runnable {
                 send("fail " + id + "\n");
             }
         }
+        return Outcome.ENDED;
+    }
+
+    /** Jay's answer to an accepted control connection: HMAC-SHA256 under the launch key, in lowercase hex. */
+    String proof(String nonce) {
+        try {
+            Mac mac = Mac.getInstance("HmacSHA256");
+            mac.init(new SecretKeySpec(key, "HmacSHA256"));
+            return toHex(mac.doFinal(("jay-lan ok " + secret + " " + nonce).getBytes(StandardCharsets.US_ASCII)));
+        } catch (GeneralSecurityException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    private static byte[] hex(String text) {
+        byte[] bytes = new byte[text.length() / 2];
+        for (int i = 0; i < bytes.length; i++) bytes[i] = (byte) Integer.parseInt(text.substring(2 * i, 2 * i + 2), 16);
+        return bytes;
+    }
+
+    private static String toHex(byte[] bytes) {
+        StringBuilder text = new StringBuilder(bytes.length * 2);
+        for (byte b : bytes) text.append(Character.forDigit((b >> 4) & 15, 16)).append(Character.forDigit(b & 15, 16));
+        return text.toString();
     }
 
     private void open(String id, int port) {

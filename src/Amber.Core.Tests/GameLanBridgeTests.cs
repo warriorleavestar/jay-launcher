@@ -28,6 +28,8 @@ public sealed class GameLanBridgeTests : IDisposable
     private readonly List<List<string>> _launches = [];
     private readonly List<IDisposable> _cleanup = [];
 
+    private const string Nonce = "00112233445566778899aabbccddeeff";
+
     public GameLanBridgeTests() => Directory.CreateDirectory(_root);
 
     public void Dispose()
@@ -41,8 +43,11 @@ public sealed class GameLanBridgeTests : IDisposable
     public void FirstLineNamesTheLaunch()
     {
         const string token = "0123456789abcdef0123456789abcdef";
-        Assert.Equal((token, (long?)null), GameLanBridge.Parse($"JAYLAN1 {token} control"));
-        Assert.Equal((token, (long?)42), GameLanBridge.Parse($"JAYLAN1 {token} data 42"));
+        Assert.Equal((token, (long?)null, Nonce), GameLanBridge.Parse($"JAYLAN1 {token} control {Nonce}"));
+        // A control connection without a fresh nonce can't be answered with a proof.
+        Assert.Null(GameLanBridge.Parse($"JAYLAN1 {token} control"));
+        Assert.Null(GameLanBridge.Parse($"JAYLAN1 {token} control 0123"));
+        Assert.Equal((token, (long?)42, (string?)null), GameLanBridge.Parse($"JAYLAN1 {token} data 42"));
         Assert.Null(GameLanBridge.Parse($"JAYLAN1 {token} data -1"));
         Assert.Null(GameLanBridge.Parse($"JAYLAN1 {token} data"));
         Assert.Null(GameLanBridge.Parse($"JAYLAN1 {token} open 1 25565"));
@@ -59,7 +64,7 @@ public sealed class GameLanBridgeTests : IDisposable
         var argument = GameLanBridge.AgentArgument(@"D:\MC 1.20\libraries\jay\jay-lan\jay-lan-0.jar");
         Assert.NotNull(argument);
         _launches.Add([argument]);
-        Assert.Matches(@"^-javaagent:D:\\MC 1\.20\\libraries\\jay\\jay-lan\\jay-lan-0\.jar=\d+:[0-9a-f]{32}$", argument);
+        Assert.Matches(@"^-javaagent:D:\\MC 1\.20\\libraries\\jay\\jay-lan\\jay-lan-0\.jar=\d+:[0-9a-f]{32}:[0-9a-f]{32}$", argument);
     }
 
     [Fact]
@@ -88,7 +93,7 @@ public sealed class GameLanBridgeTests : IDisposable
     {
         using var stranger = await DialAsync("GET / HTTP/1.1");
         Assert.Null(await ReadLineAsync(stranger));
-        using var nobody = await DialAsync($"JAYLAN1 {new string('a', 32)} control");
+        using var nobody = await DialAsync($"JAYLAN1 {new string('a', 32)} control {Nonce}");
         Assert.Null(await ReadLineAsync(nobody));
     }
 
@@ -103,14 +108,14 @@ public sealed class GameLanBridgeTests : IDisposable
         GameLanBridge.BeforeOkForTest = () => { holding.TrySetResult(); return release.Task; };
         try
         {
-            using var control = await DialAsync($"JAYLAN1 {token} control");
+            using var control = await DialAsync($"JAYLAN1 {token} control {Nonce}");
             _cleanup.Add(control);
             await holding.Task.WaitAsync(TimeSpan.FromSeconds(15));
             // Still in the handshake: the game's port isn't routed through this agent yet, so nothing is asked of it.
             Assert.False(GameLanBridge.IsBridged(game.Port));
             using (var direct = await GameLanBridge.ConnectAsync(game.Port, TimeSpan.FromSeconds(5))) Assert.NotNull(direct);
             release.SetResult();
-            Assert.Equal("ok", await ReadLineAsync(control));
+            Assert.StartsWith("ok ", await ReadLineAsync(control) ?? "");
             var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
             while (!GameLanBridge.IsBridged(game.Port) && DateTime.UtcNow < deadline) await Task.Delay(20);
             Assert.True(GameLanBridge.IsBridged(game.Port));
@@ -130,9 +135,9 @@ public sealed class GameLanBridgeTests : IDisposable
         if (!OperatingSystem.IsWindows()) return;
         using var game = new Listener();
         var token = Launch();
-        using var control = await DialAsync($"JAYLAN1 {token} control");
+        using var control = await DialAsync($"JAYLAN1 {token} control {Nonce}");
         _cleanup.Add(control);
-        Assert.Equal("ok", await ReadLineAsync(control));
+        Assert.StartsWith("ok ", await ReadLineAsync(control) ?? "");
         var before = GameLanBridge.ActiveForTest;
 
         // The agent answers every request with a data connection.
@@ -166,9 +171,9 @@ public sealed class GameLanBridgeTests : IDisposable
         if (!OperatingSystem.IsWindows()) return;
         using var game = new Listener();
         var token = Launch();
-        using var control = await DialAsync($"JAYLAN1 {token} control");
+        using var control = await DialAsync($"JAYLAN1 {token} control {Nonce}");
         _cleanup.Add(control);
-        Assert.Equal("ok", await ReadLineAsync(control));
+        Assert.StartsWith("ok ", await ReadLineAsync(control) ?? "");
         var before = GameLanBridge.ActiveForTest;
 
         // The agent gets the request but doesn't answer in time: the player gets nothing and the slot is back.
@@ -193,6 +198,36 @@ public sealed class GameLanBridgeTests : IDisposable
         using (var late = await DialAsync($"JAYLAN1 {token} data {request![1]}"))
             Assert.Null(await ReadLineAsync(late, TimeSpan.FromSeconds(5)));
         Assert.Equal(before, GameLanBridge.ActiveForTest);
+    }
+
+    [Fact]
+    public async Task OtherProgramsCannotCrowdOutAGamesAgentAndOnlyJayCanProveItself()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var argument = GameLanBridge.AgentArgument(Path.Combine(_root, "jay-lan.jar"))!;
+        List<string> args = [argument];
+        _launches.Add(args);
+        GameLanBridge.Started(args, Process.GetCurrentProcess());
+        var parts = argument[(argument.IndexOf('=') + 1)..].Split(':');
+        var (token, key) = (parts[1], Convert.FromHexString(parts[2]));
+
+        // Another program opens far more connections than there are handshake places and sends half a line on each.
+        var script = "$c=@();for($i=0;$i -lt 48;$i++){$t=[Net.Sockets.TcpClient]::new('127.0.0.1'," + GameLanBridge.PortForTest + ");" +
+                     "$b=[Text.Encoding]::ASCII.GetBytes('JAYLAN1 ');$t.GetStream().Write($b,0,$b.Length);$c+=$t};" +
+                     "'READY';[Console]::Out.Flush();Start-Sleep -Seconds 20";
+        var psi = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe"))
+        {
+            UseShellExecute = false, RedirectStandardOutput = true, CreateNoWindow = true,
+        };
+        foreach (var a in new[] { "-NoProfile", "-NonInteractive", "-Command", script }) psi.ArgumentList.Add(a);
+        var crowd = Process.Start(psi)!;
+        _cleanup.Add(new Killer(crowd));
+        Assert.Equal("READY", await crowd.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(30)));
+
+        // The game's agent still gets in at once, and Jay's answer proves it holds this launch's key.
+        using var control = await DialAsync($"JAYLAN1 {token} control {Nonce}");
+        _cleanup.Add(control);
+        Assert.Equal($"ok {GameLanBridge.Proof(key, token, Nonce)}", await ReadLineAsync(control, TimeSpan.FromSeconds(3)));
     }
 
     private static TcpRow Listening(string address, int port, int pid) =>
@@ -228,7 +263,7 @@ public sealed class GameLanBridgeTests : IDisposable
         // Another game (a separate process with its own launch and agent) listens on [::1] at the same port number.
         var script = "$l=[Net.Sockets.TcpListener]::new([Net.IPAddress]::IPv6Loopback," + port + ");$l.Start();'LISTENING';[Console]::Out.Flush();" +
                      "$t=[Console]::In.ReadLine();$c=[Net.Sockets.TcpClient]::new('127.0.0.1'," + GameLanBridge.PortForTest + ");$s=$c.GetStream();" +
-                     "$b=[Text.Encoding]::ASCII.GetBytes(\"JAYLAN1 $t control`n\");$s.Write($b,0,$b.Length);$r=[IO.StreamReader]::new($s);" +
+                     "$b=[Text.Encoding]::ASCII.GetBytes(\"JAYLAN1 $t control 00112233445566778899aabbccddeeff`n\");$s.Write($b,0,$b.Length);$r=[IO.StreamReader]::new($s);" +
                      "while(($x=$r.ReadLine()) -ne $null){\"GOT $x\";[Console]::Out.Flush()}";
         var psi = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe"))
         {
@@ -276,7 +311,7 @@ public sealed class GameLanBridgeTests : IDisposable
         if (!OperatingSystem.IsWindows()) return;
         // The launch started another process: its token alone gets this one nowhere.
         var token = Launch(OtherProcess());
-        using var control = await DialAsync($"JAYLAN1 {token} control");
+        using var control = await DialAsync($"JAYLAN1 {token} control {Nonce}");
         Assert.Null(await ReadLineAsync(control));
         Assert.Equal(0, GameLanBridge.AgentCount);
     }
@@ -289,16 +324,16 @@ public sealed class GameLanBridgeTests : IDisposable
         var old = new List<Socket>();
         for (var i = 0; i < 20; i++)
         {
-            var control = await DialAsync($"JAYLAN1 {a} control");
+            var control = await DialAsync($"JAYLAN1 {a} control {Nonce}");
             _cleanup.Add(control);
-            Assert.Equal("ok", await ReadLineAsync(control));
+            Assert.StartsWith("ok ", await ReadLineAsync(control) ?? "");
             old.Add(control);
         }
         // Each new connection replaced the one before: only the last is still open.
         foreach (var s in old.Take(19)) Assert.Null(await ReadLineAsync(s));
         var b = Launch();
-        using var other = await DialAsync($"JAYLAN1 {b} control");
-        Assert.Equal("ok", await ReadLineAsync(other));
+        using var other = await DialAsync($"JAYLAN1 {b} control {Nonce}");
+        Assert.StartsWith("ok ", await ReadLineAsync(other) ?? "");
         Assert.Equal(2, GameLanBridge.AgentCount);
     }
 
@@ -310,9 +345,9 @@ public sealed class GameLanBridgeTests : IDisposable
         var controls = new Socket[2];
         for (var i = 0; i < 2; i++)
         {
-            controls[i] = await DialAsync($"JAYLAN1 {tokens[i]} control");
+            controls[i] = await DialAsync($"JAYLAN1 {tokens[i]} control {Nonce}");
             _cleanup.Add(controls[i]);
-            Assert.Equal("ok", await ReadLineAsync(controls[i]));
+            Assert.StartsWith("ok ", await ReadLineAsync(controls[i]) ?? "");
         }
         using var game = new Listener();
         var connecting = GameLanBridge.ConnectAsync(game.Port, TimeSpan.FromSeconds(20));
@@ -340,8 +375,8 @@ public sealed class GameLanBridgeTests : IDisposable
     {
         if (!OperatingSystem.IsWindows()) return;
         var token = Launch();
-        using var control = await DialAsync($"JAYLAN1 {token} control");
-        Assert.Equal("ok", await ReadLineAsync(control));
+        using var control = await DialAsync($"JAYLAN1 {token} control {Nonce}");
+        Assert.StartsWith("ok ", await ReadLineAsync(control) ?? "");
         using var game = new Listener();
         var connecting = GameLanBridge.ConnectAsync(game.Port, TimeSpan.FromSeconds(60));
         var parts = (await ReadLineAsync(control))?.Split(' ');
@@ -397,7 +432,7 @@ public sealed class GameLanBridgeTests : IDisposable
         List<string> args = [argument];
         _launches.Add(args);
         GameLanBridge.Started(args, process ?? Process.GetCurrentProcess());
-        return argument[(argument.LastIndexOf(':') + 1)..];
+        return argument[(argument.IndexOf('=') + 1)..].Split(':')[1];
     }
 
     /// <summary>A process that is not this one and waits (killed when the test ends).</summary>

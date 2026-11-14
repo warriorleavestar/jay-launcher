@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using Amber.Core.Launch;
+using Amber.Core.Multiplayer;
 
 namespace Amber.Core.Tests;
 
@@ -13,6 +14,7 @@ namespace Amber.Core.Tests;
 public sealed class LanBridgeAgentTests : IDisposable
 {
     private const string Token = "0123456789abcdef0123456789abcdef";
+    private const string Key = "fedcba9876543210fedcba9876543210";
     private readonly string _root = Path.Combine(Path.GetTempPath(), "jay-lan-agent-" + Guid.NewGuid().ToString("N"));
     private readonly List<IDisposable> _cleanup = [];
 
@@ -31,8 +33,7 @@ public sealed class LanBridgeAgentTests : IDisposable
         var port = ((IPEndPoint)jay.LocalEndpoint).Port;
         if (Start(port) is not { } game) return;
         using var control = await jay.AcceptSocketAsync().WaitAsync(TimeSpan.FromSeconds(30));
-        Assert.Equal($"JAYLAN1 {Token} control", await ReadLineAsync(control));
-        await control.SendAsync("ok\n"u8.ToArray());
+        await AcceptAsync(control);
 
         // Jay closes; another program takes the port. The agent must not come back to it: it would hand over the token
         // and take "open" requests from whoever listens there now.
@@ -54,8 +55,7 @@ public sealed class LanBridgeAgentTests : IDisposable
         var worldPort = ((IPEndPoint)gameWorld.LocalEndpoint).Port;
         if (Start(((IPEndPoint)jay.LocalEndpoint).Port) is null) return;
         using var control = await jay.AcceptSocketAsync().WaitAsync(TimeSpan.FromSeconds(30));
-        Assert.Equal($"JAYLAN1 {Token} control", await ReadLineAsync(control));
-        await control.SendAsync("ok\n"u8.ToArray());
+        await AcceptAsync(control);
 
         var data = new List<Socket>();
         var players = new List<Socket>();
@@ -90,6 +90,50 @@ public sealed class LanBridgeAgentTests : IDisposable
             var s = Track(await jay.AcceptSocketAsync().WaitAsync(TimeSpan.FromSeconds(20)));
             Assert.StartsWith($"JAYLAN1 {Token} data 10", await ReadLineAsync(s));
         }
+    }
+
+    [Fact]
+    public async Task AnAgentTakesRequestsOnlyFromTheJayThatStartedIt()
+    {
+        var impostor = Listen(0);
+        var port = ((IPEndPoint)impostor.LocalEndpoint).Port;
+        var gameWorld = Listen(0);
+        if (Start(port) is not { } game) return;
+        using var control = await impostor.AcceptSocketAsync().WaitAsync(TimeSpan.FromSeconds(30));
+        // It learns the token from the agent's first line, but can't prove it holds the launch key.
+        var hello = (await ReadLineAsync(control))!.Split(' ');
+        Assert.Equal(["JAYLAN1", Token, "control"], hello[..3]);
+        await control.SendAsync(Encoding.ASCII.GetBytes($"ok {GameLanBridge.Proof(Convert.FromHexString(Key), Token, new string('0', 32))}\n"));
+        await control.SendAsync(Encoding.ASCII.GetBytes($"open 1 {((IPEndPoint)gameWorld.LocalEndpoint).Port}\n"));
+        // No connection to the game, none back for that request, and no further attempt.
+        using var wait = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await impostor.AcceptSocketAsync(wait.Token));
+        Assert.False(gameWorld.Pending());
+        Assert.False(game.HasExited);
+    }
+
+    [Fact]
+    public async Task AnAgentTurnedAwayBeforeItWasAcceptedTriesAgain()
+    {
+        var jay = Listen(0);
+        var gameWorld = Listen(0);
+        if (Start(((IPEndPoint)jay.LocalEndpoint).Port) is null) return;
+        // Jay is busy (or another program crowds its handshakes): the first control connection is closed unanswered.
+        using (var first = await jay.AcceptSocketAsync().WaitAsync(TimeSpan.FromSeconds(30)))
+            Assert.StartsWith($"JAYLAN1 {Token} control ", await ReadLineAsync(first));
+        using var control = await jay.AcceptSocketAsync().WaitAsync(TimeSpan.FromSeconds(10));
+        await AcceptAsync(control);
+        await control.SendAsync(Encoding.ASCII.GetBytes($"open 7 {((IPEndPoint)gameWorld.LocalEndpoint).Port}\n"));
+        var data = Track(await jay.AcceptSocketAsync().WaitAsync(TimeSpan.FromSeconds(20)));
+        Assert.Equal($"JAYLAN1 {Token} data 7", await ReadLineAsync(data));
+    }
+
+    /// <summary>Plays Jay accepting a control connection: reads its first line and answers with the proof for its nonce.</summary>
+    private static async Task AcceptAsync(Socket control)
+    {
+        var hello = (await ReadLineAsync(control))?.Split(' ');
+        Assert.True(hello is ["JAYLAN1", Token, "control", { Length: 32 }], string.Join(' ', hello ?? []));
+        await control.SendAsync(Encoding.ASCII.GetBytes($"ok {GameLanBridge.Proof(Convert.FromHexString(Key), Token, hello![3])}\n"));
     }
 
     private Socket Track(Socket s)
@@ -149,7 +193,7 @@ public sealed class LanBridgeAgentTests : IDisposable
         {
             UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true, WorkingDirectory = _root,
         };
-        psi.ArgumentList.Add($"-javaagent:{jar}={jayPort}:{Token}");
+        psi.ArgumentList.Add($"-javaagent:{jar}={jayPort}:{Token}:{Key}");
         psi.ArgumentList.Add(source);
         var game = new Game(Process.Start(psi)!);
         _cleanup.Add(game);

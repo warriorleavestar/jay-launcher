@@ -105,7 +105,7 @@ internal sealed partial class SelfTest
         {
             sandboxed.Start();
             var sandboxPort = ((System.Net.IPEndPoint)sandboxed.LocalEndpoint).Port;
-            vm.BridgedGameRunningForTest = () => true;
+            vm.BridgedForTest = p => p == sandboxPort;
             vm.ManualPort = sandboxPort.ToString(System.Globalization.CultureInfo.InvariantCulture);
             var frontReady = await vm.PrepareGameRelayForTest();
             await Task.Delay(300);
@@ -123,7 +123,7 @@ internal sealed partial class SelfTest
             window.Width = 1440;
             await Task.Delay(300);
             vm.StopGameRelayForTest();
-            vm.BridgedGameRunningForTest = null;
+            vm.BridgedForTest = null;
         }
         vm.ManualPort = savedPort;
         vm.SelectedLanGame = savedGame;

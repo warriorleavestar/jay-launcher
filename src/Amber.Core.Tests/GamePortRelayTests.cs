@@ -432,13 +432,18 @@ public sealed class GamePortRelayTests
         };
 
         // A plain game is reached on its own port, whole-LAN or not.
-        vm.BridgedGameRunningForTest = () => false;
+        vm.BridgedForTest = _ => false;
         var plain = vm.HostGamePortForTest();
         Pump(() => plain.IsCompleted);
         Assert.Equal((game.Port, (GamePortRelay?)null), plain.Result);
 
         // A game in the strong sandbox only through Jay: the room gets the relay's port, already linked to the game.
-        vm.BridgedGameRunningForTest = () => true;
+        // Another game being in the strong sandbox doesn't put a relay in front of this one.
+        vm.BridgedForTest = p => p != game.Port;
+        var other = vm.HostGamePortForTest();
+        Pump(() => other.IsCompleted);
+        Assert.Equal((game.Port, (GamePortRelay?)null), other.Result);
+        vm.BridgedForTest = p => p == game.Port;
         var bridged = vm.HostGamePortForTest();
         Pump(() => bridged.IsCompleted);
         var (port, relay) = bridged.Result!.Value;
