@@ -672,7 +672,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
         source == SharedLoopbackSource && !SourcesMapped && !Volatile.Read(ref _mappingSeen) ? UnmappedLoopbackSource : source;
 
     /// <summary>
-    /// The node's EasyTier is known to map callers (<see cref="EasyTierRelease.MapsCallers"/>): local callers are the shared
+    /// The node's EasyTier is known to map callers (<see cref="PublicNetworkArgs.TellsCallersApart"/>): local callers are the shared
     /// local source from the start, never <see cref="UnmappedLoopbackSource"/>.
     /// </summary>
     public bool SourcesMapped { get; init; }

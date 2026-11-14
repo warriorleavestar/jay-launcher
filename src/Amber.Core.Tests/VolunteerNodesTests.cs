@@ -674,6 +674,17 @@ public sealed class VolunteerNodesTests : IAsyncDisposable
     }
 
     [Fact]
+    public void CallersAreToldApartOnlyWithAMappingBuildInSecureMode()
+    {
+        // Jay's EasyTier maps callers only on secure-mode connections: the directory relies on mapping only when the
+        // package can do it and the node really starts in secure mode.
+        var profile = PublicNetworkProfile.Jay(["tcp://seed.example.org:11010"]);
+        var args = PublicNetworkArgs.Build(new PublicNetworkOptions(profile, 15000, 15001, Directory: true));
+        Assert.Equal(PublicNetworkArgs.SecureMode, args.Contains("--secure-mode"));
+        Assert.Equal(EasyTierRelease.MapsCallers && PublicNetworkArgs.SecureMode, PublicNetworkArgs.TellsCallersApart);
+    }
+
+    [Fact]
     public void DirectoryNodeArgsCarryRelayLimitsOnlyWhenSet()
     {
         var profile = PublicNetworkProfile.Jay(["tcp://seed.example.org:11010"]);

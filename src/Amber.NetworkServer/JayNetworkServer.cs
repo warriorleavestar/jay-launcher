@@ -320,8 +320,8 @@ public sealed class JayNetworkServer : IAsyncDisposable
                 Observers = observers,
                 Extensions = [.. _b.Extensions],
                 Volunteers = Volunteers,
-                // Jay's own EasyTier package says whether it maps callers; a custom one isn't assumed to.
-                SourcesMapped = _b.EasyTier is null && EasyTierRelease.MapsCallers,
+                // Jay's own EasyTier package (in secure mode) says whether it maps callers; a custom one isn't assumed to.
+                SourcesMapped = _b.EasyTier is null && PublicNetworkArgs.TellsCallersApart,
                 MinClientVersion = _b.Config?.Policy.MinVersion,
                 RequireAccountToPublish = Login is not null && _b.Config?.Login?.Required == true,
                 Identity = _sealedKeys is not null && _sealedKeys.TryGetValue("directory.key", out var sealedDir)

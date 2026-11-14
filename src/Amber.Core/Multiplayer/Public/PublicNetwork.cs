@@ -152,6 +152,15 @@ public static class PublicNetworkArgs
     /// </summary>
     public const string LoopbackSourceVariable = "JAY_ET_LOOPBACK_SOURCE";
 
+    /// <summary>
+    /// Whether public-network nodes run EasyTier in secure mode. Jay's build gives callers their own address only on
+    /// secure-mode connections, so until this is on every caller shares one source (see <see cref="EasyTierRelease.MapsCallers"/>).
+    /// </summary>
+    public const bool SecureMode = false;
+
+    /// <summary>The node's EasyTier, when it is Jay's own package, tells callers of the directory apart.</summary>
+    public static bool TellsCallersApart => EasyTierRelease.MapsCallers && SecureMode;
+
     public static Dictionary<string, string> Environment(PublicNetworkOptions o)
     {
         var env = new Dictionary<string, string> { [EasyTierArgs.SecretVariable] = o.Profile.Secret };
