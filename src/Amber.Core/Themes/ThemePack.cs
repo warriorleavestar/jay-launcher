@@ -243,6 +243,17 @@ public static partial class ThemePackReader
         return name;
     }
 
+    [System.Text.RegularExpressions.GeneratedRegex("^[0-9A-Za-z.+-]{1,32}$")]
+    private static partial System.Text.RegularExpressions.Regex VersionPattern();
+
+    private static string? VersionText(string? value, string key, List<ThemeProblem> problems)
+    {
+        if (value is null) return null;
+        if (VersionPattern().IsMatch(value)) return value;
+        problems.Add(new("bad_value", key));
+        return null;
+    }
+
     private static ThemePack Parse(Func<string, byte[]?> open)
     {
         var manifestBytes = open("theme.json") ?? throw new ThemePackException("missing_manifest", "theme.json");
@@ -259,8 +270,10 @@ public static partial class ThemePackReader
         // No "format" at all: the pack was written for format 1 (format 2 packs always say so).
         var format = m.TryGetProperty("format", out var fmt) && fmt.TryGetInt32(out var f) ? Math.Max(1, f) : 1;
         if (format > FormatVersion) problems.Add(new("newer_format", $"{format}"));
-        var minJay = Str(m, "minJay") is { } mj ? Clip(mj, 32) : null;
+        // Version strings are shown in Settings: digits, letters and . + - only (anything else is ignored with a problem).
+        var minJay = VersionText(Str(m, "minJay"), "minJay", problems);
         if (minJay is not null && ThemeFormat.NeedsNewerJay(minJay, JayVersion)) problems.Add(new("needs_newer_jay", minJay));
+        var version = VersionText(Str(m, "version"), "version", problems) ?? "1.0.0";
         var migration = new List<ThemeProblem>();
 
         // tokens.json 先读成中间结果，再组装 ThemePack（ThemePack 的部分属性是 init）。
@@ -328,7 +341,7 @@ public static partial class ThemePackReader
             Id = id,
             Name = name,
             Author = Str(m, "author") is { } a ? Clip(a, 64) : null,
-            Version = Str(m, "version") is { } ver ? Clip(ver, 32) : "1.0.0",
+            Version = version,
             Variants = variants,
             BackgroundImage = background,
             BackgroundOpacity = backgroundOpacity,

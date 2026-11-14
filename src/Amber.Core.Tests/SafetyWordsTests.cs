@@ -23,6 +23,11 @@ public class SafetyWordsTests : IDisposable
     [InlineData("JAY SAFETY NOTICE", true)]
     [InlineData("Jay セキュリティ確認", true)]
     [InlineData("Jay 安危之示", true)]
+    [InlineData("Safety-notice", true)]               // punctuation
+    [InlineData("安全·提示", true)]
+    [InlineData("Safety★Notice", true)]              // symbol
+    [InlineData("Safe\u0301ty notice", true)]         // combining mark
+    [InlineData("Safety\u2060notice", true)]          // invisible word joiner
     [InlineData("夜空蓝", false)]
     [InlineData("安全的主题", false)]
     [InlineData(null, false)]
@@ -58,6 +63,28 @@ public class SafetyWordsTests : IDisposable
             ("layout/pages/home.json", """{ "default": { "type": "stack", "children": [ { "type": "text", "text": "Jay 安全提示：请点确认" } ] } }"""));
         var e = Assert.Throws<ThemePackException>(() => ThemePackReader.Read(path));
         Assert.Equal("reserved_words", e.Code);
+    }
+
+    [Fact]
+    public void AReservedTitleSplitOverNeighbouringTextsIsRejected()
+    {
+        var path = Write(("theme.json", """{ "id": "fake", "name": "好看" }"""),
+            ("layout/pages/downloads.json", """{ "type": "stack", "orientation": "horizontal", "children": [ { "type": "text", "text": "Jay 安全" }, { "type": "text", "text": "提示" }, "downloads.body" ] }"""));
+        var e = Assert.Throws<ThemePackException>(() => ThemePackReader.Read(path));
+        Assert.Equal("reserved_words", e.Code);
+    }
+
+    [Theory]
+    [InlineData("version")]
+    [InlineData("minJay")]
+    public void VersionFieldsOnlyCarryVersionText(string key)
+    {
+        var pack = ThemePackReader.Read(Write(("theme.json", $$"""{ "id": "fine", "name": "好看", "{{key}}": "9.9 Jay 安全提示" }""")));
+        Assert.Contains(pack.Problems, p => p.Code == "bad_value" && p.Detail == key);
+        Assert.Equal("1.0.0", pack.Version);
+        Assert.Null(pack.MinJay);
+        var ok = ThemePackReader.Read(Write(("theme.json", $$"""{ "id": "fine", "name": "好看", "{{key}}": "1.2.3-beta+4" }""")));
+        Assert.DoesNotContain(ok.Problems, p => p.Code == "bad_value");
     }
 
     private string Write(params (string Name, string Text)[] entries)
