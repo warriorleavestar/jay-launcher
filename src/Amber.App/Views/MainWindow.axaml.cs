@@ -26,6 +26,12 @@ public partial class MainWindow : Window
         AttachShell();
         AttachDrop();
         AttachTips();
+        // A new page comes forward a little as it fades in (pseudo-3D; nothing with reduced motion or 3D effects off).
+        PageHost.PropertyChanged += (_, e) =>
+        {
+            if (e.Property == ContentControl.ContentProperty && e.OldValue is not null && e.NewValue is not null)
+                Amber.App.Services.Depth3D.EnterPage(PageHost);
+        };
         FitToScreen(settings?.LauncherWindow);
         // 窗口打开后才知道标题栏有多高：Width/Height 是客户区，加上标题栏可能比屏幕的可用区域还高（底下被任务栏挡住）。
         Opened += (_, _) => FitFrameToScreen();
@@ -73,6 +79,11 @@ public partial class MainWindow : Window
                      && KeyboardScope.Allows(Amber.Core.Navigation.KeyScope.OutsideText, e))
                 e.Handled = Toasts.UndoLatest();
         }, RoutingStrategies.Tunnel);
+        // Self-checks, the layout matrix and page snapshots measure and draw pages right after changing page: no page
+        // coming forward then (it is a little smaller for a moment). The motion3d scope checks the effect itself.
+        if ((Environment.GetEnvironmentVariable("AMBER_SELFTEST") is { Length: > 0 } && Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") != "motion3d")
+            || Environment.GetEnvironmentVariable("AMBER_LAYOUTCHECK") is { Length: > 0 } || Environment.GetEnvironmentVariable("AMBER_SNAPSHOT_DIR") is { Length: > 0 })
+            Amber.App.Services.Depth3D.PageEnterSuppressed = true;
         // 开发用：设置 AMBER_SNAPSHOT_DIR 后，依次把每个页面渲染成 PNG 然后退出。
         if (Environment.GetEnvironmentVariable("AMBER_SNAPSHOT_DIR") is { Length: > 0 } dir)
             Opened += async (_, _) => await SnapshotPagesAsync(dir);

@@ -83,6 +83,8 @@
                   <ComboBox x:Name="MotionBox" ItemsSource="{Binding MotionOptions}" SelectedIndex="{Binding SelectedMotionIndex}" MinWidth="160"
                             AutomationProperties.Name="{l:T settings.motion.label}" />
                   <TextBlock Classes="hint" Text="{l:T settings.motion.hint}" TextWrapping="Wrap" />
+                  <CheckBox x:Name="Motion3DBox" IsChecked="{Binding Effects3D}" Content="{l:T settings.motion3d}" Margin="0,6,0,0" />
+                  <TextBlock Classes="hint" Text="{l:T settings.motion3d.hint}" TextWrapping="Wrap" />
                 </StackPanel>
                 <Button Grid.Row="1" Grid.Column="2" Classes="ghost reset" Content="↺" Margin="8,12,0,0" VerticalAlignment="Top" Command="{Binding ResetFieldCommand}" CommandParameter="motion"
                         ToolTip.Tip="{l:T settings.reset}" AutomationProperties.Name="{l:T settings.reset}" />
