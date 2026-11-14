@@ -184,7 +184,6 @@ public sealed partial class MultiplayerViewModel
             IsDirect = true;
             _direct = direct;
             _openedOffer = opened;
-            RoomCodeText = "";
             JoinCode = "";
             JoinPassphrase = "";
             MySealedReply = SealedDirect.SealReply(opened, mine, DateTimeOffset.UtcNow);

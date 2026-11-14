@@ -1017,7 +1017,6 @@
   "multiplayer.proxy.stopped": "ゲームの転送を停止しました。今後起動するゲームは直接接続します。",
   "multiplayer.proxy.switching": "ゲームは {0}（{1}）のパソコンを経由します。相手が先に「ルームの人のゲームを転送する」をオンにする必要があります。今後、Jay から起動したゲームに適用されます。",
   "multiplayer.room.added_to_servers": "{0} のマルチプレイ一覧に追加しました（アドレス：{1}、ポートはルームに参加するたびに変わります）",
-  "multiplayer.room.code_copied": "ルームコードをコピーしました。5 分後にクリップボードから消去します",
   "multiplayer.room.connected": "ホストに接続しました{0}。ゲーム内でサーバー {1} を追加するか、下のボタンで直接参加できます。",
   "multiplayer.room.connecting": "ホストに接続中…",
   "multiplayer.room.connecting_first_time": "ホストに接続中…（初回は十数秒かかる場合があります）",

@@ -1017,7 +1017,6 @@
   "multiplayer.proxy.stopped": "已停止轉發遊戲，之後啟動的遊戲會直接連上網路。",
   "multiplayer.proxy.switching": "遊戲會經由 {0}（{1}）的電腦送出。對方必須先勾選「幫房間裡的人轉發遊戲」。之後從 Jay 啟動的遊戲才會生效。",
   "multiplayer.room.added_to_servers": "已加入 {0} 的多人遊戲清單（位址 {1}，每次加入房間時連接埠都會改變）",
-  "multiplayer.room.code_copied": "已複製房間碼，5 分鐘後自動從剪貼簿清除",
   "multiplayer.room.connected": "已連上房主{0}。請在遊戲中新增伺服器 {1}，或點選下方按鈕直接進入",
   "multiplayer.room.connecting": "正在連線至房主……",
   "multiplayer.room.connecting_first_time": "正在連線至房主……（第一次可能需要十幾秒）",

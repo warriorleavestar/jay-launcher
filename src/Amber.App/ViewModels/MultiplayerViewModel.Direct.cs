@@ -181,7 +181,6 @@ public sealed partial class MultiplayerViewModel
             AdoptGameRelay(relay, RelayOnAdapter(FullLanMode, credentials.Tunnel.Wraps));
             relay = null;
             Mode = "host";
-            RoomCodeText = "";
             RestoreChatHistory(room);
             StartHub(room);
             // Guests knock over the direct bridge (no relays: see ServerlessLobbyPeers); the host's addresses go only to
@@ -229,7 +228,6 @@ public sealed partial class MultiplayerViewModel
             Mode = "join";
             IsDirect = true;
             _direct = direct;
-            RoomCodeText = "";
             HostFingerprint = outcome.HostFingerprint;
             HostJayAccount = outcome.HostJayAccount;
             SeenJayDevice(outcome.HostPublicKey, outcome.HostJayDevice);

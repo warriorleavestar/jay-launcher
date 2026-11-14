@@ -64,8 +64,6 @@ public sealed partial class MultiplayerViewModel
     private RoomAnnouncer? _announcer;
     private PendingInvite? _standing;
     private byte[]? _standingSalt;
-    /// <summary>直连房间公开时列表里放的直连码（用长期邀请生成，和“邀请朋友”生成的单次直连码分开）。</summary>
-    /// <summary>加入方：从列表点了直连房间，生成回复码后经目录捎给房主。</summary>
 
     public ObservableCollection<PublicRoomItem> PublicRooms { get; } = [];
 

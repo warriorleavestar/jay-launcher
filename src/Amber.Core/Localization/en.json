@@ -1045,7 +1045,6 @@
   "multiplayer.proxy.stopped": "Game forwarding stopped. Games launched afterward will connect directly.",
   "multiplayer.proxy.switching": "The game will go through {0}’s computer ({1}). They must first tick “Forward the game for people in the room”. This applies to games started from Jay afterward.",
   "multiplayer.room.added_to_servers": "Added to the Multiplayer list for {0} (address {1}; the port changes each time you join a room)",
-  "multiplayer.room.code_copied": "Room code copied. It will be cleared from the clipboard in 5 minutes",
   "multiplayer.room.connected": "Connected to host{0}. Add server {1} in the game, or use the button below to join directly.",
   "multiplayer.room.connecting": "Connecting to host…",
   "multiplayer.room.connecting_first_time": "Connecting to host… (the first connection may take 10–20 seconds)",

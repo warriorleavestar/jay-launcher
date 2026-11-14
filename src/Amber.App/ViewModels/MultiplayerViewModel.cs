@@ -83,8 +83,9 @@ public sealed record PeerItem(PeerInfo Peer) : LocalizedRecord
 }
 
 /// <summary>
-/// 联机页：用 EasyTier 把“对局域网开放”的游戏分享给不在同一个局域网的朋友。
-/// 房主选一局开放到局域网的游戏，生成房间码；加入方输入房间码，本机会出现一个转发端口，游戏里直接连。
+/// The multiplayer page: shares a game opened to LAN with friends who are not on the same LAN, over EasyTier.
+/// The host opens a room and hands out invites; a guest pastes an invite, knocks, and once approved gets a local
+/// forwarding port to connect to from the game.
 /// </summary>
 public sealed partial class MultiplayerViewModel : PageViewModel
 {
@@ -251,7 +252,6 @@ public sealed partial class MultiplayerViewModel : PageViewModel
     public bool IsHosting => Mode == "host";
     public bool IsJoined => Mode == "join";
 
-    [ObservableProperty] public partial string RoomCodeText { get; set; } = "";
     [ObservableProperty] public partial string JoinAddress { get; set; } = "";
 
     /// <summary>
@@ -726,7 +726,6 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         }
         AdoptGameRelay(relay, RelayOnAdapter(FullLanMode, credentials.Tunnel.Wraps));
         Mode = "host";
-        RoomCodeText = "";
         _room = room;
         RestoreChatHistory(room);
         StartHub(room);
@@ -812,7 +811,6 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         // 完整局域网模式下直接连房主的虚拟 IP；普通模式连本机转发端口。
         JoinAddress = local is { } l ? $"127.0.0.1:{l}" : $"{EasyTierArgs.HostIp}:{room.Port}";
         ShowRoomHostAddress(FullLanMode && local is not null);
-        RoomCodeText = "";
         // 游戏的“多人游戏”列表里也会出现这个房间。
         if (local is { } port) _ = Amber.Core.Multiplayer.LanGames.AnnounceAsync(L.T("multiplayer.room.server_name"), port, _sessionCts!.Token);
         SetStatus(StatusMessage.Info("multiplayer.room.connecting"));
@@ -1447,15 +1445,8 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         }
     }
 
-    /// <summary>复制房间码、邀请码、直连码用的剪贴板：5 分钟后自动清掉（换台电脑粘贴也来得及）（自检里换成短一点的）。</summary>
+    /// <summary>The clipboard for copying invite codes: cleared after 5 minutes (time enough to paste on another computer); the self-check uses a shorter delay.</summary>
     internal Amber.App.Services.SensitiveClipboard SecretClipboard { get; set; } = Amber.App.Services.SensitiveClipboard.Shared;
-
-    [RelayCommand]
-    private async Task CopyRoomCodeAsync()
-    {
-        if (await SecretClipboard.CopyAsync(RoomCodeText))
-            SetStatus(StatusMessage.Success("multiplayer.room.code_copied"));
-    }
 
     /// <summary>把房间加进所选版本的服务器列表。</summary>
     [RelayCommand]
@@ -1578,7 +1569,6 @@ public sealed partial class MultiplayerViewModel : PageViewModel
             if (chat is not null) await chat.DisposeAsync();
         });
         Mode = "";
-        RoomCodeText = "";
         JoinAddress = "";
         ShowRoomHostAddress(false);
         MyVirtualIp = "";

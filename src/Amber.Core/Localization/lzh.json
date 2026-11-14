@@ -1000,7 +1000,6 @@
   "multiplayer.proxy.stopped": "已止轉戲之流，此後所啟之戲逕連網。",
   "multiplayer.proxy.switching": "戲之流將經 {0}（{1}）之機而出。彼須先勾「許成員藉吾機轉戲之流」。此後自 Jay 所啟之戲乃效。",
   "multiplayer.room.added_to_servers": "已納於 {0} 群戲之錄（址 {1}，每入房其埠皆易）",
-  "multiplayer.room.code_copied": "房碼已錄，五分之後自剪貼簿除之",
   "multiplayer.room.connected": "已連房主{0}。請於戲中增伺服器 {1}，或按下鈕逕入",
   "multiplayer.room.connecting": "方連房主……",
   "multiplayer.room.connecting_first_time": "方連房主……（初次或須十餘秒）",

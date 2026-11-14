@@ -1363,7 +1363,7 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         host.TestPeers = [];
         host.ManualPort = gamePort.ToString();
         await host.CreateRoomCommand.ExecuteAsync(null);
-        Check("联机：创建房间（没有可分享的房间码）", host.IsHosting && host.RoomCodeText.Length == 0, host.Status);
+        Check("联机：创建房间（没有可分享的房间码）", host.IsHosting, host.Status);
         await ShotAsync("联机房主");
         await LayoutHereAsync("联机房主");
 
