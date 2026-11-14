@@ -41,7 +41,6 @@ public partial class MultiplayerPage : UserControl
         AddHandler(KeyDownEvent, OnRoomKeyDown, Avalonia.Interactivity.RoutingStrategies.Tunnel);
         DataContextChanged += (_, _) =>
         {
-            // 新消息来了滚到底。
             if (DataContext is MultiplayerViewModel vm)
             {
                 vm.PickFileToSend = async () =>
@@ -63,12 +62,6 @@ public partial class MultiplayerPage : UserControl
                     (RelayOnlyBox.IsEffectivelyEnabled ? RelayOnlyBox : (Control)WhoSeesCloseButton).Focus();
                 }, DispatcherPriority.Background);
                 SyncRoomSwitches(vm);
-                // A knock: "No" gets the focus (Enter or Space never lets anyone in by accident).
-                vm.ApprovalCards.CollectionChanged += (_, e) =>
-                {
-                    // The next knock in line gets the same treatment once the first is answered.
-                    if (vm.HasKnocks) Dispatcher.UIThread.Post(FocusKnockDeny, DispatcherPriority.Background);
-                };
                 // Lessons: the focus follows the main button, so Enter pages through.
                 vm.LessonFocusRequested = () => Dispatcher.UIThread.Post(() =>
                 {
@@ -82,26 +75,67 @@ public partial class MultiplayerPage : UserControl
                     else if (vm.DrillExplaining) DrillNextButton.Focus();
                     else DrillRestartButton.Focus();
                 }, DispatcherPriority.Background);
-                vm.PropertyChanged += (_, e) =>
-                {
-                    if (e.PropertyName == nameof(MultiplayerViewModel.DiagnosticsOpen) && vm.DiagnosticsOpen)
-                        Dispatcher.UIThread.Post(() => DiagnosticsCheckButton.Focus(), DispatcherPriority.Background);
-                    if (e.PropertyName is nameof(MultiplayerViewModel.CompactSection) or nameof(MultiplayerViewModel.Mode)) ApplyRoomLayout(Bounds.Width);
-                    if (e.PropertyName is nameof(MultiplayerViewModel.MyRelayOnly) or nameof(MultiplayerViewModel.SharingGameProxy)) SyncRoomSwitches(vm);
-                };
-                vm.ChatLines.CollectionChanged += (_, _) => Dispatcher.UIThread.Post(() => this.FindControl<ScrollViewer>("ChatScroll")?.ScrollToEnd(), DispatcherPriority.Background);
-                vm.DebugLines.CollectionChanged += (_, _) => Dispatcher.UIThread.Post(() => this.FindControl<ScrollViewer>("DebugScroll")?.ScrollToEnd(), DispatcherPriority.Background);
-                // 开服控制台：新日志来了把光标放到最后，文本框就滚到最新一行。
-                vm.HostServer.PropertyChanged += (_, e) =>
-                {
-                    if (e.PropertyName != nameof(HostServerViewModel.LogText)) return;
-                    Dispatcher.UIThread.Post(() =>
-                    {
-                        if (this.FindControl<TextBox>("HostServerLog") is { Text: { } text } box) box.CaretIndex = text.Length;
-                    }, DispatcherPriority.Background);
-                };
             }
+            Watch(TopLevel.GetTopLevel(this) is not null ? DataContext as MultiplayerViewModel : null);
         };
+        // The view model lives as long as Jay, a page only while it is shown: watch it only while attached, so pages
+        // from earlier visits do not stay subscribed (and alive) behind the current one.
+        AttachedToVisualTree += (_, _) => Watch(DataContext as MultiplayerViewModel);
+        DetachedFromVisualTree += (_, _) => Watch(null);
+    }
+
+    private MultiplayerViewModel? _watched;
+
+    private void Watch(MultiplayerViewModel? vm)
+    {
+        if (ReferenceEquals(vm, _watched)) return;
+        if (_watched is { } old)
+        {
+            old.ApprovalCards.CollectionChanged -= OnApprovalCardsChanged;
+            old.PropertyChanged -= OnViewModelPropertyChanged;
+            old.ChatLines.CollectionChanged -= OnChatLinesChanged;
+            old.DebugLines.CollectionChanged -= OnDebugLinesChanged;
+            old.HostServer.PropertyChanged -= OnHostServerPropertyChanged;
+        }
+        _watched = vm;
+        if (vm is null) return;
+        vm.ApprovalCards.CollectionChanged += OnApprovalCardsChanged;
+        vm.PropertyChanged += OnViewModelPropertyChanged;
+        vm.ChatLines.CollectionChanged += OnChatLinesChanged;
+        vm.DebugLines.CollectionChanged += OnDebugLinesChanged;
+        vm.HostServer.PropertyChanged += OnHostServerPropertyChanged;
+    }
+
+    /// <summary>A knock: "No" gets the focus (Enter or Space never lets anyone in by accident), and so does the next one in line.</summary>
+    private void OnApprovalCardsChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
+    {
+        if (_watched is { HasKnocks: true }) Dispatcher.UIThread.Post(FocusKnockDeny, DispatcherPriority.Background);
+    }
+
+    private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (_watched is not { } vm) return;
+        if (e.PropertyName == nameof(MultiplayerViewModel.DiagnosticsOpen) && vm.DiagnosticsOpen)
+            Dispatcher.UIThread.Post(() => DiagnosticsCheckButton.Focus(), DispatcherPriority.Background);
+        if (e.PropertyName is nameof(MultiplayerViewModel.CompactSection) or nameof(MultiplayerViewModel.Mode)) ApplyRoomLayout(Bounds.Width);
+        if (e.PropertyName is nameof(MultiplayerViewModel.MyRelayOnly) or nameof(MultiplayerViewModel.SharingGameProxy)) SyncRoomSwitches(vm);
+    }
+
+    // 新消息来了滚到底。
+    private void OnChatLinesChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e) =>
+        Dispatcher.UIThread.Post(() => this.FindControl<ScrollViewer>("ChatScroll")?.ScrollToEnd(), DispatcherPriority.Background);
+
+    private void OnDebugLinesChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e) =>
+        Dispatcher.UIThread.Post(() => this.FindControl<ScrollViewer>("DebugScroll")?.ScrollToEnd(), DispatcherPriority.Background);
+
+    // 开服控制台：新日志来了把光标放到最后，文本框就滚到最新一行。
+    private void OnHostServerPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(HostServerViewModel.LogText)) return;
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (this.FindControl<TextBox>("HostServerLog") is { Text: { } text } box) box.CaretIndex = text.Length;
+        }, DispatcherPriority.Background);
     }
 
     /// <summary>
