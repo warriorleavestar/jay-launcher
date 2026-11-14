@@ -51,7 +51,8 @@ public static class NetworkOverview
         {
             if (n.BuiltIn && n.Nodes == 0) continue;
             var use = n.Id != currentId ? NetworkUse.Off : connected ? NetworkUse.On : connecting ? NetworkUse.Connecting : NetworkUse.Off;
-            var trust = n.BuiltIn ? NetworkTrust.BuiltIn : n.TestReviewed ? NetworkTrust.TestReviewed : n.Reviewed ? NetworkTrust.Reviewed : NetworkTrust.Unreviewed;
+            // Test-signed wins over built in: the built-in Jay network with relays added by a test-signed update says so.
+            var trust = n.TestReviewed ? NetworkTrust.TestReviewed : n.BuiltIn ? NetworkTrust.BuiltIn : n.Reviewed ? NetworkTrust.Reviewed : NetworkTrust.Unreviewed;
             rows.Add(new(n.Id, n.Name, trust, NetworkAbility.Invites | NetworkAbility.PublicRooms | NetworkAbility.Messages, use, CanSwitch: n.Nodes > 0));
         }
         return rows;

@@ -80,14 +80,18 @@ public sealed class LauncherService : IDisposable
     private Amber.Core.Multiplayer.Public.PublicNetworkList? _networks;
 
     /// <summary>Quorums that make a network reviewed (the self-check swaps in test keys; null = the Jay trustees).</summary>
-    internal IReadOnlyList<Amber.Core.Multiplayer.Public.TrustQuorum>? TrustedNetworkKeys { get; set; } = TestRegistryKeys.Count > 0
-        ? [Amber.Core.Multiplayer.Public.JayTrust.Quorum, new(TestRegistryKeys, 1)]
-        : null;
+    internal IReadOnlyList<Amber.Core.Multiplayer.Public.TrustQuorum>? TrustedNetworkKeys { get; set; }
+
+    /// <summary>
+    /// The keys from AMBER_TEST_REGISTRY_KEY, or null. Networks vouched for only by them are test-signed: added only after
+    /// the unreviewed-network confirmation (the "jay" network too) and never shown as reviewed.
+    /// </summary>
+    internal Amber.Core.Multiplayer.Public.TrustQuorum? TestNetworkKeys { get; set; } = TestRegistryKeys.Count > 0 ? new(TestRegistryKeys, 1) : null;
 
     /// <summary>
     /// Developer switch for test machines: AMBER_TEST_REGISTRY_KEY holds one or more registry public keys
-    /// (base64, comma separated) that this Jay also trusts. Networks signed by them are shown as "test review",
-    /// never as properly reviewed.
+    /// (base64, comma separated) that this Jay also accepts. Networks signed only by them are shown as "test review",
+    /// never as properly reviewed, and are added only after the same confirmation as an unreviewed network.
     /// </summary>
     internal static readonly IReadOnlyList<byte[]> TestRegistryKeys = ParseTestKeys(Environment.GetEnvironmentVariable("AMBER_TEST_REGISTRY_KEY"));
 
@@ -105,12 +109,8 @@ public sealed class LauncherService : IDisposable
         return keys;
     }
 
-    /// <summary>Reviewed only because of a key that AMBER_TEST_REGISTRY_KEY trusts, not by the Jay trustees.</summary>
-    internal static bool IsTestReviewed(IReadOnlyList<byte[]> signers) =>
-        !Amber.Core.Multiplayer.Public.JayTrust.Quorum.IsMet(signers) && new Amber.Core.Multiplayer.Public.TrustQuorum(TestRegistryKeys, 1).IsMet(signers);
-
     /// <summary>保存的公共网络（设置里的连接串验签后的结果，改了设置要 <see cref="ReloadNetworks"/>）。</summary>
-    public Amber.Core.Multiplayer.Public.PublicNetworkList Networks => _networks ??= new(Settings.PublicNetworks, TrustedNetworkKeys);
+    public Amber.Core.Multiplayer.Public.PublicNetworkList Networks => _networks ??= new(Settings.PublicNetworks, TrustedNetworkKeys, test: TestNetworkKeys);
 
     public void ReloadNetworks() => _networks = null;
 
