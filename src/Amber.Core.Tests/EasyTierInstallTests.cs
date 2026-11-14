@@ -155,6 +155,37 @@ public sealed class EasyTierInstallTests : IDisposable
         }
     }
 
+    /// <summary>An install in progress holds the folder: a second caller waits for it even when the files already show up.</summary>
+    [Fact]
+    public async Task EnsureWaitsForAnInstallInProgressEvenWhenTheFilesAreThere()
+    {
+        var bundle = Path.Combine(_root, "bundle-wait");
+        Directory.CreateDirectory(bundle);
+        File.WriteAllBytes(Path.Combine(bundle, _asset.Name), _good);
+        var installer = Create(_ => throw new InvalidOperationException("must not download"), bundle, Path.Combine(_root, "data-wait")).Installer;
+        await installer.EnsureAsync();
+        Assert.True(installer.IsInstalled);
+        var gate = installer.InstallLock;
+        await gate.WaitAsync();
+        Task ensure;
+        try
+        {
+            ensure = installer.EnsureAsync();
+            await Task.Delay(200);
+            Assert.False(ensure.IsCompleted);
+        }
+        finally { gate.Release(); }
+        await ensure.WaitAsync(TimeSpan.FromSeconds(10));
+    }
+
+    [Fact]
+    public void InstallFoldersThatDifferOnlyInCaseShareALockWhereTheFileSystemIgnoresCase()
+    {
+        var comparer = EasyTierInstaller.PathComparer;
+        Assert.Equal(!OperatingSystem.IsLinux(), comparer.Equals(@"C:\Data\EasyTier", @"c:\data\easytier"));
+        Assert.True(comparer.Equals("/data/easytier", "/data/easytier"));
+    }
+
     [Fact]
     public void OrdersMirrorsAndKeepsOfficial()
     {

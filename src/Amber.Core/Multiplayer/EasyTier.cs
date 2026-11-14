@@ -222,14 +222,17 @@ public sealed class EasyTierInstaller
     /// One lock per install folder, shared by every installer in this process: installers are created per use, and two
     /// first-time installs would otherwise share the same download file and temporary extract folder.
     /// </summary>
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, SemaphoreSlim> InstallLocks = new(StringComparer.Ordinal);
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, SemaphoreSlim> InstallLocks = new(PathComparer);
 
-    private SemaphoreSlim InstallLock => InstallLocks.GetOrAdd(Path.GetFullPath(InstallDir), _ => new SemaphoreSlim(1, 1));
+    /// <summary>Paths that differ only in case are the same folder on Windows and (by default) macOS.</summary>
+    internal static StringComparer PathComparer => OperatingSystem.IsLinux() ? StringComparer.Ordinal : StringComparer.OrdinalIgnoreCase;
+
+    internal SemaphoreSlim InstallLock => InstallLocks.GetOrAdd(Path.TrimEndingDirectorySeparator(Path.GetFullPath(InstallDir)), _ => new SemaphoreSlim(1, 1));
 
     /// <summary>progress 的 CurrentFile 是正在尝试的来源名。</summary>
     public async Task EnsureAsync(IProgress<DownloadProgress>? progress = null, CancellationToken ct = default)
     {
-        if (IsInstalled) return;
+        // Checked only under the lock: mid-install the files can already be in place before they are made runnable.
         var gate = InstallLock;
         await gate.WaitAsync(ct);
         try
