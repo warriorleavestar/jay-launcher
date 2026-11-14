@@ -815,7 +815,6 @@
   "log.filter.problems": "唯示警與誤",
   "log.follow_latest": "隨最新之訊",
   "log.title": "日誌",
-  "log.warnings": "警 {0:N0}",
   "main.subtitle": "Minecraft 啟動器",
   "main.title": "Jay 啟動器",
   "main.version": "v{0}",

@@ -1396,8 +1396,6 @@ public sealed partial class LogViewModel : PageViewModel
     [NotifyPropertyChangedFor(nameof(HasRun), nameof(RunSummary))]
     public partial RunLog? SelectedRun { get; set; }
 
-    public bool HasSeveralRuns => Runs.Count > 1;
-
     private RunLog Shown => SelectedRun ?? _launcher;
     private List<LogEntry> _all => Shown.All;
 
@@ -1418,11 +1416,9 @@ public sealed partial class LogViewModel : PageViewModel
     public partial int ErrorCount { get; private set; }
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(WarningSummary))]
     public partial int WarningCount { get; private set; }
 
     public string ErrorSummary => L.F("log.errors", ErrorCount);
-    public string WarningSummary => L.F("log.warnings", WarningCount);
     public string EmptyMessage => L.T(_all.Count > 0 && OnlyProblems ? "log.empty_filtered" : "log.empty");
 
     partial void OnOnlyProblemsChanged(bool value) => Rebuild();
@@ -1432,7 +1428,6 @@ public sealed partial class LogViewModel : PageViewModel
         Rebuild();
         foreach (var run in Runs) run.RefreshLabel();
         OnPropertyChanged(nameof(RunSummary));
-        OnPropertyChanged(nameof(CopyLabel));
     }
 
     public void Add(GameLogLine line) => Add(null, line);
@@ -1470,14 +1465,13 @@ public sealed partial class LogViewModel : PageViewModel
     }
 
     /// <summary>
-    /// 开始一次启动的日志（在界面线程上调）：新开一份，日志页切过去看它。别的还在运行的游戏的日志留着，页头可以切回去。
+    /// 开始一次启动的日志（在界面线程上调）：新开一份，日志页切过去看它。别的还在运行的游戏的日志留着（崩溃卡的“查看日志”切回去看）。
     /// </summary>
     public RunLog BeginRun(string instance, DateTimeOffset startedAt)
     {
         var run = new RunLog(instance, startedAt);
         Runs.Add(run);
         while (Runs.Count > KeptRuns) Runs.RemoveAt(0);
-        OnPropertyChanged(nameof(HasSeveralRuns));
         SelectedRun = run;
         return run;
     }
@@ -1569,36 +1563,6 @@ public sealed partial class LogViewModel : PageViewModel
         OnPropertyChanged(nameof(EmptyMessage));
     }
 
-    [RelayCommand]
-    private async Task CopyAsync()
-    {
-        var text = string.Join(Environment.NewLine, _all.Select(e => $"[{e.Time}] [{e.Level}] {e.Message}"));
-        var ok = false;
-        try
-        {
-            if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime { MainWindow.Clipboard: { } clipboard })
-            {
-                await clipboard.SetTextAsync(text);
-                ok = true;
-            }
-        }
-        catch (Exception e) when (e is InvalidOperationException or System.Runtime.InteropServices.COMException) { }
-        SetCopyLabel(ok ? "common.copied" : "log.copy_failed");
-        await Task.Delay(1500);
-        SetCopyLabel("log.copy_all");
-    }
-
-    private string _copyLabelKey = "log.copy_all";
-
-    private void SetCopyLabel(string key)
-    {
-        _copyLabelKey = key;
-        OnPropertyChanged(nameof(CopyLabel));
-    }
-
-    /// <summary>“复制全部”按钮的文字：点了之后短暂显示“已复制”或“复制失败”。存翻译键，换语言跟着换。</summary>
-    public string CopyLabel => L.T(_copyLabelKey);
-
     // ---- 正在看的那次启动的实例和开始时间（页头小字） ----
 
     public bool HasRun => SelectedRun is not null;
@@ -1620,9 +1584,6 @@ public sealed partial class LogViewModel : PageViewModel
 
     [RelayCommand]
     private void NextError() => JumpTo(NextMatch(_all, SelectedLine, e => e.IsError));
-
-    [RelayCommand]
-    private void NextWarning() => JumpTo(NextMatch(_all, SelectedLine, e => e.IsWarning));
 
     private void JumpTo(LogEntry? target)
     {

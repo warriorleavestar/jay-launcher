@@ -820,7 +820,6 @@
   "log.filter.problems": "警告とエラーのみ表示",
   "log.follow_latest": "最新のログに追従",
   "log.title": "ログ",
-  "log.warnings": "警告 {0:N0}",
   "main.subtitle": "Minecraft ランチャー",
   "main.title": "Jay ランチャー",
   "main.version": "v{0}",

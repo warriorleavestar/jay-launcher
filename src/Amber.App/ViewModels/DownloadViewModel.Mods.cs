@@ -75,7 +75,6 @@ public sealed partial class DownloadViewModel
 
     public bool ShowModsNeedLoader => !CanAddMods;
 
-    public bool HasModResults => ModResults.Count > 0;
 
     private bool _modsSearched;
 
@@ -106,7 +105,6 @@ public sealed partial class DownloadViewModel
     {
         OnPropertyChanged(nameof(CanAddMods));
         OnPropertyChanged(nameof(ShowModsNeedLoader));
-        OnPropertyChanged(nameof(HasModResults));
         OnPropertyChanged(nameof(ShowModsEmpty));
         OnPropertyChanged(nameof(ModsHeader));
     }

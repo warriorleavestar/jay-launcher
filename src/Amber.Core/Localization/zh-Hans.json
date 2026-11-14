@@ -820,7 +820,6 @@
   "log.filter.problems": "只看警告和错误",
   "log.follow_latest": "跟随最新",
   "log.title": "日志",
-  "log.warnings": "警告 {0:N0}",
   "main.subtitle": "Minecraft 启动器",
   "main.title": "Jay 启动器",
   "main.version": "v{0}",

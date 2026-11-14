@@ -846,7 +846,6 @@
   "log.filter.problems": "Show only warnings and errors",
   "log.follow_latest": "Follow latest",
   "log.title": "Logs",
-  "log.warnings": "Warnings {0:N0}",
   "main.subtitle": "Minecraft launcher",
   "main.title": "Jay launcher",
   "main.version": "v{0}",
