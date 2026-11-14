@@ -229,6 +229,14 @@ public sealed class EasyTierInstaller
 
     internal SemaphoreSlim InstallLock => InstallLocks.GetOrAdd(Path.TrimEndingDirectorySeparator(Path.GetFullPath(InstallDir)), _ => new SemaphoreSlim(1, 1));
 
+    /// <summary>
+    /// Tests only: awaited first thing once <see cref="EnsureAsync"/> or <see cref="ImportAsync"/> holds the install lock,
+    /// so a test can hold a real install there and watch the next caller wait. Always null in the app.
+    /// </summary>
+    internal Func<CancellationToken, Task>? WhileLockedForTests { get; set; }
+
+    private Task WhileLocked(CancellationToken ct) => WhileLockedForTests?.Invoke(ct) ?? Task.CompletedTask;
+
     /// <summary>progress 的 CurrentFile 是正在尝试的来源名。</summary>
     public async Task EnsureAsync(IProgress<DownloadProgress>? progress = null, CancellationToken ct = default)
     {
@@ -237,6 +245,7 @@ public sealed class EasyTierInstaller
         await gate.WaitAsync(ct);
         try
         {
+            await WhileLocked(ct);
             // Another install may have finished while this one waited.
             if (IsInstalled) return;
             await InstallAsync(progress, ct);
@@ -298,7 +307,11 @@ public sealed class EasyTierInstaller
     {
         var gate = InstallLock;
         await gate.WaitAsync(ct);
-        try { await InstallFromZipAsync(zipPath, ct); }
+        try
+        {
+            await WhileLocked(ct);
+            await InstallFromZipAsync(zipPath, ct);
+        }
         finally { gate.Release(); }
     }
 
