@@ -63,7 +63,11 @@ public sealed partial class InstanceViewModel
             foreach (ModItem item in e.OldItems) item.PropertyChanged -= OnModItemChanged;
         if (e.Action == NotifyCollectionChangedAction.Reset) InspectedMod = null;
         else if (InspectedMod is { } inspected && !Mods.Contains(inspected)) InspectedMod = null;
-        if (_bulkMods > 0) return;
+        if (_bulkMods > 0)
+        {
+            _bulkModsListChanged = true;
+            return;
+        }
         ApplyModQuery();
         UpdateModCounts();
     }
@@ -74,13 +78,22 @@ public sealed partial class InstanceViewModel
     /// </summary>
     private int _bulkMods;
 
+    /// <summary>Rows were added or removed during the bulk change, so the filtered view is built again at its end.</summary>
+    private bool _bulkModsListChanged;
+
     private void BulkMods(Action change)
     {
         _bulkMods++;
         try { change(); }
         finally { _bulkMods--; }
         if (_bulkMods > 0) return;
-        ApplyModQuery();
+        // Only a changed list re-filters: an enabled, disabled or rechecked row stays where it is until the filter
+        // changes (see OnModItemChanged), and the view under the pointer is not rebuilt.
+        if (_bulkModsListChanged)
+        {
+            _bulkModsListChanged = false;
+            ApplyModQuery();
+        }
         UpdateModCounts();
     }
 

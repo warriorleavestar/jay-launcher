@@ -57,5 +57,14 @@ public sealed class ModBulkTests : IDisposable
         Assert.All(vm.Mods, m => Assert.True(m.Enabled));
         Assert.InRange(vm.ModCountUpdatesForTest - before, 1, 4);
         Assert.Contains("40", vm.ModFooter);
+
+        // Enabling or disabling rows under a search keeps the filtered view as it is (rows do not jump away).
+        vm.ModSearch = "mod0";
+        var view = vm.ModsView;
+        Assert.NotSame(vm.Mods, view);
+        view.First().Enabled = false;
+        Assert.Same(view, vm.ModsView);
+        vm.DisableSelectedModsCommand.Execute(null);
+        Assert.Same(view, vm.ModsView);
     });
 }
