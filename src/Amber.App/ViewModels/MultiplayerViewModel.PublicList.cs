@@ -108,5 +108,5 @@ public sealed partial class MultiplayerViewModel
 
     /// <summary>"Add a public network…": multiplayer settings › public networks.</summary>
     [RelayCommand]
-    private void AddPublicNetwork() => Navigate?.Invoke("play/settings");
+    private void AddPublicNetwork() => Navigate?.Invoke(Amber.Core.Navigation.LegacyRoutes.PublicNetworks);
 }

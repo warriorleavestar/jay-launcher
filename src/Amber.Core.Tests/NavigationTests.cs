@@ -140,7 +140,13 @@ public class NavigationTests
     [InlineData("settings#Source", "settings#Source")]
     [InlineData("play/servers", "play/servers")]
     [InlineData("play/settings#ContactsCard", "people/add")] // the friends card: the Friends page's add panel
-    [InlineData("play/settings#IdentityCard", "play/settings#IdentityCard")]
+    [InlineData("play/settings#IdentityCard", "me#IdentityCard")]  // the safety code: Me › My devices
+    [InlineData("play/settings", "settings/multiplayer")]           // the old multiplayer settings tab
+    [InlineData("play/settings#NetworksCard", "settings#NetworksCard")]
+    [InlineData("play/settings#RelayGroup", "settings#RelayGroup")]
+    [InlineData("play/settings#StunCard", "settings#Stun")]
+    [InlineData("play/settings#TransportBox", "settings#Transport")]
+    [InlineData("play/settings#SomethingGone", "settings/multiplayer")]
     public void RoutesOfRemovedPagesGoToWhatReplacedThem(string saved, string expected) =>
         Assert.Equal(expected, LegacyRoutes.Resolve(Route.Parse(saved)).ToString());
 
@@ -150,6 +156,24 @@ public class NavigationTests
         var route = Route.Parse(LegacyRoutes.Tools);
         Assert.Equal(Section.Settings, route.Section);
         Assert.Equal(SettingsCatalog.Storage, SettingsCatalog.Find(route.Fragment)?.Group);
+    }
+
+    [Fact]
+    public void TheOldMultiplayerSettingsRoutesLandOnRealSettings()
+    {
+        // Redesign batch 7: the lobby's settings tab is Settings › Multiplayer and Settings › Network now.
+        foreach (var (text, group) in new[] { (LegacyRoutes.RoomDefaults, SettingsCatalog.Multiplayer), (LegacyRoutes.PublicNetworks, SettingsCatalog.Network),
+                     (LegacyRoutes.RelaySettings, SettingsCatalog.Network) })
+        {
+            var route = Route.Parse(text);
+            Assert.Equal(Section.Settings, route.Section);
+            Assert.Equal(group, SettingsCatalog.Find(route.Fragment)?.Group);
+        }
+        Assert.Equal(SettingsCatalog.Multiplayer, SettingsCatalog.Group(Route.Parse(LegacyRoutes.MultiplayerSettings)[1])?.Id);
+        Assert.Equal(SettingsCatalog.Network, SettingsCatalog.Group(Route.Parse(LegacyRoutes.NetworkSettings)[1])?.Id);
+        var me = Route.Parse(LegacyRoutes.DeviceIdentity);
+        Assert.Equal(Section.Me, me.Section);
+        Assert.Equal("IdentityCard", me.Fragment);
     }
 
     [Fact]

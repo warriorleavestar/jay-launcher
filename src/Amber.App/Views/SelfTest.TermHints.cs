@@ -52,10 +52,10 @@ internal sealed partial class SelfTest
                 Page<HelpCenterViewModel>().Article?.Article.Id ?? "none");
         }
 
-        main.Shell.Navigate("play/settings");
+        main.Shell.Navigate(Amber.Core.Navigation.LegacyRoutes.NetworkSettings);
         await Task.Delay(600);
         var relay = Hints().FirstOrDefault(h => h.Term == "relay");
-        Check("Terms: multiplayer settings mark the relay server", relay is not null && Dispatcher.UIThread.Invoke(() => relay.IsEffectivelyVisible));
+        Check("Terms: Settings › Network marks the relay server", relay is not null && Dispatcher.UIThread.Invoke(() => relay.IsEffectivelyVisible));
         main.Shell.Navigate("play/public");
         await Task.Delay(600);
         var all = Hints().Select(h => h.Term).ToList();

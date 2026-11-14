@@ -12,7 +12,7 @@ public sealed record SettingsGroup(string Id, string TitleKey, string SummaryKey
 public sealed record SettingsField(string Field, string Group, string LabelKey, string? HintKey = null, bool WindowsOnly = false, bool DesktopOnly = false);
 
 /// <summary>
-/// The nine settings groups and every setting with a control, in page order. The settings search and the command
+/// The ten settings groups and every setting with a control, in page order. The settings search and the command
 /// palette both read this list, so every setting is findable from either.
 /// </summary>
 public static class SettingsCatalog
@@ -24,6 +24,7 @@ public static class SettingsCatalog
     public const string Storage = "storage";
     public const string Privacy = "privacy";
     public const string Multiplayer = "multiplayer";
+    public const string Network = "network";
     public const string Experimental = "experimental";
     public const string About = "about";
 
@@ -36,6 +37,7 @@ public static class SettingsCatalog
         new(Storage, "settings.group.storage", "settings.group.storage.summary", "settings.group.storage.note"),
         new(Privacy, "settings.group.privacy", "settings.group.privacy.summary", "settings.group.privacy.note"),
         new(Multiplayer, "settings.group.multiplayer", "settings.group.multiplayer.summary", "settings.group.multiplayer.note"),
+        new(Network, "settings.group.network", "settings.group.network.summary", "settings.group.network.note"),
         new(Experimental, "settings.group.experimental", "settings.group.experimental.summary", "settings.group.experimental.note"),
         new(About, "settings.group.about", "settings.group.about.summary", "settings.group.about.note"),
     ];
@@ -77,15 +79,29 @@ public static class SettingsCatalog
         new("NoTrace", Privacy, "settings.notrace.label", "settings.notrace.hint"),
         new("StrongSandbox", Privacy, "settings.sandbox.strong", "settings.sandbox.strong.hint", WindowsOnly: true),
         new("LaunchWithoutSandbox", Privacy, "settings.sandbox.without", "settings.sandbox.without.hint"),
-        new("Attestation", Privacy, "settings.security.attest.label", "settings.security.hint"),
-        new("Breaker", Privacy, "settings.security.breaker.label", "settings.security.breaker.toggle"),
-        new("BreakerDelay", Privacy, "settings.security.delay.label"),
-        new("BreakerSkip", Privacy, "settings.security.skip.toggle"),
         new("NetworkList", Privacy, "settings.privacy.network_list", "about.net.heading"),
         new("ChildMode", Privacy, "settings.child.title", "settings.child.hint"),
         new("DataFolder", Privacy, "settings.privacy.data_folder"),
 
-        new("MultiplayerSettings", Multiplayer, "settings.multiplayer.card"),
+        // The cards that used to be the lobby's settings tab (redesign batch 7).
+        new("InviteAutoCopy", Multiplayer, "multiplayer.lobby.auto_copy", "multiplayer.clipboard.autoclear_hint"),
+        new("DefaultKnockWait", Multiplayer, "multiplayer.settings.knock_wait"),
+        new("RequestPopup", Multiplayer, "multiplayer.settings.request_popup"),
+        new("DefaultRelayOnly", Multiplayer, "multiplayer.settings.relay_only", "multiplayer.settings.relay_only_hint"),
+        new("FullLanMode", Multiplayer, "multiplayer.lan.full_mode", "multiplayer.lan.full_mode_hint"),
+        new("AllowGameProxy", Multiplayer, "multiplayer.proxy.allow"),
+        new("Transport", Multiplayer, "multiplayer.transport.label", "multiplayer.transport.hint"),
+        new("MultiplayerComponentCard", Multiplayer, "multiplayer.settings.component", "multiplayer.component.import"),
+        // Emergency disconnect: the device check and the circuit breaker (moved from Privacy).
+        new("Attestation", Multiplayer, "settings.security.attest.label", "settings.security.hint"),
+        new("Breaker", Multiplayer, "settings.security.breaker.label", "settings.security.breaker.toggle"),
+        new("BreakerDelay", Multiplayer, "settings.security.delay.label"),
+        new("BreakerSkip", Multiplayer, "settings.security.skip.toggle"),
+
+        new("NetworksCard", Network, "multiplayer.settings.public", "multiplayer.network.hint"),
+        new("PublicNodes", Network, "multiplayer.public.nodes_title", "multiplayer.public.nodes_hint"),
+        new("RelayGroup", Network, "settings.network.relays", "multiplayer.nodes.hint"),
+        new("Stun", Network, "multiplayer.direct.stun_heading"),
 
         new("Bake", Experimental, "settings.bake.title", "settings.bake.hint"),
         new("BakeLoader", Experimental, "settings.bake.loader_hint"),

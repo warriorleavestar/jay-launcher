@@ -498,8 +498,17 @@ public sealed partial class MultiplayerViewModel : PageViewModel
 
     public bool HasBuiltInNodes => BuiltInNodes.Count > 0;
 
+    private bool _nodesLoaded;
+
+    /// <summary>Adding a relay from Settings before the multiplayer page was ever opened must not drop the saved ones.</summary>
+    private void EnsureNodesLoaded()
+    {
+        if (!_nodesLoaded) LoadNodes();
+    }
+
     private void LoadNodes()
     {
+        _nodesLoaded = true;
         Nodes.Clear();
         foreach (var url in _service.Settings.MultiplayerPeers ?? []) if (RelayNodes.IsValid(url)) Nodes.Add(new NodeItem(url));
         NodesExpanded = _service.MultiplayerPeers.Count == 0;
@@ -521,6 +530,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
             SetStatus(StatusMessage.Error("multiplayer.nodes.invalid_address", url));
             return;
         }
+        EnsureNodesLoaded();
         if (Nodes.Any(n => n.Url == url)) return;
         Nodes.Add(new NodeItem(url));
         SaveNodes();
@@ -664,6 +674,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
 
     private void AddImportedNodes(string? name, List<string> urls)
     {
+        EnsureNodesLoaded();
         var added = 0;
         foreach (var url in urls.Where(u => Nodes.All(n => n.Url != u)))
         {
@@ -1447,11 +1458,15 @@ public sealed partial class MultiplayerViewModel : PageViewModel
     /// A status the refresh (every two seconds) keeps setting: only a change is shown. Setting the same one again would
     /// bring back a message the player just closed and note it in diagnostics each time.
     /// </summary>
+    internal void SetRoomStatusForTest(StatusMessage message) => SetRoomStatus(message);
+
     private void SetRoomStatus(StatusMessage message)
     {
         if (StatusInfo is { } current && current.Key == message.Key && current.Kind == message.Kind && current.Count == message.Count
             && current.Args.SequenceEqual(message.Args)) return;
-        SetStatus(message);
+        _settingRoomStatus = true;
+        try { SetStatus(message); }
+        finally { _settingRoomStatus = false; }
     }
 
     /// <summary>Everyone in the room, the host included, like the room header; just the host means still waiting.</summary>

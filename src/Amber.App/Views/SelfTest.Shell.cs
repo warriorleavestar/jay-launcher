@@ -96,7 +96,8 @@ internal sealed partial class SelfTest
                         || !(char.IsAsciiLetter(text[i - 1]) && char.IsAsciiLetter(text[i]))), $"{text} 断在 {string.Join(",", breaks)}");
                     if (!window.SidebarHost.Classes.Contains("horizontal")) RailFooterCentered(tag, privacy, items);
                 }
-                Check($"外壳（{tag}）：返回按钮可点区域 ≥ 32", window.BackButton.Bounds.Width >= 32 && window.BackButton.Bounds.Height >= 32);
+                Check($"外壳（{tag}）：返回按钮只在有地方可回时出现，出现时可点区域 ≥ 32", window.BackButton.IsEffectivelyVisible == main.Shell.CanGoBack
+                    && (!main.Shell.CanGoBack || window.BackButton.Bounds.Width >= 32 && window.BackButton.Bounds.Height >= 32));
                 await ShotAsync($"shell-{lang}-{w}x{h}");
             }
         }
@@ -205,10 +206,11 @@ internal sealed partial class SelfTest
         // 切到发现再切回：回到离开时的位置。
         shell.GoSectionCommand.Execute("discover");
         await Task.Delay(300);
-        Check("切到发现时返回按钮不能点（发现还没有历史）", !window.BackButton.IsEnabled);
+        Check("切到发现时不显示返回按钮（发现还没有历史）", !window.BackButton.IsEffectivelyVisible);
         shell.GoSectionCommand.Execute("library");
         await Task.Delay(300);
         Check("切回游戏库，回到离开时的实例详情", main.CurrentPage is InstanceViewModel);
+        Check("有历史时显示返回按钮，可点区域 ≥ 32", window.BackButton.IsEffectivelyVisible && window.BackButton.Bounds.Width >= 32 && window.BackButton.Bounds.Height >= 32);
         window.BackButton.Command?.Execute(null);
         await Task.Delay(300);
         Check("顶栏 ← 按钮返回", main.CurrentPage is DownloadViewModel);
@@ -392,9 +394,12 @@ internal sealed partial class SelfTest
         window.Height = 700;
         await Task.Delay(400);
 
-        Dispatcher.UIThread.Invoke(() => page.DeviceSettingsButton.Command?.Execute(null));
+        // The safety code, "reset identity" and device verification moved here from the lobby's settings tab (batch 7).
+        Check("我的设备：安全码、【重置联机身份】、设备认证都在这页", Dispatcher.UIThread.Invoke(() =>
+            page.IdentityCard.IsEffectivelyVisible && page.ResetIdentityButton.IsEffectivelyVisible && page.DeviceCheckCard.IsEffectivelyVisible));
+        shell.Navigate("play/settings#IdentityCard");
         var identity = await WaitAsync(() => window.RevealedField?.Name == "IdentityCard", 3);
-        Check("【安全码和重置】去联机设置里的那张卡", identity && main.CurrentPage is MultiplayerViewModel { Tab: MultiplayerTab.Settings }, $"{shell.Router.Current} {window.RevealedField?.Name}");
+        Check("旧路由 play/settings#IdentityCard 去“我”页的我的设备", identity && main.CurrentPage is AccountsViewModel, $"{shell.Router.Current} {window.RevealedField?.Name}");
         // Leaving a page drops its view: look the page up again after every return.
         async Task<AccountsPage> BackToMeAsync()
         {
@@ -592,11 +597,12 @@ internal sealed partial class SelfTest
             await WaitAsync(() => Dispatcher.UIThread.Invoke(() => window.NetworkFlyout.IsOpen && window.NetworkAdd.IsEffectivelyVisible), 3);
             Dispatcher.UIThread.Invoke(() => window.NetworkAdd.Command?.Execute(null));
             var card = await WaitAsync(() => window.RevealedField?.Name == "NetworksCard", 3);
-            Check("【添加网络…】去联机设置里的公共网络卡，面板收起", card && Dispatcher.UIThread.Invoke(() =>
-                main.CurrentPage is MultiplayerViewModel { Tab: MultiplayerTab.Settings } && !window.NetworkFlyout.IsOpen), $"{shell.Router.Current} {window.RevealedField?.Name}");
+            Check("【添加网络…】去设置 › 网络的公共网络卡，面板收起", card && Dispatcher.UIThread.Invoke(() =>
+                main.CurrentPage is SettingsViewModel { SelectedGroupId: Amber.Core.Navigation.SettingsCatalog.Network } && !window.NetworkFlyout.IsOpen), $"{shell.Router.Current} {window.RevealedField?.Name}");
             Dispatcher.UIThread.Invoke(() => network.OpenSettingsCommand.Execute(null));
             await Task.Delay(250);
-            Check("【网络设置】去联机设置", shell.Router.Current.ToString() == "play/settings");
+            Check("【网络设置】去设置 › 网络", shell.Router.Current.ToString() == Amber.Core.Navigation.LegacyRoutes.NetworkSettings
+                && main.CurrentPage is SettingsViewModel { SelectedGroupId: Amber.Core.Navigation.SettingsCatalog.Network }, shell.Router.Current.ToString());
         }
         finally
         {

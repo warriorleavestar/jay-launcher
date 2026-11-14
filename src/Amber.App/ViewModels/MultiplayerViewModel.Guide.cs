@@ -1,6 +1,7 @@
 using Amber.Core.Localization;
 using Amber.Core.Multiplayer;
 using Amber.Core.Multiplayer.Transport;
+using Amber.Core.Navigation;
 using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace Amber.App.ViewModels;
@@ -145,7 +146,7 @@ public sealed partial class MultiplayerViewModel
                 clearSource();
                 ShareCodeText = text;
                 NodesExpanded = true;
-                Tab = MultiplayerTab.Settings;
+                Navigate?.Invoke(LegacyRoutes.RelaySettings);
                 SetStatus(StatusMessage.Warning("multiplayer.code.node_misplaced"));
                 return true;
             case PastedCodeKind.OldDirect:
@@ -189,10 +190,10 @@ public sealed partial class MultiplayerViewModel
                 SetStatus(StatusMessage.Info("multiplayer.code.contact_misplaced"));
                 return true;
             case PastedCodeKind.PublicNetwork:
-                // 公共网络地址：放进联机设置的输入框，用户看过内容再确认添加，不静默添加。
+                // A public network address: into the box in Settings › Network, added only after the player has seen it.
                 clearSource();
                 NetworkInput = text.Trim();
-                Tab = MultiplayerTab.Settings;
+                Navigate?.Invoke(LegacyRoutes.PublicNetworks);
                 SetStatus(StatusMessage.Info("multiplayer.code.network_misplaced"));
                 return true;
             default:

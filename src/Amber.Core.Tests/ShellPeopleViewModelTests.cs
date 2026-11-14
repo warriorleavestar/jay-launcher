@@ -108,8 +108,10 @@ public sealed class ShellPeopleViewModelTests
             Assert.Equal(Section.People, main.Shell.Router.CurrentSection);
             me.OpenAboutCommand.Execute(null);
             Assert.Equal(Section.About, main.Shell.Router.CurrentSection);
-            me.OpenDeviceSettingsCommand.Execute(null);
-            Assert.Equal("play/settings#IdentityCard", main.Shell.Router.Current.ToString());
+            // The safety code and "reset identity" are on this page now; the old route to them lands here.
+            main.Shell.Navigate("play/settings#IdentityCard");
+            Assert.Equal(LegacyRoutes.DeviceIdentity, main.Shell.Router.Current.ToString());
+            Assert.Same(me, main.CurrentPage);
             me.OpenThemesCommand.Execute(null);
             Assert.Equal("settings#ThemePack", main.Shell.Router.Current.ToString());
         });
@@ -220,10 +222,11 @@ public sealed class ShellPeopleViewModelTests
             network.Done += () => closed++;
             network.AddNetworkCommand.Execute(null);
             Assert.Equal(1, closed);
-            Assert.Equal("play/settings#NetworksCard", main.Shell.Router.Current.ToString());
+            Assert.Equal(LegacyRoutes.PublicNetworks, main.Shell.Router.Current.ToString());
             network.OpenSettingsCommand.Execute(null);
             Assert.Equal(2, closed);
-            Assert.Equal("play/settings", main.Shell.Router.Current.ToString());
+            Assert.Equal(LegacyRoutes.NetworkSettings, main.Shell.Router.Current.ToString());
+            Assert.Equal(SettingsCatalog.Network, Assert.IsType<SettingsViewModel>(main.CurrentPage).SelectedGroupId);
         });
     }
 }

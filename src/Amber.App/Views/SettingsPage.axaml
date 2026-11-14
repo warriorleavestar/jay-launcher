@@ -387,25 +387,6 @@
                 <TextBlock Classes="hint" FontSize="12" Text="{l:T settings.sandbox.without.hint}" TextWrapping="Wrap" />
               </StackPanel>
             </Border>
-            <!-- Multiplayer security: device check, circuit breaker and the countdown before a restart -->
-            <Border Classes="card">
-              <StackPanel Spacing="8">
-                <TextBlock Classes="h2" Text="{l:T settings.security.title}" Margin="0" />
-                <TextBlock Classes="hint" FontSize="12" Text="{l:T settings.security.hint}" TextWrapping="Wrap" />
-                <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto" ColumnSpacing="16" RowSpacing="10">
-                  <TextBlock Text="{l:T settings.security.attest.label}" VerticalAlignment="Center" />
-                  <ComboBox x:Name="AttestationBox" Grid.Column="1" ItemsSource="{Binding AttestationOptions}" SelectedIndex="{Binding AttestationIndex}" HorizontalAlignment="Stretch" />
-                  <TextBlock Grid.Row="1" Text="{l:T settings.security.breaker.label}" VerticalAlignment="Center" />
-                  <CheckBox x:Name="BreakerBox" Grid.Row="1" Grid.Column="1" IsChecked="{Binding SecurityBreaker}" Content="{l:T settings.security.breaker.toggle}" />
-                  <TextBlock Grid.Row="2" Text="{l:T settings.security.delay.label}" VerticalAlignment="Top" Margin="0,6,0,0" />
-                  <StackPanel Grid.Row="2" Grid.Column="1" Spacing="4">
-                    <TextBox x:Name="BreakerDelayBox" Text="{Binding BreakerRestartDelay, UpdateSourceTrigger=LostFocus}" IsEnabled="{Binding !BreakerSkipDelay}" MaxWidth="120" HorizontalAlignment="Left" />
-                    <TextBlock Classes="field-error" Text="{Binding BreakerDelayError}" IsVisible="{Binding HasBreakerDelayError}" />
-                  </StackPanel>
-                  <CheckBox x:Name="BreakerSkipBox" Grid.Row="3" Grid.Column="1" IsChecked="{Binding BreakerSkipDelay}" Content="{l:T settings.security.skip.toggle}" />
-                </Grid>
-              </StackPanel>
-            </Border>
             <Border Classes="card">
               <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
                 <StackPanel Spacing="2" VerticalAlignment="Center">
@@ -417,14 +398,35 @@
             </Border>
           </StackPanel>
 
-          <!-- Multiplayer: the settings live in Multiplayer › Settings -->
+          <!-- Multiplayer (redesign batch 7): what used to be the lobby's settings tab, and the emergency disconnect -->
           <StackPanel x:Name="Group_multiplayer" Classes="group">
-            <Border Classes="card">
-              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-                <TextBlock Text="{l:T settings.multiplayer.card}" TextWrapping="Wrap" VerticalAlignment="Center" />
-                <Button x:Name="MultiplayerSettingsBox" Grid.Column="1" Classes="secondary" Content="{l:T settings.multiplayer.go}" Command="{Binding GoMultiplayerSettingsCommand}" VerticalAlignment="Center" />
-              </Grid>
-            </Border>
+            <StackPanel Spacing="14" Margin="0,0,0,14">
+              <views:MultiplayerSettingsView x:Name="MultiplayerSettingsPanel" DataContext="{Binding Multiplayer}" />
+              <!-- Emergency disconnect: device check, circuit breaker and the countdown before a restart -->
+              <Border x:Name="EmergencyCard" Classes="card" Margin="0">
+                <StackPanel Spacing="8">
+                  <TextBlock Classes="h2" Text="{l:T settings.mp.emergency}" Margin="0" />
+                  <TextBlock Classes="hint" FontSize="12" Text="{l:T settings.security.hint}" TextWrapping="Wrap" />
+                  <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto" ColumnSpacing="16" RowSpacing="10">
+                    <TextBlock Text="{l:T settings.security.attest.label}" VerticalAlignment="Center" />
+                    <ComboBox x:Name="AttestationBox" Grid.Column="1" ItemsSource="{Binding AttestationOptions}" SelectedIndex="{Binding AttestationIndex}" HorizontalAlignment="Stretch" />
+                    <TextBlock Grid.Row="1" Text="{l:T settings.security.breaker.label}" VerticalAlignment="Center" />
+                    <CheckBox x:Name="BreakerBox" Grid.Row="1" Grid.Column="1" IsChecked="{Binding SecurityBreaker}" Content="{l:T settings.security.breaker.toggle}" />
+                    <TextBlock Grid.Row="2" Text="{l:T settings.security.delay.label}" VerticalAlignment="Top" Margin="0,6,0,0" />
+                    <StackPanel Grid.Row="2" Grid.Column="1" Spacing="4">
+                      <TextBox x:Name="BreakerDelayBox" Text="{Binding BreakerRestartDelay, UpdateSourceTrigger=LostFocus}" IsEnabled="{Binding !BreakerSkipDelay}" MaxWidth="120" HorizontalAlignment="Left" />
+                      <TextBlock Classes="field-error" Text="{Binding BreakerDelayError}" IsVisible="{Binding HasBreakerDelayError}" />
+                    </StackPanel>
+                    <CheckBox x:Name="BreakerSkipBox" Grid.Row="3" Grid.Column="1" IsChecked="{Binding BreakerSkipDelay}" Content="{l:T settings.security.skip.toggle}" />
+                  </Grid>
+                </StackPanel>
+              </Border>
+            </StackPanel>
+          </StackPanel>
+
+          <!-- Network (redesign batch 7): public networks, relays and STUN -->
+          <StackPanel x:Name="Group_network" Classes="group">
+            <views:NetworkSettingsView x:Name="NetworkSettingsPanel" DataContext="{Binding Multiplayer}" Margin="0,0,0,14" />
           </StackPanel>
 
           <!-- Experimental -->

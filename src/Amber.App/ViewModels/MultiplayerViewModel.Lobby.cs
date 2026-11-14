@@ -1,5 +1,6 @@
 using Amber.Core.Localization;
 using Amber.Core.Multiplayer;
+using Amber.Core.Navigation;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
@@ -7,14 +8,14 @@ namespace Amber.App.ViewModels;
 
 /// <summary>
 /// The views of the multiplayer page. <see cref="Play"/> is the page itself (the lobby, or the room when in one); the
-/// others are sub-views with a way back. They used to be four tabs (official design §6.14).
+/// others are sub-views with a way back. They used to be four tabs (official design §6.14); the settings tab moved to
+/// Settings › Multiplayer and Settings › Network (redesign batch 7).
 /// </summary>
 public enum MultiplayerTab
 {
     Play,
     Public,
     Servers,
-    Settings,
 }
 
 /// <summary>
@@ -24,32 +25,30 @@ public enum MultiplayerTab
 public sealed partial class MultiplayerViewModel
 {
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsPlayTab), nameof(IsPublicTab), nameof(IsServersTab), nameof(IsSettingsTab), nameof(TabIndex), nameof(IsSubView), nameof(SubViewTitle))]
+    [NotifyPropertyChangedFor(nameof(IsPlayTab), nameof(IsPublicTab), nameof(IsServersTab), nameof(TabIndex), nameof(IsSubView), nameof(SubViewTitle))]
     public partial MultiplayerTab Tab { get; set; }
 
-    /// <summary>Not the lobby or the room: the network view, my server, or the multiplayer settings.</summary>
+    /// <summary>Not the lobby or the room: the network view or my server.</summary>
     public bool IsSubView => Tab != MultiplayerTab.Play;
 
     public string SubViewTitle => Tab switch
     {
         MultiplayerTab.Public => L.T("multiplayer.subview.network"),
         MultiplayerTab.Servers => L.T("multiplayer.subview.server"),
-        MultiplayerTab.Settings => L.T("multiplayer.tab.settings"),
         _ => "",
     };
 
     public bool IsPlayTab => Tab == MultiplayerTab.Play;
     public bool IsPublicTab => Tab == MultiplayerTab.Public;
     public bool IsServersTab => Tab == MultiplayerTab.Servers;
-    public bool IsSettingsTab => Tab == MultiplayerTab.Settings;
 
-    /// <summary>The view as a number (0 lobby or room, 1 network, 2 my server, 3 settings); routes set it.</summary>
+    /// <summary>The view as a number (0 lobby or room, 1 network, 2 my server); routes set it.</summary>
     public int TabIndex
     {
         get => (int)Tab;
         set
         {
-            var tab = (MultiplayerTab)Math.Clamp(value, 0, 3);
+            var tab = (MultiplayerTab)Math.Clamp(value, 0, 2);
             // Child mode has no public networks.
             if (tab == MultiplayerTab.Public && !ShowPublicNetworks) tab = MultiplayerTab.Play;
             Tab = tab;
@@ -65,7 +64,6 @@ public sealed partial class MultiplayerViewModel
         null or "" or "lobby" or "room" => MultiplayerTab.Play,
         "public" => MultiplayerTab.Public,
         "servers" or "server" => MultiplayerTab.Servers,
-        "settings" => MultiplayerTab.Settings,
         _ => null,
     };
 
@@ -79,9 +77,13 @@ public sealed partial class MultiplayerViewModel
     [RelayCommand]
     private void OpenMyServer() => Tab = MultiplayerTab.Servers;
 
-    /// <summary>The room menu's way to the multiplayer settings (there is no tab strip to click).</summary>
+    /// <summary>The room menu's way to Settings › Multiplayer.</summary>
     [RelayCommand]
-    private void OpenMultiplayerSettings() => Tab = MultiplayerTab.Settings;
+    private void OpenMultiplayerSettings() => Navigate?.Invoke(LegacyRoutes.MultiplayerSettings);
+
+    /// <summary>"Advanced settings" under the open-a-room card: what a new room starts with, in Settings › Multiplayer.</summary>
+    [RelayCommand]
+    private void OpenRoomDefaults() => Navigate?.Invoke(LegacyRoutes.RoomDefaults);
 
     /// <summary>The lobby's "more ways" (manual port, direct connection) is open.</summary>
     [ObservableProperty] public partial bool MoreWaysOpen { get; set; }
