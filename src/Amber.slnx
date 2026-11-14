@@ -6,4 +6,5 @@
   <Project Path="Amber.NetworkServer/Amber.NetworkServer.csproj" />
   <Project Path="Amber.Server/Amber.Server.csproj" />
   <Project Path="../samples/MyJayNetwork/MyJayNetwork.csproj" />
+  <Project Path="../tools/FullLanCheck/FullLanCheck.csproj" />
 </Solution>
