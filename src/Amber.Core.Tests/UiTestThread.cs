@@ -15,6 +15,8 @@ internal static class UiTestThread
 {
     private static readonly BlockingCollection<Action> Work = [];
     private static Exception? _setupFailure;
+    /// <summary>The test whose action is running on the UI thread right now, so a timeout can name the one that hangs.</summary>
+    private static volatile string? _running;
 
     [ModuleInitializer]
     internal static void Start()
@@ -38,18 +40,21 @@ internal static class UiTestThread
     }
 
     /// <summary>在界面线程上运行 action 并等它结束；超时算失败（多半是布局死循环）。</summary>
-    public static void Run(Action action, int timeoutSeconds = 30)
+    public static void Run(Action action, int timeoutSeconds = 30,
+        [CallerMemberName] string caller = "", [CallerFilePath] string callerFile = "")
     {
         if (_setupFailure is not null) ExceptionDispatchInfo.Capture(_setupFailure).Throw();
         Exception? failure = null;
         using var done = new ManualResetEventSlim();
         Work.Add(() =>
         {
+            _running = $"{Path.GetFileNameWithoutExtension(callerFile)}.{caller}";
             try { action(); }
             catch (Exception ex) { failure = ex; }
-            finally { done.Set(); }
+            finally { _running = null; done.Set(); }
         });
-        Assert.True(done.Wait(TimeSpan.FromSeconds(timeoutSeconds)), "界面线程上的测试超时，可能存在布局循环");
+        Assert.True(done.Wait(TimeSpan.FromSeconds(timeoutSeconds)),
+            $"界面线程上的测试超时，可能存在布局循环 (still running on the UI thread: {_running ?? "nothing"})");
         if (failure is not null) ExceptionDispatchInfo.Capture(failure).Throw();
     }
 }

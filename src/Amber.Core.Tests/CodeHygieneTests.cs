@@ -8,7 +8,7 @@ using Amber.Core.Multiplayer.Transport;
 namespace Amber.Core.Tests;
 
 /// <summary>
-/// 界面上的码：复制后 60 秒自动从剪贴板清除（剪贴板还是这段文字时才清），
+/// 界面上的码：复制后 5 分钟自动从剪贴板清除（剪贴板还是这段文字时才清），
 /// 邀请码、直连码、粘贴框和待用邀请列表默认打码，离开联机页时重新打码；每种数据封装有一句说明。
 /// </summary>
 public sealed class CodeHygieneTests
@@ -31,7 +31,7 @@ public sealed class CodeHygieneTests
         }
     }
 
-    /// <summary>手动放行的“60 秒”：测试里不真等。</summary>
+    /// <summary>手动放行的“5 分钟”：测试里不真等。</summary>
     private sealed class ManualDelay
     {
         private readonly List<(TimeSpan Wait, TaskCompletionSource Done)> _waits = [];

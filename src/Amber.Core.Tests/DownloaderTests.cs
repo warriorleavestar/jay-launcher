@@ -9,7 +9,7 @@ namespace Amber.Core.Tests;
 /// <summary>本机真实 HTTP 服务器，按需模拟范围请求、中断、错误和卡住。</summary>
 internal sealed class TestServer : IDisposable
 {
-    private readonly HttpListener _listener = new();
+    private HttpListener _listener = new();
     private readonly CancellationTokenSource _cts = new();
     private readonly Dictionary<string, byte[]> _files = [];
     public int Port { get; }
@@ -44,12 +44,25 @@ internal sealed class TestServer : IDisposable
 
     public TestServer()
     {
-        var probe = new TcpListener(IPAddress.Loopback, 0);
-        probe.Start();
-        Port = ((IPEndPoint)probe.LocalEndpoint).Port;
-        probe.Stop();
-        _listener.Prefixes.Add(Root);
-        _listener.Start();
+        // The probe frees its port before HttpListener binds it, so a parallel test can grab it in between: retry on a new port.
+        for (var attempt = 1; ; attempt++)
+        {
+            var probe = new TcpListener(IPAddress.Loopback, 0);
+            probe.Start();
+            Port = ((IPEndPoint)probe.LocalEndpoint).Port;
+            probe.Stop();
+            try
+            {
+                _listener.Prefixes.Add(Root);
+                _listener.Start();
+                break;
+            }
+            catch (HttpListenerException) when (attempt < 5)
+            {
+                _listener.Close();
+                _listener = new HttpListener();
+            }
+        }
         _ = Task.Run(LoopAsync);
     }
 
