@@ -33,6 +33,13 @@ public class EasyTierStunArgsTests
         AssertJayStunList(LobbyArgs.Build(new LobbyOptions("jay-l-x", "s", true, [], 15888, null, 40123)));
     }
 
+    /// <summary>
+    /// The IPv6 STUN list is the same list, and EasyTier only uses its AAAA answers. stun.cloudflare.com is the one host with
+    /// an AAAA record (checked by DNS on 2026-11-14; a STUN reply over IPv6 is unverified), so keep it in the list.
+    /// </summary>
+    [Fact]
+    public void TheListKeepsAHostWithAnIpv6Address() => Assert.Contains("stun.cloudflare.com:3478", Stun.DefaultServers);
+
     [Fact]
     public void TheListIsJaysDocumentedOneWithPorts()
     {

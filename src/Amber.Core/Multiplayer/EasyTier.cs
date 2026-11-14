@@ -448,6 +448,9 @@ public static class EasyTierArgs
     /// The STUN servers easytier-core asks for this computer's public address (for direct connections): Jay's documented
     /// list (<see cref="Stun.DefaultServers"/>). Without it, EasyTier uses its own built-in list, which includes hosts read
     /// from a DNS TXT record that someone else controls.
+    /// The same list goes to --stun-servers-v6, and EasyTier keeps only the IPv6 (AAAA) answers there. Of the three hosts,
+    /// only stun.cloudflare.com has an AAAA record (2606:4700:49::, looked up 2026-11-14); the other two have none. Whether
+    /// it answers STUN over IPv6 is unverified: the lookup machine had no IPv6 route.
     /// </summary>
     internal static IEnumerable<string> StunArgs()
     {
