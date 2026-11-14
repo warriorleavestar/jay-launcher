@@ -343,7 +343,7 @@ public sealed class DirectSession : IAsyncDisposable
                 var elevatedStart = options.Tun;
                 EasyTier = CreateSessionForTest is { } create ? create(elevatedStart, options)
                     : elevatedStart
-                        ? EasyTierElevatedSession.Start(_installer, options, Path.Combine(_workDir, "run-lan"))
+                        ? await EasyTierElevatedSession.StartAsync(_installer, options, Path.Combine(_workDir, "run-lan"), ct)
                         : EasyTierSession.Start(_installer, options, Path.Combine(_workDir, IsHost ? "run-direct-host" : "run-direct-guest"));
                 if (EasyTier is EasyTierSession plain && Options.Verbose) plain.Output += line => _log.Add("EasyTier", NetDiagnostics.Redact(line, _room is { } r ? [.. r.Secrets] : [], includePublicIps: true));
                 if (EasyTier is EasyTierElevatedSession fresh) await fresh.WaitForReadyAsync(ct);

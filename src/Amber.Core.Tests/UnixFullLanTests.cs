@@ -349,4 +349,55 @@ public sealed class UnixFullLanTests
             }
         }, "#!/bin/sh\necho \"from $0\"\nexec sleep 30\n");
     }
+
+    [Fact]
+    public async Task WaitingForThePasswordDialogDoesNotBlockAndCanBeCancelled()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        // A launcher that stays open like a password dialog nobody answers.
+        var dialogPid = 0;
+        UnixElevatedGuard.LaunchForTest = _ =>
+        {
+            var dialog = Process.Start(new ProcessStartInfo("/bin/sh", ["-c", "exec sleep 30"]) { UseShellExecute = false })!;
+            dialogPid = dialog.Id;
+            return dialog;
+        };
+        static bool Running(int pid)
+        {
+            try { using var p = Process.GetProcessById(pid); return !p.HasExited; }
+            catch (ArgumentException) { return false; }
+        }
+        try
+        {
+            using var cts = new CancellationTokenSource();
+            var caller = Environment.CurrentManagedThreadId;
+            var start = UnixElevatedGuard.StartAsync("/nonexistent/package.zip", ["one"], new Dictionary<string, string>(), null, "10.233.144.250", cts.Token);
+            // Returned to the caller while the dialog is still open.
+            Assert.False(start.IsCompleted);
+            cts.CancelAfter(200);
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => start.WaitAsync(TimeSpan.FromSeconds(10)));
+            // The dialog is closed too.
+            Assert.True(SpinWait.SpinUntil(() => !Running(dialogPid), 5000));
+        }
+        finally
+        {
+            UnixElevatedGuard.LaunchForTest = null;
+            if (dialogPid != 0 && Running(dialogPid)) Process.GetProcessById(dialogPid).Kill();
+        }
+    }
+
+    [Fact]
+    public async Task ClosingThePasswordDialogEndsTheWaitAsDeclined()
+    {
+        if (!OperatingSystem.IsLinux()) return;
+        // pkexec exits with 126 when the user closes the dialog.
+        UnixElevatedGuard.LaunchForTest = _ => Process.Start(new ProcessStartInfo("/bin/sh", ["-c", "exit 126"]) { UseShellExecute = false })!;
+        try
+        {
+            var start = UnixElevatedGuard.StartAsync("/nonexistent/package.zip", ["one"], new Dictionary<string, string>(), null, "10.233.144.250");
+            var e = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => start.WaitAsync(TimeSpan.FromSeconds(10)));
+            Assert.Contains(Amber.Core.Localization.L.T("core.mp.component.elevationdeclined.linux"), e.Message);
+        }
+        finally { UnixElevatedGuard.LaunchForTest = null; }
+    }
 }
