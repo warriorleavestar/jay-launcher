@@ -466,6 +466,7 @@ public sealed class LobbyOpenRoomTests
                     // 20 knocks in 12 hours, only from that device, and I still say yes to each.
                     Assert.Equal(20, invite.Uses);
                     Assert.False(invite.AutoApprove);
+                    Assert.True(invite.AskEachTime);
                     Assert.NotNull(invite.BoundTo);
                     Assert.Contains(mailed, m => m.To.PublicKey.AsSpan().SequenceEqual(invite.BoundTo) && m.Invite == invite.Invite);
                 });
@@ -563,6 +564,140 @@ public sealed class LobbyOpenRoomTests
         Assert.False(vm.IsDirect);
         Assert.Equal("", vm.Mode);
         Assert.Equal("multiplayer.direct.connect_failed", vm.StatusInfo?.Key);
+    });
+
+    [Fact]
+    public void ANoServerRoomsKnockLobbyReachesNoRelay() => UiTestThread.Run(() =>
+    {
+        var (service, vm, _) = Create();
+        using var s = service;
+        vm.TestPeers = ["tcp://relay.example.org:11010"];
+        var credentials = RoomCredentials.Create(vm.Identity.PublicKey, 25565, TunnelSettings.Default);
+        var members = new MemberTable();
+
+        // An ordinary invite room: guests knock through the relays.
+        vm.StartHostLobbyForTest(credentials, members);
+        Assert.Equal(["tcp://relay.example.org:11010"], vm.HostLobbyPeersForTest);
+        vm.StopHostLobbyForTest();
+        Assert.Null(vm.HostLobbyPeersForTest);
+
+        // "No server": the knock lobby takes no relay at all, only what the direct bridge hands it on loopback.
+        var dir = Path.Combine(Path.GetTempPath(), "jay-lobby-serverless-" + Guid.NewGuid().ToString("N"));
+        var direct = new DirectSession(null!, dir, credentials.ToHostRoom(members, "Host"), true,
+            new DirectOptions([], false, [], false, false, false, true), new DiagnosticLog());
+        try
+        {
+            vm.StartHostLobbyForTest(credentials, members, new InviteBook { KeepLobbyKey = true }, direct);
+            Assert.Empty(vm.HostLobbyPeersForTest!);
+            Assert.Empty(vm.MakeDirectOptions().FallbackNodes);
+            // Nor is it registered with a public network, while an ordinary hosted room may be.
+            vm.Mode = "host";
+            Assert.True(vm.MayAnnounce);
+            vm.IsDirect = true;
+            Assert.False(vm.MayAnnounce);
+            vm.IsDirect = false;
+            vm.Mode = "";
+        }
+        finally
+        {
+            vm.StopHostLobbyForTest();
+            Wait(direct.DisposeAsync().AsTask());
+        }
+    });
+
+    [Fact]
+    public void AFriendRemovedWhileInvitesGoOutGetsNone() => UiTestThread.Run(() =>
+    {
+        var (service, vm, _) = Create();
+        using var s = service;
+        var root = Path.Combine(Path.GetTempPath(), "jay-lobby-removed-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            vm.ContactsDir = root;
+            byte[] Key(byte n) { var key = new byte[32]; key[0] = n; return key; }
+            var now = DateTimeOffset.UtcNow;
+            vm.Contacts.Import([
+                new Contact(Key(1), "Robin", true, now),
+                new Contact(Key(2), "Sam", true, now),
+            ]);
+            vm.RefreshContacts();
+            var credentials = RoomCredentials.Create(vm.Identity.PublicKey, 25565, TunnelSettings.Default);
+            var lobby = new HostLobby(_ => new NoLobby(), () => [],
+                book => new KnockServer(book, vm.Identity.KeyPair, () => credentials, _ => false, (_, _) => Task.FromResult(false), System.Net.IPAddress.Loopback, 0));
+            try
+            {
+                vm.HostLobbyForTest(lobby, credentials);
+                var mailed = new List<string>();
+                // Sam is taken off the list while the first invite (Robin's, the lists are sorted by name) is on its way.
+                vm.TestSendInvite = (to, _, _) =>
+                {
+                    mailed.Add(to.Name);
+                    if (to.Name == "Robin")
+                    {
+                        vm.Contacts.RemovePerson(Key(2));
+                        vm.RefreshContacts();
+                    }
+                    return Task.FromResult(Guid.NewGuid().ToString("N"));
+                };
+                var told = vm.InviteFriendsToKnockAsync();
+                Wait(told);
+                Assert.Equal(1, told.Result);
+                Assert.Equal(["Robin"], mailed);
+                Assert.Equal(1, Assert.Single(lobby.Book.Pending).BoundTo![0]);
+
+                // Removed right after the mail went: the invite it carried is taken back.
+                vm.TestSendInvite = (to, _, _) =>
+                {
+                    vm.Contacts.RemovePerson(Key(1));
+                    return Task.FromResult(Guid.NewGuid().ToString("N"));
+                };
+                told = vm.InviteFriendsToKnockAsync();
+                Wait(told);
+                Assert.Equal(0, told.Result);
+                // Robin is no longer a friend: neither invite is left.
+                Assert.Empty(lobby.Book.Pending);
+            }
+            finally
+            {
+                Wait(lobby.DisposeAsync().AsTask());
+            }
+        }
+        finally
+        {
+            try { Directory.Delete(root, true); } catch (IOException) { }
+        }
+    });
+
+    [Fact]
+    public void JoiningTheSameServerAgainCountsAsJoined() => UiTestThread.Run(() =>
+    {
+        var (service, vm, _) = Create();
+        using var s = service;
+        var serverKey = System.Security.Cryptography.RandomNumberGenerator.GetBytes(32);
+        vm.JayServers.EnrollForTest = (invite, _) => Task.FromResult(
+            new Amber.Core.Multiplayer.Gate.GateMembership(invite.Host, invite.Port, serverKey, System.Security.Cryptography.RandomNumberGenerator.GetBytes(32), "Steve"));
+        string NewInvite() => new Amber.Core.Multiplayer.Gate.GateInvite("mc.example.com", 47670,
+            System.Security.Cryptography.RandomNumberGenerator.GetBytes(16), System.Security.Cryptography.RandomNumberGenerator.GetBytes(16)).Encode();
+        try
+        {
+            foreach (var round in new[] { 1, 2 })
+            {
+                vm.Where = WhereFilter.All;
+                Assert.True(vm.PasteCode(NewInvite()));
+                var joined = vm.JoinCommand.ExecuteAsync(null);
+                Wait(joined);
+                // The second time the saved server is replaced (same server, same name), and that is still a join.
+                Assert.Equal("", vm.JoinCode);
+                Assert.Equal(WhereFilter.Servers, vm.Where);
+                Assert.Single(vm.JayServers.Servers, server => server.Entry.Host == "mc.example.com");
+            }
+        }
+        finally
+        {
+            foreach (var server in vm.JayServers.Servers.Where(server => server.Entry.Host == "mc.example.com").ToList())
+                Wait(vm.JayServers.RemoveCommand.ExecuteAsync(server));
+        }
     });
 
     private sealed class NoLobby : IDisposable

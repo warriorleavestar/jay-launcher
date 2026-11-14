@@ -244,10 +244,10 @@ public sealed partial class MultiplayerViewModel
     {
         JayServers.InviteText = JoinCode.Trim();
         JayServers.InvitePassphrase = JoinPassphrase;
-        var before = JayServers.Servers.Count;
+        bool joined;
         try
         {
-            await JayServers.JoinCommand.ExecuteAsync(null);
+            joined = await JayServers.EnrollFromInviteAsync();
         }
         finally
         {
@@ -257,7 +257,7 @@ public sealed partial class MultiplayerViewModel
             JoinPassphrase = "";
         }
         if (JayServers.Status.Length > 0) SetStatus(new StatusMessage("common.raw", [JayServers.Status], StatusKind.Info));
-        if (JayServers.Servers.Count <= before) return;
+        if (!joined) return;
         JoinCode = "";
         Where = WhereFilter.Servers;
     }
