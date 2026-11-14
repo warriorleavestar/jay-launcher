@@ -79,24 +79,34 @@ public static class SystemMotion
             return SystemParametersInfo(0x1042, 0, ref enabled, 0) ? enabled == 0 : null;
         }
         if (OperatingSystem.IsMacOS())
-            return MotionPreference.ParseMacReduceMotion(Run("defaults", "read", "com.apple.universalaccess", "reduceMotion"));
+            return MotionPreference.ParseMacReduceMotion(Run("defaults", ["read", "com.apple.universalaccess", "reduceMotion"]));
         if (OperatingSystem.IsLinux())
-            return MotionPreference.ParseGnomeEnableAnimations(Run("gsettings", "get", "org.gnome.desktop.interface", "enable-animations"));
+            return MotionPreference.ParseGnomeEnableAnimations(Run("gsettings", ["get", "org.gnome.desktop.interface", "enable-animations"]));
         return null;
     }
 
-    private static string? Run(string file, params string[] args)
+    /// <summary>
+    /// Runs a settings helper and returns its standard output, or null when it fails or doesn't finish within
+    /// <paramref name="timeoutMs"/> (it is then killed). <paramref name="started"/> is a test hook that sees the process.
+    /// </summary>
+    internal static string? Run(string file, IReadOnlyList<string> args, int timeoutMs = 2000, Action<Process>? started = null)
     {
         var psi = new ProcessStartInfo(file) { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true };
         foreach (var a in args) psi.ArgumentList.Add(a);
         using var p = Process.Start(psi);
         if (p is null) return null;
+        started?.Invoke(p);
         // Read in the background so the timeout also bounds a helper that never exits; a hung one is killed.
         var output = p.StandardOutput.ReadToEndAsync();
         _ = p.StandardError.ReadToEndAsync();
-        if (!p.WaitForExit(2000))
+        if (!p.WaitForExit(timeoutMs))
         {
-            try { p.Kill(); } catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception) { }
+            try
+            {
+                p.Kill(entireProcessTree: true);
+                p.WaitForExit(1000);
+            }
+            catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception or AggregateException) { }
             return null;
         }
         return output.Wait(1000) && p.ExitCode == 0 ? output.Result : null;

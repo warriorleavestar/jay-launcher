@@ -2,11 +2,13 @@ using System.Collections.Specialized;
 using Amber.App.Services;
 using Amber.App.ViewModels;
 using Amber.Core.Launch;
+using Amber.Core.Localization;
 using Avalonia.Threading;
 
 namespace Amber.Core.Tests;
 
 /// <summary>The Logs tab of a running game: new lines don't redo the rows that didn't change or close an opened stack.</summary>
+[Collection("GlobalLanguage")]
 public sealed class LiveLogRowsTests : IDisposable
 {
     private readonly string _root = Path.Combine(Path.GetTempPath(), "amber-live-log-" + Guid.NewGuid().ToString("N"));
@@ -20,8 +22,8 @@ public sealed class LiveLogRowsTests : IDisposable
 
     private static GameLogLine Line(GameLogLevel level, string message) => new(DateTimeOffset.Now, level, "main", message);
 
-    [Fact]
-    public void NewLiveLinesKeepUnchangedRowsAndExpandedStacks() => UiTestThread.Run(() =>
+    /// <summary>An instance "a" with a running game whose live log is <c>run</c>, and its Logs tab open.</summary>
+    private (InstanceViewModel Vm, LogViewModel Log, RunLog Run, RunLogStore Store) LiveRun()
     {
         var dir = Directory.CreateDirectory(Path.Combine(_root, "versions", "a")).FullName;
         File.WriteAllText(Path.Combine(dir, "a.json"), """{"id":"a","mainClass":"Example","libraries":[]}""");
@@ -36,19 +38,108 @@ public sealed class LiveLogRowsTests : IDisposable
         var vm = new InstanceViewModel(service) { SelectedId = "a" };
         var log = new LogViewModel();
         var run = log.BeginRun("a", DateTimeOffset.Now);
-        using var store = RunLogStore.Begin(vm.Current!.WorkDir, run.StartedAt, noTrace: false);
+        var store = RunLogStore.Begin(vm.Current!.WorkDir, run.StartedAt, noTrace: false);
         run.Store = store;
         vm.LiveLogFor = id => id == "a" ? run : null;
+        return (vm, log, run, store);
+    }
+
+    private static void OpenLogsTab(InstanceViewModel vm)
+    {
+        vm.IsCurrent = true;
+        vm.TabIndex = (int)InstanceTab.Logs;
+        Dispatcher.UIThread.RunJobs();
+        Assert.True(vm.IsLiveRun);
+    }
+
+    [Fact]
+    public void SameErrorTwiceInOneMillisecondKeepsEachRowsState() => UiTestThread.Run(() =>
+    {
+        var (vm, log, run, store) = LiveRun();
+        using var _ = store;
+        // The same error at the same time, each with its own stack: two events whose first lines are equal.
+        var at = DateTimeOffset.Now;
+        log.Add(run, new GameLogLine(at, GameLogLevel.Error, "main", "Something failed"));
+        log.Add(run, new GameLogLine(at, GameLogLevel.Error, "main", "\tat example.First.run(First.java:1)"));
+        log.Add(run, new GameLogLine(at, GameLogLevel.Error, "main", "Something failed"));
+        log.Add(run, new GameLogLine(at, GameLogLevel.Error, "main", "\tat example.Second.run(Second.java:2)"));
+        log.Flush();
+        OpenLogsTab(vm);
+        Assert.Equal(2, vm.LogRows.Count);
+        var (first, second) = (vm.LogRows[0], vm.LogRows[1]);
+        Assert.Equal(first.Event.Line, second.Event.Line);
+
+        // Open the second stack and go to the second error (F8 twice).
+        vm.ToggleStackCommand.Execute(second);
+        vm.JumpLogError(1);
+        vm.JumpLogError(1);
+        Assert.Same(second, vm.SelectedLogRow);
+
+        log.Add(run, Line(GameLogLevel.Info, "Done"));
+        log.Flush();
+        vm.PollLive();
+        Assert.Equal(3, vm.LogRows.Count);
+        Assert.Same(first, vm.LogRows[0]);
+        Assert.Same(second, vm.LogRows[1]);
+        Assert.False(first.Expanded);
+        Assert.True(second.Expanded);
+        Assert.Same(second, vm.SelectedLogRow);
+        Assert.True(second.IsHighlighted);
+
+        // F8 goes on from the second error (wraps to the first), Shift+F8 comes back.
+        vm.JumpLogError(1);
+        Assert.Same(first, vm.SelectedLogRow);
+        vm.JumpLogError(-1);
+        Assert.Same(second, vm.SelectedLogRow);
+    });
+
+    [Fact]
+    public void KeptRowFollowsALanguageChange() => UiTestThread.Run(() =>
+    {
+        var before = L.Language;
+        try
+        {
+            L.SetLanguage("zh-Hans");
+            var (vm, log, run, store) = LiveRun();
+            using var _ = store;
+            log.Add(run, Line(GameLogLevel.Error, "Something failed"));
+            log.Add(run, Line(GameLogLevel.Error, "\tat example.Mod.init(Mod.java:10)"));
+            log.Flush();
+            OpenLogsTab(vm);
+            var row = vm.LogRows.Single();
+            Assert.Equal(L.P("logs.stack.show", 1, 1), row.StackLabel);
+
+            // The row is kept across a refresh, then the language changes.
+            log.Add(run, Line(GameLogLevel.Info, "Done"));
+            log.Flush();
+            vm.PollLive();
+            Assert.Same(row, vm.LogRows[0]);
+            var changed = new List<string?>();
+            row.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+            L.SetLanguage("en");
+            Dispatcher.UIThread.RunJobs();
+            Assert.Contains(changed, n => string.IsNullOrEmpty(n) || n == nameof(LogRow.StackLabel));
+            Assert.Equal("▸ 1 line of stack trace", row.StackLabel);
+        }
+        finally
+        {
+            L.SetLanguage(before);
+            Dispatcher.UIThread.RunJobs();
+        }
+    });
+
+    [Fact]
+    public void NewLiveLinesKeepUnchangedRowsAndExpandedStacks() => UiTestThread.Run(() =>
+    {
+        var (vm, log, run, store) = LiveRun();
+        using var _ = store;
 
         log.Add(run, Line(GameLogLevel.Info, "Loading mods"));
         log.Add(run, Line(GameLogLevel.Error, "Something failed"));
         log.Add(run, Line(GameLogLevel.Error, "\tat example.Mod.init(Mod.java:10)"));
         log.Add(run, Line(GameLogLevel.Info, "Still loading"));
         log.Flush();
-        vm.IsCurrent = true;
-        vm.TabIndex = (int)InstanceTab.Logs;
-        Dispatcher.UIThread.RunJobs();
-        Assert.True(vm.IsLiveRun);
+        OpenLogsTab(vm);
         Assert.Equal(3, vm.LogRows.Count);
         var before = vm.LogRows.ToList();
         var stack = before.Single(r => r.HasStack);

@@ -11,7 +11,8 @@ namespace Amber.App.Views;
 /// <summary>
 /// AMBER_SELFTEST_SCOPE=tips (official design §9.3): contextual tips wait for 800 ms without input and for nothing busy,
 /// show one at a time as a bubble at their control or as the one-line bar on short windows, never take focus, show only
-/// once, can mute their kind, two quick closes mute the run, and Help › "Show all tips again" brings them back.
+/// once, can mute their kind, two quick closes mute the run, and Help › "Show all tips again" brings them back. A
+/// closed bubble's anchor leaving the page doesn't take away a newer bubble on another control.
 /// No game directory, nothing goes online.
 /// </summary>
 internal sealed partial class SelfTest
@@ -111,6 +112,41 @@ internal sealed partial class SelfTest
             Check("Tips: a tip still shows while the game log is popped out", Dispatcher.UIThread.Invoke(() => window.PoppedOutLog is { IsVisible: true })
                 && rules.Current == Tips.FirstCrash, rules.Current?.Id ?? "none");
             if (rules.Current is not null) window.CloseTip(false);
+            Dispatcher.UIThread.Invoke(() => window.PoppedOutLog?.Close());
+
+            // 7. A bubble closed with "Got it" still listens for its anchor leaving the page; when that happens after
+            // a new bubble opened on another control, the new bubble stays. Its own anchor leaving takes it away.
+            TutorialService.ResetAll();
+            await Task.Delay(200);
+            Border oldAnchor = new() { Name = "SelfTestTipAnchorOld", Width = 40, Height = 16, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Left };
+            Border newAnchor = new() { Name = "SelfTestTipAnchorNew", Width = 40, Height = 16, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right };
+            foreach (var a in new[] { oldAnchor, newAnchor })
+            {
+                Grid.SetRow(a, 6);
+                window.ContentColumn.Children.Add(a);
+            }
+            try
+            {
+                await Task.Delay(200);
+                window.ShowTip(Tips.FirstCrash, oldAnchor);
+                Check("Tips: (anchor swap) the first bubble is on its control", window.TipBubbleShown && ReferenceEquals(window.TipBubbleAnchor, oldAnchor));
+                window.CloseTip(false);
+                window.ShowTip(Tips.ModsToggle, newAnchor);
+                window.ContentColumn.Children.Remove(oldAnchor);
+                await Task.Delay(200);
+                Check("Tips: a closed bubble's anchor leaving doesn't take away the new bubble on another control",
+                    window.TipBubbleShown && ReferenceEquals(window.TipBubbleAnchor, newAnchor) && rules.Current == Tips.ModsToggle,
+                    $"{window.TipBubbleShown} {window.TipBubbleAnchor?.Name} {rules.Current?.Id ?? "none"}");
+                window.ContentColumn.Children.Remove(newAnchor);
+                await Task.Delay(200);
+                Check("Tips: the bubble's own anchor leaving takes it away", !window.TipBubbleShown && rules.Current is null,
+                    $"{window.TipBubbleShown} {rules.Current?.Id ?? "none"}");
+            }
+            finally
+            {
+                window.ContentColumn.Children.Remove(oldAnchor);
+                window.ContentColumn.Children.Remove(newAnchor);
+            }
         }
         finally
         {

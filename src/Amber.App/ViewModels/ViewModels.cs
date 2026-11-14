@@ -1265,6 +1265,20 @@ public sealed class RunLog : ObservableObject
 
     internal void Changed() => Revision++;
 
+    /// <summary>
+    /// How many lines have left <see cref="All"/> from the front (rolled out once the log is full, or cleared), so
+    /// <c>Dropped + i</c> is a sequence number for <c>All[i]</c> that stays the same while older lines roll out.
+    /// </summary>
+    internal long Dropped { get; private set; }
+
+    /// <summary>Removes the oldest <paramref name="count"/> lines and counts them in <see cref="Dropped"/>.</summary>
+    internal void DropOldest(int count)
+    {
+        if (count <= 0) return;
+        All.RemoveRange(0, count);
+        Dropped += count;
+    }
+
     /// <summary>The saved copy of this run's log (instance logs/jay), so earlier runs survive a restart.</summary>
     internal RunLogStore? Store { get; set; }
 
@@ -1426,7 +1440,7 @@ public sealed partial class LogViewModel : PageViewModel
         }
         if (clear is not null)
         {
-            clear.All.Clear();
+            clear.DropOldest(clear.All.Count);
             clear.Changed();
             if (clear == Shown)
             {
@@ -1443,7 +1457,7 @@ public sealed partial class LogViewModel : PageViewModel
         foreach (var group in pending.Where(p => (p.Target ?? shown) != shown).GroupBy(p => p.Target!))
         {
             group.Key.All.AddRange(group.Select(p => p.Entry));
-            if (group.Key.All.Count > MaxLines) group.Key.All.RemoveRange(0, group.Key.All.Count - MaxLines);
+            if (group.Key.All.Count > MaxLines) group.Key.DropOldest(group.Key.All.Count - MaxLines);
             group.Key.Changed();
         }
         var batch = pending.Where(p => (p.Target ?? shown) == shown).Select(p => p.Entry).ToList();
@@ -1457,7 +1471,7 @@ public sealed partial class LogViewModel : PageViewModel
         {
             var visibleRemoved = _all.Take(Math.Min(removed, previousCount)).Count(Visible);
             for (var i = 0; i < visibleRemoved; i++) Lines.RemoveAt(0);
-            _all.RemoveRange(0, removed);
+            shown.DropOldest(removed);
         }
         foreach (var entry in batch.Skip(Math.Max(0, removed - previousCount)).Where(Visible)) Lines.Add(entry);
         Recount();

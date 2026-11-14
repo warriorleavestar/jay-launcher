@@ -59,11 +59,13 @@ public partial class MainWindow
         ShowTip(next.Tip);
     }
 
-    private void ShowTip(Tip tip)
+    private void ShowTip(Tip tip) => ShowTip(tip, TipAnchors.TryGetValue(tip.Id, out var name)
+        ? this.GetVisualDescendants().OfType<Control>().FirstOrDefault(c => c.Name == name && c.IsEffectivelyVisible && c.Bounds.Width > 0)
+        : null);
+
+    /// <summary>Shows <paramref name="tip"/> at <paramref name="anchor"/> (the bar when null). The self-check calls it with its own anchors.</summary>
+    internal void ShowTip(Tip tip, Control? anchor)
     {
-        var anchor = TipAnchors.TryGetValue(tip.Id, out var name)
-            ? this.GetVisualDescendants().OfType<Control>().FirstOrDefault(c => c.Name == name && c.IsEffectivelyVisible && c.Bounds.Width > 0)
-            : null;
         var mode = TipRules.ModeFor(Bounds.Height, anchor is not null);
         TutorialService.Showing(tip);
         CurrentTipMode = mode;
@@ -83,7 +85,10 @@ public partial class MainWindow
             {
                 anchor!.DetachedFromVisualTree -= Gone;
                 // Still hooked after this bubble was closed with "Got it": only take away a bubble on this anchor.
-                if (!TipPopup.IsOpen || !ReferenceEquals(TipPopup.PlacementTarget, anchor)) return;
+                // The popup closes itself when its target leaves (before this runs), so ask whether this bubble is
+                // still the tip on screen rather than whether the popup is open; otherwise the tip would stay
+                // "current" and no other tip could show for the rest of the session.
+                if (CurrentTipMode != TipMode.Bubble || !ReferenceEquals(TipPopup.PlacementTarget, anchor)) return;
                 TipPopup.IsOpen = false;
                 CurrentTipMode = null;
                 TutorialService.Hidden();
