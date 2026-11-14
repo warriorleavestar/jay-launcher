@@ -107,6 +107,9 @@ public sealed class GamePortRelay : IAsyncDisposable
     /// <summary>Tests: runs once a caller is taken on for a port, before the connection to the game is made.</summary>
     internal Func<Task>? BeforeConnectForTest { get; set; }
 
+    /// <summary>Tests: makes the connection to the game in place of <see cref="GameLanBridge.ConnectAsync"/> (to make that fail).</summary>
+    internal Func<Socket>? CreateOutboundForTest { get; set; }
+
     /// <summary>
     /// Also listen on <paramref name="address"/> (a whole-LAN room's virtual address) at the same port, waiting for the
     /// adapter to get that address. Completes once listening; throws the <see cref="SocketException"/> when it gives up,
@@ -240,7 +243,8 @@ public sealed class GamePortRelay : IAsyncDisposable
         {
             if (BeforeConnectForTest is { } before) await before();
             // Through the game's LAN bridge when the game is in the strong sandbox (see GameLanBridge), else directly.
-            outbound = await GameLanBridge.ConnectAsync(port, _connectTimeout, _cts.Token);
+            // Inside the try so a failure creating the connection still takes the caller off the connecting count.
+            outbound = CreateOutboundForTest is { } create ? create() : await GameLanBridge.ConnectAsync(port, _connectTimeout, _cts.Token);
             if (outbound is null) return;
             inbound.NoDelay = true;
             outbound.NoDelay = true;
