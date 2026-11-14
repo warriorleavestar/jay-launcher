@@ -69,7 +69,7 @@ public sealed partial class SettingsViewModel
     private void SaveCalls(Action<Amber.App.Services.AppSettings> change)
     {
         change(_service.Settings);
-        _service.Settings.Save();
+        _service.TrySaveSettings();
         NotifyCalls();
         RefreshAdvanced();
     }
@@ -98,7 +98,7 @@ public sealed partial class SettingsViewModel
         s.CallsVideoQuality = d.CallsQuality;
         s.CallsShareGameOnly = d.CallsShareGameOnly;
         s.CallsAllowControlRequests = d.CallsAllowControl;
-        s.Save();
+        _service.TrySaveSettings();
         NotifyCalls();
     }
 }

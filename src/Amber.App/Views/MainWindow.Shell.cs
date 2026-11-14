@@ -549,7 +549,7 @@ public partial class MainWindow
         MovedNotice.IsVisible = false;
         if (_settings is null) return;
         _settings.ShellMovedNoticeSeen = true;
-        try { _settings.Save(); } catch (IOException) { }
+        try { _settings.Save(); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
     }
 
     private static void Place(Control c, int row, int column)

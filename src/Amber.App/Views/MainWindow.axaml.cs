@@ -228,6 +228,9 @@ public partial class MainWindow : Window
         // 多开时一局崩了、另一局还在跑：GameExited 不会来，这里单独把窗口拿回来并提示。
         home.GameCrashed += id => Dispatcher.UIThread.Post(() => OnGameCrashed(home, id));
         home.Service.SettingsSaveFailed += e => Dispatcher.UIThread.Post(() => OnSettingsSaveFailed(e));
+        // A damaged or locked settings file, a locked accounts file: said once at startup, and the notice stays until closed.
+        foreach (var problem in home.Service.StartupProblems())
+            Toasts.Show(problem, Avalonia.Controls.Notifications.NotificationType.Error);
     }
 
     private void OnGameCrashed(HomeViewModel home, string id)

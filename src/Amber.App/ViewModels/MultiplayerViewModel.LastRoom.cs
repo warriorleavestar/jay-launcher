@@ -61,7 +61,7 @@ public sealed partial class MultiplayerViewModel
         last.Protection = SelectedProtection?.Id;
         last.Scope = SelectedScope.Id;
         _service.Settings.MultiplayerLastRoom = last;
-        _service.Settings.Save();
+        _service.TrySaveSettings();
         OnPropertyChanged(nameof(HasLastRoom));
         OnPropertyChanged(nameof(LastRoomText));
     }
@@ -73,7 +73,7 @@ public sealed partial class MultiplayerViewModel
         last.Visibility = mode.ToString();
         last.RoomName = PublishRoomName;
         last.PublishAutoApprove = PublishAutoApprove;
-        _service.Settings.Save();
+        _service.TrySaveSettings();
         OnPropertyChanged(nameof(LastRoomText));
     }
 

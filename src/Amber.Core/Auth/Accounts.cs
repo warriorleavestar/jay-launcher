@@ -70,28 +70,65 @@ public sealed class AccountStore(string path)
         public List<Account> Accounts { get; set; } = [];
     }
 
+    /// <summary>
+    /// The file is there but could not be read (locked by another program, no permission). The list is empty for now
+    /// and nothing is written over the file until a later read succeeds, so the accounts in it are never lost.
+    /// </summary>
+    public bool Unreadable { get; private set; }
+
+    /// <summary>Waits between read attempts of a locked file (tests make it zero).</summary>
+    internal TimeSpan RetryDelay { get; init; } = TimeSpan.FromMilliseconds(200);
+
     public void Load()
     {
         if (!File.Exists(path)) return;
-        try
+        for (var attempt = 1; ; attempt++)
         {
-            var model = JsonSerializer.Deserialize(File.ReadAllText(path), Options.Info<FileModel>()) ?? new FileModel();
-            foreach (var account in model.Accounts)
+            try
             {
-                account.AccessToken = Unprotect(account.ProtectedAccessToken);
-                account.RefreshToken = Unprotect(account.ProtectedRefreshToken);
+                var model = JsonSerializer.Deserialize(File.ReadAllText(path), Options.Info<FileModel>()) ?? new FileModel();
+                foreach (var account in model.Accounts)
+                {
+                    account.AccessToken = Unprotect(account.ProtectedAccessToken);
+                    account.RefreshToken = Unprotect(account.ProtectedRefreshToken);
+                }
+                Accounts = model.Accounts;
+                SelectedId = model.SelectedId;
+                Unreadable = false;
+                return;
             }
-            Accounts = model.Accounts;
-            SelectedId = model.SelectedId;
+            catch (JsonException)
+            {
+                // Damaged: kept for a look, and the list starts empty.
+                try { File.Copy(path, path + ".broken", true); }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+                Unreadable = false;
+                return;
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                // Locked by a sync client or antivirus: retry briefly, then leave the file alone for this session.
+                if (attempt < 3) { Thread.Sleep(RetryDelay); continue; }
+                Accounts = [];
+                SelectedId = null;
+                Unreadable = true;
+                return;
+            }
         }
-        catch (JsonException)
-        {
-            File.Copy(path, path + ".broken", true);
-        }
+    }
+
+    /// <summary>Before a change: a file that could not be read is read again first; while it still can't be, the change is refused.</summary>
+    private void ReadAgainIfUnreadable()
+    {
+        if (!Unreadable) return;
+        Load();
+        if (Unreadable) throw new IOException(L.T("core.auth.accounts_unreadable"));
     }
 
     public void Save()
     {
+        // Never replace a file whose accounts were not read.
+        if (Unreadable) throw new IOException(L.T("core.auth.accounts_unreadable"));
         foreach (var account in Accounts)
         {
             account.ProtectedAccessToken = Protect(account.AccessToken);
@@ -106,6 +143,7 @@ public sealed class AccountStore(string path)
     /// <summary>同类型同 UUID（外置还要同服务器）的账号视为同一个，更新而不是新增。</summary>
     public void AddOrUpdate(Account account)
     {
+        ReadAgainIfUnreadable();
         var existing = Accounts.FindIndex(a => a.Kind == account.Kind && a.Uuid == account.Uuid && a.ServerUrl == account.ServerUrl);
         if (existing >= 0)
         {
@@ -124,6 +162,7 @@ public sealed class AccountStore(string path)
 
     public void Remove(Account account)
     {
+        ReadAgainIfUnreadable();
         Accounts.RemoveAll(a => a.Id == account.Id);
         if (SelectedId == account.Id) SelectedId = Accounts.FirstOrDefault()?.Id;
         Save();

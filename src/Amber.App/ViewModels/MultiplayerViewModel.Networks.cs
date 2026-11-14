@@ -65,7 +65,7 @@ public sealed partial class MultiplayerViewModel
         // 换网络：先断开旧的（房主公开的房间也会撤下），再存设置；要用时重新点“连接”。
         if (IsPublicConnected || IsPublicConnecting) DisconnectPublic();
         _service.Settings.PublicNetworkId = id;
-        _service.Settings.Save();
+        _service.TrySaveSettings();
         NetworkChanged();
         SetStatus(StatusMessage.Success("multiplayer.network.switched", value.Name));
     }
@@ -123,7 +123,7 @@ public sealed partial class MultiplayerViewModel
                 return result;
         }
         _service.Settings.PublicNetworks = _service.Networks.ToSaved();
-        _service.Settings.Save();
+        _service.TrySaveSettings();
         NetworkInput = "";
         var wasCurrent = _service.PublicNetwork.Id == network.Info.Id;
         LoadNetworks();
@@ -146,7 +146,7 @@ public sealed partial class MultiplayerViewModel
         _service.Networks.Remove(choice.Id);
         _service.Settings.PublicNetworks = _service.Networks.ToSaved();
         if (_service.Settings.PublicNetworkId == choice.Id) _service.Settings.PublicNetworkId = null;
-        _service.Settings.Save();
+        _service.TrySaveSettings();
         LoadNetworks();
         NetworkChanged();
         SetStatus(StatusMessage.Success("multiplayer.network.removed", choice.Name));

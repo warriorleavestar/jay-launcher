@@ -847,7 +847,7 @@ public sealed partial class SettingsViewModel : PageViewModel
         var code = LanguageKeys[Math.Clamp(value, 0, LanguageKeys.Length - 1)];
         _service.Settings.Language = code == "system" ? null : code;
         Amber.Core.Localization.L.SetLanguage(_service.Settings.Language);
-        try { _service.Settings.Save(); } catch (IOException) { }
+        _service.TrySaveSettings();
     }
 
     protected override void OnFirstActivated() => _ = LoadJavaAsync(false);
@@ -874,7 +874,7 @@ public sealed partial class SettingsViewModel : PageViewModel
             var mode = Amber.Core.Layout.Density.Modes[Math.Clamp(value, 0, 1)];
             if (mode == Amber.Core.Layout.Density.Normalize(_service.Settings.Density)) return;
             _service.Settings.Density = mode;
-            _service.Settings.Save();
+            _service.TrySaveSettings();
             Amber.App.Services.DensityService.Apply(mode);
             OnPropertyChanged();
         }
@@ -1313,7 +1313,7 @@ public sealed partial class SettingsViewModel : PageViewModel
         {
             s.Save();
         }
-        catch (IOException e)
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
             SetStatus(StatusMessage.Failure("settings.error.save_failed", e, ErrorText.Of(e)));
             return;
@@ -1326,7 +1326,10 @@ public sealed partial class SettingsViewModel : PageViewModel
         if (!Equals(core, _builtCore)) _service.Reload();
         else if (!Equals(defaults, _shownDefaults)) _service.NotifyInstalledChanged();
         (_builtCore, _shownDefaults) = (core, defaults);
-        if (HasConcurrencyError || HasWindowError || HasJvmArgsError || HasGameArgsError)
+        // Applies for this session; the file that could not be read at startup is never written over.
+        if (s.ReadOnly)
+            SetStatus(StatusMessage.Error("settings.error.read_only"));
+        else if (HasConcurrencyError || HasWindowError || HasJvmArgsError || HasGameArgsError)
             SetStatus(StatusMessage.Warning("settings.saved_with_errors"));
         else
             SetStatus(StatusMessage.Success(_service.AnyRunning ? "settings.saved_next_launch" : "settings.saved_tick"));

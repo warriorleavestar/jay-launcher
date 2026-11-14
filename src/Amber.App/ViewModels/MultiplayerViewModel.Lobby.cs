@@ -179,7 +179,7 @@ public sealed partial class MultiplayerViewModel
         {
             if (_service.Settings.MultiplayerAutoCopyInvite == value) return;
             _service.Settings.MultiplayerAutoCopyInvite = value;
-            _service.Settings.Save();
+            _service.TrySaveSettings();
             OnPropertyChanged();
         }
     }

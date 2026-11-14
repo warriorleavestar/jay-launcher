@@ -238,16 +238,34 @@ public sealed partial class AccountsViewModel : PageViewModel, ISnapshotDemo
     {
         if (item is null) return;
         _service.Accounts.Store.SelectedId = item.Account.Id;
-        _service.Accounts.Store.Save();
+        SaveAccounts(_service.Accounts.Store.Save);
         Changed();
+    }
+
+    /// <summary>
+    /// The accounts file could not be written (read-only, locked, or unreadable since startup): the change that did
+    /// happen holds for this session and the page says the file was not saved. False when it was not.
+    /// </summary>
+    private bool SaveAccounts(Action change)
+    {
+        try
+        {
+            change();
+            return true;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            SetStatus(StatusMessage.Failure("common.save_file_failed", e, Amber.App.Services.AppSettings.DataDir, ErrorText.Of(e)));
+            return false;
+        }
     }
 
     [RelayCommand]
     private void Remove(AccountItem? item)
     {
         if (item is null) return;
-        _service.Accounts.Store.Remove(item.Account);
-        SetStatus(StatusMessage.Success("accounts.status.removed", item.Name));
+        if (SaveAccounts(() => _service.Accounts.Store.Remove(item.Account)))
+            SetStatus(StatusMessage.Success("accounts.status.removed", item.Name));
         Changed();
     }
 
@@ -260,7 +278,7 @@ public sealed partial class AccountsViewModel : PageViewModel, ISnapshotDemo
             SetStatus(StatusMessage.Error("accounts.status.invalid_offline_name"));
             return;
         }
-        _service.Accounts.AddOffline(name);
+        if (!SaveAccounts(() => _service.Accounts.AddOffline(name))) return;
         OfflineName = "";
         // 中文之类的名字能用，只提醒一句（规则和新手卡一样）。
         SetStatus(OfflineNameRules.Check(name).NotAscii
@@ -277,7 +295,7 @@ public sealed partial class AccountsViewModel : PageViewModel, ISnapshotDemo
     private void SaveClientId()
     {
         _service.Settings.MicrosoftClientId = string.IsNullOrWhiteSpace(ClientIdInput) ? null : ClientIdInput.Trim();
-        _service.Settings.Save();
+        _service.TrySaveSettings();
         OnPropertyChanged(nameof(MicrosoftMissingClientId));
         SetStatus(StatusMessage.Success("accounts.status.client_id_saved"));
     }
@@ -513,7 +531,7 @@ public sealed partial class AccountsViewModel : PageViewModel, ISnapshotDemo
 
     private void FinishExternal(Account account)
     {
-        _service.Accounts.Store.AddOrUpdate(account);
+        if (!SaveAccounts(() => _service.Accounts.Store.AddOrUpdate(account))) return;
         SetStatus(StatusMessage.Success("accounts.status.external_logged_in", account.Name, account.ServerName));
         Changed();
     }

@@ -61,7 +61,7 @@ public sealed partial class DownloadViewModel
         {
             if (_service.Settings.NewInstanceModsOpen == value) return;
             _service.Settings.NewInstanceModsOpen = value;
-            try { _service.Settings.Save(); } catch (IOException) { }
+            _service.TrySaveSettings();
             OnPropertyChanged();
             if (value && CanAddMods && ModResults.Count == 0) _ = SearchModsAsync();
         }

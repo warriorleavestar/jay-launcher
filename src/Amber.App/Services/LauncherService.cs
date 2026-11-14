@@ -143,7 +143,9 @@ public sealed class LauncherService : IDisposable
             }
         }
         MigrateBakeRuntime(settings);
-        if (MigratesPlayerName(store.Accounts.Count, settings.PlayerName, settings.IsFresh,
+        // Defaults standing in for a settings file that could not be read carry no old player name, and an accounts
+        // file that could not be read is not empty: neither makes an account.
+        if (!store.Unreadable && MigratesPlayerName(store.Accounts.Count, settings.PlayerName, settings.IsFresh || settings.LoadProblem is not null,
                 Environment.GetEnvironmentVariable("AMBER_SELFTEST"), Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE")))
             Accounts.AddOffline(settings.PlayerName);
         Reload();
@@ -263,7 +265,7 @@ public sealed class LauncherService : IDisposable
         }
         if (meta.ModsDifferFromHost == host) return;
         meta.ModsDifferFromHost = host;
-        Settings.Save();
+        TrySaveSettings();
     }
 
     private InstanceMeta EnsureMeta(string id)
@@ -331,8 +333,42 @@ public sealed class LauncherService : IDisposable
         CurrentInstanceChanged?.Invoke();
     }
 
+    /// <summary>
+    /// What went wrong reading Jay's own files at startup, as localized sentences for a notice that stays until closed:
+    /// a damaged or locked settings file, a locked accounts file.
+    /// </summary>
+    public IReadOnlyList<string> StartupProblems()
+    {
+        var list = new List<string>();
+        if (Settings.LoadProblem == SettingsLoadProblem.Corrupt)
+            list.Add(Amber.Core.Localization.L.F("settings.load_corrupt", Settings.BrokenCopy is { } copy ? Path.GetFileName(copy) : "settings.json.broken"));
+        else if (Settings.LoadProblem == SettingsLoadProblem.Locked)
+            list.Add(Amber.Core.Localization.L.T("settings.load_locked"));
+        if (Accounts.Store.Unreadable) list.Add(Amber.Core.Localization.L.T("accounts.load_locked"));
+        return list;
+    }
+
     /// <summary>设置文件写不进去（参数：异常）。界面弹个不挡操作的提示。</summary>
     public event Action<Exception>? SettingsSaveFailed;
+
+    /// <summary>
+    /// Saves the settings file. When it cannot be written (read-only, locked, no permission) the change still applies
+    /// for this run, the window says so once, and the caller goes on: false means it was not written.
+    /// </summary>
+    public bool TrySaveSettings()
+    {
+        try
+        {
+            Settings.Save();
+            return true;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            System.Diagnostics.Trace.WriteLine("Jay: saving settings failed: " + e.Message);
+            SettingsSaveFailed?.Invoke(e);
+            return false;
+        }
+    }
 
     /// <summary>实例的状态（安装未完成、已损坏）可能变了：安装开始、完成、取消、失败、修复之后调用。参数：实例 ID。</summary>
     public event Action<string>? InstanceStateChanged;
@@ -555,7 +591,7 @@ public sealed class LauncherService : IDisposable
             if (!undo)
             {
                 Settings.StrongSandboxFolders = [.. Settings.StrongSandboxFolders.Concat(folders).Distinct(StringComparer.OrdinalIgnoreCase)];
-                Settings.Save();
+                TrySaveSettings();
             }
             return process.ExitCode == 0 ? null : Failed($"exit {process.ExitCode}");
         }
@@ -592,7 +628,7 @@ public sealed class LauncherService : IDisposable
         if (error is not null) return error;
         Settings.StrongSandboxFolders = [];
         Settings.StrongSandbox = false;
-        Settings.Save();
+        TrySaveSettings();
         SandboxStateChanged?.Invoke();
         return null;
     }
@@ -602,7 +638,7 @@ public sealed class LauncherService : IDisposable
         if (Settings.StrongSandboxFallback == reason && Settings.StrongSandboxFallbackDetail == detail) return;
         Settings.StrongSandboxFallback = reason;
         Settings.StrongSandboxFallbackDetail = detail;
-        Settings.Save();
+        TrySaveSettings();
         SandboxStateChanged?.Invoke();
     }
 
@@ -612,7 +648,7 @@ public sealed class LauncherService : IDisposable
         Settings.StrongSandboxFallback = null;
         Settings.StrongSandboxFallbackDetail = null;
         Settings.StrongSandbox = true;
-        Settings.Save();
+        TrySaveSettings();
         SandboxStateChanged?.Invoke();
     }
 
@@ -821,7 +857,7 @@ public sealed class LauncherService : IDisposable
             if (AnyRunning) throw new Amber.Core.Bake.BakeException(Amber.Core.Localization.L.T("core.bake.gc_busy"), []);
             var package = await Task.Run(() => Amber.Core.Bake.BakePackage.InstallFromZip(zipPath, BakeLoaderInstallRoot), ct);
             Settings.BakeLoaderPath = package.Root;
-            Settings.Save();
+            TrySaveSettings();
             return package;
         }
         finally

@@ -45,7 +45,7 @@ public sealed class AccountService(HttpClient http, AccountStore store, string d
 
             case AccountKind.Microsoft:
                 await CreateMicrosoftAuth().RefreshAsync(account, ct);
-                Store.Save();
+                SaveRefreshed();
                 return new ResolvedSession(
                     new GameSession(account.Name, account.Uuid, account.AccessToken!, "msa", account.Xuid, MicrosoftClientId ?? ""), []);
 
@@ -53,7 +53,7 @@ public sealed class AccountService(HttpClient http, AccountStore store, string d
                 // 旧版本存下的 http 服务器：启动时说清楚原因和怎么办（不只在账号页提示）。
                 if (ExternalAuth.HasInsecureServer(account)) throw new InvalidOperationException(L.F("core.auth.external.insecure_saved", account.Name));
                 await External.EnsureValidAsync(account, ct);
-                Store.Save();
+                SaveRefreshed();
                 var metadata = await External.GetMetadataAsync(account.ServerUrl!, ct);
                 var jar = await new AuthlibInjector(http, Path.Combine(dataDir, "authlib-injector")).EnsureJarAsync(ct);
                 return new ResolvedSession(
@@ -63,6 +63,13 @@ public sealed class AccountService(HttpClient http, AccountStore store, string d
             default:
                 throw new ArgumentOutOfRangeException(nameof(account));
         }
+    }
+
+    /// <summary>A refreshed login holds for this launch even when the accounts file cannot be written right now.</summary>
+    private void SaveRefreshed()
+    {
+        try { Store.Save(); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { System.Diagnostics.Trace.WriteLine("Jay: saving refreshed login failed: " + e.Message); }
     }
 
     /// <summary>下载并缓存皮肤，返回 PNG 路径。没有皮肤或下载失败时返回 null（预览退回默认头像）。</summary>

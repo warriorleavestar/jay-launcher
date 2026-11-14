@@ -56,7 +56,7 @@ public sealed partial class RecycleViewModel(LauncherService service) : Observab
         {
             if (value < 0 || value >= KeepDayChoices.Length || KeepDayChoices[value] == service.Settings.TrashRetentionDays) return;
             service.Settings.TrashRetentionDays = KeepDayChoices[value];
-            try { service.Settings.Save(); } catch (IOException) { }
+            service.TrySaveSettings();
             OnPropertyChanged();
             Refresh();
         }
