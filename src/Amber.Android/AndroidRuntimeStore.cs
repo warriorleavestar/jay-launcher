@@ -7,8 +7,9 @@ using System.Text.Json;
 namespace Amber.Android;
 
 /// <summary>
-/// Owns Jay's in-app Android runtime. Runtime components are kept separate from the APK so
-/// their licenses, sources and hashes can be shown before the user-initiated download.
+/// Owns Jay's in-app Android runtime. Runtime components are kept separate from the APK; the
+/// game screen shows the download size, the licences and a link to the pinned sources and
+/// checksums (docs/android-runtime-sources.md) before the user-initiated download.
 /// </summary>
 internal static class AndroidRuntimeStore
 {

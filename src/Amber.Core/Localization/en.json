@@ -1812,6 +1812,8 @@
   "mobile.game.ended": "Minecraft has stopped. Close this screen, then open the game again to play.",
   "mobile.game.close": "Close game screen",
   "mobile.runtime.missing": "Install Jay's verified Java runtime to continue setting up Minecraft on this device.",
+  "mobile.runtime.details": "Download about {0} MB ({1} MB at most once installed). Licences: {2}",
+  "mobile.runtime.sources": "Sources and checksums",
   "mobile.runtime.install": "Install verified Java runtime",
   "mobile.runtime.cancel": "Cancel",
   "mobile.runtime.downloading": "Downloading Java runtime… {0}%",

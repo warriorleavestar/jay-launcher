@@ -1781,6 +1781,8 @@
   "mobile.game.ended": "Minecraft は停止しました。この画面を閉じてから、もう一度ゲームを開いてください。",
   "mobile.game.close": "ゲーム画面を閉じる",
   "mobile.runtime.missing": "Jay の検証済み Java ランタイムをインストールして、このデバイスで Minecraft のセットアップを続けます。",
+  "mobile.runtime.details": "ダウンロードは約 {0} MB（インストール後は最大 {1} MB）。ライセンス：{2}",
+  "mobile.runtime.sources": "ソースとチェックサム",
   "mobile.runtime.install": "検証済み Java ランタイムをインストール",
   "mobile.runtime.cancel": "キャンセル",
   "mobile.runtime.downloading": "Java ランタイムをダウンロード中… {0}%",

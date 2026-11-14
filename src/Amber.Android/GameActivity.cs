@@ -188,6 +188,37 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
         var status = new TextView(this) { Text = L.T("mobile.runtime.missing"), Gravity = GravityFlags.Center };
         status.SetTextColor(Color.White);
 
+        // What will be downloaded, under which licences, and where its sources are listed.
+        var descriptor = AndroidRuntimeCatalog.ForCurrentProcess();
+        var details = new TextView(this) { Gravity = GravityFlags.Center };
+        details.SetTextColor(Color.LightGray);
+        var sources = new TextView(this) { Text = L.T("mobile.runtime.sources"), Gravity = GravityFlags.Center };
+        sources.SetTextColor(Color.Rgb(130, 190, 255));
+        sources.PaintFlags |= PaintFlags.UnderlineText;
+        if (descriptor is null)
+        {
+            details.Visibility = ViewStates.Gone;
+            sources.Visibility = ViewStates.Gone;
+        }
+        else
+        {
+            details.Text = L.F("mobile.runtime.details",
+                Math.Max(1, (int)Math.Round(descriptor.ArchiveSize / 1_000_000.0)),
+                Math.Max(1, (int)Math.Round(descriptor.MaximumExtractedSize / 1_000_000.0)),
+                descriptor.License);
+            sources.Click += (_, _) =>
+            {
+                try
+                {
+                    StartActivity(new Intent(Intent.ActionView, global::Android.Net.Uri.Parse(descriptor.SourceUrl)));
+                }
+                catch (ActivityNotFoundException)
+                {
+                    sources.Text = descriptor.SourceUrl;
+                }
+            };
+        }
+
         var progress = new ProgressBar(this, null, 0, Resource.Style.JayProgressBarHorizontal)
         {
             Max = 100,
@@ -205,6 +236,8 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
         content.SetBackgroundColor(Color.Argb(225, 20, 24, 30));
         content.SetPadding(40, 32, 40, 32);
         content.AddView(status, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent));
+        content.AddView(details, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent));
+        content.AddView(sources, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent));
         content.AddView(progress, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent));
         content.AddView(buttons, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent));
 
@@ -217,7 +250,6 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
 
         install.Click += async (_, _) =>
         {
-            var descriptor = AndroidRuntimeCatalog.ForCurrentProcess();
             if (descriptor is null)
             {
                 status.Text = L.T("mobile.runtime.unsupported");

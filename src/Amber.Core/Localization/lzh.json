@@ -1731,6 +1731,8 @@
   "mobile.game.ended": "Minecraft 已止。闔此畫，復啟戲乃可續玩。",
   "mobile.game.close": "闔戲之畫",
   "mobile.runtime.missing": "裝 Jay 所驗之 Java 行器，乃續備此器之 Minecraft。",
+  "mobile.runtime.details": "取之約 {0} MB（裝後至多 {1} MB）。許可：{2}",
+  "mobile.runtime.sources": "源碼與驗值",
   "mobile.runtime.install": "裝所驗 Java 行器",
   "mobile.runtime.cancel": "止",
   "mobile.runtime.downloading": "方取 Java 行器… {0}%",
