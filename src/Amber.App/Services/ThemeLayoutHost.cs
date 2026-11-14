@@ -85,7 +85,8 @@ public sealed class ThemeLayoutHost
         {
             _view.Content = Build(tree, width);
         }
-        catch (Exception e) when (e is InvalidOperationException or ArgumentException)
+        // Image nodes read their files here, so a missing or locked file (edited in --theme-dev mode) also lands in this fallback.
+        catch (Exception e) when (e is InvalidOperationException or ArgumentException or IOException or UnauthorizedAccessException or NotSupportedException)
         {
             // 组装出错（不该发生，校验已经挡过）：这一页退回 Jay 自带布局，不影响别的页。
             ThemeService.Current?.Problems.Add(new("layout_failed", $"{_pageId}: {e.Message}"));
