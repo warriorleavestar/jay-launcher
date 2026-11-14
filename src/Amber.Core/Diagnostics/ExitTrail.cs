@@ -48,10 +48,15 @@ public static class ExitTrail
                 _closed = false;
                 var marker = Path.Combine(dir, MarkerName);
                 var trail = Path.Combine(dir, TrailName);
-                PreviousRunEndedUnexpectedly = File.Exists(marker);
+                var others = File.Exists(marker) ? MarkerPids(marker).Where(pid => pid != Environment.ProcessId).ToList() : [];
+                // Another Jay on the same data folder is still running: its marker is not a sign of an unclean exit, and
+                // its trail is still being written, so join it instead of copying and clearing it.
+                var sibling = others.Any(pid => IsRunningSince(pid, File.GetLastWriteTimeUtc(marker)));
+                PreviousRunEndedUnexpectedly = !sibling && File.Exists(marker);
                 if (PreviousRunEndedUnexpectedly && File.Exists(trail)) File.Copy(trail, Path.Combine(dir, PreviousName), overwrite: true);
-                File.WriteAllText(trail, "");
-                File.WriteAllText(marker, Environment.ProcessId.ToString(CultureInfo.InvariantCulture));
+                if (!sibling) File.WriteAllText(trail, "");
+                var pids = (sibling ? others : []).Append(Environment.ProcessId);
+                File.WriteAllLines(marker, pids.Select(pid => pid.ToString(CultureInfo.InvariantCulture)));
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException)
             {
@@ -124,8 +129,42 @@ public static class ExitTrail
         {
             if (_dir is null || _closed) return;
             _closed = true;
-            try { File.Delete(Path.Combine(_dir, MarkerName)); }
+            try
+            {
+                // Only this run's line goes: a second Jay that is still running keeps its own.
+                var marker = Path.Combine(_dir, MarkerName);
+                var rest = File.Exists(marker) ? MarkerPids(marker).Where(pid => pid != Environment.ProcessId).ToList() : [];
+                if (rest.Count == 0) File.Delete(marker);
+                else File.WriteAllLines(marker, rest.Select(pid => pid.ToString(CultureInfo.InvariantCulture)));
+            }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+        }
+    }
+
+    /// <summary>The process ids written in the marker, one per line; anything unreadable is skipped.</summary>
+    private static List<int> MarkerPids(string marker)
+    {
+        var pids = new List<int>();
+        foreach (var line in File.ReadAllLines(marker))
+            if (int.TryParse(line.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var pid) && pid > 0) pids.Add(pid);
+        return pids;
+    }
+
+    /// <summary>
+    /// Whether a process with this id is running and was already running when the marker was last written. A process
+    /// that started later only reuses the id of a run that has since ended.
+    /// </summary>
+    internal static bool IsRunningSince(int pid, DateTime markerWrittenUtc)
+    {
+        try
+        {
+            using var process = Process.GetProcessById(pid);
+            if (process.HasExited) return false;
+            return process.StartTime.ToUniversalTime() <= markerWrittenUtc.AddSeconds(2);
+        }
+        catch (Exception e) when (e is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException)
+        {
+            return false;
         }
     }
 
