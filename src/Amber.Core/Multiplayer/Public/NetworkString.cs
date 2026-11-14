@@ -186,7 +186,7 @@ public sealed record NetworkConfigRef(string Url, string Sha256);
 /// Older Jay versions ignore the field.
 /// </param>
 /// <param name="DirectoryRoots">
-/// Ed25519 root keys that certify directory keys ("dirRoots", optional, at most <see cref="NetworkString.MaxDirectoryRoots"/>),
+/// Ids of the hybrid root keys (<see cref="TrustSigner.Id"/>) that certify directory keys ("dirRoots", optional, at most <see cref="NetworkString.MaxDirectoryRoots"/>),
 /// see <see cref="DirectoryCertificate"/>.
 /// </param>
 /// <param name="DirectoryRootsNeed">How many of <paramref name="DirectoryRoots"/> must sign a directory certificate ("dirRootsNeed", default 1).</param>

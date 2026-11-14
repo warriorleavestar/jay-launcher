@@ -6,7 +6,7 @@ public enum TouchControlAction
     Sneak, Sprint, Drop, PreviousSlot, NextSlot, Settings
 }
 
-public enum TouchControlMode { JoystickAndTap, DPadAndTap, JoystickAndCrosshair }
+public enum TouchControlMode { JoystickAndTap, DPadAndTap, JoystickAndCrosshair, ExternalKeyboardMouse }
 
 public sealed record TouchControlDefinition(
     TouchControlAction Action, double CenterX, double CenterY, double Radius, string Label,
@@ -75,11 +75,13 @@ public static class TouchControlLayout
         new(TouchControlAction.Keyboard, 0.475, 0.050, 0.026, "聊天与指令", MenuVisible: true),
         new(TouchControlAction.Menu, 0.525, 0.050, 0.026, "菜单", MenuVisible: true),
         new(TouchControlAction.Settings, 0.575, 0.050, 0.026, "触控设置", MenuVisible: true),
-        // Keep both actions in the landscape right-thumb arc instead of the unreachable top edge.
-        new(TouchControlAction.Jump, 0.940, 0.780, 0.036, "跳跃"),
-        new(TouchControlAction.Sneak, 0.860, 0.860, 0.036, "潜行"),
-        // The square face starts exactly where the vanilla hotbar ends and shares its centre line.
-        new(TouchControlAction.Inventory, 0.608, 0.975, 0.025, "背包"),
+        // Keep both actions low in the landscape right-thumb arc, using the same reach as the
+        // familiar mobile Minecraft layouts instead of floating them near the top edge.
+        new(TouchControlAction.Jump, 0.928, 0.790, 0.042, "跳跃"),
+        new(TouchControlAction.Sneak, 0.848, 0.875, 0.040, "潜行"),
+        // The inventory key sits on the hotbar centre line. Keeping the centre above the screen
+        // edge prevents gesture navigation and rounded tablet corners from clipping its face.
+        new(TouchControlAction.Inventory, 0.608, 0.952, 0.027, "背包"),
         new(TouchControlAction.SecondaryAction, 0.940, 0.455, 0.044, "拆分",
             GameplayVisible: false, MenuVisible: true)
     ];
@@ -88,14 +90,18 @@ public static class TouchControlLayout
         new Dictionary<TouchControlMode, IReadOnlyList<TouchControlDefinition>>
         {
             [TouchControlMode.JoystickAndTap] = [.. Shared,
-                new(TouchControlAction.Move, 0.145, 0.735, 0.105, "移动")],
+                new(TouchControlAction.Move, 0.135, 0.785, 0.095, "移动")],
             [TouchControlMode.DPadAndTap] = [.. Shared.Where(control => control.Action != TouchControlAction.Sneak),
-                new(TouchControlAction.Move, 0.145, 0.735, 0.105, "方向键"),
-                new(TouchControlAction.Sneak, 0.145, 0.735, 0.032, "潜行")],
+                new(TouchControlAction.Move, 0.135, 0.785, 0.095, "方向键"),
+                new(TouchControlAction.Sneak, 0.135, 0.785, 0.031, "潜行")],
             [TouchControlMode.JoystickAndCrosshair] = [.. Shared,
-                new(TouchControlAction.Move, 0.145, 0.735, 0.105, "移动"),
+                new(TouchControlAction.Move, 0.135, 0.785, 0.095, "移动"),
                 new(TouchControlAction.PrimaryAction, 0.845, 0.710, 0.048, "攻击"),
-                new(TouchControlAction.SecondaryAction, 0.925, 0.610, 0.048, "使用")]
+                new(TouchControlAction.SecondaryAction, 0.925, 0.610, 0.048, "使用")],
+            // External keyboard/mouse mode intentionally keeps only the settings key visible.
+            // The player can switch back without disconnecting their peripherals.
+            [TouchControlMode.ExternalKeyboardMouse] = [.. Shared.Where(control =>
+                control.Action == TouchControlAction.Settings)]
         };
 
     public static IReadOnlyList<TouchControlDefinition> Default => For(TouchControlMode.JoystickAndTap);

@@ -35,7 +35,7 @@ GUI 自检（操作真实窗口，写出 `report.txt`）：
 powershell -NoProfile -ExecutionPolicy Bypass -File tools/run-selftest.ps1 -Report <dir>
 ```
 
-只做布局检查（每个页面 × 每种语言 × 6 种窗口大小，输出截图和被切掉的控件列表 `layout.txt`）：
+只做布局检查（每个页面 × 每种语言 × 8 种窗口大小，输出截图和被切掉的控件列表 `layout.txt`）：
 
 ```bash
 AMBER_LAYOUTCHECK=<dir> src/Amber.App/bin/Release/net10.0/Jay.exe
@@ -91,7 +91,7 @@ AMBER_LAYOUTCHECK=<dir> src/Amber.App/bin/Release/net10.0/Jay.exe
 
 每种语言一个文件，放在一起：
 
-- 英文版用原名：`README.md`、`CONTRIBUTING.md`、`docs/themes.md`。
+- 英文版用原名：`README.md`、`CONTRIBUTING.md`。
 - 译文在 `.md` 前加语言代码：`README.zh-Hans.md`、`CONTRIBUTING.ja.md`、`docs/themes.zh-Hans.md`。
 - 每个版本开头放一行语言切换，比如 `[English](README.md) | 简体中文`，加新语言时把其他版本的切换行也补上。
 - 改文档时尽量同步改译文，改不了的在 PR 里说明哪些译文已经过时。

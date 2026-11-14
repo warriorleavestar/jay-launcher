@@ -93,13 +93,15 @@ public sealed record PublicNetworkProfile(string Id, string Name, string Network
 
     /// <summary>
     /// The directory nodes' pinned X25519 public keys, from the signed connection string. Empty means the network doesn't
-    /// pin its directory (the built-in network, except for the GUI self-check's own local directory while it runs, and older strings): Jay then uses the legacy
-    /// unauthenticated protocol. Non-empty means Jay never sends a request to a directory that can't prove it holds one.
+    /// pin its directory (the built-in network, except for the GUI self-check's own local directory while it runs, and older strings):
+    /// Jay still uses the encrypted <see cref="DirectoryChannel"/> and then accepts a root-certified key (<see cref="DirectoryRoots"/>)
+    /// or, with neither, the first key it sees at each address (<see cref="DirectoryKeyMemory"/>). Non-empty means Jay never
+    /// sends a request to a directory that can't prove it holds one.
     /// </summary>
     public IReadOnlyList<byte[]> DirectoryKeys { get; init; } = [];
 
     /// <summary>
-    /// Ed25519 root keys whose certificates (<see cref="DirectoryCertificate"/>) make a directory key acceptable, from
+    /// Ids of the root keys (hybrid Ed25519 + ML-DSA-65, <see cref="TrustSigner.Id"/>) whose certificates (<see cref="DirectoryCertificate"/>) make a directory key acceptable, from
     /// the connection string's "dirRoots", or the Jay trustees (<see cref="JayTrust"/>) for the built-in network. Lets a
     /// network add or re-key directory nodes without re-issuing its string, while the root private keys stay offline.
     /// </summary>
@@ -114,7 +116,7 @@ public sealed record PublicNetworkProfile(string Id, string Name, string Network
 }
 
 /// <summary>公共网络 EasyTier 的启动参数。</summary>
-/// <param name="Directory">目录服务那台机器：固定地址 10.235.0.N（N = <paramref name="DirectoryIndex"/>），只放行目录端口。</param>
+/// <param name="Directory">目录服务那台机器：固定地址（<see cref="PublicNetworkProfile.DirectoryIpOf"/>(<paramref name="DirectoryIndex"/>)：1 是 10.235.0.1，2–4 是 10.235.255.254 / .253 / .252），只放行目录端口。</param>
 /// <param name="Listeners">目录服务那台机器同时当节点时监听的地址（tcp://0.0.0.0:11010 等）。</param>
 /// <param name="DirectoryIndex">第几个目录节点（1 是主目录，2–4 是备用）。</param>
 /// <param name="ExtraPeers">More peers to try besides the network's nodes (volunteer nodes remembered from last time).</param>
@@ -194,7 +196,7 @@ public interface IPublicNetwork
     Task<string?> MyIpAsync(CancellationToken ct);
     /// <summary>现在在线的目录节点地址（按编号排）。默认只有主目录。</summary>
     Task<IReadOnlyList<string>> DirectoriesAsync(CancellationToken ct) => Task.FromResult<IReadOnlyList<string>>([PublicNetworkProfile.DirectoryIp]);
-    /// <summary>The network this is, for its pinned directory keys. Null: unknown, use the legacy directory protocol.</summary>
+    /// <summary>The network this is, for its pinned directory keys. Null: unknown network; nothing is pinned, so directory keys are trusted on first use.</summary>
     PublicNetworkProfile? Profile => null;
 }
 
@@ -268,7 +270,7 @@ public sealed class PublicNetworkSession : IPublicNetwork, IDisposable
 
     private (DateTimeOffset At, IReadOnlyList<string> Ips) _directories = (DateTimeOffset.MinValue, []);
 
-    /// <summary>现在在线的目录节点（公共网络里看得到的 10.235.0.1–4，按编号排；查一次缓存 5 秒）。</summary>
+    /// <summary>现在在线的目录节点（公共网络里看得到的 <see cref="PublicNetworkProfile.DirectoryIps"/>，按编号排；查一次缓存 5 秒）。</summary>
     public async Task<IReadOnlyList<string>> DirectoriesAsync(CancellationToken ct)
     {
         var cached = _directories;

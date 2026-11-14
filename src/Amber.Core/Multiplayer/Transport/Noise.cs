@@ -22,7 +22,7 @@ public sealed class CipherState : IDisposable
     public const int KeyLength = 32;
     public const int TagLength = 16;
     private byte[]? _k;
-    private ChaCha20Poly1305? _aead;
+    private ChaChaPoly? _aead;
     private ulong _n;
 
     public bool HasKey => _k is not null;
@@ -37,7 +37,7 @@ public sealed class CipherState : IDisposable
         if (_k is not null && !ReferenceEquals(_k, key)) CryptographicOperations.ZeroMemory(_k);
         _k = key;
         _aead?.Dispose();
-        _aead = key is null ? null : new ChaCha20Poly1305(key);
+        _aead = key is null ? null : new ChaChaPoly(key);
         _n = 0;
     }
 

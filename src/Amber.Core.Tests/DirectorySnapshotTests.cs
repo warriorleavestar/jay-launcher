@@ -815,9 +815,11 @@ public sealed class DirectorySnapshotTests : IAsyncDisposable
         }
         finally
         {
+            // Let the accept loop end on the cancellation first: a listener stopped under a loop that has not yet seen
+            // it throws "not listening" from its next accept.
             stop.Cancel();
-            silent.Stop();
             await accepting;
+            silent.Stop();
             foreach (var c in held) c.Dispose();
         }
     }

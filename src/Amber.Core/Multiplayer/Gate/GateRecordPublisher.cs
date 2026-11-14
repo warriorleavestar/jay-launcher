@@ -40,44 +40,55 @@ public sealed class GateRecordPublisher : IAsyncDisposable
         await directories.PutRecordAsync(record, ct);
     }
 
-    private static async Task RunAsync(GateStore store, GateConfig config, string network, string workDir, Action<string> log, CancellationToken ct)
+    private static Task RunAsync(GateStore store, GateConfig config, string network, string workDir, Action<string> log, CancellationToken ct) =>
+        RetryAsync(token => PublishWhileConnectedAsync(store, config, network, workDir, log, token), log, TimeSpan.FromMinutes(5), ct);
+
+    /// <summary>
+    /// Runs <paramref name="attempt"/> again <paramref name="retry"/> after each failure until cancelled. Any failure is
+    /// logged and retried: an exception leaving this loop would end publishing for good and surface later from the
+    /// server's stop.
+    /// </summary>
+    internal static async Task RetryAsync(Func<CancellationToken, Task> attempt, Action<string> log, TimeSpan retry, CancellationToken ct)
     {
-        var retry = TimeSpan.FromMinutes(5);
         while (!ct.IsCancellationRequested)
         {
-            PublicNetworkSession? session = null;
-            try
-            {
-                var profile = Profile(network);
-                using (var http = Downloader.CreateHttpClient())
-                {
-                    var installer = new EasyTierInstaller(new Downloader(http, SourceChain.Default()), workDir);
-                    await installer.EnsureAsync(null, ct);
-                    session = PublicNetworkSession.Start(installer, new PublicNetworkOptions(profile, EasyTierArgs.FreeTcpPort(), EasyTierArgs.FreeTcpPort()),
-                        Path.Combine(workDir, "record-network"));
-                }
-                await session.WaitForDirectoryAsync(TimeSpan.FromMinutes(2), ct);
-                // The directory keys of networks that pin none are remembered in the gate's own folder (trust on first use).
-                var directories = new RoomDirectoryClient(session) { KeyMemory = KeyMemory(store) };
-                while (!ct.IsCancellationRequested && !session.HasExited)
-                {
-                    await PublishOnceAsync(directories, store, config, DateTimeOffset.UtcNow, ct);
-                    log(L.F("core.gate.record.published", profile.Name));
-                    await Task.Delay(GateRecord.Renew, ct);
-                }
-            }
+            try { await attempt(ct); }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { return; }
-            catch (Exception e) when (e is IOException or DirectoryRejectedException or InvalidDataException or InvalidOperationException
-                or System.Net.Sockets.SocketException or System.Net.Http.HttpRequestException or System.ComponentModel.Win32Exception or TimeoutException)
+            catch (Exception e) when (e is not OperationCanceledException || !ct.IsCancellationRequested)
             {
                 log(L.F("core.gate.record.failed", e.Message));
             }
-            finally
-            {
-                session?.Dispose();
-            }
             try { await Task.Delay(retry, ct); }
             catch (OperationCanceledException) { return; }
+        }
+    }
+
+    private static async Task PublishWhileConnectedAsync(GateStore store, GateConfig config, string network, string workDir, Action<string> log, CancellationToken ct)
+    {
+        PublicNetworkSession? session = null;
+        try
+        {
+            var profile = Profile(network);
+            using (var http = Downloader.CreateHttpClient())
+            {
+                var installer = new EasyTierInstaller(new Downloader(http, SourceChain.Default()), workDir);
+                await installer.EnsureAsync(null, ct);
+                session = PublicNetworkSession.Start(installer, new PublicNetworkOptions(profile, EasyTierArgs.FreeTcpPort(), EasyTierArgs.FreeTcpPort()),
+                    Path.Combine(workDir, "record-network"));
+            }
+            await session.WaitForDirectoryAsync(TimeSpan.FromMinutes(2), ct);
+            // The directory keys of networks that pin none are remembered in the gate's own folder (trust on first use).
+            var directories = new RoomDirectoryClient(session) { KeyMemory = KeyMemory(store) };
+            while (!ct.IsCancellationRequested && !session.HasExited)
+            {
+                await PublishOnceAsync(directories, store, config, DateTimeOffset.UtcNow, ct);
+                log(L.F("core.gate.record.published", profile.Name));
+                await Task.Delay(GateRecord.Renew, ct);
+            }
+        }
+        finally
+        {
+            session?.Dispose();
         }
     }
 
