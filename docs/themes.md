@@ -237,6 +237,9 @@ map to the new ones: `accounts.title` → `me.title`, `accounts.list` → `me.ac
 `me.devices`, `me.appearance`) are added at the end like any other missing required region. When a pack carries both
 `accounts.json` and `me.json`, `me.json` wins.
 
+Drawers and other overlays of a page (the multiplayer page's "Connection problems?", drill and lesson drawers) are not
+regions: they always stay above the theme's layout, open and close as usual, and a theme cannot move or hide them.
+
 设置页的排版固定，不能改（“恢复默认主题”在那里）。
 
 必需的区块没写进去，Jay 会把它补在最外层容器的最后并在设置页提示，所以功能不会因为主题丢掉。每个区块只能出现一次。

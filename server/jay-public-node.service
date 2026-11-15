@@ -1,7 +1,10 @@
 # Jay 公共网络节点（种子节点 + 房间目录）的 systemd 服务。
-# 用法见 docs/public-network.md：把 jay-server 放到 /opt/jay-server/，数据放 /var/lib/jay-public-node/，用单独的 jay-network 用户运行
-# (not the `jay` user of jay-server.service: a Minecraft server on the same machine must not read the node's keys).
-# server/install-network-node.sh sets all of this up for you.
+# 用法见 docs/public-network.md：把 jay-server 放到 /opt/jay-server/，数据放 /var/lib/jay-public-node/，用单独的 jay 用户运行。
+# This template keeps the `jay` user and data folder of existing nodes, so an updated copy restarts as before.
+# New nodes: use server/install-network-node.sh, which runs the node as its own jay-network user, so a Minecraft server
+# (jay-server.service, user `jay`) on the same machine cannot read the node's keys. To move an existing node to its own
+# user: stop the service, create a system user jay-network, `chown -R jay-network:jay-network /var/lib/jay-public-node`,
+# set User= and Group= below to jay-network, then `systemctl daemon-reload` and start it again.
 [Unit]
 Description=Jay public network node (seed + room directory)
 After=network-online.target
@@ -9,8 +12,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=jay-network
-Group=jay-network
+User=jay
+Group=jay
 Environment=JAY_SERVER_DIR=/var/lib/jay-public-node
 ExecStart=/opt/jay-server/jay-server directory --listen 11010
 Restart=on-failure
