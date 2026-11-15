@@ -26,7 +26,7 @@ internal sealed class AndroidKeystoreKeyProtector : ILocalKeyProtector
         try
         {
             using var cipher = Cipher.GetInstance(Transformation)!;
-            cipher.Init(CipherMode.EncryptMode, GetOrCreateKey());
+            cipher.Init(Javax.Crypto.CipherMode.EncryptMode, GetOrCreateKey());
             var iv = cipher.GetIV() ?? throw new CryptographicException("The Android Keystore returned no IV.");
             if (iv.Length != IvLength) throw new CryptographicException("The Android Keystore returned an unexpected IV.");
             var sealedKey = cipher.DoFinal(key) ?? throw new CryptographicException("The Android Keystore returned nothing.");
@@ -45,7 +45,7 @@ internal sealed class AndroidKeystoreKeyProtector : ILocalKeyProtector
         {
             var key = ExistingKey() ?? throw new CryptographicException("The Android Keystore no longer has Jay's key.");
             using var cipher = Cipher.GetInstance(Transformation)!;
-            cipher.Init(CipherMode.DecryptMode, key, new GCMParameterSpec(TagBits, sealedKey[..IvLength]));
+            cipher.Init(Javax.Crypto.CipherMode.DecryptMode, key, new GCMParameterSpec(TagBits, sealedKey[..IvLength]));
             return cipher.DoFinal(sealedKey[IvLength..]) ?? throw new CryptographicException("The Android Keystore returned nothing.");
         }
         catch (Java.Lang.Exception e)

@@ -1064,7 +1064,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         string? options = null;
         try
         {
-            options = File.ReadAllText(Path.Combine(Context!.FilesDir!.AbsolutePath, "minecraft", "options.txt"));
+            options = File.ReadAllText(System.IO.Path.Combine(Context!.FilesDir!.AbsolutePath, "minecraft", "options.txt"));
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
         _guiScaleOption = MinecraftHotbar.ReadGuiScaleOption(options);
