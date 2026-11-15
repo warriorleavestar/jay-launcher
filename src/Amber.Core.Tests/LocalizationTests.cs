@@ -164,18 +164,21 @@ public partial class LocalizationTests
     /// One thing, one name (docs/i18n-glossary.md). These are the names the wording pass retired: "invite code" is now
     /// an invite, "contact" a friend, the JAYF1- code a device code, "relay server" a relay, "tunneling" protection,
     /// "full LAN mode" a scope, "exit" going online through someone, "remote control" remote help, "circuit breaker"
-    /// an emergency disconnect, and there is no "lobby". They must not come back anywhere in the UI, and the UI states
-    /// facts instead of telling people to feel safe. Matching ignores case.
+    /// an emergency disconnect, and there is no "lobby". The pages the new shell removed (Accounts, Downloads,
+    /// Instances) are not pointed to either: accounts live in Me, new instances in Library and file repair in the
+    /// instance's ⋯ menu. They must not come back anywhere in the UI, and the UI states facts instead of telling people
+    /// to feel safe. Matching ignores case.
     /// </summary>
     [Theory]
     [InlineData("zh-Hans", new[] { "邀请码", "联系人", "设备认证", "连接串", "中转服务器", "网络服务器", "Jay 服务器", "数据封装", "封装通道", "伪装",
-        "完整局域网", "出口", "远程控制", "大厅", "熔断", "联机身份", "联机节点", "放心" })]
+        "完整局域网", "出口", "远程控制", "大厅", "熔断", "联机身份", "联机节点", "放心", "账号页", "账户页", "「账号」页", "「下载」页" })]
     [InlineData("zh-Hant", new[] { "邀請碼", "聯絡人", "裝置認證", "連線字串", "中轉伺服器", "網路伺服器", "Jay 伺服器", "資料封裝", "封裝通道", "偽裝",
-        "完整區域網路", "出口", "遠端控制", "大廳", "熔斷", "連線身分", "放心" })]
+        "完整區域網路", "出口", "遠端控制", "大廳", "熔斷", "連線身分", "放心", "帳號頁", "帳戶頁", "「帳號」頁", "「下載」頁" })]
     [InlineData("en", new[] { "invite code", "contact code", "contacts", "network string", "relay server", "network server", "tunnel", "disguise",
-        "full LAN", "full-LAN", "exit node", "lobby", "remote control", "circuit breaker", "multiplayer identity", "rest assured" })]
+        "full LAN", "full-LAN", "exit node", "lobby", "remote control", "circuit breaker", "multiplayer identity", "rest assured",
+        "Accounts page", "Downloads page", "Instances page" })]
     [InlineData("ja", new[] { "招待コード", "連絡先", "デバイス認証", "接続文字列", "中継サーバー", "ネットワークサーバー", "Jay サーバー", "トンネル", "偽装",
-        "フルLAN", "完全 LAN", "出口", "リモート操作", "ロビー", "ブレーカー", "安心して" })]
+        "フルLAN", "完全 LAN", "出口", "リモート操作", "ロビー", "ブレーカー", "安心して", "アカウントページ", "「アカウント」ページ", "「ダウンロード」ページ", "インスタンスページ" })]
     public void RetiredNamesDoNotComeBack(string code, string[] retired)
     {
         var bad = L.Load(code)
@@ -202,14 +205,37 @@ public partial class LocalizationTests
         Assert.DoesNotContain(name, table["multiplayer.public.setup_body"], StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// The theme recovery tip names the recovery that exists (automatic fallback on the next start and
+    /// --default-theme, see ThemeService.ApplyAtStartup); nothing reads a held key at startup.
+    /// </summary>
+    [Theory]
+    [InlineData("zh-Hans")]
+    [InlineData("zh-Hant")]
+    [InlineData("en")]
+    [InlineData("ja")]
+    [InlineData("lzh")]
+    public void ThemeRecoveryTipNamesTheRealRecovery(string code)
+    {
+        var tip = L.Load(code)["tip.theme_import"];
+        Assert.DoesNotContain("Shift", tip, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("--default-theme", tip, StringComparison.Ordinal);
+    }
+
     /// <summary>占位符的完整写法（包括 :F1 这类格式），译文要和原文一模一样。</summary>
     private static HashSet<string> Placeholders(string text) => Placeholder().Matches(text).Select(m => m.Value).ToHashSet();
 
-    /// <summary>界面、Core 和开发用 CLI 的所有代码（XAML 和 C#），不含 bin / obj。</summary>
+    /// <summary>Other projects whose C# code calls L.T / L.F / L.P.</summary>
+    private static readonly string[] OtherProjects = ["Amber.Mobile", "Amber.Android", "Amber.iOS", "Amber.NetworkServer", "Amber.Server"];
+
+    /// <summary>All code that looks up keys: the desktop UI (XAML and C#), Core, the developer CLI and <see cref="OtherProjects"/>, without bin / obj.</summary>
     private static IEnumerable<string> CodeFiles() =>
         UiFiles()
             .Concat(Directory.EnumerateFiles(Path.Combine(Src, "Amber.Core"), "*.cs", SearchOption.AllDirectories))
             .Concat(Directory.EnumerateFiles(Path.Combine(Src, "Amber.Cli"), "*.cs", SearchOption.AllDirectories))
+            // The mobile apps and the server projects look up keys from the same tables.
+            .Concat(OtherProjects.Select(p => Path.Combine(Src, p)).Where(Directory.Exists)
+                .SelectMany(d => Directory.EnumerateFiles(d, "*.cs", SearchOption.AllDirectories)))
             .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}") && !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}"));
 
     /// <summary>单复数变体（key.one / key.other）：原文表里只有 key，译文可以多出这两种。</summary>
