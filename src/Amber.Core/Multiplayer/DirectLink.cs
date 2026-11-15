@@ -320,8 +320,50 @@ public sealed class DirectBridge : IAsyncDisposable
         // limit is still on its way in.
         set
         {
-            lock (_peerGate) Volatile.Write(ref _ipv6Allowed, value);
+            lock (_peerGate)
+            {
+                Volatile.Write(ref _ipv6Allowed, value);
+                DropHeldLocked();
+            }
         }
+    }
+
+    /// <summary>
+    /// Under <see cref="_peerGate"/>: drops the IPv6 peers outside the limit that would otherwise get back in without
+    /// meeting it: ones still joining (not admitted) and paused ones. Coming back, they are new and turned away, so they
+    /// join through the room's other paths instead of resuming a connection the exit's gate would cut. Admitted peers
+    /// stay (the exit switch checks for those and goes back if one is outside its addresses).
+    /// </summary>
+    private void DropHeldLocked()
+    {
+        if (!_isHost || Volatile.Read(ref _ipv6Allowed) is not { } allowed) return;
+        foreach (var (endpoint, peer) in _pausedPeers.ToArray())
+        {
+            if (!Ipv6Held(allowed, endpoint.Address)) continue;
+            _pausedPeers.Remove(endpoint);
+            peer.Local?.Dispose();
+        }
+        foreach (var (endpoint, peer) in _peers)
+        {
+            if (peer.Admitted || !Ipv6Held(allowed, endpoint.Address) || !_peers.TryRemove(endpoint, out var removed)) continue;
+            removed.Local?.Dispose();
+        }
+    }
+
+    /// <summary>Tests: registers <paramref name="peer"/> as connected (or paused) without a handshake.</summary>
+    internal void AddPeerForTest(DirectPeer peer, bool paused = false)
+    {
+        lock (_peerGate)
+        {
+            if (paused) _pausedPeers[peer.Remote] = peer;
+            else _peers[peer.Remote] = peer;
+        }
+    }
+
+    /// <summary>Tests: paused peers.</summary>
+    internal int PausedPeerCountForTest
+    {
+        get { lock (_peerGate) return _pausedPeers.Count; }
     }
 
     /// <summary>
@@ -335,6 +377,7 @@ public sealed class DirectBridge : IAsyncDisposable
             List<DirectPeer> now = [.. _peers.Values];
             Volatile.Write(ref _ipv6Allowed, now.Select(p => p.Remote.Address.IsIPv4MappedToIPv6 ? p.Remote.Address.MapToIPv4() : p.Remote.Address)
                 .Where(a => a.AddressFamily == AddressFamily.InterNetworkV6).ToHashSet());
+            DropHeldLocked();
             return now;
         }
     }

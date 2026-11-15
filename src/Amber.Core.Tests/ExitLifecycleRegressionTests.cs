@@ -393,6 +393,67 @@ public sealed class ExitLifecycleRegressionTests
         finally { session.DisposeAsync().AsTask().GetAwaiter().GetResult(); }
     });
 
+    [Fact]
+    public void ViewModelKeepsTheConnectionAndSaysWhyWhenMembersCantBeConfirmedAndARetryWorks() => UiTestThread.Run(() =>
+    {
+        if (!PlatformFeatures.FullTrafficExit) return;
+        using var service = new LauncherService(new AppSettings { GameDirectory = TestDataDir.Path, PlayerName = "" });
+        var member = Ipv6Member(verified: false);
+        member._outdated = true;
+        var session = new DirectSession(null!, Path.Combine(Path.GetTempPath(), "amber-exit-lifecycle-" + Guid.NewGuid().ToString("N")),
+            Room, false, Direct, new DiagnosticLog())
+        {
+            StartForTest = (o, _) => Task.FromResult<IEasyTierSession>(new FakeEasyTier(o)),
+            BridgePeersForTest = () => [member],
+            BearerWait = TimeSpan.FromMilliseconds(300),
+        };
+        using var lifetime = new CancellationTokenSource();
+        var owner = new Owner();
+        try
+        {
+            Pump(session.StartEasyTierAsync(Original, default));
+            var running = session.EasyTier!;
+            var vm = new MultiplayerViewModel(service) { SelectedExitPeer = new PeerItem(new PeerInfo("amber-host", EasyTierArgs.HostIp, "p2p", 1, "udp")) };
+            SetField(vm, "_direct", session);
+            SetField(vm, "_session", running);
+            SetField(vm, "_sessionCts", lifetime);
+            service.ActiveMultiplayer = owner;
+
+            // A member on an older Jay, then one whose answer doesn't come: each time the room keeps running as it was,
+            // and the reason is shown.
+            foreach (var (outdated, key) in new[] { (true, "core.mp.session.bearer_outdated"), (false, "core.mp.session.bearer_unverified") })
+            {
+                member._outdated = outdated;
+                Pump(vm.UseExitNodeCommand.ExecuteAsync(null));
+                Assert.Same(running, GetField(vm, "_session"));
+                Assert.False(running.HasExited);
+                Assert.Same(owner, service.ActiveMultiplayer);
+                Assert.Equal("", vm.ExitNodeIp);
+                Assert.Equal(L.F("multiplayer.exit.switch_failed_kept", L.T(key)), vm.Status);
+            }
+
+            // Once the member is confirmed, trying again works.
+            Volatile.Write(ref member._verified, true);
+            Pump(vm.UseExitNodeCommand.ExecuteAsync(null));
+            Assert.Equal(EasyTierArgs.HostIp, vm.ExitNodeIp);
+            Assert.Same(session.EasyTier, GetField(vm, "_session"));
+        }
+        finally { Pump(session.DisposeAsync().AsTask()); }
+    });
+
+    /// <summary>Waits for <paramref name="task"/> on the UI thread while running its queued work (the switch waits with
+    /// Task.Delay, whose continuation comes back to this thread).</summary>
+    private static void Pump(Task task)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(20);
+        while (!task.IsCompleted && DateTime.UtcNow < deadline)
+        {
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            Thread.Sleep(10);
+        }
+        task.GetAwaiter().GetResult();
+    }
+
     private static void SetField(object instance, string name, object value) =>
         instance.GetType().GetField(name, BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(instance, value);
 

@@ -210,6 +210,33 @@ public sealed class ExitPeerTrustTests
     }
 
     [Fact]
+    public async Task PeersOutsideTheLimitThatCouldComeBackUnseenAreDropped()
+    {
+        // A joining peer that went quiet (so left out of the plan) or a paused one would otherwise resume as a known peer,
+        // past the limit, and be cut off by the gate. They are dropped and come back as new peers, which the limit turns
+        // away. Admitted peers and IPv4 peers stay.
+        await using var host = new DirectBridge(DirectBridge.CreateSocket(), DirectTestKeys.Bridge, true, 1, _ => { });
+        var planned = Peer("2001:db8::7", admitted: true, verified: true);
+        var quietJoiner = Peer("2001:db8::8", admitted: false, verified: false);
+        var admittedOutside = Peer("2001:db8::9", admitted: true, verified: true);
+        var v4 = new DirectPeer { Remote = new IPEndPoint(IPAddress.Parse("203.0.113.5"), 40000), Path = PathKind.Punch };
+        var paused = Peer("2001:db8::a", admitted: true, verified: true);
+        foreach (var p in new[] { planned, quietJoiner, admittedOutside, v4 }) host.AddPeerForTest(p);
+        host.AddPeerForTest(paused, paused: true);
+
+        host.Ipv6Allowed = new HashSet<IPAddress> { IPAddress.Parse("2001:db8::7") };
+        Assert.Equal([planned, admittedOutside, v4], host.Peers.OrderBy(p => p.Remote.Address.ToString()).ToArray(),
+            ReferenceEqualityComparer.Instance);
+        Assert.Equal(0, host.PausedPeerCountForTest);
+
+        // Without a limit nothing is dropped.
+        host.AddPeerForTest(quietJoiner);
+        host.Ipv6Allowed = null;
+        Assert.Contains(quietJoiner, host.Peers);
+        await Task.CompletedTask;
+    }
+
+    [Fact]
     public async Task APeerBeingRegisteredIsEitherInTheHoldSnapshotOrHeld()
     {
         // A new peer that already passed the limit check and is being registered when the switch takes its snapshot:
