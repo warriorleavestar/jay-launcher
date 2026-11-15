@@ -402,6 +402,17 @@ public static class NetworkLoginClient
     /// <summary>解开节点的回复，验凭证（签名、网络、绑定的是自己）。失败抛 <see cref="InvalidDataException"/>，要两步验证抛 <see cref="SecondFactorRequiredException"/>，消息给用户看。</summary>
     public static (string Token, AccountToken Parsed) Read(JsonObject reply, X25519KeyPair me, NetworkLogin login, string network, DateTimeOffset now)
     {
+        // The reply comes from a directory node: wrongly typed fields, bad base64 or bad JSON inside are a failed login
+        // (InvalidDataException, which callers show), not an exception type nobody handles.
+        try { return ReadReply(reply, me, login, network, now); }
+        catch (Exception e) when (e is InvalidOperationException or FormatException or JsonException or ArgumentException)
+        {
+            throw new InvalidDataException(L.T("core.mp.account.failed"), e);
+        }
+    }
+
+    private static (string Token, AccountToken Parsed) ReadReply(JsonObject reply, X25519KeyPair me, NetworkLogin login, string network, DateTimeOffset now)
+    {
         if (reply["ok"]?.GetValue<bool>() != true && reply["error"]?.GetValue<string>() == "factor"
             && PrivateSeal.Open(me, login.Key, Convert.FromBase64String(reply["b"]?.GetValue<string>() ?? "")) is { } sealedNeed
             && JsonNode.Parse(sealedNeed) is JsonObject needed)

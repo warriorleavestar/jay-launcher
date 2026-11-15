@@ -50,6 +50,21 @@ public class StunParseTests
     }
 
     [Theory]
+    [InlineData("stun.example.test:99999999999")]
+    [InlineData("stun.example.test:70000")]
+    [InlineData("stun.example.test:0")]
+    [InlineData("stun.example.test:-1")]
+    [InlineData("stun.example.test:abc")]
+    public async Task StunServerWithABadPortIsSkipped(string server)
+    {
+        // Typed into the free-text STUN box: a bad entry must be the FormatException every caller skips, not an OverflowException.
+        await Assert.ThrowsAsync<FormatException>(() => Stun.ResolveAsync(server, default));
+        using var socket = new System.Net.Sockets.Socket(System.Net.Sockets.AddressFamily.InterNetwork, System.Net.Sockets.SocketType.Dgram, System.Net.Sockets.ProtocolType.Udp);
+        socket.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+        Assert.Null(await Stun.QueryAsync(socket, server, TimeSpan.FromSeconds(2), default));
+    }
+
+    [Theory]
     [InlineData("8.8.8.8", true)]
     [InlineData("192.168.1.2", false)]
     [InlineData("100.70.1.1", false)]
