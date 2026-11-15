@@ -1043,6 +1043,46 @@ public sealed class BakeTests : IDisposable
     }
 
     [Fact]
+    public async Task ABrokenCachedInstallerIsRemovedSoTheNextAttemptDownloadsItAgain()
+    {
+        var installer = Path.Combine(Data, "platforms", "installers", "neoforge-21.1.265-installer.jar");
+        Directory.CreateDirectory(Path.GetDirectoryName(installer)!);
+        File.WriteAllText(installer, "not a zip");
+        var instance = Instance("neoforge", "1.21.1", "21.1.265", "neoforge-1.21.1");
+        await Assert.ThrowsAsync<InvalidDataException>(() => BakePlatform.PrepareAsync(new GameDirectory(Game), instance, Data, null, null, CancellationToken.None));
+        Assert.False(File.Exists(installer));
+    }
+
+    [Fact]
+    public async Task AnInstallerWithABrokenProfileIsUnpackedAgainAfterTheNextDownload()
+    {
+        PlatformInstall("neoforge", "1.21.1", "21.1.265");
+        var good = FakeFiles[BakePlatform.InstallerUrl("neoforge", "21.1.265")];
+        string goodProfile;
+        using (var zip = ZipFile.OpenRead(good))
+        using (var reader = new StreamReader(zip.GetEntry("install_profile.json")!.Open()))
+            goodProfile = reader.ReadToEnd();
+        // A cached installer whose profile is not JSON but has exactly the same length as the good one.
+        var installer = Path.Combine(Data, "platforms", "installers", "neoforge-21.1.265-installer.jar");
+        Directory.CreateDirectory(Path.GetDirectoryName(installer)!);
+        using (var zip = ZipFile.Open(installer, ZipArchiveMode.Create))
+        using (var w = new StreamWriter(zip.CreateEntry("install_profile.json").Open()))
+            w.Write(new string('x', goodProfile.Length));
+        var instance = Instance("neoforge", "1.21.1", "21.1.265", "neoforge-1.21.1");
+        Task Download(IReadOnlyCollection<DownloadItem> items, CancellationToken _)
+        {
+            foreach (var item in items) { Directory.CreateDirectory(Path.GetDirectoryName(item.LocalPath)!); File.Copy(FakeFiles[item.Url], item.LocalPath, true); }
+            return Task.CompletedTask;
+        }
+
+        await Assert.ThrowsAnyAsync<System.Text.Json.JsonException>(() => BakePlatform.PrepareAsync(new GameDirectory(Game), instance, Data, Download, null, CancellationToken.None));
+        Assert.False(File.Exists(installer));
+
+        var root = await BakePlatform.PrepareAsync(new GameDirectory(Game), instance, Data, Download, null, CancellationToken.None);
+        Assert.Equal(goodProfile, File.ReadAllText(Path.Combine(root, "inst", "install_profile.json")));
+    }
+
+    [Fact]
     public void ForgeUpdateCheckIsTurnedOff()
     {
         var work = Directory.CreateDirectory(Path.Combine(_root, "forge-work")).FullName;
