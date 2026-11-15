@@ -141,6 +141,32 @@ public sealed class CodeHygieneTests
         Assert.False(vm.InviteShown);
     });
 
+    /// <summary>Leaving the page re-masks the thirty-day invite codes too.</summary>
+    [Fact]
+    public void LongInviteCodesRemaskOnLeavingThePage() => UiTestThread.Run(() =>
+    {
+        var (service, vm) = Create();
+        using var _ = service;
+        var dir = Path.Combine(Path.GetTempPath(), "jay-long-mask-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var file = Path.Combine(dir, "long-invites.json");
+            new LongLivedInvites(file).Create("Robin");
+            vm.LongInvitesFile = file;
+            var item = Assert.Single(vm.LongInviteItems);
+            vm.IsCurrent = true;
+            vm.ToggleLongInviteShownCommand.Execute(item);
+            Assert.True(item.Shown);
+            vm.IsCurrent = false;
+            Assert.False(item.Shown);
+        }
+        finally
+        {
+            try { Directory.Delete(dir, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        }
+    });
+
     [Fact]
     public void PendingInviteListIsMaskedWithAToggle()
     {
@@ -193,6 +219,23 @@ public sealed class CodeHygieneTests
             var text = new TransportChoice(mode).Privacy;
             Assert.DoesNotContain("multiplayer.transport", text, StringComparison.Ordinal);
             Assert.NotEqual(generalText, text);
+        }
+    }
+
+    /// <summary>
+    /// Every directory call from the multiplayer page goes through DirectoryClient(network), which remembers the
+    /// directory's key on first use; a client built by hand would skip that check.
+    /// </summary>
+    [Fact]
+    public void DirectoryClientsComeFromTheOneFactory()
+    {
+        var repo = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+        var viewModels = Path.Combine(repo, "src", "Amber.App", "ViewModels");
+        var made = new System.Text.RegularExpressions.Regex(@"new\s+(Amber\.Core\.Multiplayer\.Public\.)?RoomDirectoryClient\s*\(");
+        foreach (var file in Directory.EnumerateFiles(viewModels, "*.cs", SearchOption.AllDirectories))
+        {
+            if (Path.GetFileName(file) == "MultiplayerViewModel.Contacts.cs") continue;
+            Assert.False(made.IsMatch(File.ReadAllText(file)), $"{Path.GetFileName(file)} builds a RoomDirectoryClient without DirectoryClient(network)");
         }
     }
 }
