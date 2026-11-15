@@ -113,6 +113,8 @@ public sealed partial class MultiplayerViewModel
             ? SelectedLanGame?.Label ?? L.F("multiplayer.guide.port_label", port)
             : null;
         IsWaitingForGame = relay.Target is null;
+        // The game line (waiting, or linked) sits in the invite part: a narrow window shows that part.
+        CompactSection = 2;
         OnPropertyChanged(nameof(HasGameRelay));
         OnPropertyChanged(nameof(GameLinkText));
     }
@@ -306,6 +308,8 @@ public sealed partial class MultiplayerViewModel
             _clearingGameChoice = false;
         }
         IsWaitingForGame = true;
+        // The host has to pick the game again, in the invite part.
+        CompactSection = 2;
         OnPropertyChanged(nameof(GameLinkText));
         SetStatus(StatusMessage.Info("multiplayer.relay.game_gone", label));
     }

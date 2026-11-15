@@ -141,6 +141,8 @@ public sealed class GamePortRelayTests
         Assert.True(vm.HasGameRelay);
         Assert.True(vm.IsWaitingForGame);
         Assert.Equal(L.T("multiplayer.relay.waiting"), vm.GameLinkText);
+        // A narrow window shows the invite part, where the game line and port box are.
+        Assert.True(vm.CompactInvite);
         var relay = vm.GameRelayForTest!;
 
         // A typed port (any TCP game) is linked once something answers on it.
@@ -200,6 +202,7 @@ public sealed class GamePortRelayTests
         Check(vm.WatchGameTargetAsync());
         Assert.Equal(game.Port, relay.Target);
 
+        vm.CompactSection = 1;
         // One miss could be a hiccup; the second drops the game and the room waits again, with the typed port cleared.
         answers = false;
         Check(vm.WatchGameTargetAsync());
@@ -210,6 +213,7 @@ public sealed class GamePortRelayTests
         Assert.Equal(L.T("multiplayer.relay.waiting"), vm.GameLinkText);
         Assert.Equal("multiplayer.relay.game_gone", vm.StatusInfo?.Key);
         Assert.Equal("", vm.ManualPort);
+        Assert.True(vm.CompactInvite);
 
         // The same port again (the game came back) links again.
         answers = true;
@@ -459,11 +463,14 @@ public sealed class GamePortRelayTests
         var disposed = relay.DisposeAsync().AsTask();
         Pump(() => disposed.IsCompleted);
 
-        // Adopted by the room, it is linked at once and named by the typed port alone.
+        // Adopted by the room, it is linked at once and named by the typed port alone; a narrow window that was on
+        // the chat shows the invite part, where that line is.
+        vm.CompactSection = 1;
         var prepared = vm.PrepareGameRelayForTest();
         Pump(() => prepared.IsCompleted);
         Assert.True(prepared.Result);
         Assert.False(vm.IsWaitingForGame);
+        Assert.True(vm.CompactInvite);
         Assert.Equal(L.F("multiplayer.relay.linked_port", game.Port), vm.GameLinkText);
         vm.StopGameRelayForTest();
     });
