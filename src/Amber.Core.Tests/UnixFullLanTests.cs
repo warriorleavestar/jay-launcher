@@ -345,9 +345,12 @@ public sealed class UnixFullLanTests
         if (OperatingSystem.IsWindows() && !IsElevatedOnWindows()) return;
         WithCoreStore((_, package, asset, _) =>
         {
-            // A third guard is half-way through its own extraction; it must not lose its folder.
+            // The protected folders come from a first guard (a root made here by hand would be refused on Windows); the
+            // copy itself is removed again so the two guards below both have to extract it.
+            var first = ElevatedCoreStore.Prepare(package);
             var parent = Path.Combine(ElevatedCoreStore.RootForTest!, EasyTierRelease.InstallTag);
-            Directory.CreateDirectory(parent);
+            Directory.Delete(Path.GetDirectoryName(first)!, recursive: true);
+            // A third guard is half-way through its own extraction; it must not lose its folder.
             var busy = Directory.CreateDirectory(Path.Combine(parent, asset.Platform + ".tmp-0123456789abcdef")).FullName;
             using var start = new Barrier(2);
             var cores = new string?[2];
