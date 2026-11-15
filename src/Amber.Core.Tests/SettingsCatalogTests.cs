@@ -28,7 +28,7 @@ public sealed class SettingsCatalogTests
         // Strong sandbox has no control off Windows, so settings#StrongSandbox and the palette must not offer it there.
         Assert.True(SettingsCatalog.All.Single(f => f.Field == "StrongSandbox").WindowsOnly);
         Assert.Equal(OperatingSystem.IsWindows(), SettingsCatalog.Find("StrongSandbox") is not null);
-        Assert.Equal(SettingsCatalog.All.Count(f => !f.WindowsOnly || OperatingSystem.IsWindows()), SettingsCatalog.Fields.Count);
+        Assert.Equal(SettingsCatalog.All.Count(f => !f.WindowsOnly || OperatingSystem.IsWindows()), SettingsCatalog.FieldsFor(calls: true).Count);
     }
 
     [Fact]

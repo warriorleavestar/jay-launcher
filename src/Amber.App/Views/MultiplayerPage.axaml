@@ -153,6 +153,8 @@
             <StackPanel x:Name="RoomHeaderActions" Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Top" HorizontalAlignment="Right">
               <!-- The one amber action in a room. -->
               <Button x:Name="EnterGameButton" Classes="play" Content="{l:T multiplayer.room.enter_game}" Command="{Binding EnterGameCommand}" IsVisible="{Binding ShowEnterGame}" />
+              <Button x:Name="RoomVoiceButton" Classes="on-cover" Content="{l:T call.voice}" Command="{Binding JoinRoomVoiceCommand}"
+                      IsVisible="{Binding ShowRoomVoice}" IsEnabled="{Binding CanJoinRoomVoice}" />
               <Button x:Name="HeaderInviteButton" Classes="on-cover" Content="{l:T multiplayer.room.invite}" Command="{Binding InviteFriendsCommand}" IsVisible="{Binding IsHosting}" ToolTip.Tip="Ctrl+Shift+I" />
               <Button x:Name="RoomMenuButton" Classes="on-cover" Content="⋯" ToolTip.Tip="{l:T multiplayer.room.menu}" AutomationProperties.Name="{l:T multiplayer.room.menu}">
                 <Button.Flyout>
@@ -214,6 +216,13 @@
           </Grid>
         </Panel>
       </Border>
+
+      <!-- Room voice or a share with one member (reserved): the call panel sits under the banner. -->
+      <Panel x:Name="RoomCallHost" IsVisible="{Binding Call.ShowInRoom, FallbackValue=False}">
+        <c:CallPanel x:Name="RoomCallPanel" DataContext="{Binding Call}" />
+      </Panel>
+      <TextBlock x:Name="RoomCallEnded" Classes="hint" Text="{Binding Call.EndedText, FallbackValue=''}" TextWrapping="Wrap"
+                 IsVisible="{Binding Call.ShowEndedInRoom, FallbackValue=False}" />
 
       <!-- A mailed invite got no receipt: it may have been held back; offer the other ways in. -->
       <Border x:Name="HeldBackBanner" Classes="banner warning" Margin="0" Padding="12,8" IsVisible="{Binding HasHeldBack}">
@@ -722,6 +731,13 @@
                         <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.remote.hint}" />
                         <Button x:Name="ShareRemoteButton" Classes="small" Content="{l:T multiplayer.share.remote.ask}" Command="{Binding AskRemoteHelpCommand}" IsEnabled="{Binding CanAskRemoteHelp}" HorizontalAlignment="Left" />
                         <TextBlock x:Name="ShareRemoteNote" Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{Binding RemoteHelpNote}" IsVisible="{Binding HasRemoteHelpNote}" />
+                      </StackPanel>
+                      <!-- With calls on, remote help is the last step of a share: share first, then [Let them control]. -->
+                      <StackPanel x:Name="ShareScreenRow" Spacing="3" IsVisible="{Binding ShowShareScreenWith}">
+                        <TextBlock Text="{l:T call.share_to}" />
+                        <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T call.share_to.hint}" />
+                        <Button x:Name="ShareScreenWithButton" Classes="small" Content="{l:T call.share_to}" Command="{Binding ShareScreenWithCommand}"
+                                IsEnabled="{Binding Call.CanStartShare, FallbackValue=False}" HorizontalAlignment="Left" />
                       </StackPanel>
                       <StackPanel x:Name="ShareProxyRow" Spacing="3" IsVisible="{Binding ShowShareNetwork}">
                         <CheckBox x:Name="ShareProxyBox" IsEnabled="{Binding CanShareGameProxy}" Click="ShareProxy_Click">

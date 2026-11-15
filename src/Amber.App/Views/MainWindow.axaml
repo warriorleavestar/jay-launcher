@@ -255,7 +255,16 @@
           </StackPanel>
         </Button>
         <!-- 正在玩胶囊：有游戏准备中、运行中或刚崩溃时才出现；点它去游戏库 -->
-        <Button x:Name="PlayingPill" Grid.Column="5" Classes="pill-play" Classes.crash="{Binding Activity.PillIsCrash}" Command="{Binding Activity.OpenPillCommand}"
+        <!-- In a call (reserved): a chip beside the playing pill; it goes back to the page that holds the call panel. -->
+        <StackPanel Grid.Column="5" Orientation="Horizontal" VerticalAlignment="Center">
+        <Button x:Name="CallChip" Classes="pill-play" Command="{Binding Call.OpenPanelCommand}" IsVisible="{Binding Call.IsInCall}" Margin="8,0,0,0"
+                VerticalAlignment="Center" ToolTip.Tip="{Binding Call.ChipText}" AutomationProperties.Name="{Binding Call.ChipText}">
+          <StackPanel Orientation="Horizontal" Spacing="6">
+            <Border Classes="led online" />
+            <TextBlock Text="{Binding Call.ChipText}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="180" />
+          </StackPanel>
+        </Button>
+        <Button x:Name="PlayingPill" Classes="pill-play" Classes.crash="{Binding Activity.PillIsCrash}" Command="{Binding Activity.OpenPillCommand}"
                 IsVisible="{Binding Activity.HasPill}" Margin="8,0,0,0" VerticalAlignment="Center" ToolTip.Tip="{Binding Activity.PillText}"
                 AutomationProperties.Name="{Binding Activity.PillText}">
           <StackPanel Orientation="Horizontal" Spacing="6">
@@ -263,6 +272,7 @@
             <TextBlock Text="{Binding Activity.PillText}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="220" />
           </StackPanel>
         </Button>
+        </StackPanel>
         <!-- 活动：铃铛；有任务时外圈是总进度，有没看过的失败或请求时红点。Ctrl+J -->
         <Button x:Name="ActivityButton" Grid.Column="6" Classes="ghost icon-only" Command="{Binding Activity.ToggleCommand}" Margin="4,0,0,0"
                 VerticalAlignment="Center" ToolTip.Tip="{Binding Activity.ActivityTip}" AutomationProperties.Name="{l:T activity.title}">
@@ -292,6 +302,13 @@
           <ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Spacing="6" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
         </ItemsControl>
       </StackPanel>
+      <!-- Someone controls this computer during a call (reserved): the locked red bar, with [Stop] and Ctrl+Shift+F12. -->
+      <safety:SafetyBanner x:Name="CallControlBar" Grid.Row="2" Classes="remote" Margin="16,0,16,8" IsVisible="{Binding Call.IsControlled}">
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+          <TextBlock x:Name="CallControlText" Text="{Binding Call.ControlBarText}" FontWeight="SemiBold" VerticalAlignment="Center" TextWrapping="Wrap" />
+          <safety:SafetyButton x:Name="CallControlStop" Grid.Column="1" Kind="Safe" Content="{l:T call.control.stop}" Command="{Binding Call.StopControlCommand}" />
+        </Grid>
+      </safety:SafetyBanner>
       <!-- 第一次打开新版：东西搬到哪了（可关闭） -->
       <StackPanel Grid.Row="3">
       <Border x:Name="MovedNotice" Classes="banner" Margin="16,0,16,8" IsVisible="False">
@@ -571,6 +588,8 @@
     </c:LazyHost>
 
     <!-- 熔断倒计时：盖住整个窗口，按空格或点按钮取消重启 -->
+    <!-- Sharing the screen (reserved): a red frame round the whole window; it never takes a click. -->
+    <Border x:Name="CallShareFrame" Grid.ColumnSpan="2" BorderThickness="3" BorderBrush="#B3261E" IsHitTestVisible="False" IsVisible="{Binding Call.Sharing}" />
     <c:LazyHost x:Name="BreakerHost" Grid.ColumnSpan="2" IsOpen="{Binding Multiplayer.IsBreakerCounting}" IsVisible="{Binding Multiplayer.IsBreakerCounting}">
       <Template x:DataType="vm:MainViewModel">
           <Border x:Name="BreakerOverlayPart" Background="{DynamicResource Scrim}">

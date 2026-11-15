@@ -266,6 +266,56 @@
       </StackPanel>
     </Expander>
 
+    <!-- Calls and screen (reserved): only while calls are switched on. "For a child" hides the camera and control. -->
+    <Expander x:Name="MpGroupCalls" Classes="mp-group" IsVisible="{Binding CallsVisible}">
+      <Expander.Header>
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+          <StackPanel Spacing="2">
+            <TextBlock Text="{l:T settings.mp.group.calls}" FontWeight="SemiBold" />
+            <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T settings.mp.group.calls.summary}" />
+          </StackPanel>
+          <Border x:Name="MpCallsTag" Grid.Column="1" Classes="tag" VerticalAlignment="Center" IsVisible="{Binding CallsCustomized}">
+            <TextBlock Text="{l:T settings.mp.customized}" FontSize="12" />
+          </Border>
+        </Grid>
+      </Expander.Header>
+      <StackPanel Spacing="8">
+        <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T settings.calls.reserved}" />
+        <TextBlock Text="{l:T settings.calls.who}" TextWrapping="Wrap" />
+        <ComboBox x:Name="CallsWhoBox" ItemsSource="{Binding CallsWhoOptions}" SelectedIndex="{Binding CallsWhoIndex}" MinWidth="200"
+                  AutomationProperties.Name="{l:T settings.calls.who}" />
+        <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T settings.calls.who_hint}" />
+        <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="16" RowDefinitions="Auto,Auto" RowSpacing="4">
+          <TextBlock Text="{l:T settings.calls.mic_device}" />
+          <ComboBox x:Name="CallsMicBox" Grid.Row="1" ItemsSource="{Binding CallsDeviceOptions}" SelectedIndex="{Binding CallsMicIndex}" MinWidth="160"
+                    AutomationProperties.Name="{l:T settings.calls.mic_device}" />
+          <TextBlock Grid.Column="1" Text="{l:T settings.calls.camera_device}" IsVisible="{Binding CallsShowCamera}" />
+          <ComboBox x:Name="CallsCameraBox" Grid.Column="1" Grid.Row="1" ItemsSource="{Binding CallsDeviceOptions}" SelectedIndex="{Binding CallsCameraIndex}"
+                    MinWidth="160" IsVisible="{Binding CallsShowCamera}" AutomationProperties.Name="{l:T settings.calls.camera_device}" />
+        </Grid>
+        <CheckBox x:Name="CallsNoiseBox" IsChecked="{Binding CallsNoise}">
+          <TextBlock Text="{l:T settings.calls.noise}" TextWrapping="Wrap" />
+        </CheckBox>
+        <CheckBox x:Name="CallsPushToTalkBox" IsChecked="{Binding CallsPushToTalk}">
+          <TextBlock Text="{l:T settings.calls.ptt}" TextWrapping="Wrap" />
+        </CheckBox>
+        <StackPanel Spacing="4" IsVisible="{Binding CallsShowCamera}">
+          <TextBlock Text="{l:T settings.calls.quality}" />
+          <ComboBox x:Name="CallsQualityBox" ItemsSource="{Binding CallsQualityOptions}" SelectedIndex="{Binding CallsQualityIndex}" MinWidth="160"
+                    AutomationProperties.Name="{l:T settings.calls.quality}" />
+        </StackPanel>
+        <CheckBox x:Name="CallsShareGameBox" IsChecked="{Binding CallsShareGameOnly}">
+          <TextBlock Text="{l:T settings.calls.share_game}" TextWrapping="Wrap" />
+        </CheckBox>
+        <StackPanel Spacing="2" IsVisible="{Binding CallsShowControl}">
+          <CheckBox x:Name="CallsAllowControlBox" IsChecked="{Binding CallsAllowControl}">
+            <TextBlock Text="{l:T settings.calls.allow_control}" TextWrapping="Wrap" />
+          </CheckBox>
+          <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T settings.calls.allow_control_hint}" />
+        </StackPanel>
+      </StackPanel>
+    </Expander>
+
     <!-- Reset all: asks first in a locked safety panel (a theme pack can't restyle or relabel it; focus on [Cancel],
          Esc or leaving cancels); networks and relays stay. -->
     <StackPanel Spacing="6" Margin="0,6,0,0">
