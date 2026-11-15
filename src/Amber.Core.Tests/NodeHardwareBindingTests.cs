@@ -113,6 +113,32 @@ public sealed class NodeHardwareBindingTests : IDisposable
     public void UnboundNodeIsLeftAlone() => Assert.Null(Guard(Machine(), new FakeTpm()).Enforce());
 
     [Fact]
+    public void TpmIsProbedOnlyWhenABoundNodeNeedsIt()
+    {
+        var hw = Machine();
+        var tpm = new FakeTpm();
+        var probes = 0;
+        ITpmSealer Probe() { probes++; return tpm; }
+        NodeHardwareGuard NewGuard() => new(_dir, Probe) { Hardware = hw, Integrity = new FakeIntegrity(), Trust = Trustees };
+
+        // An unbound node never touches the TPM, neither when the guard is made nor when it is enforced.
+        var unbound = NewGuard();
+        Assert.Equal(0, probes);
+        Assert.Null(unbound.Enforce());
+        Assert.Equal(0, probes);
+
+        // A bound node probes on its first real need only, then reuses that TPM for every later use.
+        Bind(hw, tpm, requireTpm: true);
+        var guard = NewGuard();
+        Assert.Equal(0, probes);
+        Assert.NotNull(guard.Enforce());
+        Assert.Equal(1, probes);
+        Assert.NotNull(guard.Enforce());
+        Assert.Same(tpm, guard.Tpm);
+        Assert.Equal(1, probes);
+    }
+
+    [Fact]
     public void OneChangedPartIsTolerated()
     {
         var hw = Machine();
