@@ -249,6 +249,70 @@ public sealed class ZeroLeakCodesTests : IAsyncDisposable
         Assert.Empty(alex.Post.Unconfirmed());
     }
 
+    /// <summary>
+    /// A verified friend mailing invite after invite (new ids and tokens, no end date or a far one) through the real
+    /// sealed-mail path: what reaches the lobby stays within its limits, however the mail arrives.
+    /// </summary>
+    [Fact]
+    public async Task AFloodOfMailedInvitesFromAFriendStaysBoundedInTheLobby()
+    {
+        var server = StartDirectory();
+        using var alex = NewPerson("alex", server);
+        using var steve = NewPerson("steve", server);
+        await Exchange(alex, steve);
+        var toSteve = alex.Book.Find(steve.Key.PublicKey)!;
+        var batches = new List<IReadOnlyList<MailedInvite>>();
+        JayInvite? repeated = null;
+        for (var round = 0; round < 3; round++)
+        {
+            // A mailbox holds 32 at a time, so the flood arrives in batches.
+            for (var i = 0; i < 30; i++)
+            {
+                var invite = new InviteBook().Create(20, null, false, TunnelSettings.Default, boundTo: steve.Key.PublicKey).Invite;
+                repeated ??= invite;
+                DateTimeOffset? expires = round switch { 0 => null, 1 => _now.AddYears(30), _ => i % 2 == 0 ? null : _now.AddDays(400) };
+                await alex.Post.SendInviteAsync(toSteve, invite, alex.Key.PublicKey, $"room {round}-{i}", expires, default);
+            }
+            // The same invite under a new mail id.
+            await alex.Post.SendInviteAsync(toSteve, repeated!, alex.Key.PublicKey, "again", null, default);
+            batches.Add(await steve.Post.CheckAsync(steve.Name, default));
+        }
+        Assert.All(batches, b => Assert.InRange(b.Count, 30, 31));
+
+        UiTestThread.Run(() =>
+        {
+            using var service = new Amber.App.Services.LauncherService(new Amber.App.Services.AppSettings { GameDirectory = TestDataDir.Path, PlayerName = "" });
+            var vm = new Amber.App.ViewModels.MultiplayerViewModel(service);
+            var now = DateTimeOffset.UtcNow;
+            vm.FriendRoomClock = () => now;
+            int Requests() => service.Requests.Pending.Count(r => r.Spec.Kind == "contact-invite");
+            foreach (var batch in batches)
+            {
+                vm.ShowMailedInvites(batch);
+                Assert.InRange(vm.FriendRooms.Count, 1, Amber.App.ViewModels.MultiplayerViewModel.MaxFriendRoomsPerDevice);
+                Assert.Equal(vm.FriendRooms.Count, vm.HeldFriendInvites);
+                Assert.Equal(vm.FriendRooms.Count, Requests());
+            }
+            // "Not now" on each: nothing is left, and the same invites coming again stay away.
+            var ignored = vm.FriendRooms.Select(r => r.Invite).ToList();
+            foreach (var request in service.Requests.Pending.Where(r => r.Spec.Kind == "contact-invite").ToList())
+                service.Requests.Resolve(request, "ignore", Amber.Core.Activity.RequestSource.Bar);
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            Assert.Empty(vm.FriendRooms);
+            Assert.Equal(0, vm.HeldFriendInvites);
+            vm.ShowMailedInvites(ignored);
+            Assert.Empty(vm.FriendRooms);
+            // Whatever is listed goes by itself at the latest after MaxFriendRoomAge.
+            vm.ShowMailedInvites(batches[0]);
+            Assert.NotEmpty(vm.FriendRooms);
+            now += Amber.App.ViewModels.MultiplayerViewModel.MaxFriendRoomAge;
+            vm.PruneFriendRooms();
+            Assert.Empty(vm.FriendRooms);
+            Assert.Equal(0, vm.HeldFriendInvites);
+            Assert.Equal(0, Requests());
+        });
+    }
+
     [Fact]
     public async Task InviteWithoutReceiptIsReportedAsPossiblyHeldBack()
     {

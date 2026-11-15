@@ -140,8 +140,18 @@ public sealed partial class MultiplayerViewModel
     /// <summary>Exit trail: the multiplayer steps by status key only (the arguments can hold codes, names and addresses).</summary>
     protected override void OnStatusChanged()
     {
-        if (StatusInfo is { } status) Amber.Core.Diagnostics.ExitTrail.Note("mp", $"{status.Kind}: {status.Key}");
+        if (StatusInfo is not { } status) return;
+        Amber.Core.Diagnostics.ExitTrail.Note("mp", $"{status.Kind}: {status.Key}");
+        if (!_settingRoomStatus) ActionStatus?.Invoke(status);
     }
+
+    /// <summary>
+    /// What a multiplayer action says (a relay added, a backup saved, an error), not the room's running headcount. Settings
+    /// and the Me page run some of these commands and show the result on their own status bar while they are on screen.
+    /// </summary>
+    public event Action<StatusMessage>? ActionStatus;
+
+    private bool _settingRoomStatus;
 
     /// <summary>倒计时里按空格（或点按钮）：不重启，联机已经断开了。</summary>
     [RelayCommand]

@@ -14,9 +14,26 @@ public sealed class LanGameWatch
 
     public TimeSpan Expiry { get; init; } = DefaultExpiry;
 
+    /// <summary>
+    /// The most worlds kept at once. Broadcasts can come from any program on this computer: past this, a new port is
+    /// only taken once a quiet one has gone, so ports already listed (the real game's among them) stay.
+    /// </summary>
+    public const int MaxGames = 16;
+
+    /// <summary>Tests: how many ports are remembered.</summary>
+    public int Count => _seen.Count;
+
+    /// <summary>The port is remembered (heard, and not dropped yet).</summary>
+    public bool Has(int port) => _seen.ContainsKey(port);
+
     /// <summary>A broadcast was heard. True when that changes the list: a new port, or a new name on a known one.</summary>
     public bool Saw(LanGame game, DateTime now)
     {
+        if (!_seen.ContainsKey(game.Port) && _seen.Count >= MaxGames)
+        {
+            Expire(now);
+            if (_seen.Count >= MaxGames) return false;
+        }
         if (_seen.TryGetValue(game.Port, out var known))
         {
             // A port that had already gone quiet counts as new again: the same world reopened on the same port.
@@ -56,5 +73,47 @@ public sealed class LanGameWatch
         if (linked is { } port && (current.Any(g => g.Port == port) || !linkedWasHeard)) return null;
         foreach (var game in current) if (game.Port != relayPort && game.Port != linked) return game.Port;
         return null;
+    }
+}
+
+/// <summary>
+/// Broadcasts heard since the list was last updated, one per port and at most <see cref="LanGameWatch.MaxGames"/>
+/// ports, so a flood of them becomes one update at a time instead of one per packet. Thread-safe: the listener adds,
+/// the UI takes.
+/// </summary>
+public sealed class LanGameInbox
+{
+    private readonly Dictionary<int, LanGame> _pending = [];
+    private readonly Lock _gate = new();
+    private bool _scheduled;
+
+    /// <summary>Tests: ports waiting.</summary>
+    public int Count { get { lock (_gate) return _pending.Count; } }
+
+    /// <summary>
+    /// Keeps the broadcast (the newest per port; a new port past the limit is dropped). True when the caller should
+    /// schedule a <see cref="Take"/>: the first since the last one.
+    /// </summary>
+    public bool Add(LanGame game)
+    {
+        lock (_gate)
+        {
+            if (_pending.ContainsKey(game.Port) || _pending.Count < LanGameWatch.MaxGames) _pending[game.Port] = game;
+            if (_scheduled) return false;
+            _scheduled = true;
+            return true;
+        }
+    }
+
+    /// <summary>Everything waiting, oldest port first; the next <see cref="Add"/> schedules again.</summary>
+    public IReadOnlyList<LanGame> Take()
+    {
+        lock (_gate)
+        {
+            var all = _pending.Values.ToList();
+            _pending.Clear();
+            _scheduled = false;
+            return all;
+        }
     }
 }

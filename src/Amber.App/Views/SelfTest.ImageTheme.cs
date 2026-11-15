@@ -136,12 +136,37 @@ internal sealed class ImageThemeSelfTest(MainWindow window, MainViewModel main, 
             Check("名字空着时【用上】不能点", Named<Button>("ApplyImageThemeButton") is { IsEffectivelyEnabled: false });
             vm.Name = "自检图片主题";
             await Task.Delay(100);
+            bool previewAbove() => Named<Control>("PreviewColumn") is { } preview && Named<Control>("EditorColumn") is { } slots
+                && preview.Bounds.Bottom <= slots.Bounds.Top && slots.Bounds.Right <= editor!.Bounds.Width + 0.5;
+            Check("预览在图片位上面，图片位占满编辑器的宽度", previewAbove() && Named<Control>("EditorColumn")!.Bounds.Width >= editor!.Bounds.Width - 1,
+                $"{editor!.Bounds.Width:0}");
+            editor.BringIntoView();
             await ShotAsync("image-theme-panel-1280");
-            window.Width = 820;
+            window.Width = 760;
             await Task.Delay(500);
-            Check("设置栏窄时预览挪到上面", editor!.IsStacked);
-            await ShotAsync("image-theme-panel-820");
+            Check("设置栏窄时预览也在上面", previewAbove(), $"{editor.Bounds.Width:0}");
+            editor.BringIntoView();
+            await ShotAsync("image-theme-panel-760");
+            // The smallest window, in English and Japanese (longer labels): nothing wider than the column it sits in.
+            window.Width = 600;
+            window.Height = 420;
+            var startLanguage = L.Language;
+            foreach (var language in new[] { "en", "ja" })
+            {
+                L.SetLanguage(language);
+                await Task.Delay(600);
+                var scroll = editor.FindAncestorOfType<ScrollViewer>();
+                var fits = editor.GetVisualDescendants().OfType<Control>()
+                    .Where(c => c.IsEffectivelyVisible && c is TextBlock or Button or Slider or TextBox)
+                    .All(c => c.TranslatePoint(new Point(c.Bounds.Width, 0), editor) is { } p && p.X <= editor.Bounds.Width + 1);
+                Check($"600×420（{language}）：预览在上面、没有东西伸出右边", previewAbove() && fits
+                    && (scroll is null || editor.Bounds.Width <= scroll.Viewport.Width + 1), $"{editor.Bounds.Width:0}");
+                editor.BringIntoView();
+                await ShotAsync($"image-theme-panel-600x420-{language}");
+            }
+            L.SetLanguage(startLanguage);
             window.Width = 1280;
+            window.Height = 800;
             await Task.Delay(400);
 
             // [Use it]

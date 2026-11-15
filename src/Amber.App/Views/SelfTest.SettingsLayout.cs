@@ -48,6 +48,22 @@ internal sealed partial class SelfTest
             await Task.Delay(300);
             Check("settings/network：只显示网络（公共网络、中转、STUN）", Shown() is ["Group_network"] && settings.SelectedGroupId == SettingsCatalog.Network, string.Join(",", Shown()));
             await ShotAsync("settings-network-1440");
+            // A relay command run from Settings › Network says what happened on Settings' own status bar.
+            if (settings.Multiplayer is { } mp)
+            {
+                var nodesBefore = mp.Nodes.Count;
+                Dispatcher.UIThread.Invoke(() =>
+                {
+                    mp.NewNodeUrl = "not a relay";
+                    mp.AddNodeCommand.Execute(null);
+                });
+                await Task.Delay(200);
+                Check("设置 › 网络：加一个写错的中转，设置页底部写明哪里不对，原来的中转都在",
+                    Dispatcher.UIThread.Invoke(() => page.SettingsStatus.IsEffectivelyVisible && page.SettingsStatus.Message?.Key == "multiplayer.nodes.invalid_address")
+                    && mp.Nodes.Count == nodesBefore, settings.StatusInfo?.Key ?? "");
+                Dispatcher.UIThread.Invoke(() => { mp.NewNodeUrl = ""; settings.SetStatus(null); });
+            }
+            else Check("设置 › 网络：连着联机页的设置", false);
             main.Shell.Navigate("settings/multiplayer");
             await Task.Delay(300);
             Check("settings/multiplayer：只显示联机（分组的联机高级设置）", Shown() is ["Group_multiplayer"] && settings.SelectedGroupId == SettingsCatalog.Multiplayer, string.Join(",", Shown()));

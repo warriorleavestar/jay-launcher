@@ -1092,6 +1092,8 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
         if (string.IsNullOrWhiteSpace(name)) throw new ArgumentException(L.T("content.modpack.name_required"));
         var skipped = new List<string>();
         var mixed = false;
+        // The game directory can be switched while the pack imports: everything after it goes to the one it went into.
+        var ctx = _service.Context;
         // Created here so progress reports come back to the UI thread; the import itself (opening and extracting the
         // archive) runs on the thread pool so the window stays responsive.
         var progress = new Progress<LoaderProgress>(p =>
@@ -1100,23 +1102,33 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
             if (p.Percent is { } percent) Progress = percent;
             _importTask?.Report(p.Percent / 100.0, p.Stage);
         });
-        var modpacks = _service.Modpacks;
-        var versionDir = (Func<string, string>)_service.Directory.VersionDir;
+        var modpacks = ctx.Modpacks;
+        var versionDir = (Func<string, string>)ctx.Directory.VersionDir;
         var id = await Task.Run(() => modpacks.ImportAsync(path, name, versionDir, progress, ct,
             onSkip: file => { lock (skipped) skipped.Add(file); }, mixedRefusal: info => { mixed = true; return MixedRefusal(info); }), ct);
         await Ui.FlushAsync();
-        _service.ForceIsolated(id);
-        // A mixed pack only runs through the universal loader, so the new instance starts with it on.
-        if (mixed) _service.SetUniversalLoader(id, true);
+        FinishImport(ctx, id, mixed);
         // 跳过的文件在进度里一闪而过，完成时用可随语言切换的状态再汇总一次。
         lock (skipped)
             SetStatus(skipped.Count == 0
                 ? StatusMessage.Success("content.modpack.installed", id)
                 : StatusMessage.Warning("content.modpack.installed_skipped", id, skipped.Count, string.Join(L.T("core.mp.format.listseparator"), skipped.Take(5)) + (skipped.Count > 5 ? "…" : "")));
-        _service.NotifyInstalledChanged();
-        // 新装的整合包直接成为当前实例（改版规格 2.3）。
-        _service.SetCurrentInstance(id);
         return id;
+    }
+
+    /// <summary>
+    /// After a pack is in: its instance is isolated, a mixed pack's instance starts with the universal loader on, and
+    /// it becomes the current instance (redesign 2.3), all in the game directory it was imported into. When the user
+    /// switched to another directory meanwhile, nothing there changes.
+    /// </summary>
+    internal void FinishImport(GameContext ctx, string id, bool mixed)
+    {
+        _service.ForceIsolated(ctx, id);
+        // A mixed pack only runs through the universal loader, so the new instance starts with it on.
+        if (mixed) _service.SetUniversalLoader(ctx, id, true);
+        if (!ReferenceEquals(ctx, _service.Context)) return;
+        _service.NotifyInstalledChanged();
+        _service.SetCurrentInstance(id);
     }
 
     /// <summary>A mixed pack imports only when the universal loader runs its mix on the base loader and is installed (the new instance then uses it).</summary>

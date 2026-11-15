@@ -45,11 +45,25 @@ public sealed partial class MultiplayerViewModel
         var cts = _roomWatchCts = new CancellationTokenSource();
         var ct = cts.Token;
         var listen = RoomGameListenForTest ?? Amber.Core.Multiplayer.LanGames.WatchAsync;
+        // Any program here can send these, as fast as it likes: they are gathered per port and handed to the UI at
+        // most every RoomGamesFlushInterval, never one post per packet. A room that stopped gets nothing more.
+        var inbox = _roomInbox = new LanGameInbox();
+        void Heard(LanGame game)
+        {
+            if (ct.IsCancellationRequested || !inbox.Add(game)) return;
+            Interlocked.Increment(ref _roomFlushesScheduled);
+            _ = Task.Delay(RoomGamesFlushInterval, CancellationToken.None).ContinueWith(_ => Dispatcher.UIThread.Post(() =>
+            {
+                var games = inbox.Take();
+                if (ct.IsCancellationRequested || _roomInbox != inbox) return;
+                foreach (var game in games) RoomGameHeard(game);
+            }), TaskScheduler.Default);
+        }
         _ = Task.Run(async () =>
         {
             try
             {
-                await listen(game => Dispatcher.UIThread.Post(() => { if (!ct.IsCancellationRequested) RoomGameHeard(game); }), ct);
+                await listen(Heard, ct);
             }
             catch (Exception e) when (e is System.Net.Sockets.SocketException or ObjectDisposedException or InvalidOperationException)
             {
@@ -62,8 +76,20 @@ public sealed partial class MultiplayerViewModel
         RebuildRoomGames();
     }
 
+    /// <summary>How often gathered broadcasts reach the list.</summary>
+    internal static readonly TimeSpan RoomGamesFlushInterval = TimeSpan.FromMilliseconds(250);
+
+    private LanGameInbox? _roomInbox;
+    private int _roomFlushesScheduled;
+
+    /// <summary>Tests: broadcasts waiting for the list, updates handed to the UI so far, and ports remembered.</summary>
+    internal int RoomGamesWaitingForTest => _roomInbox?.Count ?? 0;
+    internal int RoomGamesFlushesForTest => Volatile.Read(ref _roomFlushesScheduled);
+    internal int RoomGamesKnownForTest => _roomWatch.Count + _roomHeard.Count;
+
     private void StopRoomGameWatch()
     {
+        _roomInbox = null;
         _roomWatchCts?.Cancel();
         _roomWatchCts?.Dispose();
         _roomWatchCts = null;
@@ -77,8 +103,14 @@ public sealed partial class MultiplayerViewModel
     internal void RoomGameHeard(LanGame game)
     {
         if (_gameRelay is not { } relay || game.Port == relay.Port) return;
-        _roomHeard.Add(game.Port);
-        if (!_roomWatch.Saw(game, RoomGamesNow)) return;
+        var changed = _roomWatch.Saw(game, RoomGamesNow);
+        // Only ports the list kept count as heard (bounded the same way).
+        if (_roomWatch.Has(game.Port))
+        {
+            if (_roomHeard.Count >= LanGameWatch.MaxGames * 4) _roomHeard.RemoveWhere(p => p != relay.Target);
+            _roomHeard.Add(game.Port);
+        }
+        if (!changed) return;
         RebuildRoomGames();
         FollowRoomGame();
     }
@@ -86,14 +118,25 @@ public sealed partial class MultiplayerViewModel
     /// <summary>On the room refresh: drop worlds that went quiet, and follow one that moved.</summary>
     internal void ExpireRoomGames()
     {
-        if (_gameRelay is null || !_roomWatch.Expire(RoomGamesNow)) return;
-        RebuildRoomGames();
-        FollowRoomGame();
+        if (_gameRelay is not { } relay) return;
+        if (_roomWatch.Expire(RoomGamesNow))
+        {
+            RebuildRoomGames();
+            FollowRoomGame();
+        }
+        // Still waiting while a world keeps broadcasting (its first check failed, say, while it was still starting):
+        // try it again, at most every RoomGamesRetryInterval.
+        else if (relay.Target is null && RoomGamesNow >= _roomRetryAt) FollowRoomGame();
     }
+
+    /// <summary>How long a room waiting for its game waits before trying a listed world again.</summary>
+    internal static readonly TimeSpan RoomGamesRetryInterval = TimeSpan.FromSeconds(5);
+    private DateTime _roomRetryAt;
 
     private void FollowRoomGame()
     {
         if (_gameRelay is not { } relay) return;
+        _roomRetryAt = RoomGamesNow + RoomGamesRetryInterval;
         var target = relay.Target;
         // A game someone is playing in stays linked, whatever its broadcasts do.
         if (target is { } t && relay.OpenConnectionsTo(t) > 0) return;

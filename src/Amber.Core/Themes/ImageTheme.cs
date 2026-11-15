@@ -183,14 +183,16 @@ public static class ImageTheme
 
         var temp = path + ".tmp";
         if (File.Exists(temp)) File.Delete(temp);
-        using (var zip = ZipFile.Open(temp, ZipArchiveMode.Create))
-            foreach (var (entryName, bytes) in files)
-            {
-                using var stream = zip.CreateEntry(entryName, CompressionLevel.Optimal).Open();
-                stream.Write(bytes);
-            }
         try
         {
+            // Inside the try: a write that fails (a full disk, say) leaves no .tmp behind.
+            using (var file = CreateTempFile(temp))
+            using (var zip = new ZipArchive(file, ZipArchiveMode.Create))
+                foreach (var (entryName, bytes) in files)
+                {
+                    using var stream = zip.CreateEntry(entryName, CompressionLevel.Optimal).Open();
+                    stream.Write(bytes);
+                }
             var pack = ThemePackReader.Read(temp);
             if (pack.Problems.FirstOrDefault(p => p.Code is "bad_image" or "image_too_large" or "missing_file" or "bad_asset_path") is { } problem)
                 throw new ThemePackException(problem.Code, problem.Detail);
@@ -199,10 +201,14 @@ public static class ImageTheme
         }
         catch
         {
-            File.Delete(temp);
+            try { File.Delete(temp); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
             throw;
         }
     }
+
+    /// <summary>Opens the pack's temporary file (tests swap in a stream that fails part way, like a full disk).</summary>
+    internal static Func<string, Stream> CreateTempFile { get; set; } = File.Create;
 
     private const string Readme =
         "Jay theme pack made from pictures. tokens.json holds the colours and the image slots (background, sidebar, mascot,\n" +

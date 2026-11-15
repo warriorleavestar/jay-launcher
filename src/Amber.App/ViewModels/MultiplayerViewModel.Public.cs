@@ -327,6 +327,9 @@ public sealed partial class MultiplayerViewModel
     /// <summary>The room may be registered with the connected public network: never a "No server" (direct) room.</summary>
     internal bool MayAnnounce => IsHosting && _lobby is not null && !IsDirect;
 
+    /// <summary>[Publish…] in the room's settings: not for a no-server room, which is never listed.</summary>
+    public bool ShowPublishRoom => ShowPublicNetworks && !IsDirect;
+
     private void StartAnnouncerIfHosting()
     {
         if (_public is not { } network || _announcer is not null || !MayAnnounce) return;
@@ -387,6 +390,12 @@ public sealed partial class MultiplayerViewModel
         if (Child.InviteOnly)
         {
             SetStatus(StatusMessage.Warning("multiplayer.public.child_invite_only"));
+            return;
+        }
+        // A no-server room is never listed (MayAnnounce): say so instead of a "published" that lists nothing.
+        if (IsDirect)
+        {
+            SetStatus(StatusMessage.Warning("multiplayer.direct.use_sealed"));
             return;
         }
         if (_public is null)
