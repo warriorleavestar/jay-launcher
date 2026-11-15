@@ -82,7 +82,8 @@ public static class Program
           jay-server node panel               打印网页管理面板的链接（只能在本机打开；远程服务器用 ssh -L 转发端口）
           jay-server node ban host|room|account|room-host|node|operator <房主指纹|房间编号|账号|房间编号|志愿节点地址|志愿节点运营者的 Jay 账户> [--for 7d] [--reason 原因]
               封禁房主（换房间也进不了列表）、房间、网络账号（也不能再登录），或者某个房间的房主（指纹 + 他登录的账号）。
-              马上把已经在目录里的房间拿掉；--for 30m/24h/7d 是临时封禁，到点自动解除。node unban host|room|account|node|operator <...>（room-host 封的要分别解封 host 和 account）
+              马上把已经在目录里的房间拿掉；--for 30m/24h/7d 是临时封禁，到点自动解除。node unban host|room|account|node|operator <...>（room-host 封的要分别解封 host 和 account；
+              同名的账号封禁既有精确的、又有旧版不分大小写的（node bans 里标 "anyCase"）时，要加 --exact 或 --any-case 指定解哪一条）
           jay-server node remove <房间编号>     只删掉这一个房间（房主续期时会重新审核）
 
         自己的公共网络（连接串 JAYNET2-...）：
@@ -946,7 +947,17 @@ public static class Program
                     ["kind"] = Need(0, "host、room、account 或 room-host"), ["value"] = Need(1, "房主指纹、房间编号或账号"), ["reason"] = options.Get("reason"),
                     ["for"] = options.Get("for") is { } span ? BanSeconds(span) : null,
                 }),
-                "unban" => await client.CallAsync("POST", "/unban", new() { ["kind"] = Need(0, "host、room 或 account"), ["value"] = Need(1, "房主指纹、房间编号或账号") }),
+                "unban" => await client.CallAsync("POST", "/unban", new()
+                {
+                    ["kind"] = Need(0, "host、room 或 account"), ["value"] = Need(1, "房主指纹、房间编号或账号"),
+                    ["match"] = (options.Has("any-case"), options.Has("exact")) switch
+                    {
+                        (true, true) => throw new ArgumentException("--any-case 和 --exact 只能选一个"),
+                        (true, false) => "anyCase",
+                        (false, true) => "exact",
+                        _ => null,
+                    },
+                }),
                 "remove" => await client.CallAsync("POST", "/remove", new() { ["id"] = Need(0, "房间编号") }),
                 _ => throw new ArgumentException("用法：jay-server node status|rooms|bans|nodes|panel|ban|unban|remove"),
             };
@@ -963,6 +974,8 @@ public static class Program
             return 0;
         }
         output.WriteLine(reply.ToJsonString(pretty));
+        if (sub == "unban" && reply["error"]?.GetValue<string>() == "ambiguous")
+            output.WriteLine("这个名字既有精确的账号封禁，又有旧版不分大小写的封禁（node bans 里标 \"anyCase\"）：加 --exact 只解精确的那条，或加 --any-case 只解旧的那条。");
         if (sub == "ban" && reply["bannedNodes"] is System.Text.Json.Nodes.JsonArray { Count: > 0 } bannedNodes)
             output.WriteLine($"一起封掉的地址：{string.Join("、", bannedNodes)}（封错了用 node unban node <地址> 解封）");
         if (sub == "ban" && reply["disputedNotBanned"] is System.Text.Json.Nodes.JsonArray { Count: > 0 } spared)
@@ -1353,7 +1366,7 @@ public static class Program
 /// <summary>最简单的参数解析：第一个词是命令，--name value 是选项，--flag 是开关，其余是位置参数。</summary>
 internal sealed class Options
 {
-    private static readonly HashSet<string> Flags = ["accept-eula", "no-mc", "console", "new-seed", "verbose", "accounts", "require-2fa", "seed-only", "no-admin", "no-rate-limit", "secure-directory-only", "no-volunteers", "signed-volunteers", "no-passphrase", "paper", "wipe-dry-run", "check", "secure-boot", "no-tpm"];
+    private static readonly HashSet<string> Flags = ["accept-eula", "no-mc", "console", "new-seed", "verbose", "accounts", "require-2fa", "seed-only", "no-admin", "no-rate-limit", "secure-directory-only", "no-volunteers", "signed-volunteers", "no-passphrase", "paper", "wipe-dry-run", "check", "secure-boot", "no-tpm", "any-case", "exact"];
     private readonly Dictionary<string, string?> _values = new(StringComparer.OrdinalIgnoreCase);
     public string? Command { get; private set; }
     public List<string> Positional { get; } = [];

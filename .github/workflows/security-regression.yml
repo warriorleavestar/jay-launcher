@@ -2,10 +2,10 @@ name: security-regression
 
 on:
   pull_request:
-    paths: ['src/**', '.github/workflows/security-regression.yml']
+    paths: ['src/**', 'node/install.sh', 'server/install-network-node.sh', '.github/workflows/security-regression.yml']
   push:
     branches: [main]
-    paths: ['src/**', '.github/workflows/security-regression.yml']
+    paths: ['src/**', 'node/install.sh', 'server/install-network-node.sh', '.github/workflows/security-regression.yml']
 
 # 同一个 PR 推了新提交时，取消旧提交还在排队或在跑的检查；main 和标签上的不取消
 concurrency:
@@ -46,7 +46,7 @@ jobs:
       - name: Security boundary regression tests
         run: >-
           dotnet test Amber.Core.Tests -c Release
-          --filter "FullyQualifiedName~ProcessBoundarySecurityTests|FullyQualifiedName~InputParsingSecurityTests|FullyQualifiedName~WorldImportTests|FullyQualifiedName~ServerStatusTests|FullyQualifiedName~SpeedTestServerTests|FullyQualifiedName~SpeedTestSecurityTests|FullyQualifiedName~NbtBudgetTests|FullyQualifiedName~TestMatrixTests"
+          --filter "FullyQualifiedName~ProcessBoundarySecurityTests|FullyQualifiedName~InputParsingSecurityTests|FullyQualifiedName~WorldImportTests|FullyQualifiedName~ServerStatusTests|FullyQualifiedName~SpeedTestServerTests|FullyQualifiedName~SpeedTestSecurityTests|FullyQualifiedName~NbtBudgetTests|FullyQualifiedName~TestMatrixTests|FullyQualifiedName~InstallScriptTests"
           --logger "trx;LogFileName=security.trx" --results-directory ../out/security-tests
 
       - name: Upload security test results

@@ -177,7 +177,7 @@ function Run-DirectCase([string]$label, [string[]]$extra, [int]$timeout) {
 }
 
 try {
-    Write-Log "Amber 联机自测，日志：$log"
+    Write-Log "Jay 联机自测，日志：$log"
     Write-Log "Amber.Cli：$Cli"
     if (-not (Test-Path $Cli)) { throw "找不到 Amber.Cli.exe，先在 src 下运行 dotnet build" }
     & $Cli lan-setup 2>&1 | ForEach-Object { Write-Log $_ }
@@ -193,7 +193,7 @@ try {
     if (-not $SkipPublic -and $PublicNode) {
         Run-Case "公共节点" @("--peer", $PublicNode) @("--peer", $PublicNode) @() $PublicTimeout
     } elseif (-not $SkipPublic) {
-        Write-Log "跳过公共节点测试：没有给 -PublicNode（Amber 不内置节点）"
+        Write-Log "跳过公共节点测试：没有给 -PublicNode"
     }
 
     $etDir = Join-Path $env:APPDATA "Amber\easytier"

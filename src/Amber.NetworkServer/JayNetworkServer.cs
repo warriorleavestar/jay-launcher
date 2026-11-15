@@ -57,7 +57,7 @@ public sealed class JayNetworkServerBuilder
     public JayNetworkServerBuilder UseSeeds(IEnumerable<string> seeds)
     {
         foreach (var s in seeds)
-            if (!RelayNodes.IsValid(s)) throw new ArgumentException($"种子节点地址不对：{s}（例：tcp://1.2.3.4:11010）");
+            if (!RelayNodes.IsValid(s)) throw new ArgumentException($"种子节点地址不对：{s}（例：tcp://seed.example.org:11010）");
         Seeds = [.. seeds.Select(s => s.Trim())];
         return this;
     }
@@ -207,6 +207,7 @@ public sealed class JayNetworkServer : IAsyncDisposable
         if (_sealedKeys is null) Guard = null;
         Bans = b.BanListOn ? new BanList(Path.Combine(b.DataDir, "bans.json"), b.Clock) : null;
         Stats = new DirectoryStats();
+        IAccountStore? accountStore = null;
         if (b.Login is { } login) Login = login;
         else if (b.Accounts is { } accounts)
         {
@@ -219,7 +220,30 @@ public sealed class JayNetworkServer : IAsyncDisposable
                 Factors = [new TotpFactor(store), .. b.Factors],
                 RequireSecondFactor = accounts.RequireSecondFactor,
             };
+            accountStore = store;
         }
+        MigrateAccountBans(accountStore);
+    }
+
+    /// <summary>
+    /// Ties account bans saved by older versions to the exact account they name, and tells the admin about the ones that
+    /// can't be tied to one account (they keep matching the name in any case; <c>node bans</c> marks them "anyCase").
+    /// </summary>
+    private void MigrateAccountBans(IAccountStore? store)
+    {
+        if (Bans is not { } bans) return;
+        if (store?.AccountNames() is { } names)
+        {
+            var result = bans.MigrateAccountBans(names);
+            if (result.Migrated > 0) _b.Log($"Ban list: {result.Migrated} account ban(s) from an older version now name the exact account");
+            foreach (var (ban, count) in result.Unresolved)
+                _b.Log($"Ban list: please review the account ban \"{ban.Value}\": "
+                    + (count == 0 ? "no account has this name" : $"{count} accounts have this name in different case")
+                    + "; it keeps matching the name in any case (\"anyCase\" in node bans). Ban the exact account name, then lift only this entry (node unban account <name> --any-case).");
+        }
+        else if (bans.List().Count(b => b.AnyCase) is > 0 and var left)
+            _b.Log($"Ban list: {left} account ban(s) from an older version keep matching names in any case because the account store "
+                + "can't list its accounts (\"anyCase\" in node bans). Please review them.");
     }
 
     private DateTimeOffset Now => _b.Clock?.Invoke() ?? DateTimeOffset.UtcNow;
@@ -465,11 +489,14 @@ public sealed class JayNetworkServer : IAsyncDisposable
     /// <summary>The reason on address bans that came with banning an operator (how unbanning finds them).</summary>
     private static string OperatorBanReason(string account) => "with operator " + account;
 
-    /// <summary>Lifts a ban. Lifting an operator ban also lifts the address bans that came with it.</summary>
-    public bool Unban(string kind, string value)
+    /// <summary>
+    /// Lifts a ban (<paramref name="match"/>: see <see cref="BanList.Remove"/>). Lifting an operator ban also lifts the
+    /// address bans that came with it.
+    /// </summary>
+    public bool Unban(string kind, string value, BanMatch match = BanMatch.Auto)
     {
         if (Bans is null) throw new InvalidOperationException("This node has no ban list.");
-        if (!Bans.Remove(kind, value)) return false;
+        if (!Bans.Remove(kind, value, match)) return false;
         if (kind == "operator" && Amber.Core.Identity.JayAddress.Canonical(value.Trim()) is { } account)
             foreach (var node in Bans.List().Where(b => b.Kind == "node" && b.Reason == OperatorBanReason(account)).ToList())
                 Bans.Remove("node", node.Value);
