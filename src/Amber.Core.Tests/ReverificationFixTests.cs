@@ -96,6 +96,7 @@ public class ReverificationFixTests
             Discover = _ => { Interlocked.Increment(ref calls); return Task.FromResult(ok); },
             MaxPublicIpAge = TimeSpan.FromMilliseconds(50),
             Time = clock,
+            IsRoutable = TestAddresses.IsRoutable,
         };
         policy.SetReady(true);
         clock.Advance(TimeSpan.FromMilliseconds(100));
@@ -104,10 +105,11 @@ public class ReverificationFixTests
         // 刚查过：不再查。
         Assert.True(await policy.EnsureFreshAsync(TimeSpan.FromSeconds(2), default));
         Assert.Equal(1, calls);
+        Assert.True(policy.Allows(IPAddress.Parse("198.51.100.88")));
         clock.Advance(TimeSpan.FromMilliseconds(100));
         ok = false;
         Assert.False(await policy.EnsureFreshAsync(TimeSpan.FromSeconds(2), default));
-        Assert.False(policy.Allows(IPAddress.Parse("8.8.8.8")));
+        Assert.False(policy.Allows(IPAddress.Parse("198.51.100.88")));
     }
 
     // R7：出口没准备好时回专门的答复，加入方看到“出口还没准备好”。
@@ -207,7 +209,7 @@ public class ReverificationFixTests
     [Fact]
     public void MappedPrefixDoesNotThrow()
     {
-        Assert.False(ExitPolicy.InNetwork(IPAddress.Parse("8.8.8.8"), IPAddress.Parse("::ffff:10.0.0.0"), 104));
+        Assert.False(ExitPolicy.InNetwork(IPAddress.Parse("198.51.100.88"), IPAddress.Parse("::ffff:10.0.0.0"), 104));
         using var real = new ExitPolicy();
         real.RefreshLocal();
     }

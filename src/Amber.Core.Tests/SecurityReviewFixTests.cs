@@ -37,15 +37,17 @@ public class SecurityReviewFixTests
     [Fact]
     public void Exit_FailsClosedUntilPublicIpKnown()
     {
-        using var policy = new ExitPolicy([], []);
+        using var policy = new ExitPolicy([], []) { IsRoutable = TestAddresses.IsRoutable };
         policy.SetReady(false);
-        Assert.False(policy.Allows(IPAddress.Parse("8.8.8.8")));
+        Assert.False(policy.Allows(IPAddress.Parse("198.51.100.88")));
         policy.SetReady(true);
-        Assert.True(policy.Allows(IPAddress.Parse("8.8.8.8")));
-        // A well-known public resolver address: the reported set is shared by every policy, so no other test may expect it allowed.
-        ExitPolicy.ReportPublicAddress(IPAddress.Parse("149.112.112.112"));
-        Assert.False(policy.Allows(IPAddress.Parse("149.112.112.112")));
-        Assert.False(policy.Allows(IPAddress.Parse("::ffff:149.112.112.112")));
+        Assert.True(policy.Allows(IPAddress.Parse("198.51.100.88")));
+        // The reported set is shared by every policy, so this address is used here only and no other test may expect it allowed.
+        var reported = IPAddress.Parse("203.0.113.112");
+        Assert.True(policy.Allows(reported));
+        ExitPolicy.ReportPublicAddress(reported);
+        Assert.False(policy.Allows(reported));
+        Assert.False(policy.Allows(IPAddress.Parse("::ffff:203.0.113.112")));
     }
 
     // 2. 公网 IPv6 的整个 /56（同一家里的别的 /64），以及路由表里的非默认路由。
@@ -403,30 +405,32 @@ public class SecurityReviewFixTests
     [Fact]
     public async Task JoinTarget_ResolveForRelay()
     {
-        static Task<IPAddress[]> Public(string _, CancellationToken __) => Task.FromResult(new[] { IPAddress.Parse("8.8.8.8") });
+        static Task<IPAddress[]> Public(string _, CancellationToken __) => Task.FromResult(new[] { IPAddress.Parse("198.51.100.88") });
         static Task<IPAddress[]> Private(string _, CancellationToken __) => Task.FromResult(new[] { IPAddress.Parse("192.168.1.9") });
         static (string, int)? NoSrv(string _) => null;
         static (string, int)? Srv(string name) => name == "_minecraft._tcp.play.example.org" ? ("mc1.example.org", 25570) : null;
 
-        Assert.Equal(new RelayPlan("play.example.org", 25565, "play.example.org", 25565), await JoinTarget.ResolveForRelayAsync("play.example.org", default, Public, NoSrv));
+        Assert.Equal(new RelayPlan("play.example.org", 25565, "play.example.org", 25565), await JoinTarget.ResolveForRelayAsync("play.example.org", TestAddresses.IsRoutable, default, Public, NoSrv));
         // SRV：连 SRV 给的主机和端口，握手包里仍写用户写的名字和默认端口（和游戏直接进时一样，按域名分服的服务器才认得）。
-        Assert.Equal(new RelayPlan("mc1.example.org", 25570, "mc1.example.org", 25570), await JoinTarget.ResolveForRelayAsync("play.example.org", default, Public, Srv));
+        Assert.Equal(new RelayPlan("mc1.example.org", 25570, "mc1.example.org", 25570), await JoinTarget.ResolveForRelayAsync("play.example.org", TestAddresses.IsRoutable, default, Public, Srv));
         // 写了 25565 也查 SRV（和游戏一样）。
-        Assert.Equal(new RelayPlan("mc1.example.org", 25570, "mc1.example.org", 25570), await JoinTarget.ResolveForRelayAsync("play.example.org:25565", default, Public, Srv));
-        Assert.Equal(new RelayPlan("play.example.org", 25566, "play.example.org", 25566), await JoinTarget.ResolveForRelayAsync("play.example.org:25566", default, Public, Srv));
-        Assert.Null(await JoinTarget.ResolveForRelayAsync("intranet.example.org", default, Private, NoSrv));
-        Assert.Null(await JoinTarget.ResolveForRelayAsync("localhost:25565", default, Public, NoSrv));
-        Assert.Null(await JoinTarget.ResolveForRelayAsync("192.168.1.5:25565", default, Public, NoSrv));
-        Assert.Equal(new RelayPlan("8.8.8.8", 25565, "8.8.8.8", 25565), await JoinTarget.ResolveForRelayAsync("8.8.8.8", default, Public, NoSrv));
+        Assert.Equal(new RelayPlan("mc1.example.org", 25570, "mc1.example.org", 25570), await JoinTarget.ResolveForRelayAsync("play.example.org:25565", TestAddresses.IsRoutable, default, Public, Srv));
+        Assert.Equal(new RelayPlan("play.example.org", 25566, "play.example.org", 25566), await JoinTarget.ResolveForRelayAsync("play.example.org:25566", TestAddresses.IsRoutable, default, Public, Srv));
+        Assert.Null(await JoinTarget.ResolveForRelayAsync("intranet.example.org", TestAddresses.IsRoutable, default, Private, NoSrv));
+        Assert.Null(await JoinTarget.ResolveForRelayAsync("localhost:25565", TestAddresses.IsRoutable, default, Public, NoSrv));
+        Assert.Null(await JoinTarget.ResolveForRelayAsync("192.168.1.5:25565", TestAddresses.IsRoutable, default, Public, NoSrv));
+        Assert.Equal(new RelayPlan("198.51.100.88", 25565, "198.51.100.88", 25565), await JoinTarget.ResolveForRelayAsync("198.51.100.88", TestAddresses.IsRoutable, default, Public, NoSrv));
+        // The real check refuses documentation addresses: only the test stand-in above lets them through.
+        Assert.Null(await JoinTarget.ResolveForRelayAsync("198.51.100.88", default, Public, NoSrv));
         // 本机名字不去查 SRV。
         var asked = false;
         (string, int)? Spy(string _) { asked = true; return null; }
-        Assert.Null(await JoinTarget.ResolveForRelayAsync("nas.lan", default, Public, Spy));
+        Assert.Null(await JoinTarget.ResolveForRelayAsync("nas.lan", TestAddresses.IsRoutable, default, Public, Spy));
         Assert.False(asked);
         // SRV 查询卡住也不会一直等。
         var watch = System.Diagnostics.Stopwatch.StartNew();
         (string, int)? Hang(string _) { Thread.Sleep(10_000); return null; }
-        Assert.NotNull(await JoinTarget.ResolveForRelayAsync("play.example.org", default, Public, Hang));
+        Assert.NotNull(await JoinTarget.ResolveForRelayAsync("play.example.org", TestAddresses.IsRoutable, default, Public, Hang));
         Assert.True(watch.Elapsed < TimeSpan.FromSeconds(6));
     }
 

@@ -42,21 +42,29 @@ public class StunParseTests
         BinaryPrimitives.WriteUInt16BigEndian(response.AsSpan(22), 20);
         response[25] = 0x02;
         BinaryPrimitives.WriteUInt16BigEndian(response.AsSpan(26), (ushort)(40000 ^ 0x2112));
-        var address = IPAddress.Parse("2408:8000::1").GetAddressBytes();
+        var address = IPAddress.Parse("2001:db8:8000::1").GetAddressBytes();
         var key = new byte[16];
         BinaryPrimitives.WriteUInt32BigEndian(key, 0x2112A442);
         for (var i = 0; i < 16; i++) response[28 + i] = (byte)(address[i] ^ key[i]);
-        Assert.Equal(IPEndPoint.Parse("[2408:8000::1]:40000"), Stun.ParseResponse(response, id));
+        Assert.Equal(IPEndPoint.Parse("[2001:db8:8000::1]:40000"), Stun.ParseResponse(response, id));
     }
 
     [Theory]
-    [InlineData("8.8.8.8", true)]
     [InlineData("192.168.1.2", false)]
     [InlineData("100.70.1.1", false)]
     [InlineData("172.20.0.1", false)]
-    [InlineData("2408:8000::1", true)]
     [InlineData("fe80::1", false)]
     public void PublicAddress(string address, bool expected) => Assert.Equal(expected, PortMapping.IsPublic(IPAddress.Parse(address)));
+
+    /// <summary>Just outside the private ranges is public (built from the range edges, so no real host is named).</summary>
+    [Fact]
+    public void AddressesNextToPrivateRangesArePublic()
+    {
+        Assert.True(PortMapping.IsPublic(TestAddresses.After("10.255.255.255")));
+        Assert.True(PortMapping.IsPublic(TestAddresses.After("100.127.255.255")));
+        Assert.True(PortMapping.IsPublic(TestAddresses.Before("172.16.0.0")));
+        Assert.True(PortMapping.IsPublic(TestAddresses.Before("fc00::")));
+    }
 }
 
 /// <summary>本机两个直连桥：打洞、转发、控制消息、禁用路径。</summary>
@@ -199,13 +207,13 @@ public class TestMatrixTests
     [Fact]
     public void PlanUsesWhatBothSidesHave()
     {
-        var host = new[] { C(PathKind.IPv6, "[2408::1]:1"), C(PathKind.Punch, "203.0.113.5:1"), C(PathKind.Lan, "192.168.1.5:1") };
+        var host = new[] { C(PathKind.IPv6, "[2001:db8::1]:1"), C(PathKind.Punch, "203.0.113.5:1"), C(PathKind.Lan, "192.168.1.5:1") };
         var guest = new[] { C(PathKind.Punch, "198.51.100.7:1"), C(PathKind.Lan, "10.0.0.5:1") };
         var steps = TestMatrix.Plan(new MatrixInputs(host, guest, 2, false, false));
         Assert.Equal([PathKind.Punch, PathKind.PunchSpray], steps.Select(s => s.Path!.Value));
         Assert.All(steps, s => Assert.False(s.FullLan));
 
-        var full = TestMatrix.Plan(new MatrixInputs(host, [.. guest, C(PathKind.IPv6, "[2409::2]:1")], 3, true, true));
+        var full = TestMatrix.Plan(new MatrixInputs(host, [.. guest, C(PathKind.IPv6, "[2001:db8:1::2]:1")], 3, true, true));
         // IPv6、打洞、喷洒、中转、节点，各 3 步（经别人上网只有 Windows 能用，其他系统各 2 步）
         Assert.Equal((PlatformFeatures.FullTrafficExit ? 3 : 2) * 5, full.Count);
         if (PlatformFeatures.FullTrafficExit) Assert.Contains(full, s => s.Route == RouteKind.Relay && s.FullLan && s.Exit);

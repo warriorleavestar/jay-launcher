@@ -137,8 +137,8 @@ public sealed class GateTests : IAsyncLifetime
     [InlineData("mc.example.com", false)]
     [InlineData("localhost", false)]
     [InlineData("203.0.113.5", true)]
-    [InlineData("2408:8000::1", true)]
-    [InlineData("[2408:8000::1]", true)]
+    [InlineData("2001:db8:8000::1", true)]
+    [InlineData("[2001:db8:8000::1]", true)]
     public void IpHostsNeedASeal(string host, bool ip) => Assert.Equal(ip, GateInvite.IsIpLiteral(host));
 
     [Fact]

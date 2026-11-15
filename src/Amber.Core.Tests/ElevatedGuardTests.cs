@@ -261,7 +261,7 @@ public class ElevatedGuardTests
     [InlineData("trailing\\")]
     [InlineData("trailing space\\")]
     [InlineData("back\\\\\"slash")]
-    [InlineData("tcp://1.2.3.4:11010")]
+    [InlineData("tcp://192.0.2.4:11010")]
     [InlineData("a\tb")]
     public void CommandLineQuotingRoundTrips(string arg)
     {
