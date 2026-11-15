@@ -782,7 +782,7 @@
   "instance.settings.join_server": "啟動後加入伺服器",
   "instance.settings.transformer_cache": "啟動快取",
   "instance.settings.transformer_cache.on": "加快 Forge 1.12.2 啟動（通用載入器）",
-  "instance.settings.transformer_cache.hint": "保存上一次啟動時 Forge 處理好的類別。遊戲當機、看起來和快取有關時可以關掉，關掉後按原版 Forge 的方式啟動，會慢一些。",
+  "instance.settings.transformer_cache.hint": "保存上一次啟動時 Forge 準備好的內容，下次直接用。遊戲當機、看起來和快取有關時可以關掉，關掉後會慢一些。",
   "instance.settings.join_server_hint": "每次啟動時直接加入這個伺服器，例如 play.example.com:25565",
   "instance.settings.jvm_args": "JVM 參數",
   "instance.settings.jvm_hint": "例如 -XX:+UseZGC，留空沿用全域設定",
@@ -2811,7 +2811,7 @@
   "core.bake.runtime.legacy_launchwrapper": "缺少 Forge 1.12.2 的 LaunchWrapper 程式庫。替這個實例重新安裝一次 Forge。",
   "core.bake.runtime.legacy_failed": "Forge 1.12.2 沒能啟動（{0}）。詳情看遊戲日誌。",
   "core.bake.runtime.legacy_cache_off": "這次沒能用上 Forge 1.12.2 的啟動快取，遊戲按一般方式啟動（會慢一些）。如果一直這樣，可以在實例設定裡關掉這個快取。",
-  "core.bake.legacy_forge_version": "通用載入器只支援 Forge 1.12.2 的 14.23.5.x，這個實例裝的是 Forge {0}。換成 Forge 14.23.5.2860（1.12.2 的最後一版）就能用；或者替這個實例關掉烘焙。",
+  "core.bake.legacy_forge_version": "通用載入器只支援 Forge 1.12.2 的 14.23.5.x，這個實例裝的是 Forge {0}。換成 Forge 14.23.5.2860（1.12.2 的最後一版）就能用；或者替這個實例關掉通用載入器。",
   "core.bake.loader_missing_short": "沒找到通用載入器",
   "core.bake.download_failed": "無法下載 {0}：\n{1}",
   "core.bake.download_unpublished": "通用載入器還沒有發佈可供下載，目前請從壓縮檔安裝。",
@@ -3385,5 +3385,14 @@
   "core.bake.java_too_new": "這個遊戲需要 Java {0} 或更舊的版本（這次會用 Java {1}）。Forge 1.12.2 和它的大多數模組只能在 Java 8 上執行。Jay 會自動給它用 Java 8；如果這個實例用的是你自己選的 Java，請在實例設定裡換成 Java 8。",
   "core.bake.bad_platform": "給通用載入器準備的 Forge 安裝不完整：{0}。請重新安裝這個實例，再烘焙一次。",
   "core.bake.problem.bad_metadata": "讀不出它的模組資訊（mcmod.info 或 @Mod）",
-  "core.bake.problem.platform_unavailable": "這個版本的載入器還跑不了這個平台"
+  "core.bake.problem.platform_unavailable": "這個版本的載入器還跑不了這個平台",
+  "instance.lastrun.legacy.java": "Forge 1.12.2 沒有用 Java 8 啟動",
+  "instance.lastrun.legacy.launchwrapper": "缺少 Forge 1.12.2 的啟動函式庫",
+  "instance.lastrun.legacy.failed": "Forge 1.12.2 在進遊戲前停下了",
+  "instance.lastrun.legacy.cache": "啟動快取沒能用上",
+  "instance.lastrun.legacy.quickplay": "沒能直接進存檔",
+  "instance.lastrun.fix.cache_off": "關掉啟動快取",
+  "instance.lastrun.fix.without_loader": "這次不用通用載入器啟動",
+  "instance.lastrun.cache_off_done": "這個實例的啟動快取關掉了。",
+  "core.bake.runtime.legacy_quickplay": "遊戲沒能直接進存檔，停在了主選單。"
 }

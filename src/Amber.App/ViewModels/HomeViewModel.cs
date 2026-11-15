@@ -1164,8 +1164,12 @@ public sealed partial class HomeViewModel : PageViewModel
         _log.AddRaw(run.Log, L.F("home.log.crash_analysis", analysis.Summary));
         CrashInstance = run.Id;
         CrashTime = run.Session.Ended ?? DateTimeOffset.Now;
+        lock (run.BakeProblems) CrashBakeProblems = [.. run.BakeProblems];
         Crash = analysis;
     }
+
+    /// <summary>What the universal loader reported in the run that crashed (the last-session panel turns Forge 1.12.2 ones into causes).</summary>
+    public IReadOnlyList<Amber.Core.Bake.BakeRuntimeProblem> CrashBakeProblems { get; internal set; } = [];
 
     /// <summary>崩溃卡上的“查看日志”：打开日志页，只看警告和错误。</summary>
     [RelayCommand]

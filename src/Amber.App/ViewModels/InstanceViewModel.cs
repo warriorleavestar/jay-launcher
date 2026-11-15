@@ -187,6 +187,9 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
     /// <summary>Forge on Minecraft 1.12.2: the universal loader's transformer cache switch applies.</summary>
     public bool IsForgeLegacy => Current is { } c && Amber.Core.Bake.BakePlatform.KindOf(c) == Amber.Core.Bake.BakePlatform.ForgeLegacy;
 
+    /// <summary>The start cache row: Forge 1.12.2 that starts through the universal loader.</summary>
+    public bool ShowTransformerCache => IsForgeLegacy && _service.Settings.ExperimentalBake;
+
     /// <summary>共享目录提示上的【去开启】：切到设置 Tab。</summary>
     [RelayCommand]
     private void GoToIsolationSetting() => TabIndex = (int)InstanceTab.Settings;
@@ -265,6 +268,8 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
     {
         // 回到这一页：跟上别处换的当前实例。
         if (_active && !IsBusy && _service.CurrentInstance is { } id && Instances.Contains(id) && id != SelectedId) SelectedId = id;
+        // The universal loader may have been turned on or off in Settings meanwhile.
+        OnPropertyChanged(nameof(ShowTransformerCache));
         if (TabIndex == (int)InstanceTab.Servers) LoadTab((int)InstanceTab.Servers);
     }
 
@@ -691,6 +696,7 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
         PostExit = s.PostExitCommand ?? "";
         JoinServer = s.JoinServer ?? "";
         TransformerCache = s.LegacyTransformerCache != false;
+        OnPropertyChanged(nameof(ShowTransformerCache));
         _ = LoadJavaChoicesAsync(s.JavaPath);
     }
 

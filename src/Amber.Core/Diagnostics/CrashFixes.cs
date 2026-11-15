@@ -17,6 +17,10 @@ public enum CrashFixKind
     ShadersOff,
     /// <summary>Open the log, errors only.</summary>
     ViewLog,
+    /// <summary>Turn the Forge 1.12.2 start cache off for this instance.</summary>
+    TransformerCacheOff,
+    /// <summary>Start once without the universal loader.</summary>
+    LaunchWithoutLoader,
 }
 
 public sealed record CrashFix(CrashFixKind Kind, string? Argument = null)
@@ -29,6 +33,8 @@ public sealed record CrashFix(CrashFixKind Kind, string? Argument = null)
         CrashFixKind.OpenMods => "instance.lastrun.fix.open_mods",
         CrashFixKind.RepairFiles => "instance.lastrun.fix.repair",
         CrashFixKind.ShadersOff => "instance.lastrun.fix.shaders_off",
+        CrashFixKind.TransformerCacheOff => "instance.lastrun.fix.cache_off",
+        CrashFixKind.LaunchWithoutLoader => "instance.lastrun.fix.without_loader",
         _ => "instance.lastrun.fix.view_log",
     };
 }
