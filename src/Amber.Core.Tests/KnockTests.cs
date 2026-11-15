@@ -489,6 +489,41 @@ public sealed class KnockTests : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Connections that close or stay silent before naming an invite have proven nothing: like unknown ids they are
+    /// dropped without counting as failures, so they cannot keep knocking paused for everyone.
+    /// </summary>
+    [Fact]
+    public async Task ConnectionsThatNeverNameAnInviteDoNotPauseTheLobby()
+    {
+        var invite = Invite();
+        var server = Server(Fast with { HandshakeTimeout = TimeSpan.FromSeconds(1) });
+        var paused = false;
+        server.Paused += () => paused = true;
+        var ended = 0;
+        server.SessionEnded += () => Interlocked.Increment(ref ended);
+        var closed = Fast.MaxFailuresPerMinute + 2;
+        for (var i = 0; i < closed; i++)
+        {
+            using var client = new TcpClient();
+            await client.ConnectAsync(IPAddress.Loopback, server.Port);
+            // Closed at once; wait for the server to see it, so the connections don't pile up past the concurrency limit.
+            client.Close();
+            for (var wait = 0; wait < 100 && Volatile.Read(ref ended) <= i; wait++) await Task.Delay(20);
+        }
+        using (var silent = new TcpClient())
+        {
+            await silent.ConnectAsync(IPAddress.Loopback, server.Port);
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            Assert.Equal(0, await ReadToEndAsync(silent.GetStream(), timeout.Token));
+        }
+        for (var wait = 0; wait < 100 && Volatile.Read(ref ended) <= closed; wait++) await Task.Delay(20);
+        Assert.Equal(closed + 1, Volatile.Read(ref ended));
+        Assert.False(paused);
+        Assert.False(server.IsPaused);
+        Assert.True((await KnockAsync(invite.Invite)).Approved);
+    }
+
     /// <summary>乱报的邀请编号直接断开，不算失败次数：拿着大厅密钥的人或者本机别的程序不能借此让敲门一直暂停。</summary>
     [Fact]
     public async Task UnknownInviteIdsDoNotPauseTheLobby()
