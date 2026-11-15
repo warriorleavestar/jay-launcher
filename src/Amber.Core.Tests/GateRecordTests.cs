@@ -170,6 +170,55 @@ public sealed class GateRecordTests : IAsyncLifetime
         lock (log) Assert.True(log.Count(l => l.Contains("unexpected", StringComparison.Ordinal)) >= 3);
     }
 
+    /// <summary>A state file that can't be read for a while pauses publishing; it goes on once the file reads again.</summary>
+    [Fact]
+    public async Task RecordPublishingGoesOnAfterTheStateFileFailsToRead()
+    {
+        _store.EnableRecords("jay");
+        var statePath = Path.Combine(_root, "gate", GateStore.StateFile);
+        var good = File.ReadAllBytes(statePath);
+        File.WriteAllText(statePath, "{ not json");
+        var joins = 0;
+        var log = new List<string>();
+        var published = L.F("core.gate.record.published", GateRecordPublisher.Profile("jay").Name);
+        await using (GateRecordPublisher.Start(_store, _store.LoadConfig(), (_, _) =>
+        {
+            Interlocked.Increment(ref joins);
+            return Task.FromResult<GateRecordPublisher.IJoined>(new FakeJoined(Directories()));
+        }, line => { lock (log) log.Add(line); }, TimeSpan.FromMilliseconds(20), TimeSpan.FromHours(1)))
+        {
+            await Until(() => { lock (log) return Task.FromResult(log.Count > 0); });
+            await Task.Delay(200);
+            Assert.Equal(0, Volatile.Read(ref joins));
+            lock (log) Assert.Single(log); // said once, not every round
+            File.WriteAllBytes(statePath, good);
+            await Until(() => { lock (log) return Task.FromResult(log.Contains(published)); });
+        }
+    }
+
+    /// <summary>The wait after a failure is for that network: turning records off and on again tries at once.</summary>
+    [Fact]
+    public async Task TurningRecordsOffAndOnSkipsTheWaitAfterAFailure()
+    {
+        _store.EnableRecords("jay");
+        var fail = 1;
+        var log = new List<string>();
+        var published = L.F("core.gate.record.published", GateRecordPublisher.Profile("jay").Name);
+        await using (GateRecordPublisher.Start(_store, _store.LoadConfig(), (_, _) =>
+        {
+            if (Volatile.Read(ref fail) == 1) throw new IOException("network down");
+            return Task.FromResult<GateRecordPublisher.IJoined>(new FakeJoined(Directories()));
+        }, line => { lock (log) log.Add(line); }, TimeSpan.FromMilliseconds(20), TimeSpan.FromHours(1)))
+        {
+            await Until(() => { lock (log) return Task.FromResult(log.Any(l => l.Contains("network down", StringComparison.Ordinal))); });
+            Volatile.Write(ref fail, 0);
+            _store.DisableRecords();
+            await Task.Delay(200);
+            _store.EnableRecords("jay");
+            await Until(() => { lock (log) return Task.FromResult(log.Contains(published)); });
+        }
+    }
+
     /// <summary>A running gate follows records on/off and republishes when its entries change, without a restart.</summary>
     [Fact]
     public async Task RunningPublisherFollowsTheRecordsSetting()

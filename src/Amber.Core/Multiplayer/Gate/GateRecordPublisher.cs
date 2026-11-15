@@ -15,7 +15,7 @@ public sealed class GateRecordPublisher : IAsyncDisposable
 {
     /// <summary>How often the stored state is read again.</summary>
     public static readonly TimeSpan Poll = TimeSpan.FromMinutes(1);
-    /// <summary>How long to wait after a failed join or put.</summary>
+    /// <summary>How long to wait after a failed join or put, unless records are turned off and on or the network changes.</summary>
     public static readonly TimeSpan Retry = TimeSpan.FromMinutes(5);
 
     /// <summary>A joined public network: its directories, and whether the connection has ended.</summary>
@@ -95,6 +95,9 @@ public sealed class GateRecordPublisher : IAsyncDisposable
         string? lastContent = null;
         var lastPut = DateTimeOffset.MinValue;
         var nextTry = DateTimeOffset.MinValue;
+        // The network the wait after a failure is for: records turned off and on again, or another network, try at once.
+        string? failedNetwork = null;
+        string? readFailure = null;
         void Leave()
         {
             joined?.Dispose();
@@ -106,8 +109,27 @@ public sealed class GateRecordPublisher : IAsyncDisposable
         {
             while (!ct.IsCancellationRequested)
             {
-                var state = store.Read();
+                GateState state;
+                try
+                {
+                    state = store.Read();
+                    readFailure = null;
+                }
+                // A state file that can't be read just now (being replaced, or damaged until someone fixes it) skips this
+                // round; publishing goes on once it reads again. Logged when it starts failing, not every round.
+                catch (Exception e) when (e is not OperationCanceledException)
+                {
+                    if (e.Message != readFailure) log(L.F("core.gate.record.failed", e.Message));
+                    readFailure = e.Message;
+                    await Task.Delay(poll, ct);
+                    continue;
+                }
                 var network = state.RecordNetwork;
+                if (network != failedNetwork)
+                {
+                    nextTry = DateTimeOffset.MinValue;
+                    failedNetwork = null;
+                }
                 // Records turned off, moved to another network, or the connection ended: leave.
                 if (joined is not null && (network != joinedNetwork || joined.HasExited)) Leave();
                 var now = DateTimeOffset.UtcNow;
@@ -136,6 +158,7 @@ public sealed class GateRecordPublisher : IAsyncDisposable
                         log(L.F("core.gate.record.failed", e.Message));
                         Leave();
                         nextTry = DateTimeOffset.UtcNow + retry;
+                        failedNetwork = network;
                     }
                 }
                 await Task.Delay(poll, ct);
