@@ -62,6 +62,11 @@ internal sealed partial class SelfTest
             var modZone = await ZoneCenter(0);
             Over(modZone);
             Check("拖到落点上：这个落点高亮", drop.Targets[0].IsHovered && !drop.Targets[1].IsHovered);
+            // Crossing into a child control raises DragEnter again: same zones, the highlight stays.
+            var zonesBefore = drop.Targets.ToList();
+            var again = await Data([jar, pack, unknown]);
+            Dispatcher.UIThread.Invoke(() => window.RaiseEvent(new DragEventArgs(DragDrop.DragEnterEvent, again, window, modZone, KeyModifiers.None)));
+            Check("移过子控件（又收到 DragEnter）：落点不重建，高亮还在", drop.Targets.SequenceEqual(zonesBefore) && drop.Targets[0].IsHovered && !drop.Targets[1].IsHovered);
             await ShotAsync("drop-1440");
             window.Width = 600;
             window.Height = 640;
