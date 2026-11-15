@@ -171,7 +171,8 @@
           <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel ItemSpacing="12" LineSpacing="12" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
           <ItemsControl.ItemTemplate>
             <DataTemplate DataType="vm:LibraryCard">
-              <Border Classes="instance-card">
+              <!-- The card leans toward the pointer (3D effects in Settings › Appearance). -->
+              <Border Classes="instance-card" c:TiltEffect.IsOn="True">
                 <Panel>
                   <Button Classes="ghost" Padding="0" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Command="{Binding OpenCommand}"
                           ToolTip.Tip="{Binding OpenTip}" AutomationProperties.Name="{Binding OpenTip}">

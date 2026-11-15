@@ -204,6 +204,9 @@ public sealed class AppSettings
     /// <summary>减少动画：system（跟随系统，默认）/ on / off。旧的 ReduceMotion 勾过的升级成 on（见 MotionPreference.Migrate）。</summary>
     public string? ReduceMotionMode { get; set; }
 
+    /// <summary>3D effects (Settings › Appearance): cards lean toward the pointer, pages come forward, the theme's scene moves. Reduced motion turns them off anyway.</summary>
+    public bool Motion3D { get; set; } = true;
+
     /// <summary>启动游戏后启动器怎么办：minimize（最小化，默认）/ keep（保持）/ tray（隐藏到托盘）。</summary>
     public string AfterLaunch { get; set; } = "minimize";
 

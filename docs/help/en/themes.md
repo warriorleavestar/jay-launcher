@@ -18,6 +18,7 @@ Jay can follow your system, or always be light or dark. Theme packs change colou
 - A theme from your own pictures: **Settings › Appearance › Make a theme from pictures…**. Pick a picture for the background, the sidebar, a character and the banner (or drag one onto the window). Jay takes its colours from them and shows a preview. **Use it** switches to it at once; **Save as .jaytheme to share** makes a pack you can send to a friend. The character sits behind the page, so it never covers a button, and steps aside in a narrow window.
 - Built in: **Jay classic amber** and **High contrast**. They can't be deleted.
 - An older theme pack is upgraded when Jay reads it; its card says so, and **Copy for the author** copies what changed.
+- **Settings › Appearance › 3D effects**: cards lean toward the pointer and a new page comes forward. A theme pack can bring a layered scene that moves with the pointer. Reduce motion turns all of this off, and safety notices never move.
 - Theme packs can't change safety notices or the privacy text.
 
 ## If something goes wrong

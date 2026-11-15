@@ -55,6 +55,7 @@ public static class SettingsCatalog
         new("AllowNetworkThemes", Appearance, "settings.themepack.allow_network"),
         new("ImageThemeCard", Appearance, "theme.image.title", "theme.image.summary"),
         new("Motion", Appearance, "settings.motion.label", "settings.motion.hint"),
+        new("Motion3D", Appearance, "settings.motion3d", "settings.motion3d.hint"),
         new("Sidebar", Appearance, "settings.sidebar.label"),
         new("Density", Appearance, "settings.density.label", "settings.density.hint"),
 

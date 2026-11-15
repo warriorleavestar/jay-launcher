@@ -24,6 +24,10 @@ public sealed partial class AccountItem(Account account) : LocalizedObservable
     [ObservableProperty]
     public partial Bitmap? Body { get; set; }
 
+    /// <summary>The skin for the turning figure: the account's own, or one drawn from the name when it has none.</summary>
+    [ObservableProperty]
+    public partial Amber.Core.Themes.SkinTexture? Skin { get; set; }
+
     [ObservableProperty]
     public partial bool IsCurrent { get; set; }
 
@@ -221,12 +225,17 @@ public sealed partial class AccountsViewModel : PageViewModel, ISnapshotDemo
     private async Task LoadSkinAsync(AccountItem item)
     {
         var path = await _service.Accounts.GetSkinFileAsync(item.Account);
-        if (path is null) return;
+        if (path is null)
+        {
+            item.Skin = Amber.Core.Themes.PixelSkin.Generate(item.Account.Name);
+            return;
+        }
         if (await Task.Run(() => SkinRenderer.Render(path, item.Account.SlimSkin)) is { } rendered)
         {
             item.Head = rendered.Head;
             item.Body = rendered.Body;
         }
+        item.Skin = await Task.Run(() => SkinRenderer.ReadTexture(path, item.Account.SlimSkin)) ?? Amber.Core.Themes.PixelSkin.Generate(item.Account.Name);
     }
 
     private void Changed()

@@ -261,12 +261,14 @@ public static class ThemeService
         else UnloadFonts();
         var oldPictures = _slotPictures;
         _slotPictures = pack is null ? [] : LoadSlotPictures(pack);
+        var oldScene = Depth3D.LoadScene(pack);
         ApplyComponentStyles();
         ApplyVariant();
         SystemMotion.Reapply();
         Changed?.Invoke();
         // Everything showing the old pictures has moved to the new ones by now.
         foreach (var (bitmap, _) in oldPictures.Values) bitmap.Dispose();
+        foreach (var (bitmap, _) in oldScene) bitmap.Dispose();
     }
 
     private static Dictionary<string, (Bitmap Bitmap, ThemeSlot Settings)> _slotPictures = [];

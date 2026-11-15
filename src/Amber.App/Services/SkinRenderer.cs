@@ -63,6 +63,34 @@ public static class SkinRenderer
         }
     }
 
+    /// <summary>The skin file as pixels for the turning figure (<see cref="Amber.Core.Themes.SkinTurntable"/>), or null when it isn't a skin.</summary>
+    public static Amber.Core.Themes.SkinTexture? ReadTexture(string skinPath, bool slim)
+    {
+        try
+        {
+            using var source = new Bitmap(skinPath);
+            var (width, height) = (source.PixelSize.Width, source.PixelSize.Height);
+            if (!Amber.Core.Themes.SkinTexture.Fits(width, height)) return null;
+            var bytes = new byte[width * height * 4];
+            var handle = GCHandle.Alloc(bytes, GCHandleType.Pinned);
+            try { source.CopyPixels(new PixelRect(0, 0, width, height), handle.AddrOfPinnedObject(), bytes.Length, width * 4); }
+            finally { handle.Free(); }
+            var swap = source.Format == PixelFormat.Rgba8888;
+            var pixels = new uint[width * height];
+            for (var i = 0; i < pixels.Length; i++)
+            {
+                var o = i * 4;
+                var (r, b) = swap ? (bytes[o], bytes[o + 2]) : (bytes[o + 2], bytes[o]);
+                pixels[i] = (uint)bytes[o + 3] << 24 | (uint)r << 16 | (uint)bytes[o + 1] << 8 | b;
+            }
+            return new Amber.Core.Themes.SkinTexture(pixels, width, height, slim);
+        }
+        catch (Exception e) when (e is IOException or ArgumentException or InvalidOperationException or NotSupportedException)
+        {
+            return null;
+        }
+    }
+
     private static WriteableBitmap Compose(byte[] source, int sourceWidth, int scale, bool swap, int w, int h, int zoom, IReadOnlyList<Part> parts)
     {
         var target = new byte[w * h * 4];
