@@ -63,8 +63,12 @@ public class Socks5ClientTests
         }
     }
 
-    private static Task<Stream> Connect(int port) =>
-        Socks5Client.ConnectAsync(IPAddress.Loopback, port, "10.144.0.7", 25565, default).WaitAsync(Limit);
+    /// <summary>Connects with the test's deadline as the client's own token, so a stuck handshake is cancelled, not left behind.</summary>
+    private static async Task<Stream> Connect(int port)
+    {
+        using var cts = new CancellationTokenSource(Limit);
+        return await Socks5Client.ConnectAsync(IPAddress.Loopback, port, "10.144.0.7", 25565, cts.Token);
+    }
 
     [Fact]
     public async Task SuccessReplyGivesAWorkingStreamAndSendsTheRightRequest()
