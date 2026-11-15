@@ -257,17 +257,41 @@ public static class ThemeService
                 SetAccent(resources, accent);
             LoadFonts(pack);
             ApplyFonts(resources);
-            if (LoadBackground(pack) is { } bitmap)
-            {
-                Set(resources, "ThemeBackgroundImage", bitmap);
-                Set(resources, "ThemeBackgroundOpacity", pack.BackgroundOpacity);
-            }
         }
         else UnloadFonts();
+        var oldPictures = _slotPictures;
+        _slotPictures = pack is null ? [] : LoadSlotPictures(pack);
         ApplyComponentStyles();
         ApplyVariant();
         SystemMotion.Reapply();
         Changed?.Invoke();
+        // Everything showing the old pictures has moved to the new ones by now.
+        foreach (var (bitmap, _) in oldPictures.Values) bitmap.Dispose();
+    }
+
+    private static Dictionary<string, (Bitmap Bitmap, ThemeSlot Settings)> _slotPictures = [];
+
+    /// <summary>The picture in one of the theme's image slots, or null when the theme has none there.</summary>
+    public static (Bitmap Bitmap, ThemeSlot Settings)? SlotPicture(string slot) =>
+        _slotPictures.TryGetValue(slot, out var picture) ? picture : null;
+
+    /// <summary>
+    /// Decodes the slot pictures of a theme. A format 1 background image counts as the background slot (its opacity
+    /// becomes how much of the page colour covers it). A broken picture leaves its slot empty and is noted on the pack.
+    /// </summary>
+    private static Dictionary<string, (Bitmap, ThemeSlot)> LoadSlotPictures(ThemePack pack)
+    {
+        var result = new Dictionary<string, (Bitmap, ThemeSlot)>();
+        if (pack.Directory is null) return result;
+        var slots = new Dictionary<string, ThemeSlot>(pack.Slots);
+        if (!slots.ContainsKey(ThemeSlots.Background) && pack.BackgroundImage is { } legacy)
+            slots[ThemeSlots.Background] = new ThemeSlot { Image = legacy, Dim = 1 - pack.BackgroundOpacity };
+        foreach (var (name, settings) in slots)
+        {
+            if (ThemeImages.Load(Path.Combine(pack.Directory, settings.Image), name, settings) is { } bitmap) result[name] = (bitmap, settings);
+            else pack.Problems.Add(new("bad_image", settings.Image));
+        }
+        return result;
     }
 
     private static void ApplyVariant()
@@ -379,22 +403,6 @@ public static class ThemeService
         foreach (var key in new[] { "UiFont", "MonoFont" })
             if (AddedKeys.Remove(key)) app.Resources.Remove(key);
         ApplyFonts(app.Resources);
-    }
-
-    private static Bitmap? LoadBackground(ThemePack pack)
-    {
-        if (pack.BackgroundImage is null || pack.Directory is null) return null;
-        try
-        {
-            using var stream = File.OpenRead(Path.Combine(pack.Directory, pack.BackgroundImage));
-            // 解码成不超过 2560 宽的位图：原图再大也不多占内存。
-            return Bitmap.DecodeToWidth(stream, 2560);
-        }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException or NotSupportedException)
-        {
-            pack.Problems.Add(new("bad_image", pack.BackgroundImage));
-            return null;
-        }
     }
 
     /// <summary>把当前生效的配色（默认值 + 主题覆盖）导出成 .jaytheme。</summary>

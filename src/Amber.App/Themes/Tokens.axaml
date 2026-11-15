@@ -82,7 +82,6 @@
   <x:Double x:Key="FontPixelTag">17</x:Double>
   <x:Double x:Key="FontPixelStep">19</x:Double>
   <!-- 主题包的窗口背景图透明度（背景图本身只在主题包里有） -->
-  <x:Double x:Key="ThemeBackgroundOpacity">1</x:Double>
 
   <!-- 阴影层级（§4.6）：深色主要靠底色变亮和边框，浅色靠阴影 -->
   <BoxShadows x:Key="Elevation1">0 1 2 0 #330B1220</BoxShadows>

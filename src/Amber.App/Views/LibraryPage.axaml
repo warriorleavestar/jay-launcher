@@ -2,6 +2,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Amber.App.ViewModels"
              xmlns:v="using:Amber.App.Views"
+             xmlns:c="using:Amber.App.Views.Controls"
              xmlns:l="using:Amber.App.Localization"
              xmlns:svc="using:Amber.App.Services"
              x:Class="Amber.App.Views.LibraryPage"
@@ -72,6 +73,7 @@
         <Border x:Name="ContinueCard" Classes="continue" IsVisible="{Binding HasContinue}"
                 Background="{Binding Continue.CoverSlot, Converter={x:Static v:CoverBrush.Instance}, FallbackValue={x:Null}}">
           <Panel>
+            <c:SlotImage Slot="banner" />
             <Border>
               <Border.Background>
                 <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">

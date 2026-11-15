@@ -69,11 +69,13 @@
   </Window.DataTemplates>
 
   <Grid x:Name="ShellGrid" ColumnDefinitions="240,*">
-    <!-- 主题包的窗口背景图（没有主题背景图时是空的）。放在最底层，不接收点击。 -->
-    <Image x:Name="ThemeBackground" Grid.ColumnSpan="2" Source="{DynamicResource ThemeBackgroundImage}" Opacity="{DynamicResource ThemeBackgroundOpacity}"
-           Stretch="UniformToFill" IsHitTestVisible="False" />
+    <!-- The theme's background picture (empty without one): the bottom layer, takes no clicks. -->
+    <c:SlotImage x:Name="ThemeBackground" Grid.ColumnSpan="2" Slot="background" />
     <!-- 侧栏（官方设计 §2.1、§3.1）：品牌 → 三个一级入口 → 隐私行 → 设置 → 账号。展开 240，收成图标栏 76。 -->
     <Border x:Name="SidebarHost" Classes="sidebar">
+      <Panel>
+      <!-- The theme's sidebar picture, under the entries (empty without one). -->
+      <c:SlotImage x:Name="ThemeSidebar" Slot="sidebar" />
       <Grid x:Name="SidebarGrid" RowDefinitions="Auto,*,Auto">
         <Button x:Name="SidebarHeader" Classes="ghost shell-brand" Command="{Binding Shell.GoSectionCommand}" CommandParameter="library"
                 ToolTip.Tip="{Binding VersionText}" AutomationProperties.Name="Jay">
@@ -173,6 +175,7 @@
           </Button>
         </StackPanel>
       </Grid>
+      </Panel>
     </Border>
 
     <!-- Content column: top bar, request bar, "where things moved", page -->
@@ -327,6 +330,8 @@
           </Border>
         </StackPanel>
       </Popup>
+      <!-- The theme's mascot in a corner of the content area, behind the page: it shows where the page leaves room. -->
+      <c:SlotImage x:Name="ThemeMascot" Grid.Row="4" Slot="mascot" />
       <ContentControl x:Name="PageHost" Grid.Row="4" Content="{Binding CurrentPage}" Margin="24,4,24,20" />
 
       <!-- Docked game log (§6.9): Ctrl+` docks the running game's log at the bottom, 240 high and draggable; in a short

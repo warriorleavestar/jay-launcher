@@ -387,6 +387,11 @@ public sealed partial class MainViewModel : ObservableObject
                 await download.PreviewPackAsync(path);
             },
             ImportTheme = settingsPage.ImportThemePack,
+            PictureForTheme = (path, slot) =>
+            {
+                shell.Navigate("settings#ImageThemeCard");
+                settingsPage.OpenImageTheme(path, slot);
+            },
         };
         FirstRun = new FirstRunViewModel(service, home.Onboarding)
         {
@@ -948,6 +953,26 @@ public sealed partial class SettingsViewModel : PageViewModel
         }
         ThemePackStatus = string.Join("\n", lines);
         ThemeReportText = string.Join("\n", report);
+    }
+
+    private ImageThemeViewModel? _imageTheme;
+
+    /// <summary>Settings › Appearance › Make a theme from pictures (made the first time it is shown).</summary>
+    public ImageThemeViewModel ImageTheme => _imageTheme ??= new ImageThemeViewModel(path =>
+    {
+        var pack = ThemeService.Store.Install(path);
+        ReloadThemePacks(pack.Id);
+        ThemeService.Select(_service.Settings, pack.Id);
+        Persist();
+        UpdateThemePackStatus();
+        return pack;
+    });
+
+    /// <summary>A picture dragged onto the window for a theme slot: open the picture theme panel with it.</summary>
+    public void OpenImageTheme(string? path = null, string? slot = null)
+    {
+        ImageTheme.OpenCommand.Execute(null);
+        if (path is not null && slot is not null) ImageTheme.SetPicture(slot, path);
     }
 
     /// <summary>导入 .jaytheme：读取、校验、安装，然后直接切换过去。</summary>

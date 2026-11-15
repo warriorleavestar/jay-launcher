@@ -113,6 +113,43 @@ internal sealed class SafetyLockSelfTest(MainWindow window, MainViewModel main, 
                 }
             }
 
+            // A theme's sidebar picture can't show through the privacy row: the real window, a noisy sidebar picture
+            // with no cover, both colour modes, a wide and the smallest window; the composited pixels of the row match.
+            window.Content = original;
+            var noisePack = Path.Combine(reportDir, "noise-sidebar.jaytheme");
+            ImageTheme.Write(noisePack, "selftest-noise-sidebar", "Noise sidebar", ImageTheme.Extract([]),
+                new Dictionary<string, ImageThemeSlot> { [ThemeSlots.Sidebar] = new(new ThemeSlot { Image = "", Dim = 0 }, NoisePng(480, 1400), ".png") });
+            var sidebarRow = window.GetVisualDescendants().OfType<PrivacyRow>().First(r => r.Name == "PrivacyRow");
+            var (windowWidth, windowHeight) = (window.ClientSize.Width, window.ClientSize.Height);
+            foreach (var (w, h) in new[] { (1280, 800), (600, 420) })
+            {
+                window.Width = w;
+                window.Height = h;
+                settings.ResetThemePackCommand.Execute(null);
+                await Task.Delay(600);
+                var plain = new Dictionary<ThemeVariant, (byte[] Row, byte[] Above)>();
+                foreach (var variant in new[] { ThemeVariant.Dark, ThemeVariant.Light })
+                {
+                    Application.Current!.RequestedThemeVariant = variant;
+                    plain[variant] = await RowPixelsAsync(sidebarRow, $"privacy-row-{w}x{h}-default-{variant}");
+                }
+                settings.ImportThemePack(noisePack);
+                await Task.Delay(800);
+                foreach (var variant in new[] { ThemeVariant.Dark, ThemeVariant.Light })
+                {
+                    Application.Current!.RequestedThemeVariant = variant;
+                    var (rowNow, aboveNow) = await RowPixelsAsync(sidebarRow, $"privacy-row-{w}x{h}-noise-{variant}");
+                    Check($"{w}×{h}（{variant}）：侧栏图片确实画出来了（隐私行上面一块跟默认不一样）", !aboveNow.AsSpan().SequenceEqual(plain[variant].Above));
+                    Check($"{w}×{h}（{variant}）：侧栏图片透不过隐私行，整窗截图里这一行和默认外观逐像素一致", rowNow.AsSpan().SequenceEqual(plain[variant].Row));
+                }
+            }
+            settings.ResetThemePackCommand.Execute(null);
+            Application.Current!.RequestedThemeVariant = ThemeVariant.Default;
+            // Back to the size the baseline was taken at, so the later comparisons see the same layout.
+            (window.Width, window.Height) = (windowWidth, windowHeight);
+            window.Content = stage;
+            await Task.Delay(300);
+
             // 带保留词的主题包：名字、作者、布局文字里有“Jay 安全提示”都整包拒绝。
             var reserved = Path.Combine(reportDir, "reserved.jaytheme");
             ThemeSelfTest.WritePack(reserved, """{ "id": "selftest-reserved", "name": "Jay 安全提示" }""", "{}");
@@ -214,6 +251,52 @@ internal sealed class SafetyLockSelfTest(MainWindow window, MainViewModel main, 
             }
             return result;
         });
+    }
+
+    /// <summary>
+    /// Renders the whole window and returns the privacy row's pixels (inset past its rounded corners) and a strip of the
+    /// sidebar just above it; also saves the window.
+    /// </summary>
+    private async Task<(byte[] Row, byte[] Above)> RowPixelsAsync(PrivacyRow row, string tag)
+    {
+        await Task.Delay(400);
+        return await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            var size = new PixelSize((int)window.Bounds.Width, (int)window.Bounds.Height);
+            using var bmp = new RenderTargetBitmap(size);
+            bmp.Render(window);
+            bmp.Save(Path.Combine(reportDir, tag + ".png"));
+            var all = new byte[size.Width * size.Height * 4];
+            var handle = System.Runtime.InteropServices.GCHandle.Alloc(all, System.Runtime.InteropServices.GCHandleType.Pinned);
+            try { bmp.CopyPixels(new PixelRect(size), handle.AddrOfPinnedObject(), all.Length, size.Width * 4); }
+            finally { handle.Free(); }
+            var origin = row.TranslatePoint(new Point(0, 0), window) ?? default;
+            var inner = new PixelRect((int)Math.Ceiling(origin.X) + 4, (int)Math.Ceiling(origin.Y) + 4,
+                Math.Max(1, (int)row.Bounds.Width - 9), Math.Max(1, (int)row.Bounds.Height - 9));
+            var above = new PixelRect(inner.X, Math.Max(0, (int)origin.Y - 40), inner.Width, 30);
+            byte[] cut(PixelRect r)
+            {
+                var result = new byte[r.Width * r.Height * 4];
+                for (var y = 0; y < r.Height; y++)
+                    Array.Copy(all, ((r.Y + y) * size.Width + r.X) * 4, result, y * r.Width * 4, r.Width * 4);
+                return result;
+            }
+            return (cut(inner), cut(above));
+        });
+    }
+
+    /// <summary>A sidebar picture of hard-edged colour blocks, the worst case behind small text.</summary>
+    private static byte[] NoisePng(int width, int height)
+    {
+        var random = new Random(7);
+        using var bitmap = new SkiaSharp.SKBitmap(width, height);
+        using (var canvas = new SkiaSharp.SKCanvas(bitmap))
+            for (var y = 0; y < height; y += 6)
+                for (var x = 0; x < width; x += 6)
+                    using (var paint = new SkiaSharp.SKPaint { Color = new SkiaSharp.SKColor((byte)random.Next(256), (byte)random.Next(256), (byte)random.Next(256)) })
+                        canvas.DrawRect(x, y, 6, 6, paint);
+        using var data = bitmap.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100);
+        return data.ToArray();
     }
 
     private static (string Tokens, string Styles) Pack(string kind)

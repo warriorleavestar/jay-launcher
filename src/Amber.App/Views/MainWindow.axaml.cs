@@ -97,6 +97,8 @@ public partial class MainWindow : Window
                     await new RemoteSelfTest(this, (MainViewModel)DataContext!, report).RunAsync();
                 else if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "theme")
                     await new ThemeSelfTest(this, (MainViewModel)DataContext!, report).RunAsync();
+                else if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "image-theme")
+                    await new ImageThemeSelfTest(this, (MainViewModel)DataContext!, report).RunAsync();
                 else if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "safety-lock")
                     await new SafetyLockSelfTest(this, (MainViewModel)DataContext!, report).RunAsync();
                 else if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "bake-notice")

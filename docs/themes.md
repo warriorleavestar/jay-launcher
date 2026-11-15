@@ -91,6 +91,27 @@ JSON 里可以写 `//` 注释和结尾逗号。每一部分都可选，没写的
 }
 ```
 
+### 图片位（slots）
+
+图片主题用 tokens.json 的 `slots`，四个位置，每个都可以不写。设置 › 外观 › **用图片做主题** 做出来的就是这样的包，不用手写。
+
+```jsonc
+"slots": {
+  // 整个窗口最底层。dim：盖上多少页面色（0–0.9），blur：模糊半径（按 1920 宽算的像素，0–40），focus：裁剪时保留哪一点（左右、上下，0–1）
+  "background": { "image": "assets/background.jpg", "dim": 0.55, "blur": 8, "focus": [0.5, 0.4] },
+  // 侧栏底图，盖上侧栏色
+  "sidebar": { "image": "assets/sidebar.png", "dim": 0.6, "focus": [0.5, 0.5] },
+  // 立绘：内容区下面的角落，在页面后面，不挡点击；size 是占内容区高度的比例（0.15–0.8），最宽占内容区的三分之一；窗口窄于 720 时不显示
+  "mascot": { "image": "assets/mascot.png", "size": 0.45, "side": "right", "opacity": 1 },
+  // 游戏库“继续玩”卡片和房间横幅的底图（上面照常压一层暗色，文字看得清）
+  "banner": { "image": "assets/banner.png", "focus": [0.5, 0.3] }
+}
+```
+
+- 图片只能是包里 `assets/` 下的 PNG 或 JPEG，每边不超过 4096。数字超出范围会被拉回范围内并在主题卡上提示。
+- 写了 `slots.background` 时它优先；旧的 `background` 照样能用（相当于 `dim = 1 - opacity`）。用图片做主题时 Jay 两个都写，旧版 Jay 读不懂 `slots` 也能显示背景。
+- 立绘和背景都在内容后面，画不到锁定的安全界面和侧栏的隐私行上。
+
 ### 颜色名
 
 format 2 的名字和 format 1 的名字都认（左边是 format 2 写法，括号里是 format 1 的旧名字，同一个颜色）：

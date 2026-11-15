@@ -34,6 +34,9 @@ public sealed partial class DropViewModel(LauncherService service) : ObservableO
     /// <summary>Imports a theme pack (the settings page's import).</summary>
     public Action<string>? ImportTheme { get; set; }
 
+    /// <summary>Opens Settings › Appearance › Make a theme from pictures with this picture in this slot.</summary>
+    public Action<string, string>? PictureForTheme { get; set; }
+
     /// <summary>Something dragged is over the window.</summary>
     [ObservableProperty]
     public partial bool IsActive { get; set; }
@@ -111,6 +114,18 @@ public sealed partial class DropViewModel(LauncherService service) : ObservableO
                     ImportTheme?.Invoke(paths[0]);
                     return Task.CompletedTask;
                 })];
+            case DropKind.Picture:
+                return Amber.Core.Themes.ThemeSlots.All.Select(slot => new DropTarget(group.Kind, L.T(slot switch
+                {
+                    Amber.Core.Themes.ThemeSlots.Background => "drop.picture.background",
+                    Amber.Core.Themes.ThemeSlots.Sidebar => "drop.picture.sidebar",
+                    Amber.Core.Themes.ThemeSlots.Mascot => "drop.picture.mascot",
+                    _ => "drop.picture.banner",
+                }), Path.GetFileName(paths[0]), () =>
+                {
+                    PictureForTheme?.Invoke(paths[0], slot);
+                    return Task.CompletedTask;
+                }));
         }
         if (Current() is not { } instance)
         {
