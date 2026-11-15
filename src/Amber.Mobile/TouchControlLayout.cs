@@ -1,3 +1,5 @@
+using Amber.Core.Localization;
+
 namespace Amber.Mobile;
 
 public enum TouchControlAction
@@ -8,18 +10,43 @@ public enum TouchControlAction
 
 public enum TouchControlMode { JoystickAndTap, DPadAndTap, JoystickAndCrosshair, ExternalKeyboardMouse }
 
+/// <summary>
+/// One on-screen control. Centres are fractions of the view width and height; <see cref="Radius"/> is a
+/// fraction of the view's shorter side, the same unit the overlay draws with.
+/// </summary>
 public sealed record TouchControlDefinition(
-    TouchControlAction Action, double CenterX, double CenterY, double Radius, string Label,
-    bool GameplayVisible = true, bool MenuVisible = false);
+    TouchControlAction Action, double CenterX, double CenterY, double Radius, string LabelKey,
+    bool GameplayVisible = true, bool MenuVisible = false)
+{
+    /// <summary>The control's name in the current UI language.</summary>
+    public string Label => L.T(LabelKey);
+}
 
 /// <summary>A mutable, resolution-independent touch profile shared by rendering and hit testing.</summary>
 public sealed class TouchControlProfile
 {
     private readonly Dictionary<(TouchControlMode Mode, TouchControlAction Action), (double X, double Y)> _positions = [];
+    private double _aspectRatio = 1;
 
     public TouchControlMode Mode { get; set; } = TouchControlMode.JoystickAndTap;
     public double Scale { get; set; } = 1;
     public bool ForcedSprint { get; set; } = true;
+
+    /// <summary>
+    /// View width divided by height. Hit testing and the joystick measure distances in units of the
+    /// shorter side so a control's touch area matches its drawn size on any screen shape.
+    /// </summary>
+    public double AspectRatio
+    {
+        get => _aspectRatio;
+        set => _aspectRatio = double.IsFinite(value) && value > 0 ? value : 1;
+    }
+
+    /// <summary>
+    /// Where the game currently draws its hotbar (fractions of the view), or null when unknown. The
+    /// inventory key sits right after the hotbar's end unless the player moved it.
+    /// </summary>
+    public (double Left, double Top, double Right, double Bottom)? HotbarBounds { get; set; }
 
     public IReadOnlyList<TouchControlDefinition> Controls => TouchControlLayout.For(Mode)
         .Select(Apply).ToArray();
@@ -27,12 +54,12 @@ public sealed class TouchControlProfile
     public TouchControlDefinition? HitTest(double x, double y, bool gameplayControlsActive = true) =>
         Controls.LastOrDefault(control =>
             (gameplayControlsActive ? control.GameplayVisible : control.MenuVisible) &&
-            TouchControlLayout.Distance(control, x, y) <= control.Radius);
+            TouchControlLayout.Distance(control, x, y, AspectRatio) <= control.Radius);
 
     public (double X, double Y) MovementVector(double x, double y)
     {
         var move = Controls.Single(control => control.Action == TouchControlAction.Move);
-        var vector = TouchControlLayout.MovementVector(move, x, y);
+        var vector = TouchControlLayout.MovementVector(move, x, y, AspectRatio);
         if (Mode != TouchControlMode.DPadAndTap) return vector;
         var length = Math.Sqrt(vector.X * vector.X + vector.Y * vector.Y);
         if (length < 0.20) return (0, 0);
@@ -60,29 +87,47 @@ public sealed class TouchControlProfile
 
     private TouchControlDefinition Apply(TouchControlDefinition control)
     {
-        var positioned = _positions.TryGetValue((Mode, control.Action), out var position)
+        var custom = _positions.TryGetValue((Mode, control.Action), out var position);
+        var positioned = custom
             ? control with { CenterX = position.X, CenterY = position.Y }
             : control;
-        return positioned with { Radius = Math.Clamp(positioned.Radius * Scale, 0.018, 0.15) };
+        positioned = positioned with { Radius = Math.Clamp(positioned.Radius * Scale, 0.018, 0.15) };
+        if (!custom && control.Action == TouchControlAction.Inventory && HotbarBounds is { } hotbar)
+        {
+            // The square face starts where the hotbar ends and shares its centre line, but never reaches past the
+            // bottom of the screen (a small GUI scale puts the hotbar's centre closer to the edge than the face is tall).
+            var faceHalfWidth = positioned.Radius * TouchControlLayout.UtilityFaceScale *
+                                Math.Min(AspectRatio, 1) / AspectRatio;
+            var faceHalfHeight = positioned.Radius * TouchControlLayout.UtilityFaceScale * Math.Min(AspectRatio, 1);
+            positioned = positioned with
+            {
+                CenterX = hotbar.Right + faceHalfWidth,
+                CenterY = Math.Min((hotbar.Top + hotbar.Bottom) / 2, 1 - faceHalfHeight)
+            };
+        }
+        return positioned;
     }
 }
 
 /// <summary>Built-in schemes modelled after the interaction choices familiar on mobile Minecraft.</summary>
 public static class TouchControlLayout
 {
+    /// <summary>Half the drawn face of the menu, keyboard, inventory and drop keys, in radii.</summary>
+    public const double UtilityFaceScale = 0.82;
+
     private static readonly TouchControlDefinition[] Shared =
     [
-        new(TouchControlAction.Keyboard, 0.475, 0.050, 0.026, "聊天与指令", MenuVisible: true),
-        new(TouchControlAction.Menu, 0.525, 0.050, 0.026, "菜单", MenuVisible: true),
-        new(TouchControlAction.Settings, 0.575, 0.050, 0.026, "触控设置", MenuVisible: true),
+        new(TouchControlAction.Keyboard, 0.475, 0.050, 0.026, "mobile.touch.keyboard", MenuVisible: true),
+        new(TouchControlAction.Menu, 0.525, 0.050, 0.026, "mobile.touch.menu", MenuVisible: true),
+        new(TouchControlAction.Settings, 0.575, 0.050, 0.026, "mobile.touch.settings", MenuVisible: true),
         // Keep both actions low in the landscape right-thumb arc, using the same reach as the
         // familiar mobile Minecraft layouts instead of floating them near the top edge.
-        new(TouchControlAction.Jump, 0.928, 0.790, 0.042, "跳跃"),
-        new(TouchControlAction.Sneak, 0.848, 0.875, 0.040, "潜行"),
-        // The inventory key sits on the hotbar centre line. Keeping the centre above the screen
-        // edge prevents gesture navigation and rounded tablet corners from clipping its face.
-        new(TouchControlAction.Inventory, 0.608, 0.952, 0.027, "背包"),
-        new(TouchControlAction.SecondaryAction, 0.940, 0.455, 0.044, "拆分",
+        new(TouchControlAction.Jump, 0.928, 0.790, 0.042, "mobile.touch.jump"),
+        new(TouchControlAction.Sneak, 0.848, 0.875, 0.040, "mobile.touch.sneak"),
+        // Fallback position on the vanilla hotbar's centre line until the game surface size is known. Keeping the
+        // centre above the screen edge prevents gesture navigation and rounded tablet corners from clipping its face.
+        new(TouchControlAction.Inventory, 0.608, 0.952, 0.027, "mobile.touch.inventory"),
+        new(TouchControlAction.SecondaryAction, 0.940, 0.455, 0.044, "mobile.touch.split",
             GameplayVisible: false, MenuVisible: true)
     ];
 
@@ -90,14 +135,14 @@ public static class TouchControlLayout
         new Dictionary<TouchControlMode, IReadOnlyList<TouchControlDefinition>>
         {
             [TouchControlMode.JoystickAndTap] = [.. Shared,
-                new(TouchControlAction.Move, 0.135, 0.785, 0.095, "移动")],
+                new(TouchControlAction.Move, 0.135, 0.785, 0.095, "mobile.touch.move")],
             [TouchControlMode.DPadAndTap] = [.. Shared.Where(control => control.Action != TouchControlAction.Sneak),
-                new(TouchControlAction.Move, 0.135, 0.785, 0.095, "方向键"),
-                new(TouchControlAction.Sneak, 0.135, 0.785, 0.031, "潜行")],
+                new(TouchControlAction.Move, 0.135, 0.785, 0.095, "mobile.touch.dpad"),
+                new(TouchControlAction.Sneak, 0.135, 0.785, 0.031, "mobile.touch.sneak")],
             [TouchControlMode.JoystickAndCrosshair] = [.. Shared,
-                new(TouchControlAction.Move, 0.135, 0.785, 0.095, "移动"),
-                new(TouchControlAction.PrimaryAction, 0.845, 0.710, 0.048, "攻击"),
-                new(TouchControlAction.SecondaryAction, 0.925, 0.610, 0.048, "使用")],
+                new(TouchControlAction.Move, 0.135, 0.785, 0.095, "mobile.touch.move"),
+                new(TouchControlAction.PrimaryAction, 0.845, 0.710, 0.048, "mobile.touch.attack"),
+                new(TouchControlAction.SecondaryAction, 0.925, 0.610, 0.048, "mobile.touch.use")],
             // External keyboard/mouse mode intentionally keeps only the settings key visible.
             // The player can switch back without disconnecting their peripherals.
             [TouchControlMode.ExternalKeyboardMouse] = [.. Shared.Where(control =>
@@ -111,19 +156,31 @@ public static class TouchControlLayout
     public static (double X, double Y) JoystickVector(double x, double y) =>
         new TouchControlProfile().MovementVector(x, y);
 
-    internal static (double X, double Y) MovementVector(TouchControlDefinition move, double x, double y)
+    internal static (double X, double Y) MovementVector(TouchControlDefinition move, double x, double y,
+        double aspectRatio = 1)
     {
-        var dx = (x - move.CenterX) / move.Radius;
-        var dy = (y - move.CenterY) / move.Radius;
+        var (dx, dy) = ShortSideOffset(move, x, y, aspectRatio);
+        dx /= move.Radius;
+        dy /= move.Radius;
         var length = Math.Sqrt(dx * dx + dy * dy);
         if (length > 1) { dx /= length; dy /= length; }
         return (dx, dy);
     }
 
-    internal static double Distance(TouchControlDefinition control, double x, double y)
+    internal static double Distance(TouchControlDefinition control, double x, double y, double aspectRatio = 1)
     {
-        var dx = x - control.CenterX;
-        var dy = y - control.CenterY;
+        var (dx, dy) = ShortSideOffset(control, x, y, aspectRatio);
         return Math.Sqrt(dx * dx + dy * dy);
+    }
+
+    /// <summary>
+    /// Converts an offset in view fractions (x of the width, y of the height) into fractions of the
+    /// shorter side, the unit control radii are drawn in.
+    /// </summary>
+    private static (double X, double Y) ShortSideOffset(TouchControlDefinition control, double x, double y,
+        double aspectRatio)
+    {
+        var shortSide = Math.Min(aspectRatio, 1);
+        return ((x - control.CenterX) * aspectRatio / shortSide, (y - control.CenterY) / shortSide);
     }
 }

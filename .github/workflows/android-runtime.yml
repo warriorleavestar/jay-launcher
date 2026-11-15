@@ -35,6 +35,8 @@ jobs:
         with:
           persist-credentials: false
 
+      # prepare-android-openjdk.sh also pins every download the upstream scripts make
+      # (OpenJDK commit, NDK, boot JDK, FreeType, CUPS, termux-elf-cleaner).
       - name: Fetch pinned Android OpenJDK build source
         shell: bash
         run: |
@@ -65,7 +67,7 @@ jobs:
           # both kinds so every activated runtime path is an independently verified file.
           tar --hard-dereference -C "$normalized" -cJhf "$archive" .
           readelf_path="runtime-source/android-ndk-r21/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
-          bash scripts/check-android-runtime.sh "$archive" "${{ matrix.architecture }}" "$readelf_path"
+          bash scripts/check-android-runtime.sh "$archive" "${{ matrix.architecture }}" "$readelf_path" 21.0.12.1
           sha256sum "$archive" > "$archive.sha256"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

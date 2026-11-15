@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# -ne 3 ]]; then
-  echo "usage: $0 <jre.tar.xz> <arm64-v8a|x86_64> <readelf>" >&2
+if [[ $# -ne 3 && $# -ne 4 ]]; then
+  echo "usage: $0 <jre.tar.xz> <arm64-v8a|x86_64> <readelf> [expected Java version]" >&2
   exit 2
 fi
 
 archive="$1"
 architecture="$2"
 elf_reader="$3"
+expected_java_version="${4:-}"
 test -f "$archive"
 test -x "$elf_reader"
 
@@ -46,6 +47,17 @@ test -f "$work/lib/modules"
 test -f "$work/release"
 test -f "$work/legal/java.base/LICENSE"
 test -f "$work/legal/java.base/ASSEMBLY_EXCEPTION"
+
+# The game needs Java 21; when the caller names the exact release it pinned, require that one.
+java_version="$(sed -n 's/^JAVA_VERSION="\(.*\)"$/\1/p' "$work/release")"
+if [[ "$java_version" != 21 && "$java_version" != 21.* ]]; then
+  echo "runtime is not Java 21: JAVA_VERSION=\"$java_version\"" >&2
+  exit 1
+fi
+if [[ -n "$expected_java_version" && "$java_version" != "$expected_java_version" ]]; then
+  echo "runtime is Java $java_version, expected $expected_java_version" >&2
+  exit 1
+fi
 
 checked=0
 while IFS= read -r -d '' library; do

@@ -8,7 +8,10 @@ using System.Runtime.Versioning;
 
 namespace Amber.Android;
 
-[Service(Exported = false, ForegroundServiceType = ForegroundService.TypeDataSync)]
+// specialUse: the service keeps a loopback gateway open for a game running in the foreground. The
+// dataSync type would be stopped by Android 15 after six hours a day, which would end the gateway
+// in the middle of a long session.
+[Service(Exported = false, ForegroundServiceType = ForegroundService.TypeSpecialUse)]
 public sealed class GatewayKeepAliveService : Service
 {
     private const string ChannelId = "jay_gateway";

@@ -11,6 +11,7 @@ using Android.Widget;
 using Amber.Core.Localization;
 using Amber.Core.Install;
 using Amber.Mobile;
+using System.Runtime.Versioning;
 using System.Text;
 
 namespace Amber.Android;
@@ -20,12 +21,19 @@ namespace Amber.Android;
     Process = ":game",
     Theme = "@style/MyTheme.NoActionBar",
     ScreenOrientation = ScreenOrientation.SensorLandscape,
-    ConfigurationChanges = ConfigChanges.Orientation | ConfigChanges.ScreenSize | ConfigChanges.UiMode)]
+    // One game screen per game process: opening the game again brings the running one to the front.
+    LaunchMode = LaunchMode.SingleTask,
+    // The running game cannot be recreated, so keep the activity across keyboard and window changes.
+    ConfigurationChanges = ConfigChanges.Orientation | ConfigChanges.ScreenSize | ConfigChanges.UiMode |
+                           ConfigChanges.Keyboard | ConfigChanges.KeyboardHidden | ConfigChanges.Navigation |
+                           ConfigChanges.ScreenLayout | ConfigChanges.SmallestScreenSize)]
 public sealed class GameActivity : Activity, ISurfaceHolderCallback
 {
     public const string ServerAddressExtra = "nz.work.minecraft.jay.SERVER_ADDRESS";
+    private const int GlfwKeyEscape = 256;
     private CancellationTokenSource? _runtimeSetup;
     private CancellationTokenSource? _gameSetup;
+    private Java.Lang.Object? _backCallback;
     private TouchControlOverlay? _touchOverlay;
 
     protected override void OnCreate(Bundle? savedInstanceState)
@@ -44,13 +52,99 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
         };
         root.AddView(_touchOverlay, MatchParent());
 
-        if (!AndroidRuntimeStore.IsInstalled(this))
+        if (AndroidEmbeddedGame.IsRunning)
+        {
+            // The screen was recreated under a running game; it continues on the new surface, controls included.
+            _touchOverlay.Visibility = ViewStates.Visible;
+            _touchOverlay.Alpha = 1;
+        }
+        else if (AndroidEmbeddedGame.HasStarted)
+            AddGameEnded(root, L.T("mobile.game.ended"));
+        else if (!AndroidRuntimeStore.IsInstalled(this))
             AddRuntimeSetup(root);
         else
             AddGameSetup(root);
 
         SetContentView(root);
         EnterImmersiveMode();
+        if (OperatingSystem.IsAndroidVersionAtLeast(33)) RegisterBackCallback();
+    }
+
+    protected override void OnNewIntent(Intent? intent)
+    {
+        base.OnNewIntent(intent);
+        // Before the game starts, use the latest server address; a running game keeps its own.
+        if (intent is not null && !AndroidEmbeddedGame.HasStarted) Intent = intent;
+    }
+
+    [SupportedOSPlatform("android33.0")]
+    private void RegisterBackCallback()
+    {
+        var callback = new BackCallback(HandleBack);
+        // 0 is OnBackInvokedDispatcher.PRIORITY_DEFAULT.
+        OnBackInvokedDispatcher.RegisterOnBackInvokedCallback(0, callback);
+        _backCallback = callback;
+    }
+
+    [SupportedOSPlatform("android33.0")]
+    private void UnregisterBackCallback()
+    {
+        if (_backCallback is global::Android.Window.IOnBackInvokedCallback callback)
+            OnBackInvokedDispatcher.UnregisterOnBackInvokedCallback(callback);
+        _backCallback?.Dispose();
+        _backCallback = null;
+    }
+
+#pragma warning disable CS0672, CA1422 // Android 12 and older still deliver Back here.
+    public override void OnBackPressed() => HandleBack();
+#pragma warning restore CS0672, CA1422
+
+    private void HandleBack()
+    {
+        switch (AndroidEmbeddedGame.State.BackAction)
+        {
+            case EmbeddedGameBackAction.SendEscape:
+                // Back acts like Esc in the game (pause menu, close screens) instead of leaving the
+                // screen while the game keeps running in the background.
+                NativeJvmHost.AddKey(GlfwKeyEscape);
+                break;
+            case EmbeddedGameBackAction.EndProcess:
+                EndGameProcess();
+                break;
+            default:
+                Finish();
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Leaves the game screen and ends the game process. The embedded JVM can be created only once per
+    /// process, so the next game starts in a fresh process.
+    /// </summary>
+    private void EndGameProcess()
+    {
+        Finish();
+        global::Android.OS.Process.KillProcess(global::Android.OS.Process.MyPid());
+    }
+
+    private void AddGameEnded(FrameLayout root, string message)
+    {
+        var status = new TextView(this) { Text = message, Gravity = GravityFlags.Center };
+        status.SetTextColor(Color.White);
+        var close = new Button(this) { Text = L.T("mobile.game.close") };
+        close.Click += (_, _) => EndGameProcess();
+
+        var content = new LinearLayout(this) { Orientation = Orientation.Vertical };
+        content.SetGravity(GravityFlags.Center);
+        content.SetBackgroundColor(Color.Argb(225, 20, 24, 30));
+        content.SetPadding(40, 32, 40, 32);
+        content.AddView(status, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent));
+        content.AddView(close, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent));
+        root.AddView(content, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent, GravityFlags.Center)
+        {
+            LeftMargin = 64,
+            RightMargin = 64
+        });
     }
 
     public override void OnWindowFocusChanged(bool hasFocus)
@@ -104,6 +198,7 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
         _gameSetup?.Cancel();
         _gameSetup?.Dispose();
         _gameSetup = null;
+        if (OperatingSystem.IsAndroidVersionAtLeast(33)) UnregisterBackCallback();
         base.OnDestroy();
     }
 
@@ -116,6 +211,42 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
     private void AddRuntimeSetup(FrameLayout root)
     {
         var (backdrop, content, status) = AddSetupShell(root, L.T("mobile.runtime.missing"));
+
+        // What will be downloaded, under which licences, and where its sources are listed.
+        var descriptor = AndroidRuntimeCatalog.ForCurrentProcess();
+        var details = new TextView(this) { Gravity = GravityFlags.Center };
+        details.SetTextColor(Color.LightGray);
+        details.TextSize = 13;
+        var sources = new TextView(this) { Text = L.T("mobile.runtime.sources"), Gravity = GravityFlags.Center };
+        sources.SetTextColor(Color.Rgb(130, 190, 255));
+        sources.TextSize = 13;
+        sources.PaintFlags |= PaintFlags.UnderlineText;
+        if (descriptor is null)
+        {
+            details.Visibility = ViewStates.Gone;
+            sources.Visibility = ViewStates.Gone;
+        }
+        else
+        {
+            details.Text = L.F("mobile.runtime.details",
+                Math.Max(1, (int)Math.Round(descriptor.ArchiveSize / 1_000_000.0)),
+                Math.Max(1, (int)Math.Round(descriptor.MaximumExtractedSize / 1_000_000.0)),
+                descriptor.License);
+            sources.Click += (_, _) =>
+            {
+                try
+                {
+                    StartActivity(new Intent(Intent.ActionView, global::Android.Net.Uri.Parse(descriptor.SourceUrl)));
+                }
+                catch (ActivityNotFoundException)
+                {
+                    sources.Text = descriptor.SourceUrl;
+                }
+            };
+        }
+        content.AddView(details, SetupRow(ViewGroup.LayoutParams.WrapContent, Dp(8), 0));
+        content.AddView(sources, SetupRow(ViewGroup.LayoutParams.WrapContent, Dp(4), 0));
+
         var progress = CreateSetupProgress();
         content.AddView(progress, SetupRow(Dp(6), Dp(18), Dp(4)));
         var install = CreateSetupButton(L.T("mobile.runtime.install"), true);
@@ -126,7 +257,6 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
 
         install.Click += async (_, _) =>
         {
-            var descriptor = AndroidRuntimeCatalog.ForCurrentProcess();
             if (descriptor is null)
             {
                 status.Text = L.T("mobile.runtime.unsupported");
@@ -248,19 +378,8 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
                 await Task.Delay(900);
                 await RevealGameAsync(backdrop, content);
                 await runTask;
-                _touchOverlay?.Animate().Cancel();
-                if (_touchOverlay is not null)
-                {
-                    _touchOverlay.Visibility = ViewStates.Gone;
-                    _touchOverlay.Alpha = 0;
-                }
-                status.Text = L.T("mobile.game.exited");
-                backdrop.Visibility = ViewStates.Visible;
-                content.Visibility = ViewStates.Visible;
-                backdrop.Alpha = 0;
-                content.Alpha = 0;
-                backdrop.Animate().Alpha(1).SetDuration(240).Start();
-                content.Animate().Alpha(1).SetDuration(240).Start();
+                // The game ended without ending the process. It cannot start again in this process.
+                EndGameProcess();
             }
             catch (System.OperationCanceledException)
             {
@@ -270,6 +389,14 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
             catch (Exception exception) when (exception is IOException or InvalidDataException or HttpRequestException
                                                or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
             {
+                if (AndroidEmbeddedGame.HasStarted)
+                {
+                    // The JVM exists already, so Play cannot work again here: offer only closing.
+                    RestoreSetup(backdrop, content);
+                    content.Visibility = ViewStates.Gone;
+                    AddGameEnded(root, L.F("mobile.game.failed", exception.Message));
+                    return;
+                }
                 status.Text = L.F("mobile.game.failed", exception.Message);
                 RestoreSetup(backdrop, content);
             }
@@ -443,6 +570,12 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
     private static FrameLayout.LayoutParams MatchParent() => new(
         ViewGroup.LayoutParams.MatchParent,
         ViewGroup.LayoutParams.MatchParent);
+
+    [SupportedOSPlatform("android33.0")]
+    private sealed class BackCallback(Action onBack) : Java.Lang.Object, global::Android.Window.IOnBackInvokedCallback
+    {
+        public void OnBackInvoked() => onBack();
+    }
 }
 
 /// <summary>A lightweight, original loading scene that avoids showing a blank surface or stock Android chrome.</summary>
@@ -491,6 +624,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
 {
     private const long LongPressDelayMs = 340;
     private const long LongPressRingMs = 900;
+    private const long StatePollMs = 100;
     private readonly Paint _fill = new() { AntiAlias = true, Color = Color.Argb(142, 48, 53, 59) };
     private readonly Paint _activeFill = new() { AntiAlias = true, Color = Color.Argb(218, 105, 112, 120) };
     private readonly Paint _buttonFace = new() { AntiAlias = false, Color = Color.Argb(82, 76, 82, 86) };
@@ -518,6 +652,10 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     private int? _editingPointer;
     private TouchControlAction? _editingAction;
     private float _controlOpacity = 0.62f;
+    private int _guiScaleOption = MinecraftHotbar.DefaultGuiScaleOption;
+    private bool _polling;
+    private bool _polledGameplay;
+    private Java.Lang.Runnable? _poll;
     private float _lastMouseX;
     private float _lastMouseY;
     private bool _hasMousePosition;
@@ -554,6 +692,8 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         {
             if (_lastGameplayControlsActive == true && !gameplayControlsActive)
                 ReleaseHardwareInput();
+            // The GUI scale can only change in a menu, so re-read it whenever play resumes.
+            if (gameplayControlsActive) RefreshHotbar();
             _lastGameplayControlsActive = gameplayControlsActive;
             UpdateHardwareCapture(HasWindowFocus);
         }
@@ -569,9 +709,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
                 DrawMovementPad(canvas, x, y, radius);
             else
                 DrawActionButton(canvas, control, x, y, radius,
-                    !gameplayControlsActive && control.Action == TouchControlAction.SecondaryAction
-                        ? "拆分"
-                        : control.Label);
+                    splitGlyph: !gameplayControlsActive && control.Action == TouchControlAction.SecondaryAction);
         }
         DrawLongPressIndicators(canvas);
         if (_profile.Mode == TouchControlMode.JoystickAndCrosshair && gameplayControlsActive)
@@ -580,7 +718,35 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
             DrawSettings(canvas);
         else if (_layoutEditing)
             DrawEditGuide(canvas);
-        PostInvalidateDelayed(100);
+    }
+
+    protected override void OnAttachedToWindow()
+    {
+        base.OnAttachedToWindow();
+        _polling = true;
+        _poll ??= new Java.Lang.Runnable(PollGameState);
+        RemoveCallbacks(_poll);
+        PostDelayed(_poll, StatePollMs);
+    }
+
+    protected override void OnDetachedFromWindow()
+    {
+        _polling = false;
+        if (_poll is not null) RemoveCallbacks(_poll);
+        base.OnDetachedFromWindow();
+    }
+
+    /// <summary>
+    /// Redraws only when something on screen can have changed without a touch: the game switched
+    /// between play and a menu, or a long-press ring is animating. Touches redraw directly.
+    /// </summary>
+    private void PollGameState()
+    {
+        if (!_polling) return;
+        var gameplay = NativeJvmHost.GameplayControlsActive;
+        if (gameplay != _polledGameplay || _longPressIndicators.Count > 0) Invalidate();
+        _polledGameplay = gameplay;
+        if (_poll is not null) PostDelayed(_poll, StatePollMs);
     }
 
     private void DrawMovementPad(Canvas canvas, float x, float y, float radius)
@@ -663,9 +829,9 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     {
         _hint.TextSize = Math.Max(18, Math.Min(Width, Height) * 0.021f);
         canvas.DrawRect(Width * 0.35f, Height * 0.115f, Width * 0.65f, Height * 0.185f, _fill);
-        canvas.DrawText("拖动按键调整位置", Width * 0.5f, Height * 0.160f, _hint);
+        canvas.DrawText(L.T("mobile.touch.edit_hint"), Width * 0.5f, Height * 0.160f, _hint);
         canvas.DrawRect(Width * 0.87f, Height * 0.02f, Width * 0.98f, Height * 0.10f, _activeFill);
-        canvas.DrawText("完成", Width * 0.925f, Height * 0.075f, _hint);
+        canvas.DrawText(L.T("mobile.touch.done"), Width * 0.925f, Height * 0.075f, _hint);
     }
 
     private void DrawSettings(Canvas canvas)
@@ -675,18 +841,18 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         canvas.DrawRect(0, 0, Width, Height, _scrim);
         canvas.DrawRect(left, Height * 0.08f, right, Height * 0.96f, _panel);
         _hint.TextSize = Math.Max(17, Math.Min(Width, Height) * 0.021f);
-        canvas.DrawText("触控设置", (left + right) / 2, Height * 0.14f, _hint);
-        DrawSettingRow(canvas, "摇杆 + 点击互动", 0.20f, _profile.Mode == TouchControlMode.JoystickAndTap);
-        DrawSettingRow(canvas, "方向键 + 点击互动", 0.29f, _profile.Mode == TouchControlMode.DPadAndTap);
-        DrawSettingRow(canvas, "摇杆 + 准星", 0.38f, _profile.Mode == TouchControlMode.JoystickAndCrosshair);
-        DrawSettingRow(canvas, "外接键盘鼠标", 0.47f, _profile.Mode == TouchControlMode.ExternalKeyboardMouse);
-        DrawStepper(canvas, $"按键大小  {Math.Round(_profile.Scale * 100):0}%", 0.58f);
-        DrawStepper(canvas, $"透明度  {Math.Round(_controlOpacity * 100):0}%", 0.67f);
-        DrawSettingRow(canvas, _profile.ForcedSprint ? "强制疾跑：开" : "强制疾跑：关", 0.76f,
+        canvas.DrawText(L.T("mobile.touch.settings"), (left + right) / 2, Height * 0.14f, _hint);
+        DrawSettingRow(canvas, L.T("mobile.touch.mode.joystick_tap"), 0.20f, _profile.Mode == TouchControlMode.JoystickAndTap);
+        DrawSettingRow(canvas, L.T("mobile.touch.mode.dpad_tap"), 0.29f, _profile.Mode == TouchControlMode.DPadAndTap);
+        DrawSettingRow(canvas, L.T("mobile.touch.mode.joystick_crosshair"), 0.38f, _profile.Mode == TouchControlMode.JoystickAndCrosshair);
+        DrawSettingRow(canvas, L.T("mobile.touch.mode.keyboard_mouse"), 0.47f, _profile.Mode == TouchControlMode.ExternalKeyboardMouse);
+        DrawStepper(canvas, L.F("mobile.touch.size", (int)Math.Round(_profile.Scale * 100)), 0.58f);
+        DrawStepper(canvas, L.F("mobile.touch.opacity", (int)Math.Round(_controlOpacity * 100)), 0.67f);
+        DrawSettingRow(canvas, _profile.ForcedSprint ? L.T("mobile.touch.sprint_on") : L.T("mobile.touch.sprint_off"), 0.76f,
             _profile.ForcedSprint);
-        DrawPanelButton(canvas, "恢复默认", 0.615f, 0.83f, 0.77f, 0.90f);
-        DrawPanelButton(canvas, "编辑布局", 0.80f, 0.83f, 0.955f, 0.90f);
-        DrawPanelButton(canvas, "完成", 0.70f, 0.91f, 0.87f, 0.955f);
+        DrawPanelButton(canvas, L.T("mobile.touch.reset"), 0.615f, 0.83f, 0.77f, 0.90f);
+        DrawPanelButton(canvas, L.T("mobile.touch.edit_layout"), 0.80f, 0.83f, 0.955f, 0.90f);
+        DrawPanelButton(canvas, L.T("mobile.touch.done"), 0.70f, 0.91f, 0.87f, 0.955f);
     }
 
     private void DrawSettingRow(Canvas canvas, string text, float y, bool selected)
@@ -754,13 +920,14 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     }
 
     private void DrawActionButton(Canvas canvas, TouchControlDefinition control,
-        float x, float y, float radius, string label)
+        float x, float y, float radius, bool splitGlyph)
     {
         var compact = control.Action is TouchControlAction.PreviousSlot or TouchControlAction.NextSlot;
         var utility = control.Action is TouchControlAction.Menu or TouchControlAction.Keyboard or
             TouchControlAction.Inventory or TouchControlAction.Drop;
-        var halfWidth = radius * (compact ? 0.78f : utility ? 0.82f : 0.92f);
-        var halfHeight = radius * (compact ? 0.78f : utility ? 0.82f : 0.92f);
+        var faceScale = compact ? 0.78f : utility ? (float)TouchControlLayout.UtilityFaceScale : 0.92f;
+        var halfWidth = radius * faceScale;
+        var halfHeight = radius * faceScale;
         var pressed = _router.IsPressed(control.Action);
         var pressOffset = pressed ? Math.Max(1, radius * 0.08f) : 0;
         var bounds = new RectF((float)Math.Round(x - halfWidth), (float)Math.Round(y - halfHeight),
@@ -776,10 +943,11 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         canvas.DrawLine(bounds.Left + 2, bounds.Top + 2, bounds.Right - 2, bounds.Top + 2, _buttonHighlight);
         canvas.DrawLine(bounds.Left + 2, bounds.Top + 2, bounds.Left + 2, bounds.Bottom - 2, _buttonHighlight);
         DrawGlyph(canvas, control.Action, x, y + pressOffset,
-            Math.Min(halfWidth, halfHeight) * 0.68f, label);
+            Math.Min(halfWidth, halfHeight) * 0.68f, control.Label, splitGlyph);
     }
 
-    private void DrawGlyph(Canvas canvas, TouchControlAction action, float x, float y, float size, string fallback)
+    private void DrawGlyph(Canvas canvas, TouchControlAction action, float x, float y, float size, string fallback,
+        bool splitGlyph)
     {
         _glyph.SetStyle(Paint.Style.Stroke);
         _glyph.StrokeWidth = Math.Max(3, size * 0.12f);
@@ -852,7 +1020,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
                 canvas.Restore();
                 break;
             case TouchControlAction.SecondaryAction:
-                if (fallback == "拆分")
+                if (splitGlyph)
                 {
                     canvas.DrawRect(x - size * 0.62f, y - size * 0.44f,
                         x - size * 0.08f, y + size * 0.10f, _glyph);
@@ -887,17 +1055,22 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         }
     }
 
-    private static bool TryGetHotbarSlot(double x, double y, out int slot)
+    private bool TryGetHotbarSlot(double x, double y, out int slot) =>
+        MinecraftHotbar.TryGetSlot(x, y, Width, Height, _guiScaleOption, out slot);
+
+    /// <summary>Re-reads the game's GUI scale and places the hotbar for the current surface size.</summary>
+    private void RefreshHotbar()
     {
-        const double left = 0.405;
-        const double right = 0.595;
-        if (y < 0.905 || x < left || x >= right)
+        string? options = null;
+        try
         {
-            slot = -1;
-            return false;
+            options = File.ReadAllText(System.IO.Path.Combine(Context!.FilesDir!.AbsolutePath, "minecraft", "options.txt"));
         }
-        slot = Math.Clamp((int)((x - left) / ((right - left) / 9)), 0, 8);
-        return true;
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+        _guiScaleOption = MinecraftHotbar.ReadGuiScaleOption(options);
+        _profile.HotbarBounds = Width > 0 && Height > 0
+            ? MinecraftHotbar.Bounds(Width, Height, _guiScaleOption)
+            : null;
     }
 
     private void DrawChevron(Canvas canvas, float x, float y, float size)
@@ -914,6 +1087,8 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     protected override void OnSizeChanged(int width, int height, int oldWidth, int oldHeight)
     {
         base.OnSizeChanged(width, height, oldWidth, oldHeight);
+        _profile.AspectRatio = height > 0 ? (double)width / height : 1;
+        RefreshHotbar();
         if (Build.VERSION.SdkInt < BuildVersionCodes.Q) return;
 #pragma warning disable CA1416
         SystemGestureExclusionRects = [new Rect(0, Math.Max(0, height - 200), width, height)];
@@ -1044,6 +1219,8 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         // button and drag packets through the touch channel instead of generic motion.
         if (IsHardwarePointer(e)) return HandleHardwareMotion(e);
         if (HandleSettingsTouch(e) || HandleLayoutEditTouch(e)) return true;
+        // Pressed keys and the joystick knob follow the finger.
+        Invalidate();
         var actionIndex = e.ActionIndex;
         switch (e.ActionMasked)
         {

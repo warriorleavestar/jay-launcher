@@ -120,7 +120,8 @@ public sealed class MobilePortTests
         Assert.Equal(1, right.X, 6);
         Assert.Equal(0, right.Y, 6);
         Assert.DoesNotContain(TouchControlLayout.Default, control => control.Label is "Q" or "E" or "Run" or "Use");
-        Assert.Equal("背包", TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Inventory).Label);
+        Assert.Equal("mobile.touch.inventory",
+            TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Inventory).LabelKey);
         Assert.DoesNotContain(TouchControlLayout.Default, control => control.Action == TouchControlAction.Drop);
 
         var menu = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Menu);
@@ -178,6 +179,184 @@ public sealed class MobilePortTests
         Assert.Equal(TouchControlAction.Jump, profile.HitTest(0.80, 0.70)!.Action);
         profile.ResetPositions();
         Assert.NotEqual(0.80, profile.Controls.Single(control => control.Action == TouchControlAction.Jump).CenterX);
+    }
+
+    [Fact]
+    public void TouchHitAreasAndJoystickFollowTheDrawnSizeOnAWideScreen()
+    {
+        const double width = 2400, height = 1080;
+        var profile = new TouchControlProfile { AspectRatio = width / height };
+        var jump = profile.Controls.Single(control => control.Action == TouchControlAction.Jump);
+        var radiusPixels = jump.Radius * Math.Min(width, height);
+
+        // Inside the drawn size in both directions, outside it at 1.5 radii (in pixels) sideways.
+        Assert.Equal(TouchControlAction.Jump,
+            profile.HitTest(jump.CenterX + radiusPixels * 0.9 / width, jump.CenterY)!.Action);
+        Assert.Equal(TouchControlAction.Jump,
+            profile.HitTest(jump.CenterX, jump.CenterY + radiusPixels * 0.9 / height)!.Action);
+        Assert.NotEqual(TouchControlAction.Jump,
+            profile.HitTest(jump.CenterX + radiusPixels * 1.5 / width, jump.CenterY)?.Action);
+
+        // The same finger travel in pixels moves the joystick equally far in either direction.
+        var move = profile.Controls.Single(control => control.Action == TouchControlAction.Move);
+        var travel = move.Radius * Math.Min(width, height) * 0.5;
+        var sideways = profile.MovementVector(move.CenterX + travel / width, move.CenterY);
+        var forward = profile.MovementVector(move.CenterX, move.CenterY - travel / height);
+        Assert.Equal(0.5, sideways.X, 6);
+        Assert.Equal(-0.5, forward.Y, 6);
+
+        // A bad size never breaks hit testing.
+        profile.AspectRatio = double.NaN;
+        Assert.Equal(1, profile.AspectRatio);
+    }
+
+    [Fact]
+    public void EmbeddedGameRunsOncePerProcessAndBackFollowsItsState()
+    {
+        var state = new EmbeddedGameRunState();
+        Assert.Equal(EmbeddedGameBackAction.CloseScreen, state.BackAction);
+
+        var runs = 0;
+        state.Run(() =>
+        {
+            runs++;
+            Assert.True(state.IsRunning);
+            Assert.Equal(EmbeddedGameBackAction.SendEscape, state.BackAction);
+        });
+        Assert.True(state.HasStarted);
+        Assert.False(state.IsRunning);
+        Assert.Equal(EmbeddedGameBackAction.EndProcess, state.BackAction);
+
+        // A second start in the same process never reaches the JVM.
+        Assert.Throws<InvalidOperationException>(() => state.Run(() => runs++));
+        Assert.Equal(1, runs);
+
+        // A game that fails after starting still counts as started.
+        var failed = new EmbeddedGameRunState();
+        Assert.Throws<InvalidOperationException>(() => failed.Run(() => throw new InvalidOperationException("crash")));
+        Assert.Equal(EmbeddedGameBackAction.EndProcess, failed.BackAction);
+    }
+
+    [Theory]
+    [InlineData(2400, 1080, 3, 3)]
+    [InlineData(1600, 720, 3, 3)]
+    [InlineData(1280, 720, 0, 3)]
+    [InlineData(854, 480, 3, 2)]
+    [InlineData(2400, 1080, 2, 2)]
+    public void HotbarFollowsTheGameGuiScale(int width, int height, int option, int expectedScale)
+    {
+        Assert.Equal(expectedScale, MinecraftHotbar.EffectiveGuiScale(width, height, option));
+
+        var (left, top, right, bottom) = MinecraftHotbar.Bounds(width, height, option);
+        Assert.Equal(182.0 * expectedScale / width, right - left, 6);
+        Assert.Equal(0.5, (left + right) / 2, 2);
+        Assert.InRange(bottom, 1.0, 1.0 + (double)expectedScale / height);
+        Assert.Equal(22.0 * expectedScale / height, bottom - top, 6);
+
+        // The middle of each visible slot selects that slot; just outside the bar selects nothing.
+        for (var slot = 0; slot < 9; slot++)
+        {
+            var x = left + (1 + 20 * slot + 10.0) * expectedScale / width;
+            Assert.True(MinecraftHotbar.TryGetSlot(x, (top + bottom) / 2, width, height, option, out var picked));
+            Assert.Equal(slot, picked);
+        }
+        Assert.False(MinecraftHotbar.TryGetSlot(left - 1.0 / width, (top + bottom) / 2, width, height, option, out _));
+        Assert.False(MinecraftHotbar.TryGetSlot(right + 1.0 / width, (top + bottom) / 2, width, height, option, out _));
+        Assert.False(MinecraftHotbar.TryGetSlot(0.5, top - 2.0 / height, width, height, option, out _));
+    }
+
+    [Fact]
+    public void HotbarTapsMatchTheVisibleSlotsOnAWidePhone()
+    {
+        // 2400x1080 at GUI scale 3: the hotbar spans 927..1473 px. Pixel 940 is inside the first slot,
+        // which the old fixed fractions (0.405..0.595) did not accept.
+        Assert.True(MinecraftHotbar.TryGetSlot(940.0 / 2400, 1060.0 / 1080, 2400, 1080, 3, out var first));
+        Assert.Equal(0, first);
+        Assert.True(MinecraftHotbar.TryGetSlot(1000.0 / 2400, 1060.0 / 1080, 2400, 1080, 3, out var second));
+        Assert.Equal(1, second);
+    }
+
+    [Theory]
+    [InlineData(null, MinecraftHotbar.DefaultGuiScaleOption)]
+    [InlineData("version:4671\nguiScale:2\nmaxFps:60\n", 2)]
+    [InlineData("version:4671\r\nguiScale:0\r\n", 0)]
+    [InlineData("version:4671\n", 0)]
+    [InlineData("guiScale:big\n", MinecraftHotbar.DefaultGuiScaleOption)]
+    public void HotbarReadsTheGuiScaleFromOptions(string? text, int expected) =>
+        Assert.Equal(expected, MinecraftHotbar.ReadGuiScaleOption(text));
+
+    [Fact]
+    public void InventoryKeyFollowsTheHotbarUnlessMoved()
+    {
+        const int width = 2400, height = 1080;
+        var profile = new TouchControlProfile
+        {
+            AspectRatio = (double)width / height,
+            HotbarBounds = MinecraftHotbar.Bounds(width, height, 3)
+        };
+        var hotbar = profile.HotbarBounds!.Value;
+        var inventory = profile.Controls.Single(control => control.Action == TouchControlAction.Inventory);
+        var faceLeftPixels = (inventory.CenterX * width) -
+                             inventory.Radius * TouchControlLayout.UtilityFaceScale * Math.Min(width, height);
+        Assert.Equal(hotbar.Right * width, faceLeftPixels, 3);
+        Assert.Equal((hotbar.Top + hotbar.Bottom) / 2, inventory.CenterY, 6);
+        Assert.False(MinecraftHotbar.TryGetSlot(inventory.CenterX, inventory.CenterY, width, height, 3, out _));
+        Assert.Equal(TouchControlAction.Inventory, profile.HitTest(inventory.CenterX, inventory.CenterY)!.Action);
+
+        profile.SetPosition(TouchControlAction.Inventory, 0.30, 0.40);
+        inventory = profile.Controls.Single(control => control.Action == TouchControlAction.Inventory);
+        Assert.Equal((0.30, 0.40), (inventory.CenterX, inventory.CenterY));
+    }
+
+    [Theory]
+    [InlineData(1, 1.0)]
+    [InlineData(1, 1.35)]
+    [InlineData(2, 1.35)]
+    public void InventoryKeyStaysOnScreenAtASmallGuiScale(int guiScale, double buttonScale)
+    {
+        const int width = 2400, height = 1080;
+        var profile = new TouchControlProfile
+        {
+            AspectRatio = (double)width / height,
+            Scale = buttonScale,
+            HotbarBounds = MinecraftHotbar.Bounds(width, height, guiScale)
+        };
+        var inventory = profile.Controls.Single(control => control.Action == TouchControlAction.Inventory);
+        var faceBottomPixels = inventory.CenterY * height +
+                               inventory.Radius * TouchControlLayout.UtilityFaceScale * Math.Min(width, height);
+        Assert.True(faceBottomPixels <= height + 1e-6, $"face bottom {faceBottomPixels} below {height}");
+        Assert.Equal(TouchControlAction.Inventory, profile.HitTest(inventory.CenterX, inventory.CenterY)!.Action);
+    }
+
+    [Fact]
+    public void TouchControlTextIsTranslatedInEveryLanguage()
+    {
+        // The game screen follows the app language, so every string it shows must come from the
+        // language files: control names from the layout, and the settings panel text in GameActivity.
+        var src = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));
+        var keys = Enum.GetValues<TouchControlMode>()
+            .SelectMany(TouchControlLayout.For)
+            .Select(control => control.LabelKey)
+            .ToHashSet();
+        foreach (var file in Directory.EnumerateFiles(Path.Combine(src, "Amber.Android"), "*.cs")
+                     .Concat(Directory.EnumerateFiles(Path.Combine(src, "Amber.Mobile"), "*.cs")))
+            foreach (System.Text.RegularExpressions.Match match in System.Text.RegularExpressions.Regex.Matches(
+                         File.ReadAllText(file), @"\bL\.[TF]\(\s*""(mobile\.[^""]+)"""))
+                keys.Add(match.Groups[1].Value);
+        Assert.Contains("mobile.touch.edit_layout", keys);
+        var literals = Directory.EnumerateFiles(Path.Combine(src, "Amber.Android"), "*.cs")
+            .Concat(Directory.EnumerateFiles(Path.Combine(src, "Amber.Mobile"), "*.cs"))
+            .SelectMany(file => System.Text.RegularExpressions.Regex.Matches(File.ReadAllText(file),
+                    @"""[^""\n]*[\u3040-\u30ff\u4e00-\u9fff][^""\n]*""")
+                .Select(match => $"{Path.GetFileName(file)}: {match.Value}"))
+            .ToList();
+        Assert.True(literals.Count == 0, "Hard-coded UI text:\n" + string.Join("\n", literals));
+
+        foreach (var code in new[] { "en", "zh-Hans", "zh-Hant", "ja", "lzh" })
+        {
+            var table = Amber.Core.Localization.L.Load(code);
+            Assert.All(keys, key => Assert.True(table.ContainsKey(key), $"{code} is missing {key}"));
+        }
     }
 
     [Fact]

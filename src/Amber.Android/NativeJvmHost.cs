@@ -7,7 +7,7 @@ namespace Amber.Android;
 
 internal static partial class NativeJvmHost
 {
-    private const int ExpectedAbiVersion = 10;
+    private const int ExpectedAbiVersion = 11;
 
     public static bool GameplayControlsActive => IsAvailable && GetNativeGameplayMode() != 0;
 
@@ -21,15 +21,15 @@ internal static partial class NativeJvmHost
         }
     }
 
-    public static bool IsAvailable
+    // The native library and its ABI cannot change while the process runs, so check them once.
+    private static readonly Lazy<bool> Available = new(() =>
     {
-        get
-        {
-            try { return AbiVersion() == ExpectedAbiVersion; }
-            catch (DllNotFoundException) { return false; }
-            catch (EntryPointNotFoundException) { return false; }
-        }
-    }
+        try { return AbiVersion() == ExpectedAbiVersion; }
+        catch (DllNotFoundException) { return false; }
+        catch (EntryPointNotFoundException) { return false; }
+    });
+
+    public static bool IsAvailable => Available.Value;
 
     public static string? LoadRuntime(string libJvmPath)
     {
