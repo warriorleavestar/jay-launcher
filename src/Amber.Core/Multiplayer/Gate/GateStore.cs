@@ -133,7 +133,7 @@ internal sealed partial class GateJsonContext : JsonSerializerContext;
 public enum RedeemOutcome { Ok, InviteGone, DeviceLimit, Disabled }
 
 /// <summary>
-/// 网关数据目录（默认 /var/lib/jay-gate）：server.key（网关长期私钥，0600）、state.json（名单和邀请）、gate.json（设置）。
+/// 网关数据目录（服务器数据目录下的 gate/，见 JayServerRunner.GateDirectory）：server.key（网关长期私钥，0600）、state.json（名单和邀请）、gate.json（设置）。
 /// 守护进程和管理命令会同时改 state.json：每次修改都先拿 state.lock 的独占锁，重新读一遍，改完原子替换（写临时文件再改名），不会互相覆盖。
 /// </summary>
 public sealed class GateStore
@@ -341,7 +341,6 @@ public sealed class GateStore
 
     public bool CancelInvite(string id) => Mutate(s => s.Invites.RemoveAll(i => i.Id == id) > 0);
 
-    /// <summary>告诉客户端的连法。隐私+ 下不带直连地址（源站地址不外传）。</summary>
     /// <summary>开着的轮换：规则和主种子；没开返回 null。</summary>
     public (GateRotation Rule, byte[] Master)? Rotation(GateState? state = null)
     {
@@ -441,6 +440,7 @@ public sealed class GateStore
     public GateEntryRotation? EntryRotation(string entry, GateState? state = null) =>
         Rotation(state) is { } r ? new GateEntryRotation(r.Rule, GateRotation.EntrySeed(r.Master, entry)) : null;
 
+    /// <summary>告诉客户端的连法。隐私+ 下不带直连地址（源站地址不外传）。</summary>
     public GateNetwork Network(GateConfig config)
     {
         var state = Read();
@@ -455,12 +455,16 @@ public sealed class GateStore
         return new GateNetwork(state.Privacy, direct, relays, rotation);
     }
 
+    /// <summary>Healthy relays privacy++ needs before the breaker stays closed: never fewer than two.</summary>
+    public static int RequiredHealthyRelays(GateState state) => Math.Max(2, state.MinHealthyRelays);
+
     /// <summary>切换隐私等级。隐私+ 至少要两个节点。</summary>
     public void SetPrivacy(PrivacyLevel level) => Mutate(s =>
     {
         if (level.IsSplit() && s.Relays.Count < 2) throw new ArgumentException(L.T("core.gate.admin.plus_needs_relays"));
-        if (level == PrivacyLevel.PlusPlus && s.Relays.Count(r => r.HeartbeatPsk is not null) < s.MinHealthyRelays)
-            throw new ArgumentException(L.F("core.gate.admin.plusplus_needs_codes", s.MinHealthyRelays));
+        var needed = RequiredHealthyRelays(s);
+        if (level == PrivacyLevel.PlusPlus && s.Relays.Count(r => r.HeartbeatPsk is not null) < needed)
+            throw new ArgumentException(L.F("core.gate.admin.plusplus_needs_codes", needed));
         s.Privacy = level;
         return 0;
     });

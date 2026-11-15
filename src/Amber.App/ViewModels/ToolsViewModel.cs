@@ -223,7 +223,7 @@ public sealed partial class ToolsViewModel : PageViewModel
             UpdateStatus = L.T("tools.update.store");
             return;
         }
-        // Privacy plan item 2: a newer release is offered only when 2 of the 3 Jay trustees signed it.
+        // Privacy plan item 2: a newer release is offered only when enough Jay release keys signed it.
         (UpdateStatus, UpdateUrl) = await RunUpdateCheckAsync(new UpdateCheck(service.Http, AppSettings.DataDir), feed, UpdateChecker.CurrentVersion);
     }
 
@@ -249,19 +249,23 @@ public sealed partial class ToolsViewModel : PageViewModel
     private void OpenUpdateUrl()
     {
         if (UpdateUrl is null) return;
-        if (!UpdateChecker.TryGetSafeUpdateUrl(UpdateUrl, out var uri))
-        {
-            UpdateStatus = L.F("tools.update.failed", L.T("tools.download.invalid_url"));
-            UpdateUrl = null;
-            return;
-        }
         try
         {
-            Process.Start(new ProcessStartInfo(uri!.AbsoluteUri) { UseShellExecute = true });
+            if (TryOpenUpdatePage(UpdateUrl, url => Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }))) return;
+            UpdateStatus = L.F("tools.update.failed", L.T("tools.download.invalid_url"));
+            UpdateUrl = null;
         }
         catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException)
         {
             UpdateStatus = L.F("tools.update.failed", e.Message);
         }
+    }
+
+    /// <summary>Hands the update page to <paramref name="open"/> only when it is a safe absolute HTTP(S) address.</summary>
+    internal static bool TryOpenUpdatePage(string? value, Action<string> open)
+    {
+        if (!UpdateChecker.TryGetSafeUpdateUrl(value, out var uri)) return false;
+        open(uri!.AbsoluteUri);
+        return true;
     }
 }

@@ -24,7 +24,7 @@ Android 版是一个独立的 Avalonia 移动端工程，不会把桌面端的�
 
 ## 本地构建
 
-需要 .NET 10 Android workload、Android SDK、JDK 21 和 Android NDK 28.2.13676358。可按 Microsoft 提供的 `InstallAndroidDependencies` 目标安装与当前项目匹配的依赖：
+需要 .NET 10 Android workload、Android SDK、JDK 21、Android NDK 28.2.13676358 和 SDK CMake 3.22.1。可按 Microsoft 提供的 `InstallAndroidDependencies` 目标安装与当前项目匹配的依赖：
 
 ```sh
 dotnet workload install android
@@ -35,9 +35,12 @@ dotnet build src/Amber.Android/Amber.Android.csproj \
   -p:AcceptAndroidSdkLicenses=true
 
 /absolute/path/android-sdk/cmdline-tools/latest/bin/sdkmanager \
-  --sdk_root=/absolute/path/android-sdk 'ndk;28.2.13676358'
+  --sdk_root=/absolute/path/android-sdk 'ndk;28.2.13676358' 'cmake;3.22.1'
 bash scripts/build-android-native.sh \
   /absolute/path/android-sdk src/Amber.Android/obj/jay-native
+# Required for Release builds. Clones glfw/glfw at a pinned commit, so it needs git and network access.
+bash scripts/build-android-glfw.sh \
+  /absolute/path/android-sdk src/Amber.Android/obj/jay-glfw
 
 dotnet publish src/Amber.Android/Amber.Android.csproj -c Release \
   -p:AndroidSdkDirectory=/absolute/path/android-sdk \

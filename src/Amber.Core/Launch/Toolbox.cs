@@ -162,9 +162,6 @@ public static class Toolbox
             $process=[Diagnostics.Process]::Start($start);$process.WaitForExit();exit $process.ExitCode;
         }catch{[Console]::Error.WriteLine($_.Exception.Message);exit 1}
         """;
-
-    /// <summary>版本文件的大小统计，用于实例页显示。</summary>
-    public static long InstanceSize(GameInstance instance) => SizeOf([instance.WorkDir]);
 }
 
 public sealed record UpdateInfo(string Version, string? Url, string? Notes);

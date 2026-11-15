@@ -43,6 +43,34 @@ public sealed class NetworkAccountsTests : IAsyncDisposable
     }
 
     [Fact]
+    public void RepeatedFactorInAReplyIsAskedOnce()
+    {
+        var node = X25519KeyPair.Generate();
+        var login = new NetworkLogin(true, node.PublicKey, new byte[32]);
+        var need = new JsonObject
+        {
+            ["need"] = new JsonArray(new JsonObject { ["name"] = "totp" }, new JsonObject { ["name"] = "totp", ["prompt"] = "again" }),
+        };
+        var sealedNeed = PrivateSeal.Seal(node, _guest.PublicKey, System.Text.Encoding.UTF8.GetBytes(need.ToJsonString()));
+        var reply = new JsonObject { ["ok"] = false, ["error"] = "factor", ["b"] = Convert.ToBase64String(sealedNeed) };
+        var e = Assert.Throws<SecondFactorRequiredException>(() => NetworkLoginClient.Read(reply, _guest, login, "net1", DateTimeOffset.UtcNow));
+        Assert.Equal("totp", Assert.Single(e.Need).Name);
+    }
+
+    [Fact]
+    public void RepeatedFactorsAreDroppedBeforeTheFourFactorLimit()
+    {
+        var node = X25519KeyPair.Generate();
+        var login = new NetworkLogin(true, node.PublicKey, new byte[32]);
+        var names = new[] { "totp", "totp", "pin", "totp", "email", "pin", "word", "extra" };
+        var need = new JsonObject { ["need"] = new JsonArray([.. names.Select(n => (JsonNode)new JsonObject { ["name"] = n })]) };
+        var sealedNeed = PrivateSeal.Seal(node, _guest.PublicKey, System.Text.Encoding.UTF8.GetBytes(need.ToJsonString()));
+        var reply = new JsonObject { ["ok"] = false, ["error"] = "factor", ["b"] = Convert.ToBase64String(sealedNeed) };
+        var e = Assert.Throws<SecondFactorRequiredException>(() => NetworkLoginClient.Read(reply, _guest, login, "net1", DateTimeOffset.UtcNow));
+        Assert.Equal(["totp", "pin", "email", "word"], e.Need.Select(f => f.Name));
+    }
+
+    [Fact]
     public async Task LoginGivesATokenBoundToTheIdentity()
     {
         var (store, _, login) = StartNode();
