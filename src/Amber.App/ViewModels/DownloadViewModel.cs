@@ -661,7 +661,17 @@ public sealed partial class DownloadViewModel : PageViewModel, ISnapshotDemo
                 item.Installed = true;
             }
             if (universalLoader is { } useUniversalLoader) _service.SetUniversalLoader(ctx, id, useUniversalLoader);
-            if (picks.Count > 0) await InstallPickedModsAsync(picks, ctx, id, task, ct);
+            if (picks.Count > 0)
+            {
+                // The extra mods are optional: when they fail, the game itself is still installed, so report the
+                // problem next to the success instead of failing the whole install and leaving it marked incomplete.
+                try { await InstallPickedModsAsync(picks, ctx, id, task, ct); }
+                catch (Exception e) when (e is not OperationCanceledException || !ct.IsCancellationRequested)
+                {
+                    _modProblems = [ErrorText.Describe(e)];
+                    _modsInstalled = 0;
+                }
+            }
             await Ui.FlushAsync();
             acceptingProgress = false;
             var elapsedSeconds = watch.Elapsed.TotalSeconds;
@@ -676,8 +686,12 @@ public sealed partial class DownloadViewModel : PageViewModel, ISnapshotDemo
             }
             task.Succeed(Status);
             Target = null;
-            _service.MarkInstallFinished(ctx, id);
-            if (id != expectedId) _service.MarkInstallFinished(ctx, expectedId);
+            try
+            {
+                _service.MarkInstallFinished(ctx, id);
+                if (id != expectedId) _service.MarkInstallFinished(ctx, expectedId);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
             // 装的时候换了游戏目录：装好的实例在旧目录里，不把它设成当前实例，也不提示“打开实例”。
             var sameDirectory = _service.IsCurrentDirectory(ctx);
             _service.NotifyInstalledChanged();

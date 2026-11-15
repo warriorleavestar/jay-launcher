@@ -68,9 +68,12 @@ public sealed class RunLogStore : IDisposable
         return new RunLogStore(Path.Combine(dir, name + ".log"), Path.Combine(dir, name + ".json"), startedAt, noTrace);
     }
 
-    public void Add(DateTimeOffset time, GameLogLevel level, string message, bool fromJay = false)
+    /// <param name="chat">The raw output this line came from is part of a chat event (see
+    /// <see cref="ChatLogFilter.OutputFilter"/>): it covers the later lines of a multi-line chat message, which carry no
+    /// chat marker of their own.</param>
+    public void Add(DateTimeOffset time, GameLogLevel level, string message, bool fromJay = false, bool chat = false)
     {
-        if (_writer is null || (_noTrace && !fromJay && Chat.IsMatch(message))) return;
+        if (_writer is null || (_noTrace && !fromJay && (chat || Chat.IsMatch(message)))) return;
         lock (_gate)
         {
             try

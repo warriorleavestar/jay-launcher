@@ -169,7 +169,8 @@ public sealed partial class LibraryViewModel : PageViewModel
             var mods = 0;
             if (instance is { Loader: not null })
             {
-                try { mods = Directory.Exists(instance.ModsDir) ? Directory.EnumerateFiles(instance.ModsDir, "*.jar").Count() : 0; }
+                // The same count as the instance page's hero: enabled mod files, without reading them.
+                try { mods = new ModManager(instance.ModsDir).CountEnabled(); }
                 catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
             }
             var entry = new LibraryEntry(id, meta?.DisplayName ?? id, instance?.McVersion ?? id, instance?.Loader, meta?.Pinned ?? false, meta?.LastPlayed,

@@ -27,13 +27,16 @@ internal sealed class RunOutput
         }
     }
 
-    public void Add(string line)
+    /// <summary>Adds a raw output line; the returned line says whether it belongs to a chat event (for the saved log).</summary>
+    public ChatLogFilter.OutputLine Add(string line)
     {
         lock (_gate)
         {
             // 先识别事件再裁剪：聊天首行被挤出队列后，余下的续行仍带着聊天标记。
-            _lines.Enqueue(_filter.Add(line));
+            var output = _filter.Add(line);
+            _lines.Enqueue(output);
             if (_lines.Count > Kept) _lines.Dequeue();
+            return output;
         }
     }
 

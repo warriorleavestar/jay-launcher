@@ -37,6 +37,39 @@ public sealed class WorldImportTests : IDisposable
     }
 
     [Fact]
+    public void UnreadableArchiveThrowsAccessDenied()
+    {
+        // A path that cannot be opened as a file (here a folder) is reported as access denied, which callers must catch.
+        var folder = Path.Combine(_root, "not-a-zip.zip");
+        Directory.CreateDirectory(folder);
+        Assert.Throws<UnauthorizedAccessException>(() => WorldManager.Import(folder, Saves));
+    }
+
+    [Fact]
+    public void InstancePageReportsAccessDeniedImport() => UiTestThread.Run(() =>
+    {
+        var game = Path.Combine(_root, "game");
+        var dir = Path.Combine(game, "versions", "a");
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, "a.json"), """{"id":"a","mainClass":"Example","libraries":[]}""");
+        File.WriteAllBytes(Path.Combine(dir, "a.jar"), []);
+        var service = new Amber.App.Services.LauncherService(new Amber.App.Services.AppSettings
+        {
+            GameDirectory = game,
+            SavePathForTest = Path.Combine(_root, "settings.json"),
+            PlayerName = "",
+            AutoJavaDownload = false,
+        });
+        var vm = new Amber.App.ViewModels.InstanceViewModel(service) { SelectedId = "a" };
+        var folder = Path.Combine(_root, "denied.zip");
+        Directory.CreateDirectory(folder);
+
+        vm.ImportWorld(folder);
+
+        Assert.Equal("instance.worlds.import_failed", vm.StatusInfo?.Key);
+    });
+
+    [Fact]
     public void NestedWorldAndCollisionRemainSupported()
     {
         var zip = Archive("normal.zip", "wrapper/世界/level.dat", "wrapper/世界/region/r.0.0.mca", "wrapper/readme.txt");

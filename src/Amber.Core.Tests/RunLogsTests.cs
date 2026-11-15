@@ -72,6 +72,34 @@ public sealed class RunLogsTests : IDisposable
         Assert.Equal(["Saving chunks"], lines.Select(l => l.Message));
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void NoTraceKeepsEveryLineOfAMultiLineChatMessageOut(bool noTrace)
+    {
+        // A plain-text console (Forge, NeoForge): only the first line of a chat message carries the chat marker.
+        string[] output =
+        [
+            "[12:00:00] [Render thread/INFO]: [CHAT] <Steve> first line",
+            "second line of the same message",
+            "[12:00:01] [Server thread/INFO]: Saving chunks",
+        ];
+        using (var store = RunLogStore.Begin(_work, T0, noTrace))
+        {
+            var filter = new ChatLogFilter.OutputFilter();
+            var parser = new GameLogParser();
+            foreach (var line in output)
+            {
+                var raw = filter.Add(line);
+                if (parser.Feed(line) is { } entry) store.Add(entry.Time, entry.Level, entry.Message, chat: raw.IsChat);
+            }
+            store.Finish(T0.AddMinutes(1), RunOutcome.Exited, 0);
+        }
+        var lines = RunLogStore.Read(RunLogStore.List(_work)[0].LogPath).Select(l => l.Message).ToList();
+        if (noTrace) Assert.Equal(["[12:00:01] [Server thread/INFO]: Saving chunks"], lines);
+        else Assert.Equal(output, lines);
+    }
+
     [Fact]
     public void OnlyTheNewestRunsAreKept()
     {

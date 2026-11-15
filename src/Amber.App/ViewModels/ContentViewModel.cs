@@ -456,8 +456,19 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
         await SearchAsync();
     }
 
-    private GameInstance? CurrentInstance() =>
-        TargetInstance is { } id ? _service.GetInstance(id) : null;
+    /// <summary>The "install to" instance, or null when none is picked or its files cannot be read (a broken instance).</summary>
+    private GameInstance? CurrentInstance()
+    {
+        if (TargetInstance is not { } id) return null;
+        try
+        {
+            return _service.GetInstance(id);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Text.Json.JsonException or InvalidDataException or NotSupportedException)
+        {
+            return null;
+        }
+    }
 
     // ---- 结果列表的三种状态（改版规格 4.5）：加载中（10 秒后提示慢）、空结果、出错 ----
 
@@ -580,7 +591,8 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
             Status = result.Total == 0 ? L.T("content.search.no_results") : L.P("content.search.results", result.Total, result.Total, Page + 1);
             SetSearchState(false, empty: result.Total == 0 ? EmptyMessage(Query.Trim(), instance is not null) : null);
         }
-        catch (OperationCanceledException) { }
+        // Only our own cancellation is silent: an HTTP timeout is also an OperationCanceledException and must show an error.
+        catch (OperationCanceledException) when (cts.IsCancellationRequested) { }
         catch (Exception e)
         {
             if (!cts.IsCancellationRequested)
@@ -704,7 +716,7 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
             // 提示也放在详情面板的安装按钮上方：状态条会被后面的消息覆盖，这条不能被跳过（改版规格 4.5）。
             LoaderNote = loaderNote;
         }
-        catch (OperationCanceledException) { }
+        catch (OperationCanceledException) when (cts.IsCancellationRequested) { }
         catch (Exception e)
         {
             SetStatus(StatusMessage.Failure("content.files.fetch_failed", e, ErrorText.Of(e)));
@@ -1041,7 +1053,8 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
         var task = _importTask = _service.Tasks.Track("import", L.F("activity.kind.import", Path.GetFileName(path)), () => { try { cts.Cancel(); } catch (ObjectDisposedException) { } });
         try
         {
-            var info = ModpackService.Inspect(path);
+            // Opening the pack can extract an inner archive: keep it off the UI thread.
+            var info = await Task.Run(() => ModpackService.Inspect(path), cts.Token);
             task.Rename(L.F("activity.kind.import", SafeName(info.Name)));
             imported = await ImportCoreAsync(path, SafeName(info.Name), _workCts.Token);
             task.Succeed(Status);
@@ -1081,12 +1094,18 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
         var mixed = false;
         // The game directory can be switched while the pack imports: everything after it goes to the one it went into.
         var ctx = _service.Context;
-        var id = await ctx.Modpacks.ImportAsync(path, name, ctx.Directory.VersionDir, new Progress<LoaderProgress>(p =>
+        // Created here so progress reports come back to the UI thread; the import itself (opening and extracting the
+        // archive) runs on the thread pool so the window stays responsive.
+        var progress = new Progress<LoaderProgress>(p =>
         {
             Status = p.Stage;
             if (p.Percent is { } percent) Progress = percent;
             _importTask?.Report(p.Percent / 100.0, p.Stage);
-        }), ct, onSkip: file => { lock (skipped) skipped.Add(file); }, mixedRefusal: info => { mixed = true; return MixedRefusal(info); });
+        });
+        var modpacks = ctx.Modpacks;
+        var versionDir = (Func<string, string>)ctx.Directory.VersionDir;
+        var id = await Task.Run(() => modpacks.ImportAsync(path, name, versionDir, progress, ct,
+            onSkip: file => { lock (skipped) skipped.Add(file); }, mixedRefusal: info => { mixed = true; return MixedRefusal(info); }), ct);
         await Ui.FlushAsync();
         FinishImport(ctx, id, mixed);
         // 跳过的文件在进度里一闪而过，完成时用可随语言切换的状态再汇总一次。
