@@ -1,4 +1,5 @@
 using Android.Content;
+using Amber.Core.Net;
 using Amber.Mobile;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
@@ -79,12 +80,8 @@ internal static class AndroidRuntimeStore
         _ => "unsupported"
     };
 
-    private static HttpClient CreateRuntimeClient()
-    {
-        var client = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
-        client.DefaultRequestHeaders.UserAgent.ParseAdd("Jay-Android/1.0");
-        return client;
-    }
+    private static HttpClient CreateRuntimeClient() =>
+        Downloader.CreateHttpClient(category: NetworkCategory.Download);
 
     private static void MakeRuntimeCodeReadOnly(Context context, RuntimeBundleManifest manifest)
     {

@@ -44,7 +44,7 @@ Root files: `AmberJson.cs` (source-generated JSON context, AOT-safe), `ArchiveMe
 | `src/Amber.Core/Install/` | Vanilla, Fabric/Quilt, Forge/NeoForge (new and legacy), OptiFine installers. | `VanillaInstaller.cs`, `ForgeInstaller.cs` |
 | `src/Amber.Core/Interop/` | P/Invoke library names for macOS frameworks. | `MacFrameworks.cs` |
 | `src/Amber.Core/Java/` | Find local Java, or download the Mojang runtime / Temurin. | `JavaManager.cs`, `JavaFinder.cs` |
-| `src/Amber.Core/Launch/` | Build the command line and run the game; per-instance settings, logs, no-trace mode, error reports, graceful exit per OS, the update check and release signature checks. | `GameLauncher.cs`, `LaunchSession.cs`, `InstanceSettings.cs`; release signatures (2 of 3 trustees, trust chain) in `ReleaseSignature.cs`, the signed update check in `UpdateCheck.cs`, its once-a-day schedule in `AutoUpdateCheck.cs` |
+| `src/Amber.Core/Launch/` | Build the command line and run the game; per-instance settings, logs, no-trace mode, error reports, graceful exit per OS, the update check and release signature checks. | `GameLauncher.cs`, `LaunchSession.cs`, `InstanceSettings.cs`; release signatures (Jay release keys, currently 2 of 2; trust chain) in `ReleaseSignature.cs`, the signed update check in `UpdateCheck.cs`, its once-a-day schedule in `AutoUpdateCheck.cs` |
 | `src/Amber.Core/Layout/` | UI-independent layout rules: width tiers, density, motion, window sizing. | `LayoutTiers.cs` |
 | `src/Amber.Core/Localization/` | UI strings (`en.json` is the source, then one JSON per language), error text, number formatting. | `L.cs`, `en.json` |
 | `src/Amber.Core/Multiplayer/` | EasyTier-based rooms: invites, knock, lobby, members, chat, private messages and files, direct link and hole punching, exit (VPN-like) mode helpers. | `Invite.cs`, `Knock.cs`, `Lobby.cs`, `EasyTier.cs`, `DirectLink.cs` |
@@ -69,7 +69,7 @@ Root files: `AmberJson.cs` (source-generated JSON context, AOT-safe), `ArchiveMe
 | --- | --- | --- |
 | `JAY2-` | Room invite | `Multiplayer/Invite.cs` |
 | `JAYDS1-`, `JAYDR1-` | Sealed direct offer / reply (no server; addresses encrypted with a passphrase told another way) | `Multiplayer/SealedDirect.cs` |
-| `JAY2D-`, `JAY2R-` | Removed direct-link codes (carried public IPs); refused as `OldDirect` | `Multiplayer/DirectLink.cs` (`OldDirectCodes`) |
+| `JAY2D-`, `JAY2R-` | Removed direct-link codes (carried public IPs); refused as `OldDirect` | `Multiplayer/PastedCode.cs` (`Prefixes` → `OldDirect`) |
 | `AMB-` | Legacy room code | `Multiplayer/RoomCode.cs` |
 | `JAYS2-` | Jay server invite (domain only, no player name; version 3 carries a signed-record locator instead of an address) | `Multiplayer/Gate/GateInvite.cs`, `Multiplayer/Gate/GateRecord.cs` |
 | `JAYSS1-` | Jay server invite sealed with a passphrase (server with no domain) | `Multiplayer/Gate/GateInvite.cs` |

@@ -121,16 +121,24 @@ public sealed class BanList : IRoomGate
         var o = JsonNode.Parse(File.ReadAllText(_path)) as JsonObject ?? throw new InvalidDataException(_path);
         // A file without "v" predates versioning and used the version 1 rules.
         var version = o["v"] is JsonValue v && v.TryGetValue<int>(out var n) ? n : 1;
-        foreach (var item in o["bans"] as JsonArray ?? [])
-            if (item is JsonObject b && b["kind"]?.GetValue<string>() is { } kind && Kinds.Contains(kind) && b["value"]?.GetValue<string>() is { Length: > 0 } value)
-            {
-                var ban = new Ban(kind, value, b["reason"]?.GetValue<string>(),
-                    DateTimeOffset.FromUnixTimeSeconds(b["at"]?.GetValue<long>() ?? 0),
-                    b["until"]?.GetValue<long>() is { } until ? DateTimeOffset.FromUnixTimeSeconds(until) : null);
-                if (kind == "account" && (version < 2 || b["anyCase"] is JsonValue a && a.TryGetValue<bool>(out var any) && any))
-                    anyCase[value] = ban with { AnyCase = true };
-                else bans[Key(kind, value)] = ban;
-            }
+        try
+        {
+            foreach (var item in o["bans"] as JsonArray ?? [])
+                if (item is JsonObject b && b["kind"]?.GetValue<string>() is { } kind && Kinds.Contains(kind) && b["value"]?.GetValue<string>() is { Length: > 0 } value)
+                {
+                    var ban = new Ban(kind, value, b["reason"]?.GetValue<string>(),
+                        DateTimeOffset.FromUnixTimeSeconds(b["at"]?.GetValue<long>() ?? 0),
+                        b["until"]?.GetValue<long>() is { } until ? DateTimeOffset.FromUnixTimeSeconds(until) : null);
+                    if (kind == "account" && (version < 2 || b["anyCase"] is JsonValue a && a.TryGetValue<bool>(out var any) && any))
+                        anyCase[value] = ban with { AnyCase = true };
+                    else bans[Key(kind, value)] = ban;
+                }
+        }
+        // A field of the wrong JSON type or a time outside the calendar is a broken file like any other.
+        catch (Exception e) when (e is InvalidOperationException or FormatException or ArgumentException)
+        {
+            throw new InvalidDataException(_path, e);
+        }
         _bans = bans;
         _anyCase = anyCase;
         _fileVersion = version;

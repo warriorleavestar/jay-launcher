@@ -98,7 +98,9 @@ $bytes = New-Object byte[] 18
 [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
 $secret = -join ($bytes | ForEach-Object { $_.ToString("x2") })
 $net = "amber-node-" + $secret.Substring(0, 12)
-$whitelist = if ($Relay -eq "amber") { "amber-*" } else { "*" }
+# Jay names invite rooms, their lobbies and extra paths jay-…, and rooms opened with a room code amber-….
+# The list is one argument: EasyTier splits it at spaces.
+$whitelist = if ($Relay -eq "amber") { "jay-* amber-*" } else { "*" }
 $arguments = "--network-name $net --network-secret $secret --no-tun --listeners tcp://0.0.0.0:$Port udp://0.0.0.0:$Port " +
              "--relay-network-whitelist `"$whitelist`" --hostname amber-node --rpc-portal 127.0.0.1:15888"
 
