@@ -114,6 +114,59 @@ public sealed class DirectMatrixNetworkTests
         Assert.Equal(new[] { PathKind.IPv6 }, host.Bridge.AllowedPaths);
     }
 
+    /// <summary>
+    /// Step messages travel authenticated but not encrypted: they carry no address. The guest checks the exit against the
+    /// host's public addresses it got inside the encrypted knock.
+    /// </summary>
+    [Fact]
+    public async Task StepMessagesCarryNoAddress()
+    {
+        await using var host = NewSession(true, TimeSpan.FromMilliseconds(150), TimeSpan.FromMilliseconds(400));
+        await using var guest = new DirectBridge(DirectBridge.CreateSocket(), DirectTestKeys.Bridge, false, null, _ => { });
+        var messages = Controls(guest);
+        var peer = await ConnectHostAsync(host, guest);
+        var run = host.RunMatrixAsync(false, null, null, default);
+        await AnswerAsync(guest, peer, await NextAsync(messages, "test-request"));
+        var step = await NextAsync(messages, "step");
+        await run.WaitAsync(Deadline);
+
+        Assert.Equal(["exit", "fullLan", "i", "op", "path", "route", "run"], step.Select(p => p.Key).Order(StringComparer.Ordinal));
+        Assert.DoesNotMatch(@"\d+\.\d+\.\d+\.\d+", step.ToJsonString());
+
+        var hostPublic = DirectSession.HostPublicAddresses(
+        [
+            new(PathKind.Punch, IPEndPoint.Parse("203.0.113.5:40000")),
+            new(PathKind.Mapped, IPEndPoint.Parse("[::ffff:198.51.100.7]:40001")),
+            new(PathKind.Lan, IPEndPoint.Parse("192.168.1.5:40000")),
+            new(PathKind.IPv6, IPEndPoint.Parse("[2408:8000::1]:40000")),
+        ]);
+        Assert.Equal([IPAddress.Parse("198.51.100.7"), IPAddress.Parse("203.0.113.5")], hostPublic.OrderBy(a => a.ToString()));
+    }
+
+    /// <summary>
+    /// The test switches the whole bridge and the host's EasyTier: it runs only with exactly one guest on the bridge, and
+    /// in a room that admits members only with one who has joined.
+    /// </summary>
+    [Fact]
+    public async Task FullTestNeedsExactlyOneJoinedGuest()
+    {
+        await using var host = NewSession(true);
+        await using var first = new DirectBridge(DirectBridge.CreateSocket(), DirectTestKeys.Bridge, false, null, _ => { });
+        await using var second = new DirectBridge(DirectBridge.CreateSocket(), DirectTestKeys.Bridge, false, null, _ => { });
+        await ConnectHostAsync(host, first);
+        Assert.NotNull(await second.PunchAsync([new(PathKind.Lan, new IPEndPoint(IPAddress.Loopback, host.Bridge!.SocketEndPoint.Port))], NatKind.Cone, Deadline));
+        Assert.Equal(2, host.Bridge.Peers.Count);
+        var refused = await Assert.ThrowsAsync<InvalidOperationException>(() => host.RunMatrixAsync(false, null, null, default));
+        Assert.Equal(Amber.Core.Localization.L.T("core.mp.matrix.oneguest"), refused.Message);
+        Assert.Equal(1, host.EasyTierStarts);
+
+        var one = Assert.Single(host.Bridge.Peers, p => p.Remote.Port == first.SocketEndPoint.Port);
+        Assert.Same(one, DirectSession.TestedGuest([one], admission: false));
+        Assert.Null(DirectSession.TestedGuest(host.Bridge.Peers, admission: false));
+        var knocking = new DirectPeer { Remote = one.Remote, Path = PathKind.Lan };
+        Assert.Null(DirectSession.TestedGuest([knocking], admission: true));
+    }
+
     [Fact]
     public async Task CancelledHostStepWaitsForProbeCleanupBeforeReturning()
     {
