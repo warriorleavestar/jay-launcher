@@ -485,13 +485,20 @@ internal sealed partial class SelfTest
         await ShotAsync("房间-1440-en");
         L.SetLanguage("zh-Hans");
 
-        // Settings › invites and alerts: the default wait for new rooms.
-        vm.ShowTabCommand.Execute("settings");
+        // Settings › Multiplayer: the default wait for new rooms, and the room-defaults card says a room is open.
+        main.Shell.Navigate(Amber.Core.Navigation.LegacyRoutes.MultiplayerSettings);
         await Task.Delay(300);
-        Check("联机设置：新房间的默认等待时长", Named<ComboBox>("DefaultKnockWaitBox")?.IsEffectivelyVisible == true && vm.SelectedDefaultKnockWait.Wait == KnockWait.TenMinutes);
-        Check("联机设置：能把“只走中转”设成默认；没有 30 天邀请时不单独占一块", Named<CheckBox>("DefaultRelayOnlyBox") is { IsEffectivelyVisible: true, IsChecked: false }
-            && !vm.DefaultRelayOnly && Named<TextBlock>("LongInviteTitle")?.IsVisible == false && Named<Button>("CreateLongInviteButton") is null);
-        Check("房间：不在一起玩页签时顶栏收起", !vm.ShowRoomHeader);
+        T? Anywhere<T>(string name) where T : Control => window.GetVisualDescendants().OfType<T>().FirstOrDefault(c => c.Name == name);
+        Check("设置 › 联机：新房间的默认等待时长", Anywhere<ComboBox>("DefaultKnockWaitBox")?.IsEffectivelyVisible == true && vm.SelectedDefaultKnockWait.Wait == KnockWait.TenMinutes);
+        Check("设置 › 联机：能把“只走中转”设成默认；没有 30 天邀请时不单独占一块", Anywhere<CheckBox>("DefaultRelayOnlyBox") is { IsEffectivelyVisible: true, IsChecked: false }
+            && !vm.DefaultRelayOnly && Anywhere<TextBlock>("LongInviteTitle")?.IsVisible == false && Anywhere<Button>("CreateLongInviteButton") is null);
+        Check("设置 › 联机：在房间里时写明改动从下一个房间生效，完整局域网等不能改", Anywhere<TextBlock>("RoomDefaultsBusyText")?.IsEffectivelyVisible == true
+            && Anywhere<CheckBox>("FullLanModeBox")?.IsEffectivelyEnabled == false && Anywhere<CheckBox>("DefaultRelayOnlyBox")?.IsEffectivelyEnabled == true);
+        await ShotAsync("设置-联机-在房间里");
+        main.Shell.Navigate("play/servers");
+        await Task.Delay(300);
+        page = (await FindAsync<MultiplayerPage>(p => p.IsEffectivelyVisible))!;
+        Check("房间：不在一起玩页签时顶栏收起", vm.IsServersTab && !vm.ShowRoomHeader);
 
         // A guest's view: the one amber button is [Enter the game]; the host is reached through a relay; remote help is asked from the host.
         var hostKey = new byte[32];

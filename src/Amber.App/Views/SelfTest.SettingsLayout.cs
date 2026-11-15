@@ -35,14 +35,41 @@ internal sealed partial class SelfTest
             settings.SelectedGroupIndex = 0;
             await Task.Delay(200);
             string[] Shown() => Dispatcher.UIThread.Invoke(() => page.Form.Children.Where(c => c.IsVisible).Select(c => c.Name ?? "").ToArray());
-            Check("宽窗口：左边 9 个分组、右边说明栏、没有下拉", Dispatcher.UIThread.Invoke(() => page.Tier == WidthTier.Wide && page.GroupList.IsEffectivelyVisible
-                && page.NotePane.IsEffectivelyVisible && !page.GroupPicker.IsVisible) && settings.Groups.Count == 9);
+            Check("宽窗口：左边 10 个分组、右边说明栏、没有下拉", Dispatcher.UIThread.Invoke(() => page.Tier == WidthTier.Wide && page.GroupList.IsEffectivelyVisible
+                && page.NotePane.IsEffectivelyVisible && !page.GroupPicker.IsVisible) && settings.Groups.Count == 10);
             Check("一次只显示一组（常规）", Shown() is ["Group_general"], string.Join(",", Shown()));
             await ShotAsync("settings-1440");
             settings.SelectedGroupIndex = 1;
             await Task.Delay(200);
             Check("点“外观”：只显示外观，说明栏跟着换", Shown() is ["Group_appearance"] && settings.SelectedGroupNote.Contains("主题包"), settings.SelectedGroupNote);
             await ShotAsync("settings-appearance-1440");
+            // Redesign batch 7: the lobby's settings tab became two groups, each with its own route.
+            main.Shell.Navigate("settings/network");
+            await Task.Delay(300);
+            Check("settings/network：只显示网络（公共网络、中转、STUN）", Shown() is ["Group_network"] && settings.SelectedGroupId == SettingsCatalog.Network, string.Join(",", Shown()));
+            await ShotAsync("settings-network-1440");
+            // A relay command run from Settings › Network says what happened on Settings' own status bar.
+            if (settings.Multiplayer is { } mp)
+            {
+                var nodesBefore = mp.Nodes.Count;
+                Dispatcher.UIThread.Invoke(() =>
+                {
+                    mp.NewNodeUrl = "not a relay";
+                    mp.AddNodeCommand.Execute(null);
+                });
+                await Task.Delay(200);
+                Check("设置 › 网络：加一个写错的中转，设置页底部写明哪里不对，原来的中转都在",
+                    Dispatcher.UIThread.Invoke(() => page.SettingsStatus.IsEffectivelyVisible && page.SettingsStatus.Message?.Key == "multiplayer.nodes.invalid_address")
+                    && mp.Nodes.Count == nodesBefore, settings.StatusInfo?.Key ?? "");
+                Dispatcher.UIThread.Invoke(() => { mp.NewNodeUrl = ""; settings.SetStatus(null); });
+            }
+            else Check("设置 › 网络：连着联机页的设置", false);
+            main.Shell.Navigate("settings/multiplayer");
+            await Task.Delay(300);
+            Check("settings/multiplayer：只显示联机（邀请、新房间默认、联机组件、紧急断开）", Shown() is ["Group_multiplayer"] && settings.SelectedGroupId == SettingsCatalog.Multiplayer, string.Join(",", Shown()));
+            await ShotAsync("settings-multiplayer-1440");
+            settings.SelectedGroupIndex = 1;
+            await Task.Delay(200);
 
             // Every setting has a home: settings#Field opens its group and reveals the control.
             var missing = new List<string>();

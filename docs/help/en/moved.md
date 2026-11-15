@@ -20,5 +20,6 @@ Jay's layout has four places: the library, Discover, Multiplayer and Friends. He
 - **Light/dark and language** (they were in the avatar's menu) → **Me** › Appearance, and Settings as before.
 - **Friends** (they were in Multiplayer settings) → the Friends entry in the sidebar. Adding a friend, backup and restore are there.
 - **Trusted people** (a list in Multiplayer settings) → the switch "Let them straight in when they knock" on each person on the Friends page.
+- **Multiplayer settings** (a tab of the multiplayer page) → Settings › Multiplayer (invites, what a new room starts with, the multiplayer component, emergency disconnect) and Settings › Network (public networks, relays, STUN). This computer's safety code and device code → **Me** › My devices. Checking the network, debug mode and the diagnostics report → "Connection problems?".
 - Which network Jay is using → the network status at the top right, on every page.
 - Ctrl+K finds anything, including the old page names.

@@ -7,10 +7,10 @@ namespace Amber.Core.Tests;
 public sealed class SettingsCatalogTests
 {
     [Fact]
-    public void NineGroupsEachWithAtLeastOneSetting()
+    public void TenGroupsEachWithAtLeastOneSetting()
     {
-        // The Tools group is gone: its things live in Storage, Game and About.
-        Assert.Equal(9, SettingsCatalog.Groups.Count);
+        // The Tools group is gone: its things live in Storage, Game and About. Network came with redesign batch 7.
+        Assert.Equal(10, SettingsCatalog.Groups.Count);
         Assert.Null(SettingsCatalog.Group("tools"));
         Assert.Equal(SettingsCatalog.Storage, SettingsCatalog.Find("Junk")?.Group);
         Assert.Equal(SettingsCatalog.Game, SettingsCatalog.Find("JavaDownload")?.Group);
@@ -43,6 +43,10 @@ public sealed class SettingsCatalogTests
     [InlineData("SidebarBox", "Sidebar", "appearance")]
     [InlineData("gamedirectory", "GameDirectory", "storage")]
     [InlineData("NoTrace", "NoTrace", "privacy")]
+    [InlineData("TransportBox", "Transport", "multiplayer")]
+    [InlineData("Breaker", "Breaker", "multiplayer")]   // emergency disconnect moved from Privacy (batch 7)
+    [InlineData("StunBox", "Stun", "network")]
+    [InlineData("RelayGroup", "RelayGroup", "network")]
     public void FindsAFieldByFragmentOrControlName(string fragment, string field, string group)
     {
         var found = SettingsCatalog.Find(fragment);

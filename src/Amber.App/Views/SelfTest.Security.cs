@@ -18,7 +18,7 @@ internal sealed partial class SelfTest
         main.CurrentPage = settings;
         await Task.Delay(600);
 
-        settings.SelectGroup("privacy");
+        settings.SelectGroup(Amber.Core.Navigation.SettingsCatalog.Multiplayer); // emergency disconnect: Settings › Multiplayer
         var attest = await FindAsync<ComboBox>(c => c.Name == "AttestationBox" && c.IsEffectivelyVisible);
         var breaker = await FindAsync<CheckBox>(c => c.Name == "BreakerBox" && c.IsEffectivelyVisible);
         var delay = await FindAsync<TextBox>(t => t.Name == "BreakerDelayBox" && t.IsEffectivelyVisible);

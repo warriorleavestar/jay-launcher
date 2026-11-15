@@ -83,6 +83,16 @@ public sealed partial class SettingsViewModel
         if (group is not null) SelectGroup(group.Id);
     }
 
+    /// <summary>settings/{group} opens that group (settings/multiplayer, settings/network); other parts leave it as it was.</summary>
+    public void ShowRoute(string? part)
+    {
+        if (SettingsCatalog.Group(part) is { } group)
+        {
+            SettingsSearch = "";
+            SelectGroup(group.Id);
+        }
+    }
+
     /// <summary>Before <c>settings#Field</c> is revealed: open the group that holds it and clear the search.</summary>
     public void ShowField(string? field)
     {
@@ -131,8 +141,26 @@ public sealed partial class SettingsViewModel
     /// <summary>Raised to reveal a field (the window scrolls to it, focuses it and flashes it).</summary>
     public Action<string>? RevealField { get; set; }
 
-    /// <summary>Navigates elsewhere (the multiplayer and tools cards).</summary>
+    /// <summary>Navigates elsewhere (the about page, the tools cards).</summary>
     public Action<string>? Navigate { get; set; }
+
+    /// <summary>The multiplayer page's view model: Settings › Multiplayer and Settings › Network bind to it.</summary>
+    public MultiplayerViewModel? Multiplayer
+    {
+        get;
+        set
+        {
+            if (field is not null) field.ActionStatus -= OnMultiplayerActionStatus;
+            field = value;
+            if (value is not null) value.ActionStatus += OnMultiplayerActionStatus;
+        }
+    }
+
+    /// <summary>The multiplayer commands in Settings › Multiplayer and › Network report here while Settings is on screen.</summary>
+    private void OnMultiplayerActionStatus(StatusMessage status)
+    {
+        if (IsCurrent) SetStatus(status);
+    }
 
     [RelayCommand]
     private void OpenHit(SettingsSearchHit? hit)
@@ -142,7 +170,6 @@ public sealed partial class SettingsViewModel
         RevealField?.Invoke(hit.Field.Field);
     }
 
-    [RelayCommand] private void GoMultiplayerSettings() => Navigate?.Invoke("play");
     [RelayCommand] private void GoAbout() => Navigate?.Invoke("about");
     [RelayCommand] private void GoGroup(string? id) { if (id is not null) SelectGroup(id); }
 

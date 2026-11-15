@@ -114,7 +114,8 @@ public class HelpLibraryTests
     [InlineData("help", "first-time")]
     [InlineData("play/public", "public-rooms")]
     [InlineData("play/servers", "servers")]
-    [InlineData("play/settings", "connection")]
+    [InlineData("settings/network", "connection")]
+    [InlineData("settings/multiplayer", "settings")]
     public void EveryRouteHasAnArticle(string route, string expected) =>
         Assert.Equal(expected, HelpLibrary.Load("zh-Hans").ForRoute(Route.Parse(route))?.Id);
 

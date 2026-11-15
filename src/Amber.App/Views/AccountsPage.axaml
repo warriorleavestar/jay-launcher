@@ -22,8 +22,8 @@
     <Style Selector="Border#AddCard Button /template/ ContentPresenter">
       <Setter Property="TextWrapping" Value="Wrap" />
     </Style>
-    <!-- The Jay account card can be narrow too (expanded sidebar beside a small content area): its buttons wrap the same way. -->
-    <Style Selector="Border#JayCard Button /template/ ContentPresenter">
+    <!-- The other cards can be narrow too (expanded sidebar beside a small content area): their buttons wrap the same way. -->
+    <Style Selector="Border.card Button /template/ ContentPresenter">
       <Setter Property="TextWrapping" Value="Wrap" />
     </Style>
     <ContainerQuery Name="AccountsPageRoot" Query="max-width:640">
@@ -240,27 +240,52 @@
       </StackPanel>
     </Border>
 
-    <!-- My devices: this computer's identity. Computers under the same Jay account count as one person. -->
-    <Border svc:ThemeRegion.Name="me.devices" x:Name="DevicesCard" Classes="card" Margin="0">
-      <StackPanel Spacing="8">
-        <TextBlock Classes="h2" Text="{l:T me.devices.title}" Margin="0" />
-        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10">
-          <Border Classes="led online" VerticalAlignment="Top" Margin="0,6,0,0" />
-          <StackPanel Grid.Column="1" Spacing="1">
-            <TextBlock FontWeight="SemiBold" TextWrapping="Wrap">
-              <Run Text="{l:T me.devices.this}" /><Run Text=" · " /><Run Text="{Binding ThisDeviceName, Mode=OneWay}" />
-            </TextBlock>
-            <SelectableTextBlock x:Name="ThisDeviceCodeText" Classes="hint" FontSize="12" Text="{Binding ThisDeviceCode}" TextWrapping="Wrap" />
-          </StackPanel>
-        </Grid>
-        <TextBlock x:Name="DevicesNote" Classes="hint" FontSize="12" Text="{Binding DevicesNote}" TextWrapping="Wrap" />
-        <WrapPanel ItemSpacing="8" LineSpacing="6">
+    <StackPanel svc:ThemeRegion.Name="me.devices" Spacing="14">
+      <!-- My devices: this computer's identity, and device verification. Computers under the same Jay account count as one person. -->
+      <Border x:Name="DevicesCard" Classes="card" Margin="0">
+        <StackPanel Spacing="8">
+          <TextBlock Classes="h2" Text="{l:T me.devices.title}" Margin="0" />
+          <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10">
+            <Border Classes="led online" VerticalAlignment="Top" Margin="0,6,0,0" />
+            <StackPanel Grid.Column="1" Spacing="1">
+              <TextBlock FontWeight="SemiBold" TextWrapping="Wrap">
+                <Run Text="{l:T me.devices.this}" /><Run Text=" · " /><Run Text="{Binding ThisDeviceName, Mode=OneWay}" />
+              </TextBlock>
+              <SelectableTextBlock x:Name="ThisDeviceCodeText" Classes="hint" FontSize="12" Text="{Binding ThisDeviceCode}" TextWrapping="Wrap" />
+            </StackPanel>
+          </Grid>
+          <TextBlock x:Name="DevicesNote" Classes="hint" FontSize="12" Text="{Binding DevicesNote}" TextWrapping="Wrap" />
           <Button x:Name="DevicesCreateJay" Classes="small" Content="{l:T me.devices.create_jay}" Command="{Binding StartCreateJayCommand}"
-                  IsVisible="{Binding ShowJayIntro}" />
-          <Button x:Name="DeviceSettingsButton" Classes="secondary small" Content="{l:T me.devices.manage}" Command="{Binding OpenDeviceSettingsCommand}" />
-        </WrapPanel>
-      </StackPanel>
-    </Border>
+                  IsVisible="{Binding ShowJayIntro}" HorizontalAlignment="Left" />
+          <!-- This computer's multiplayer identity (it used to be in the lobby's settings tab). A new identity changes the
+               safety code above: friends have to compare emoji again. -->
+          <StackPanel x:Name="IdentityCard" Spacing="6" Margin="0,6,0,0" DataContext="{Binding Multiplayer}" x:DataType="vm:MultiplayerViewModel">
+            <TextBlock Text="{l:T multiplayer.identity.title}" FontWeight="SemiBold" />
+            <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.identity.reset_hint}" />
+            <Button x:Name="ResetIdentityButton" Content="{l:T multiplayer.identity.reset}" Command="{Binding ResetIdentityCommand}" IsEnabled="{Binding IsIdle}" HorizontalAlignment="Left" />
+          </StackPanel>
+        </StackPanel>
+      </Border>
+
+      <!-- Device verification (off by default): a code from this computer's hardware that a host can ask for. -->
+      <Border x:Name="DeviceCheckCard" Classes="card" Margin="0" DataContext="{Binding Multiplayer}" x:DataType="vm:MultiplayerViewModel">
+        <StackPanel Spacing="8">
+          <TextBlock Classes="h2" Text="{l:T multiplayer.device.title}" Margin="0" />
+          <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.device.hint}" />
+          <Button x:Name="EnableDeviceButton" Classes="secondary" Content="{l:T multiplayer.device.enable}" Command="{Binding EnableDeviceCommand}" IsVisible="{Binding !DeviceEnabled}" HorizontalAlignment="Left" />
+          <StackPanel Spacing="6" IsVisible="{Binding DeviceEnabled}">
+            <TextBlock FontSize="12" Text="{Binding DeviceIdText}" />
+            <SelectableTextBlock Text="{Binding MyFingerprintCode}" FontFamily="Consolas,monospace" FontWeight="SemiBold" TextWrapping="Wrap" />
+            <WrapPanel ItemSpacing="6" LineSpacing="6">
+              <Button Classes="secondary" Content="{l:T multiplayer.device.new_code}" Command="{Binding NewFingerprintCodeCommand}" />
+              <Button Content="{l:T multiplayer.device.copy}" Command="{Binding CopyFingerprintCodeCommand}" />
+              <Button Content="{l:T multiplayer.device.rotate}" Command="{Binding RotateDeviceCommand}" />
+              <Button Content="{l:T multiplayer.device.disable}" Command="{Binding DisableDeviceCommand}" />
+            </WrapPanel>
+          </StackPanel>
+        </StackPanel>
+      </Border>
+    </StackPanel>
 
     <!-- Appearance: light/dark and the language right here; theme packs are in the settings. -->
     <Border svc:ThemeRegion.Name="me.appearance" x:Name="AppearanceCard" Classes="card" Margin="0">

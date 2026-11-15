@@ -16,10 +16,8 @@ internal sealed partial class SelfTest
     private async Task HotspotAsync()
     {
         var page = Page<MultiplayerViewModel>();
-        main.CurrentPage = page;
-        // The hotspot card lives on the Multiplayer settings tab; on any other tab it is collapsed (0×0 bounds).
-        var originalTab = page.Tab;
-        page.Tab = MultiplayerTab.Settings;
+        // The hotspot card lives in Settings › Multiplayer; in any other group it is collapsed (0×0 bounds).
+        main.Shell.Navigate(Amber.Core.Navigation.LegacyRoutes.MultiplayerSettings);
         window.Width = 1080;
         window.Height = 700;
         await Task.Delay(300);
@@ -84,12 +82,11 @@ internal sealed partial class SelfTest
         session.HotspotSharingActive = false;
         vm.UpdateSession(session, true, "10.144.144.1");
         await vm.StartCommand.ExecuteAsync(null);
-        Log("结构检查：以下为联机整页的四语言 × 四尺寸共 16 组布局检查；截图可能未滚动到热点卡，不作为热点按钮操作或热点卡视觉验收。");
+        Log("结构检查：以下为设置 › 联机整页的四语言 × 四尺寸共 16 组布局检查；截图可能未滚动到热点卡，不作为热点按钮操作或热点卡视觉验收。");
         await LayoutHereAsync("热点共享-全页结构");
-        page.Tab = MultiplayerTab.Settings;
+        main.Shell.Navigate(Amber.Core.Navigation.LegacyRoutes.MultiplayerSettings);
         await HotspotButtonsAsync(panel, vm, session);
         vm.UpdateSession(null, false, null);
-        page.Tab = originalTab;
         Log("热点自检只使用假会话，未验证真实手机、ICS 或远端互联网连通性。");
     }
 

@@ -158,22 +158,40 @@ internal sealed partial class SelfTest
         await ShotAsync("联机大厅-1440");
         await LayoutHereAsync("联机大厅");
 
-        // Relay servers live in multiplayer settings, reached from [Advanced settings] under the open-a-room card; built-in
-        // ones are on out of the box. A sub-view has a row to go back and its name.
-        Check("开房间卡下面的【高级设置】打开联机设置", Press(Visible("OpenAdvancedButton")) && vm.IsSettingsTab);
+        // The old settings tab is gone: [Advanced settings] under the open-a-room card goes to Settings › Multiplayer, at
+        // what a new room starts with. The server sub-view still has a row to go back and its name.
+        string Route() => main.Shell.Router.Current.ToString();
+        bool Anywhere(string key) => window.GetVisualDescendants().OfType<TextBlock>().Any(t => t.IsEffectivelyVisible && t.Text == L.T(key));
+        async Task BackToPlay()
+        {
+            main.Shell.Navigate("play");
+            await Task.Delay(300);
+            page = (await FindAsync<MultiplayerPage>(p => p.IsEffectivelyVisible))!;
+            roomCode = await FindAsync<TextBox>(t => t.Name == "JoinCodeBox");
+        }
+        Check("开房间卡下面的【高级设置】去设置 › 联机的“新房间默认”", Press(Visible("OpenAdvancedButton"))
+            && await WaitAsync(() => main.CurrentPage is SettingsViewModel { SelectedGroupId: SettingsCatalog.Multiplayer }, 3)
+            && Route() == LegacyRoutes.RoomDefaults && !vm.IsSubView, Route());
         await Task.Delay(300);
-        Check("子页面：顶上有【返回】和这一页的名字，大厅收起", vm.IsSubView && Visible("MpBackButton") is not null
-            && Text("MpSubViewTitle")?.Text == L.T("multiplayer.tab.settings") && Card("JoinCard") is null, Text("MpSubViewTitle")?.Text ?? "none");
+        Check("设置 › 联机：邀请、新房间默认、联机组件、热点、紧急断开都在", Anywhere("multiplayer.settings.invites") && Anywhere("settings.mp.room_defaults")
+            && Anywhere("multiplayer.settings.component") && Anywhere("settings.mp.emergency")
+            && window.GetVisualDescendants().OfType<Controls.HotspotSharingPanel>().Any(h => h.IsEffectivelyVisible));
+        Check("设置 › 联机：没在房间里时不写“现在在房间里”", vm.IsIdle && !Anywhere("settings.mp.room_defaults_busy"));
+        await ShotAsync("设置-联机-1440");
+        await BackToPlay();
+        Check("子页面：【开一个一直在线的服务器】顶上有【返回】和这一页的名字，大厅收起", Press(Visible("OpenServerButton")) && vm.IsServersTab);
+        await Task.Delay(300);
+        Check("子页面：顶上有【返回】和这一页的名字", vm.IsSubView && Visible("MpBackButton") is not null
+            && Text("MpSubViewTitle")?.Text == L.T("multiplayer.subview.server") && Card("JoinCard") is null, Text("MpSubViewTitle")?.Text ?? "none");
         Check("子页面：【返回】回到大厅", Press(Visible("MpBackButton")) && vm.IsPlayTab && !vm.IsSubView);
-        vm.ShowTabCommand.Execute("settings");
+        main.Shell.Navigate("play/settings");
         await Task.Delay(300);
-        Check("联机设置：分组都在", HasText("multiplayer.settings.identity") && HasText("multiplayer.settings.invites") && HasText("multiplayer.settings.component")
-            && HasText("multiplayer.settings.diagnostics"));
+        Check("旧路由 play/settings 去设置 › 联机", main.CurrentPage is SettingsViewModel { SelectedGroupId: SettingsCatalog.Multiplayer }, Route());
 
-        // Thirty-day invites are made in a room's invite panel. They outlive the room, so multiplayer settings lists the
+        // Thirty-day invites are made in a room's invite panel. They outlive the room, so Settings › Multiplayer lists the
         // ones that exist (masked, copy, revoke) and takes no space when there are none.
-        Check("30 天邀请：没有时联机设置里不占一块", !vm.HasLongInvites && Visible("CreateLongInviteButton") is null
-            && !page.GetVisualDescendants().OfType<ItemsControl>().Any(i => i.Name == "LongInviteList" && i.IsEffectivelyVisible));
+        bool LongListShown() => window.GetVisualDescendants().OfType<ItemsControl>().Any(i => i.Name == "LongInviteList" && i.IsEffectivelyVisible);
+        Check("30 天邀请：没有时设置里不占一块", !vm.HasLongInvites && !LongListShown());
         Dispatcher.UIThread.Invoke(() =>
         {
             vm.LongInviteLabel = "Bob";
@@ -183,41 +201,46 @@ internal sealed partial class SelfTest
         await WaitAsync(() => vm.HasLongInvites, 3);
         await Task.Delay(200);
         var longItem = vm.LongInviteItems.FirstOrDefault();
-        Check("30 天邀请：有一张时列在联机设置里，30 天、默认打码、能被认出是邀请", longItem is { Label: "Bob" } && longItem.Left == L.P("multiplayer.longinvite.days_left", 30, 30)
+        Check("30 天邀请：有一张时列在设置 › 联机里，30 天、默认打码、能被认出是邀请", longItem is { Label: "Bob" } && longItem.Left == L.P("multiplayer.longinvite.days_left", 30, 30)
             && longItem.CodeDisplay.Contains('•') && JayInvite.TryParse(longItem.Code, out _) && vm.LongInviteLabel.Length == 0
-            && page.GetVisualDescendants().OfType<ItemsControl>().Any(i => i.Name == "LongInviteList" && i.IsEffectivelyVisible), longItem?.Left);
+            && LongListShown(), longItem?.Left);
         await ShotAsync("长期邀请");
-        Press(page.GetVisualDescendants().OfType<Button>().FirstOrDefault(b => b.Classes.Contains("long-revoke") && b.IsEffectivelyVisible));
+        Press(window.GetVisualDescendants().OfType<Button>().FirstOrDefault(b => b.Classes.Contains("long-revoke") && b.IsEffectivelyVisible));
         await Task.Delay(200);
         Check("30 天邀请：作废后列表清空", !vm.HasLongInvites && !vm.HasInvite);
         Dispatcher.UIThread.Invoke(() => vm.PickInviteChoices(InviteLife.TenMinutes, InviteUse.Once));
+        await BackToPlay();
         await ContactsAsync(vm, page);
-        var relayHeader = page.GetVisualDescendants().OfType<TextBlock>().FirstOrDefault(t => t.Name == "RelayHeader");
+
+        // Relays, public networks and STUN are in Settings › Network.
+        main.Shell.Navigate(LegacyRoutes.NetworkSettings);
+        await Task.Delay(300);
+        var relayHeader = await FindAsync<TextBlock>(t => t.Name == "RelayHeader");
         // "On by default" is about a fresh install, not about this test profile: a reused profile may have it switched off
         // (earlier runs, or a tester who turned it off). Check the default itself, then show the switch on for the UI checks
         // and put the profile's own choice back at the end.
         var profileUsesBuiltIn = vm.UseBuiltInNodes;
         vm.UseBuiltInNodes = true;
         await Task.Delay(100);
-        Check("联机设置：默认开着内置中转服务器，开箱就有", new AppSettings().UseBuiltInNodes && vm.HasNodes && HasText("multiplayer.nodes.builtin_toggle")
-            && relayHeader?.Text == vm.NodesHeaderText,
+        Check("设置 › 网络：默认开着内置中转服务器，开箱就有", main.CurrentPage is SettingsViewModel { SelectedGroupId: SettingsCatalog.Network }
+            && new AppSettings().UseBuiltInNodes && vm.HasNodes && Anywhere("multiplayer.nodes.builtin_toggle") && relayHeader?.Text == vm.NodesHeaderText,
             $"default={new AppSettings().UseBuiltInNodes} profile={profileUsesBuiltIn} has={vm.HasNodes} header={vm.NodesHeaderText} count={RelayNodes.BuiltIn.Count}");
-        var advanced = page.GetVisualDescendants().OfType<Expander>().FirstOrDefault(e => e.Name == "AdvancedExpander");
-        Check("联机设置：高级选项默认收起", advanced is { IsExpanded: false });
+        Check("设置 › 网络：STUN 在这里", await FindAsync<TextBox>(t => t.Name == "StunBox", 3) is not null);
         vm.UseBuiltInNodes = false;
         await Task.Delay(200);
-        Check("联机设置：没有中转服务器时标题写出来", !vm.HasNodes && relayHeader?.Text == L.T("multiplayer.nodes.header_empty"));
-        await ShotAsync("联机设置-1440");
+        Check("设置 › 网络：没有中转服务器时标题写出来", !vm.HasNodes && relayHeader?.Text == L.T("multiplayer.nodes.header_empty"));
+        await ShotAsync("设置-网络-1440");
 
-        // A relay share code pasted into the join box goes to settings and is not imported silently.
-        vm.ShowTabCommand.Execute("play");
-        await Task.Delay(200);
+        // A relay share code pasted into the join box goes to Settings › Network and is not imported silently.
+        await BackToPlay();
         var nodeCode = RelayNodes.Encode(null, ["tcp://example.invalid:11010"]);
         Dispatcher.UIThread.Invoke(() => roomCode!.Text = nodeCode);
         Check("加入框里的中转分享码：点加入", Press(await FindAsync<Button>(b => ReferenceEquals(b.Command, vm.JoinCommand))));
         await Task.Delay(300);
         var importBox = await FindAsync<TextBox>(t => t.PlaceholderText == L.T("multiplayer.nodes.share_placeholder"));
-        Check("中转分享码转到联机设置，不静默导入", vm.IsSettingsTab && vm.Nodes.Count == 0 && roomCode!.Text == "" && importBox?.Text == nodeCode && vm.IsIdle);
+        // Settings › Network was built again on the way back: look the header up again.
+        relayHeader = await FindAsync<TextBlock>(t => t.Name == "RelayHeader");
+        Check("中转分享码转到设置 › 网络，不静默导入", Route() == LegacyRoutes.RelaySettings && vm.Nodes.Count == 0 && vm.JoinCode == "" && importBox?.Text == nodeCode && vm.IsIdle, Route());
         Check("用户点导入才添加", Press(await FindAsync<Button>(b => ReferenceEquals(b.Command, vm.ImportNodesCommand)))
             && await WaitAsync(() => Dispatcher.UIThread.Invoke(() => vm.Nodes.Count == 1), 5) && vm.Nodes[0].Url == "tcp://example.invalid:11010");
         Check("中转服务器数量同步到标题和大厅状态行", relayHeader?.Text == L.F("multiplayer.nodes.header_count", 1)
@@ -239,6 +262,7 @@ internal sealed partial class SelfTest
             && vm.Nodes[0].Url == "tcp://203.0.113.5:11010" && vm.SharePassphrase == "");
         if (vm.Nodes.Count > 0) vm.RemoveNodeCommand.Execute(vm.Nodes.Single());
         vm.UseBuiltInNodes = true;
+        await BackToPlay();
 
         // Open a room: game status follows the port typed under "more ways".
         vm.ShowTabCommand.Execute("play");
@@ -379,10 +403,11 @@ internal sealed partial class SelfTest
         await Task.Delay(500);
         Check("连接有问题？：紧凑窗口铺满", drawer is not null && drawer.Bounds.Width >= page.Bounds.Width - 1, $"{drawer?.Bounds.Width}/{page.Bounds.Width}");
         await ShotAsync("连接有问题-600");
-        Check("连接有问题？：【换中转服务器】去联机设置", Press(page.GetVisualDescendants().OfType<Button>().FirstOrDefault(b => b.Name == "SwitchRelayButton")) && !vm.DiagnosticsOpen && vm.IsSettingsTab);
+        Check("连接有问题？：【换中转服务器】去设置 › 网络的中转", Press(page.GetVisualDescendants().OfType<Button>().FirstOrDefault(b => b.Name == "SwitchRelayButton")) && !vm.DiagnosticsOpen
+            && main.Shell.Router.Current.ToString() == LegacyRoutes.RelaySettings, main.Shell.Router.Current.ToString());
         window.Width = 1440;
         window.Height = 900;
-        vm.ShowTabCommand.Execute("play");
+        await BackToPlay();
         await DrillAsync(vm);
         await LessonsAsync(vm);
     }
@@ -749,7 +774,7 @@ internal sealed partial class SelfTest
         var navigate = vm.Navigate;
         string? went = null;
         vm.Navigate = route => went = route;
-        Check("Contacts: multiplayer settings no longer hold the friends card, only a link to the Friends page", Shown("ContactsCard") is null && Shown("OpenFriendsButton") is not null
+        Check("Contacts: the multiplayer page holds no friends card (friends have their own page)", Shown("ContactsCard") is null
             && vm.MyContactCode.StartsWith("JAYC1-"));
 
         using var peer = Amber.Core.Multiplayer.Transport.X25519KeyPair.Generate();

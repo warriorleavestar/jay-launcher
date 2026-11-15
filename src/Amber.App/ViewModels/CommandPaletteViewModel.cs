@@ -264,7 +264,9 @@ public sealed partial class CommandPaletteViewModel : ObservableObject
         // The multiplayer page's sub-views; their old tab names still find them.
         list.Add(Page("play/public", "multiplayer.subview.network", [.. NamesOf("multiplayer.tab.public"), "public rooms", "network"]));
         list.Add(Page("play/servers", "multiplayer.subview.server", [.. NamesOf("multiplayer.tab.servers"), "jay server", "host"]));
-        list.Add(Page("play/settings", "multiplayer.tab.settings", "relay", "nodes"));
+        // The old multiplayer settings tab is two settings groups now; its name still finds them.
+        list.Add(Page(LegacyRoutes.MultiplayerSettings, "settings.group.multiplayer", [.. NamesOf("multiplayer.tab.settings")]));
+        list.Add(Page(LegacyRoutes.NetworkSettings, "settings.group.network", "relay", "nodes", "stun"));
         list.Add(Page("settings", "shell.settings"));
         list.Add(Page(LegacyRoutes.Tools, "tools.junk.title", [.. NamesOf("palette.old.toolbox"), "tools", "toolbox"]));
         list.Add(Page(LegacyRoutes.Logs, "log.title", "log"));

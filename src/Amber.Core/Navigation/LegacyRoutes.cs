@@ -23,6 +23,24 @@ public static class LegacyRoutes
     /// <summary>Settings › Storage, where cleaning up lives (the old toolbox).</summary>
     public const string Tools = "settings#Junk";
 
+    /// <summary>Settings › Multiplayer: invites, what a new room starts with, the component, emergency disconnect.</summary>
+    public const string MultiplayerSettings = "settings/multiplayer";
+
+    /// <summary>What a new room starts with (the open-a-room card's "Advanced settings").</summary>
+    public const string RoomDefaults = "settings#DefaultRelayOnly";
+
+    /// <summary>Settings › Network: public networks, relays, STUN.</summary>
+    public const string NetworkSettings = "settings/network";
+
+    /// <summary>The public networks card in Settings › Network.</summary>
+    public const string PublicNetworks = "settings#NetworksCard";
+
+    /// <summary>The relay servers in Settings › Network.</summary>
+    public const string RelaySettings = "settings#RelayGroup";
+
+    /// <summary>This device's safety code and "reset identity", under My devices on the Me page.</summary>
+    public const string DeviceIdentity = "me#IdentityCard";
+
     /// <summary>The route for an old page id (the nine in ThemeLayout.PageIds). Null when unknown.</summary>
     public static Route? For(string pageId) => pageId switch
     {
@@ -41,8 +59,9 @@ public static class LegacyRoutes
     /// <summary>
     /// Routes that pointed at a removed page (saved in help links, tips or history) go to the place that replaced it:
     /// library/start → library, library/logs → the focused instance's logs, settings/tools → Settings › Storage, and
-    /// the friends card that used to sit in multiplayer settings (play/settings#ContactsCard) → the Friends page's add panel.
-    /// Every other route comes back unchanged.
+    /// and the old multiplayer settings tab (play/settings): its friends card (#ContactsCard) → the Friends page's add panel,
+    /// the safety code (#IdentityCard) → Me › My devices, a card that is now a setting (#NetworksCard, #RelayGroup, …) →
+    /// that setting, anything else → Settings › Multiplayer. Every other route comes back unchanged.
     /// </summary>
     public static Route Resolve(Route route)
     {
@@ -52,7 +71,14 @@ public static class LegacyRoutes
             if (route[1] == "logs") return Route.Parse(Logs);
         }
         if (route.Section == Section.Settings && route[1] == "tools") return Route.Parse(Tools);
-        if (route.Section == Section.Play && route[1] == "settings" && route.Fragment == "ContactsCard") return Route.Parse(AddFriend);
+        if (route.Section == Section.Play && route[1] == "settings")
+        {
+            if (route.Fragment == "ContactsCard") return Route.Parse(AddFriend);
+            if (route.Fragment == "IdentityCard") return Route.Parse(DeviceIdentity);
+            if (route.Fragment == "StunCard") return Route.Parse("settings#Stun");
+            if (SettingsCatalog.Find(route.Fragment) is { } field) return Route.Parse("settings#" + field.Field);
+            return Route.Parse(MultiplayerSettings);
+        }
         return route;
     }
 
