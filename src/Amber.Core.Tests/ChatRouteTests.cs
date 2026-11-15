@@ -26,7 +26,7 @@ public sealed class ChatRouteTests
         Assert.True(route.Accepts(incoming, old));
         Assert.True(route.Accepts(old, old));
         route.Switched(old);
-        route.MoveEnded(incoming);
+        route.MoveEnded(incoming, incoming);
         // After the switch: what the old connection had queued still counts.
         Assert.True(route.Accepts(old, incoming));
         Assert.True(route.Accepts(incoming, incoming));
@@ -40,7 +40,7 @@ public sealed class ChatRouteTests
         var route = new ChatRoute<Conn>();
         Conn old = new(), incoming = new();
         route.Moving(incoming);
-        route.MoveEnded(incoming);
+        route.MoveEnded(incoming, old);
         Assert.False(route.Accepts(incoming, old));
         Assert.True(route.Accepts(old, old));
     }
@@ -61,7 +61,7 @@ public sealed class ChatRouteTests
         if (!incomingSide)
         {
             route.Switched(oldA);
-            route.MoveEnded(newA);
+            route.MoveEnded(newA, newA);
         }
         route.Retire();
         Assert.False(route.IsCurrent(generationA));
@@ -69,7 +69,7 @@ public sealed class ChatRouteTests
         Assert.True(route.Accepts(chatB, chatB));
         // A late close from A doesn't touch anything of B's.
         route.Closed(oldA);
-        route.MoveEnded(newA);
+        route.MoveEnded(newA, chatB);
         Assert.True(route.IsCurrent(route.Generation));
     }
 
@@ -104,7 +104,7 @@ public sealed class ChatRouteTests
         route.Moving(incoming);
         var bindNew = route.Binder();
         route.Switched(old);
-        route.MoveEnded(incoming);
+        route.MoveEnded(incoming, incoming);
         bindOld(() => ran++)();
         bindNew(() => ran++)();
         Assert.Equal(2, ran);
@@ -121,12 +121,72 @@ public sealed class ChatRouteTests
         // Came in on the new connection before it is in place here: the hub sent it there, so answer there.
         Assert.Same(incoming, route.ReplyVia(incoming, old));
         route.Switched(old);
-        route.MoveEnded(incoming);
+        route.MoveEnded(incoming, incoming);
         // Came in on the old connection, handled after the switch: the hub has dropped it, so answer on the new one.
         Assert.Same(incoming, route.ReplyVia(old, incoming));
         route.Closed(old);
         Assert.Same(incoming, route.ReplyVia(old, incoming));
         // No chat connection at all: the one it came in on is all there is.
         Assert.Same(old, route.ReplyVia(old, null));
+    }
+
+    /// <summary>
+    /// During a move it isn't known here whether the hub has taken the new connection in yet, so an answer waits for the
+    /// move to end and then goes over the connection in use: the new one after a switch, the old one after a failed move.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void AnswersDuringAMoveWaitForItToEnd(bool switched)
+    {
+        var route = new ChatRoute<Conn>();
+        Conn old = new(), incoming = new();
+        var sent = new List<Conn>();
+        Task Send(Conn via)
+        {
+            sent.Add(via);
+            return Task.CompletedTask;
+        }
+        route.Answer(old, old, Send);
+        Assert.Equal([old], sent);
+        sent.Clear();
+        route.Moving(incoming);
+        // On the old side (the hub may have dropped it already) and on the new side (it may not have joined yet).
+        route.Answer(old, old, Send);
+        route.Answer(incoming, old, Send);
+        Assert.Empty(sent);
+        if (switched) route.Switched(old);
+        var current = switched ? incoming : old;
+        route.MoveEnded(incoming, current);
+        Assert.Equal([current, current], sent);
+        // Sent once only.
+        route.MoveEnded(incoming, current);
+        Assert.Equal(2, sent.Count);
+    }
+
+    [Fact]
+    public void AnswersHeldBackAreDroppedWhenChatDropsOrTheRoomIsLeft()
+    {
+        var route = new ChatRoute<Conn>();
+        Conn old = new(), incoming = new(), next = new();
+        var sent = 0;
+        Task Send(Conn _)
+        {
+            sent++;
+            return Task.CompletedTask;
+        }
+        route.Moving(incoming);
+        route.Answer(old, old, Send);
+        // The move failed and the hub had dropped the old connection: no chat to answer over.
+        route.MoveEnded(incoming, null);
+        Assert.Equal(0, sent);
+        route.Moving(incoming);
+        route.Answer(old, old, Send);
+        route.Retire();
+        // The next room session's move doesn't send the last one's answers.
+        route.Moving(next);
+        route.MoveEnded(next, next);
+        route.MoveEnded(incoming, next);
+        Assert.Equal(0, sent);
     }
 }

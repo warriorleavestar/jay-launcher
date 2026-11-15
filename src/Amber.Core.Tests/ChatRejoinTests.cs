@@ -80,7 +80,7 @@ public sealed class ChatRejoinTests : IDisposable
 
 /// <summary>
 /// Remote-help answers during a chat move, end to end with a real hub: whichever side of the move a request came in on,
-/// the answer picked by <see cref="ChatRoute{T}.ReplyVia"/> reaches the host.
+/// and whenever it is answered, the answer sent through <see cref="ChatRoute{T}.Answer"/> reaches the host.
 /// </summary>
 public sealed class ChatMoveRemoteReplyTests : IDisposable
 {
@@ -134,16 +134,20 @@ public sealed class ChatMoveRemoteReplyTests : IDisposable
         Assert.True(await WaitAsync(() => hub.MemberCount == 1));
         Assert.True(hub.SendRemoteRequest(alice, duringMove));
         var second = await onNew.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        // Answered before the switch here: over the new connection, which the hub sent it on.
-        await route.ReplyVia(moved, old).DeclineRemoteAsync(second);
-        Assert.True(await WaitAsync(() => declined.Contains(duringMove)));
+        // Both answered before the switch here, while the old connection (which the hub has dropped) is still the current
+        // one: they wait for the move to end.
+        route.Answer(old, old, via => via.DeclineRemoteAsync(first));
+        route.Answer(moved, old, via => via.DeclineRemoteAsync(second));
+        Assert.True(declined.IsEmpty);
 
-        // The switch, then the answer to the request that came in on the old connection: over the new one.
+        // The switch: both go out over the new connection.
         route.Switched(old);
-        route.MoveEnded(moved);
-        Assert.Same(moved, route.ReplyVia(old, moved));
-        await route.ReplyVia(old, moved).DeclineRemoteAsync(first);
-        Assert.True(await WaitAsync(() => declined.Contains(beforeMove)));
+        route.MoveEnded(moved, moved);
+        Assert.True(await WaitAsync(() => declined.Contains(beforeMove) && declined.Contains(duringMove)));
+        // And after the move, an answer to the old side goes over the new connection straight away.
+        var late = NewSid();
+        route.Answer(old, moved, via => via.DeclineRemoteAsync(late));
+        Assert.True(await WaitAsync(() => declined.Contains(late)));
         await old.CloseQuietlyAsync();
     }
 

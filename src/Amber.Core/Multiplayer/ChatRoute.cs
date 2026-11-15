@@ -7,7 +7,7 @@ namespace Amber.Core.Multiplayer;
 /// <para>Everything is tied to the room session: <see cref="Retire"/> (leaving the room, or its network changing) starts a
 /// new generation and forgets both sides of a move, and callbacks queued by a connection of an earlier generation are
 /// dropped (<see cref="IsCurrent"/>). A late kick, breaker, rekey or remote request from a room that was left never acts on
-/// the next one.</para>
+/// the next one, and an answer held back during a move is never sent into the next one.</para>
 /// </summary>
 public sealed class ChatRoute<T> where T : class
 {
@@ -41,13 +41,34 @@ public sealed class ChatRoute<T> where T : class
     public T ReplyVia(T client, T? current) =>
         client == current || client == Incoming || current is null ? client : current;
 
+    private readonly List<(T Client, Func<T, Task> Send)> _waiting = [];
+
+    /// <summary>
+    /// Answers something that came in on <paramref name="client"/>. Outside a move it goes out now (<see cref="ReplyVia"/>).
+    /// During a move it waits for the move to end: until then it isn't known here whether the hub has already taken the new
+    /// connection in (and dropped the old one, the current one here) or not yet (the new one hasn't joined).
+    /// </summary>
+    public void Answer(T client, T? current, Func<T, Task> send)
+    {
+        if (Incoming is not null) _waiting.Add((client, send));
+        else _ = send(ReplyVia(client, current));
+    }
+
     /// <summary>A move started: <paramref name="incoming"/> is heard from now on.</summary>
     public void Moving(T incoming) => Incoming = incoming;
 
-    /// <summary>The move ended (in place or not): the new connection is no longer heard as the incoming one.</summary>
-    public void MoveEnded(T incoming)
+    /// <summary>
+    /// The move ended (in place or not): the new connection is no longer heard as the incoming one, and answers held back
+    /// during the move go out over <paramref name="current"/>, the connection in use now (none when chat dropped).
+    /// </summary>
+    public void MoveEnded(T incoming, T? current)
     {
-        if (Incoming == incoming) Incoming = null;
+        if (Incoming != incoming) return;
+        Incoming = null;
+        var waiting = _waiting.ToArray();
+        _waiting.Clear();
+        if (current is null) return;
+        foreach (var (client, send) in waiting) _ = send(ReplyVia(client, current));
     }
 
     /// <summary>The move is in place: <paramref name="old"/> is still heard until <see cref="Closed"/>.</summary>
@@ -64,5 +85,6 @@ public sealed class ChatRoute<T> where T : class
         Generation++;
         Incoming = null;
         Outgoing = null;
+        _waiting.Clear();
     }
 }

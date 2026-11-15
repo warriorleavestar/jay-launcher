@@ -1117,7 +1117,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
             }
             _chatConnecting = false;
             _chatReplacing = null;
-            _chatRoute.MoveEnded(client);
+            _chatRoute.MoveEnded(client, _chat);
         }
     }
 

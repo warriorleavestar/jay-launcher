@@ -235,7 +235,7 @@ public sealed partial class MultiplayerViewModel
         if (Child.HideRemoteControl || !RemotePlatform.Supported || _remoteSessions.OfType<RemoteSharer>().Any() || Interlocked.Exchange(ref _remotePrompting, 1) != 0)
         {
             // Answered over a connection the hub still knows (the request may have come in on either side of a move).
-            await DeclineRemote(_chatRoute.ReplyVia(client, _chat), sessionId);
+            DeclineRemote(client, sessionId);
             return;
         }
         var generation = _chatRoute.Generation;
@@ -252,17 +252,16 @@ public sealed partial class MultiplayerViewModel
         // Still this room session (chat may have moved to a new connection meanwhile): the answer goes over the chat
         // connection in use now.
         if (_room != room || !_chatRoute.IsCurrent(generation)) return;
-        var reply = _chatRoute.ReplyVia(client, _chat);
         if (!consent.Accepted)
         {
-            await DeclineRemote(reply, sessionId);
+            DeclineRemote(client, sessionId);
             return;
         }
         var screen = RemotePlatform.CreateScreen();
         if (screen is null)
         {
             // macOS 还没授权屏幕录制（系统这时已经弹了授权提示）之类：这次按拒绝回，界面上写原因。
-            await DeclineRemote(reply, sessionId);
+            DeclineRemote(client, sessionId);
             SetRemoteStatus(new StatusMessage("common.raw", [RemoteUnavailableText.Length > 0 ? RemoteUnavailableText : L.T("multiplayer.remote.unsupported_os")], StatusKind.Warning));
             NotifyRemoteAvailability();
             return;
@@ -292,7 +291,13 @@ public sealed partial class MultiplayerViewModel
         }
     }
 
-    private static async Task DeclineRemote(ChatClient client, string sessionId)
+    /// <summary>
+    /// Says no to a request that came in on <paramref name="client"/>, over a connection the hub still knows: the request
+    /// may have come in on either side of a chat move, and during a move the answer waits for it to end.
+    /// </summary>
+    private void DeclineRemote(ChatClient client, string sessionId) => _chatRoute.Answer(client, _chat, reply => SendDeclineAsync(reply, sessionId));
+
+    private static async Task SendDeclineAsync(ChatClient client, string sessionId)
     {
         try { await client.DeclineRemoteAsync(sessionId); }
         catch (Exception e) when (e is IOException or OperationCanceledException or ObjectDisposedException or InvalidOperationException
