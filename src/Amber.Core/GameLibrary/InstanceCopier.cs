@@ -32,6 +32,8 @@ public static class InstanceCopier
             var oldJson = Path.Combine(target, sourceId + ".json");
             var json = JsonNode.Parse(File.ReadAllText(oldJson)) as JsonObject ?? throw new InvalidDataException(oldJson);
             json["id"] = newId;
+            // A jar-mod instance names its own jar: it is renamed below, so the copy must name the new one.
+            if (json["jar"] is JsonValue jar && jar.TryGetValue<string>(out var jarId) && jarId == sourceId) json["jar"] = newId;
             File.WriteAllText(dir.VersionJsonPath(newId), json.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
             File.Delete(oldJson);
             var oldJar = Path.Combine(target, sourceId + ".jar");

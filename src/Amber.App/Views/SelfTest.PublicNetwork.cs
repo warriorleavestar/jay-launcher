@@ -333,6 +333,8 @@ internal sealed partial class SelfTest
             Check("网络配置：取不到配置文件就不连", !host.IsPublicConnected && !host.IsPublicConnecting && host.Status.Contains("自检公共网络"), host.Status);
         }
 
+        await ReviewLostUpdateAsync(host, registry, someone);
+
         // 别人签的：先提醒（显示签名钥匙），确认后才加。
         var other = new NetworkInfo("selftest-other", "没审核的网络", "jay-selftest-other", "other-secret", ["tcp://other-node.example.invalid:11010"]);
         Dispatcher.UIThread.Invoke(() =>
@@ -370,6 +372,83 @@ internal sealed partial class SelfTest
         });
         Check("换公共网络：删掉后回到 Jay 公共网络", host.SelectedNetworkChoice is { IsBuiltIn: true } && service.Settings.PublicNetworkId is null
             && (service.Settings.PublicNetworks ?? []).Count == 0, host.Status);
+    }
+
+    /// <summary>
+    /// A reviewed network (signed by its owner, co-signed by the registry) gets a newer version that only its owner signed:
+    /// Jay asks first. Cancel keeps the reviewed version, its mark and the saved list; confirming applies the update, the
+    /// mark shows it is no longer reviewed, and the new version is saved. Only the network list changes: nothing is dialled.
+    /// </summary>
+    private async Task ReviewLostUpdateAsync(MultiplayerViewModel host, TrustSigner registry, TrustSigner owner)
+    {
+        var service = host.TestService;
+        const string id = "selftest-update";
+        var v1 = new NetworkInfo(id, "会更新的网络", "jay-selftest-update", "update-secret", ["tcp://update-node.example.invalid:11010"]);
+        var reviewedText = NetworkString.Create(v1, owner, registry);
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            host.NetworkInput = reviewedText;
+            host.AddNetworkCommand.Execute(null);
+        });
+        Check("网络更新：作者签、注册表加签的网络直接加上（审核过）", !host.NetworkConfirmOpen && host.SelectedNetworkChoice is { Id: id, Reviewed: true }
+            && service.Networks.Find(id) is { Reviewed: true, Info.Seq: 1 }, host.Status);
+
+        // The confirm card and its buttons sit in the collapsed "Public networks" expander on the settings tab.
+        Dispatcher.UIThread.Invoke(() => host.ShowTabCommand.Execute("settings"));
+        if (await FindAsync<Expander>(e => Equals(e.Header, L.T("multiplayer.network.title"))) is { } expander)
+        {
+            Dispatcher.UIThread.Invoke(() => expander.IsExpanded = true);
+            await Task.Delay(300);
+            Dispatcher.UIThread.Invoke(() => expander.BringIntoView());
+        }
+
+        // Version 2, signed by the owner only: the review is gone.
+        var savedBefore = (service.Settings.PublicNetworks ?? []).ToList();
+        var ownerOnlyText = NetworkString.Create(v1 with { Seq = 2, Nodes = [.. v1.Nodes, "tcp://update-node-2.example.invalid:11010"] }, owner);
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            host.NetworkInput = ownerOnlyText;
+            host.AddNetworkCommand.Execute(null);
+        });
+        Check("网络更新：新版本没审核了，先提醒、还没换", host.NetworkConfirmOpen && host.NetworkConfirmText.Contains("会更新的网络")
+            && service.Networks.Find(id) is { Reviewed: true, Info.Seq: 1 }, host.Status);
+        await ShotAsync("网络更新失去审核提醒");
+
+        // Cancel: the reviewed version stays, the mark is unchanged and nothing is saved.
+        var cancelled = Press(await FindAsync<Button>(b => ReferenceEquals(b.Command, host.CancelAddNetworkCommand)));
+        if (!cancelled) Dispatcher.UIThread.Invoke(() => host.CancelAddNetworkCommand.Execute(null));
+        Check("网络更新：取消后还是原来审核过的版本，标记不变、没存", cancelled && !host.NetworkConfirmOpen
+            && service.Networks.Find(id) is { Reviewed: true, Info.Seq: 1 }
+            && host.SelectedNetworkChoice is { Id: id, Reviewed: true, NodeCount: 1 } && !host.SelectedNetworkChoice.Label.Contains('⚠')
+            && (service.Settings.PublicNetworks ?? []).SequenceEqual(savedBefore)
+            && (Amber.App.Services.AppSettings.Load().PublicNetworks ?? []).SequenceEqual(savedBefore), host.Status);
+
+        // Confirm: the update is applied, marked as not reviewed, and saved.
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            host.NetworkInput = ownerOnlyText;
+            host.AddNetworkCommand.Execute(null);
+        });
+        var confirmed = host.NetworkConfirmOpen && Press(await FindAsync<Button>(b => ReferenceEquals(b.Command, host.ConfirmAddNetworkCommand)));
+        if (!confirmed) Dispatcher.UIThread.Invoke(() => host.ConfirmAddNetworkCommand.Execute(null));
+        var saved = Amber.App.Services.AppSettings.Load().PublicNetworks ?? [];
+        Check("网络更新：确认后换成新版本，标成未审核", confirmed && !host.NetworkConfirmOpen
+            && service.Networks.Find(id) is { Reviewed: false, Info.Seq: 2 }
+            && host.SelectedNetworkChoice is { Id: id, Reviewed: false, NodeCount: 2 } && host.SelectedNetworkChoice.Label.Contains('⚠')
+            && host.SelectedNetworkChoice.Detail.Contains(L.F("multiplayer.network.unreviewed", host.SelectedNetworkChoice.Signer ?? "")), host.Status);
+        Check("网络更新：确认后的新版本存进设置", (service.Settings.PublicNetworks ?? []).Contains(ownerOnlyText)
+            && saved.Contains(ownerOnlyText) && !saved.Contains(reviewedText)
+            && new PublicNetworkList(saved, service.TrustedNetworkKeys).Find(id) is { Reviewed: false, Info.Seq: 2 }, $"{saved.Count} / {host.Status}");
+        await ShotAsync("网络更新确认后未审核");
+
+        // Leave the list as it was for the steps below.
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            host.RemoveNetworkCommand.Execute(null);
+            host.ShowTabCommand.Execute("public");
+        });
+        await Task.Delay(300);
+        Check("网络更新：删掉后回到 Jay 公共网络", host.SelectedNetworkChoice is { IsBuiltIn: true } && service.Networks.Find(id) is null, host.Status);
     }
 
     /// <summary>

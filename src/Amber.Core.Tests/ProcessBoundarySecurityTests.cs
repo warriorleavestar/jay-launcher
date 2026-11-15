@@ -252,11 +252,18 @@ public sealed class ProcessBoundarySecurityTests : IDisposable
         Assert.False(UpdateChecker.TryGetSafeUpdateUrl(url, out _));
         using var http = new HttpClient(new UpdateFeedHandler(url));
         await Assert.ThrowsAsync<InvalidDataException>(() => new UpdateChecker(http).CheckAsync("https://feed.example.test", "1.0"));
-        // 命令无须连接 LauncherService；恶意值必须在触碰系统 shell 之前被挡住。
-        var viewModel = new ToolsViewModel(null!) { UpdateUrl = url };
-        viewModel.OpenUpdateUrlCommand.Execute(null);
-        Assert.Null(viewModel.UpdateUrl);
-        Assert.NotEmpty(viewModel.UpdateStatus);
+        // The opener the command uses is injected here, so a regression in the check never reaches the system shell.
+        var invoked = false;
+        Assert.False(ToolsViewModel.TryOpenUpdatePage(url, _ => invoked = true));
+        Assert.False(invoked);
+    }
+
+    [Fact]
+    public void SafeUpdateUrl_IsHandedToTheOpenerNormalized()
+    {
+        string? opened = null;
+        Assert.True(ToolsViewModel.TryOpenUpdatePage("HTTPS://Example.TEST/release", u => opened = u));
+        Assert.Equal("https://example.test/release", opened);
     }
 
     [Theory]

@@ -222,12 +222,14 @@ public class ExitRoutingScriptTests
     private static async Task RunAsync(string assertions)
     {
         if (!OperatingSystem.IsWindows()) return;
-        var script = "$ErrorActionPreference='Stop'\n" + ExitRoutingScript.Script + "\n" + Mocks + "\n" + assertions + "\nWrite-Output 'PASS'";
+        // Turn off module auto-loading so a missing mock can never fall through to a real network cmdlet.
+        var script = "Import-Module Microsoft.PowerShell.Utility,Microsoft.PowerShell.Management -ErrorAction Stop\n"
+            + "$PSModuleAutoLoadingPreference = 'None'\n$ErrorActionPreference='Stop'\n" + ExitRoutingScript.Script + "\n" + Mocks + "\n" + assertions + "\nWrite-Output 'PASS'";
         var path = Path.Combine(Path.GetTempPath(), "amber-route-test-" + Guid.NewGuid().ToString("N") + ".ps1");
         await File.WriteAllTextAsync(path, script, new UTF8Encoding(true));
         try
         {
-            var info = new ProcessStartInfo("powershell.exe") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
+            var info = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe")) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
             foreach (var arg in new[] { "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", path }) info.ArgumentList.Add(arg);
             using var process = Process.Start(info)!;
             var stdout = process.StandardOutput.ReadToEndAsync();
