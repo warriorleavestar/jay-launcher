@@ -11,6 +11,9 @@ public static class PlatformFeatures
 
     /// <summary>经别人上网（消费出口）：接管系统路由、DNS 和防漏规则。Windows 用 WFP；Linux 要 ip + nftables，macOS 用 route + pf + scutil。</summary>
     public static bool FullTrafficExit => OperatingSystem.IsWindows() || FullLan && Multiplayer.UnixExitNetwork.Supported;
+    /// <summary>A desktop (Windows, macOS, Linux): not a phone or tablet, which the stores update and which have no desktop-only settings.</summary>
+    public static bool IsDesktop { get; } = !(OperatingSystem.IsAndroid() || OperatingSystem.IsIOS());
+
     /// <summary>这台电脑能被远程看 / 控制：Windows、macOS、Linux 的 X11 桌面（Wayland 还不行）。看别人在哪都行。</summary>
     public static bool RemoteControl => global::Amber.Core.RemoteControl.RemotePlatform.Supported;
 }

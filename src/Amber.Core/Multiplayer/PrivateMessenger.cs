@@ -456,11 +456,13 @@ public sealed partial class PrivateMessenger : IAsyncDisposable
                     var text = RoomChat.Clean(body["text"]?.GetValue<string>(), MaxTextLength);
                     if (text.Length > 0) MessageReceived?.Invoke(new PrivateMessage(frame.FromFingerprint, frame.FromPublicKey, frame.FromName, text, DateTimeOffset.UtcNow));
                     break;
-                case "offer" when id is { Length: 16 } && !_incoming.ContainsKey(id):
+                case "offer" when id is { Length: 16 }:
                     var size = body["size"]?.GetValue<long>() ?? -1;
                     var sha = body["sha"]?.GetValue<string>();
                     var name = SafeName(body["name"]?.GetValue<string>() ?? "");
-                    if (size < 0 || sha is not { Length: 64 } || _incoming.Count >= MaxIncoming) return;
+                    if (size < 0 || sha is not { Length: 64 }) return;
+                    if (_incoming.TryGetValue(id, out var earlier) && !await LetGoOfResumedAsync(earlier, frame.FromFingerprint, sha, size)) return;
+                    if (_incoming.Count >= MaxIncoming) return;
                     if (!AllowsFile(size))
                     {
                         await SendAsync(frame.FromFingerprint, new JsonObject { ["t"] = "decline", ["id"] = id }, _cts.Token);
@@ -582,6 +584,25 @@ public sealed partial class PrivateMessenger : IAsyncDisposable
         Progress?.Invoke(new FileProgress(job.Offer.Id, job.Offer.FromFingerprint, job.Offer.Name, job.Offer.Size, job.Received, false) { Started = true });
 
     /// <summary>放弃这次接收。没收完的部分默认留着（下次接着收）；只有整个文件对不上哈希时才删（<paramref name="discard"/>）。</summary>
+    /// <summary>
+    /// An offer under an id that is already receiving. When it is the same sender sending the same file again (it lost
+    /// the connection and resumes before this side noticed), the earlier attempt ends and lets go of the part file so the
+    /// new one carries on from it: true. A repeated offer still waiting for an answer, or anyone else's, is ignored: false.
+    /// </summary>
+    private async Task<bool> LetGoOfResumedAsync(Incoming earlier, string from, string sha, long size)
+    {
+        if (earlier.Offer.FromFingerprint != from || earlier.Offer.Size != size || earlier.Stream is null
+            || !Convert.ToHexStringLower(earlier.Hash).Equals(sha, StringComparison.OrdinalIgnoreCase)) return false;
+        await _incomingGate.WaitAsync();
+        try
+        {
+            if (!_incoming.TryRemove(new KeyValuePair<string, Incoming>(earlier.Offer.Id, earlier))) return false;
+            Abort(earlier, L.T("core.mp.private.stalled"), FileEnd.Stalled);
+        }
+        finally { _incomingGate.Release(); }
+        return true;
+    }
+
     private void Abort(Incoming job, string error, FileEnd end, bool discard = false)
     {
         var started = job.Stream is not null || job.Received > 0;
@@ -611,21 +632,7 @@ public sealed partial class PrivateMessenger : IAsyncDisposable
     }
 
     /// <summary>对方给的文件名只留最后一段、去掉不能用的字符；空的叫 file。</summary>
-    public static string SafeName(string name)
-    {
-        var last = name.Replace('\\', '/').Split('/').LastOrDefault() ?? "";
-        var invalid = Path.GetInvalidFileNameChars().Concat(['<', '>', ':', '"', '|', '?', '*']).ToHashSet();
-        // Format characters (U+202E RIGHT-TO-LEFT OVERRIDE and friends, zero-width joiners) go too: "photo\u202Egnp.exe"
-        // would otherwise show as "photoexe.png".
-        var clean = new string(last.Where(c => !invalid.Contains(c) && !char.IsControl(c)
-            && char.GetUnicodeCategory(c) != System.Globalization.UnicodeCategory.Format).ToArray()).Trim().TrimEnd('.');
-        if (clean.Length > 120) clean = clean[..120];
-        if (clean.Length == 0 || clean is "." or "..") clean = "file";
-        // Windows 的保留名（CON、NUL……）前面加个下划线。
-        var stem = Path.GetFileNameWithoutExtension(clean).ToUpperInvariant();
-        if (stem is "CON" or "PRN" or "AUX" or "NUL" || stem.Length == 4 && (stem.StartsWith("COM") || stem.StartsWith("LPT")) && char.IsAsciiDigit(stem[3])) clean = "_" + clean;
-        return clean;
-    }
+    public static string SafeName(string name) => FileNames.Bare(name, "file");
 
     /// <summary>没收完的文件放这里：同名同内容（哈希一样）的文件再发来时找得到，接着收。</summary>
     internal static string PartPath(string dir, string name, byte[] hash) =>

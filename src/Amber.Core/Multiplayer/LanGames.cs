@@ -37,11 +37,23 @@ public static partial class LanGames
     [GeneratedRegex(@"^(?:Started serving on|Local game hosted on port|(?:本地游戏已|本地遊戲已)?在端口)\s*(\d{2,5})\b", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 1000)]
     private static partial Regex PortPattern();
 
+    /// <summary>A broadcast longer than this is not read (the game's own are a few dozen bytes).</summary>
+    public const int MaxPacketBytes = 1024;
+
+    /// <summary>A world name is cut to this many characters.</summary>
+    public const int MaxMotdChars = 96;
+
     public static LanGame? Parse(string message)
     {
+        if (message.Length > MaxPacketBytes) return null;
         var m = AnnouncePattern().Match(message);
-        return m.Success && int.TryParse(m.Groups[2].Value, out var port) && port is > 0 and < 65536 ? new LanGame(m.Groups[1].Value, port) : null;
+        if (!m.Success || !int.TryParse(m.Groups[2].Value, out var port) || port is <= 0 or >= 65536) return null;
+        var motd = m.Groups[1].Value;
+        return new LanGame(motd.Length > MaxMotdChars ? motd[..MaxMotdChars] : motd, port);
     }
+
+    /// <summary>Reads one received datagram: too long, or not a broadcast, is null.</summary>
+    public static LanGame? Read(ReadOnlySpan<byte> datagram) => datagram.Length > MaxPacketBytes ? null : Parse(Encoding.UTF8.GetString(datagram));
 
     [GeneratedRegex(@"\[MOTD\](.*?)\[/MOTD\]\[AD\](?:[^\]:]*:)?(\d{1,5})\[/AD\]", RegexOptions.Singleline)]
     private static partial Regex AnnouncePattern();
@@ -69,7 +81,7 @@ public static partial class LanGames
             {
                 var result = await client.ReceiveAsync(timeout.Token);
                 if (!local.Contains(result.RemoteEndPoint.Address)) continue;
-                if (Parse(Encoding.UTF8.GetString(result.Buffer)) is { } game) found[game.Port] = game;
+                if (Read(result.Buffer) is { } game && (found.ContainsKey(game.Port) || found.Count < LanGameWatch.MaxGames)) found[game.Port] = game;
             }
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
@@ -77,6 +89,41 @@ public static partial class LanGames
             // 时间到。
         }
         return found.Values.OrderBy(g => g.Port).ToList();
+    }
+
+    /// <summary>
+    /// Listens for this computer's LAN broadcasts until <paramref name="ct"/> is cancelled, reporting each one heard.
+    /// Like <see cref="ListenAsync"/>, broadcasts from other computers are ignored, and so are ones over
+    /// <see cref="MaxPacketBytes"/>. Any program on this computer can send these, so the caller gathers them (see
+    /// <see cref="LanGameInbox"/>) rather than acting on each. The local addresses are read again
+    /// every minute, since a room's virtual adapter can come up after listening starts.
+    /// </summary>
+    public static async Task WatchAsync(Action<LanGame> heard, CancellationToken ct)
+    {
+        using var client = new UdpClient(AddressFamily.InterNetwork);
+        client.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+        client.Client.Bind(new IPEndPoint(IPAddress.Any, MulticastPort));
+        client.JoinMulticastGroup(IPAddress.Parse(MulticastAddress));
+        var local = LocalAddresses();
+        var readAt = DateTime.UtcNow;
+        try
+        {
+            while (true)
+            {
+                var result = await client.ReceiveAsync(ct);
+                if (DateTime.UtcNow - readAt > TimeSpan.FromMinutes(1))
+                {
+                    local = LocalAddresses();
+                    readAt = DateTime.UtcNow;
+                }
+                if (result.Buffer.Length > MaxPacketBytes || !local.Contains(result.RemoteEndPoint.Address)) continue;
+                if (Read(result.Buffer) is { } game) heard(game);
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // The room stopped listening.
+        }
     }
 
     private static HashSet<IPAddress> LocalAddresses()

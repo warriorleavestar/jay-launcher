@@ -20,12 +20,7 @@ public sealed class JayAccountItem(JayAccountEntry entry, string boundTo) : Loca
     /// <summary>Four words people read out to each other to confirm they see the same account (not the recovery phrase).</summary>
     public string CheckWords
     {
-        get
-        {
-            JayAddress.TryDecode(Entry.Address, out var key);
-            var language = L.Language.StartsWith("zh", StringComparison.Ordinal) || L.Language == "lzh" ? MnemonicLanguage.ChineseSimplified : MnemonicLanguage.English;
-            return L.F("accounts.jay.check_words", string.Join(" · ", JayAddress.CheckWords(key, language)));
-        }
+        get => L.F("accounts.jay.check_words", JayAddress.CheckWordsText(Entry.Address, L.Language));
     }
 
     public string BoundText => boundTo.Length > 0 ? L.F("accounts.jay.bound_to", boundTo) : L.T("accounts.jay.not_bound");
@@ -233,7 +228,7 @@ public sealed partial class AccountsViewModel
         try
         {
             using var device = MemberIdentity.LoadOrCreate(Amber.App.Services.AppSettings.DataDir);
-            _service.JayAccounts.Add(account, "", backedUp: true, device.PublicKey, DeviceName(), DateTimeOffset.UtcNow);
+            _service.JayAccounts.Add(account, "", backedUp: true, device.Device, DeviceName(), DateTimeOffset.UtcNow);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {

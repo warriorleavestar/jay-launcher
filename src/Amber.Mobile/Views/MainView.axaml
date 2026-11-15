@@ -3,99 +3,215 @@
              xmlns:vm="using:Amber.Mobile.ViewModels"
              x:Class="Amber.Mobile.Views.MainView"
              x:DataType="vm:MobileMainViewModel">
-  <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
-    <StackPanel x:Name="PageContent" MaxWidth="1080" Margin="16,16,16,24" Spacing="16">
-      <StackPanel Spacing="8">
-        <StackPanel>
-          <TextBlock Text="{Binding Title}" FontSize="28" FontWeight="Bold" />
-          <TextBlock Text="{Binding VersionText}" Foreground="{DynamicResource SecondaryText}" FontSize="13" />
+  <!-- Same information architecture as desktop Jay: wide tablets keep the side navigation,
+       while phones reflow the same pages into a bottom navigation bar. -->
+  <Grid x:Name="ShellGrid" ColumnDefinitions="232,*" RowDefinitions="*,Auto">
+    <Border x:Name="SidebarHost" Grid.RowSpan="2" Classes="mobile-sidebar" BorderThickness="0,0,1,0">
+      <Grid RowDefinitions="Auto,*,Auto" Margin="12,14,12,16">
+        <StackPanel Orientation="Horizontal" Spacing="10" Margin="10,4,10,20">
+          <Border Width="34" Height="34" CornerRadius="10" Background="{DynamicResource AccentBrush}">
+            <TextBlock Text="J" FontSize="20" FontWeight="Bold" Foreground="{DynamicResource AccentText}"
+                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+          </Border>
+          <StackPanel x:Name="BrandText" VerticalAlignment="Center">
+            <TextBlock Text="Jay" FontSize="19" FontWeight="Bold" />
+            <TextBlock Text="{Binding VersionText}" Classes="hint" FontSize="10" MaxWidth="160" TextTrimming="CharacterEllipsis" />
+          </StackPanel>
         </StackPanel>
-        <Border HorizontalAlignment="Left" Background="{DynamicResource AccentBrush}" CornerRadius="999" Padding="10,5" VerticalAlignment="Top">
-          <TextBlock Text="{Binding ExperimentalText}" Foreground="{DynamicResource AccentText}" FontSize="12" FontWeight="SemiBold" />
-        </Border>
-      </StackPanel>
 
-      <Border Classes="card" Background="{DynamicResource WarningBackground}" BorderBrush="{DynamicResource WarningBorder}">
-        <StackPanel Spacing="8">
-          <TextBlock Text="{Binding ScopeTitle}" FontSize="17" FontWeight="SemiBold" />
-          <TextBlock Text="{Binding ScopeDescription}" TextWrapping="Wrap" Foreground="{DynamicResource SecondaryText}" LineHeight="21" />
+        <StackPanel Grid.Row="1" Spacing="4">
+          <Button x:Name="SideHome" Classes="mobile-nav active" Tag="home" Click="OnNavigate">
+            <Grid ColumnDefinitions="32,*"><TextBlock Text="▶" FontSize="15" VerticalAlignment="Center" /><TextBlock Grid.Column="1" Text="{Binding HomeText}" VerticalAlignment="Center" /></Grid>
+          </Button>
+          <Button x:Name="SideLibrary" Classes="mobile-nav" Tag="library" Click="OnNavigate">
+            <Grid ColumnDefinitions="32,*"><TextBlock Text="▦" FontSize="18" VerticalAlignment="Center" /><TextBlock Grid.Column="1" Text="{Binding LibraryText}" VerticalAlignment="Center" /></Grid>
+          </Button>
+          <Button x:Name="SideMultiplayer" Classes="mobile-nav" Tag="multiplayer" Click="OnNavigate">
+            <Grid ColumnDefinitions="32,*"><TextBlock Text="◉" FontSize="18" VerticalAlignment="Center" /><TextBlock Grid.Column="1" Text="{Binding MultiplayerText}" VerticalAlignment="Center" /></Grid>
+          </Button>
         </StackPanel>
-      </Border>
 
-      <Grid x:Name="ContentColumns" ColumnDefinitions="*" RowDefinitions="Auto,Auto" RowSpacing="16" ColumnSpacing="20">
-        <StackPanel Spacing="16" VerticalAlignment="Top">
-          <Border Classes="card">
-            <StackPanel Spacing="10">
-              <TextBlock Text="{Binding DeviceTitle}" FontSize="17" FontWeight="SemiBold" />
-              <TextBlock Text="{Binding DeviceFingerprint}" FontFamily="monospace" FontSize="16" TextWrapping="Wrap" />
-              <TextBlock Text="{Binding DeviceHint}" Foreground="{DynamicResource SecondaryText}" TextWrapping="Wrap" />
-            </StackPanel>
-          </Border>
-
-          <Border Classes="card">
-            <StackPanel Spacing="12">
-              <TextBlock Text="{Binding EnrollTitle}" FontSize="17" FontWeight="SemiBold" />
-              <TextBlock Text="{Binding EnrollHint}" Foreground="{DynamicResource SecondaryText}" TextWrapping="Wrap" />
-              <TextBox Text="{Binding InviteText}" AcceptsReturn="True" MinHeight="96" MaxHeight="200" ScrollViewer.VerticalScrollBarVisibility="Auto" TextWrapping="Wrap" PlaceholderText="JAYS2-..." />
-              <TextBox Text="{Binding InvitePassphrase}" IsVisible="{Binding InviteIsSealed}" PlaceholderText="{Binding PassphrasePlaceholder}" />
-              <Button Classes="primary" Command="{Binding EnrollCommand}" IsEnabled="{Binding !IsBusy}" HorizontalAlignment="Stretch">
-                <TextBlock Text="{Binding EnrollButtonText}" TextWrapping="Wrap" />
-              </Button>
-              <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsBusy}" />
-            </StackPanel>
-          </Border>
-
-        </StackPanel>
-        <StackPanel x:Name="ServerColumn" Grid.Row="1" Spacing="16" VerticalAlignment="Top">
-          <Border Classes="card" IsVisible="{Binding ShowGameLauncher}" Background="{DynamicResource WarningBackground}" BorderBrush="{DynamicResource WarningBorder}">
-            <StackPanel Spacing="10">
-              <TextBlock Text="{Binding GameLauncherTitle}" FontSize="17" FontWeight="SemiBold" />
-              <TextBlock Text="{Binding GameLauncherHint}" TextWrapping="Wrap" Foreground="{DynamicResource SecondaryText}" LineHeight="21" />
-              <Button Classes="primary" Command="{Binding OpenGameLauncherCommand}" HorizontalAlignment="Stretch">
-                <TextBlock Text="{Binding OpenGameLauncherText}" TextWrapping="Wrap" />
-              </Button>
-            </StackPanel>
-          </Border>
-
-          <Border Classes="card" IsVisible="{Binding HasStatus}">
-            <TextBlock Text="{Binding Status}" TextWrapping="Wrap" LineHeight="21" />
-          </Border>
-
-          <Border Classes="card" IsVisible="{Binding IsConnected}">
-            <StackPanel Spacing="10">
-              <TextBlock Text="{Binding TunnelTitle}" FontSize="17" FontWeight="SemiBold" />
-              <TextBlock Text="{Binding LocalAddress}" FontFamily="monospace" FontSize="20" FontWeight="Bold" TextWrapping="Wrap" />
-              <TextBlock Text="{Binding TunnelHint}" TextWrapping="Wrap" Foreground="{DynamicResource SecondaryText}" />
-              <Button Classes="secondary" Command="{Binding DisconnectCommand}">
-                <TextBlock Text="{Binding DisconnectButtonText}" TextWrapping="Wrap" />
-              </Button>
-            </StackPanel>
-          </Border>
-
-          <TextBlock Text="{Binding SavedServersTitle}" FontSize="20" FontWeight="SemiBold" Margin="0,4,0,0" />
-          <TextBlock Text="{Binding NoServersText}" IsVisible="{Binding HasNoServers}" Foreground="{DynamicResource SecondaryText}" TextWrapping="Wrap" />
-          <ItemsControl ItemsSource="{Binding Servers}">
-            <ItemsControl.ItemTemplate>
-              <DataTemplate x:DataType="vm:MobileServerItem">
-                <Border Classes="card" Margin="0,0,0,12">
-                  <StackPanel Spacing="10">
-                    <TextBlock Text="{Binding Title}" FontSize="17" FontWeight="SemiBold" TextWrapping="Wrap" />
-                    <TextBlock Text="{Binding Detail}" Foreground="{DynamicResource SecondaryText}" TextWrapping="Wrap" />
-                    <StackPanel Spacing="8">
-                      <Button Classes="primary" Command="{Binding ConnectCommand}">
-                        <TextBlock Text="{Binding ConnectText}" TextWrapping="Wrap" />
-                      </Button>
-                      <Button Classes="secondary" Command="{Binding RemoveCommand}">
-                        <TextBlock Text="{Binding RemoveText}" TextWrapping="Wrap" />
-                      </Button>
-                    </StackPanel>
-                  </StackPanel>
-                </Border>
-              </DataTemplate>
-            </ItemsControl.ItemTemplate>
-          </ItemsControl>
+        <StackPanel Grid.Row="2" Spacing="4">
+          <Border Height="1" Background="{DynamicResource CardBorder}" Margin="6,0,6,8" />
+          <Button x:Name="SideSettings" Classes="mobile-nav" Tag="settings" Click="OnNavigate">
+            <Grid ColumnDefinitions="32,*"><TextBlock Text="⚙" FontSize="18" VerticalAlignment="Center" /><TextBlock Grid.Column="1" Text="{Binding SettingsText}" VerticalAlignment="Center" /></Grid>
+          </Button>
+          <Button x:Name="SideMe" Classes="mobile-nav" Tag="me" Click="OnNavigate">
+            <Grid ColumnDefinitions="32,*"><Border Width="24" Height="24" CornerRadius="12" Background="{DynamicResource AccentTint}"><TextBlock Text="J" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" /></Border><TextBlock Grid.Column="1" Text="{Binding MeText}" VerticalAlignment="Center" /></Grid>
+          </Button>
         </StackPanel>
       </Grid>
-    </StackPanel>
-  </ScrollViewer>
+    </Border>
+
+    <Grid x:Name="ContentHost" Grid.Column="1" RowDefinitions="52,*">
+      <Border Classes="mobile-topbar" BorderThickness="0,0,0,1">
+        <Grid ColumnDefinitions="*,Auto" Margin="20,0">
+          <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+            <TextBlock x:Name="PageTitle" Text="{Binding HomeText}" FontSize="18" FontWeight="SemiBold" />
+            <Border Background="{DynamicResource AccentTint}" CornerRadius="999" Padding="8,3">
+              <TextBlock Text="{Binding ExperimentalText}" Foreground="{DynamicResource AccentText}" FontSize="10" FontWeight="SemiBold" />
+            </Border>
+          </StackPanel>
+          <Border Grid.Column="1" Background="{DynamicResource SuccessTint}" CornerRadius="999" Padding="10,5" VerticalAlignment="Center">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+              <Border Width="7" Height="7" CornerRadius="4" Background="{DynamicResource SuccessBrush}" VerticalAlignment="Center" />
+              <TextBlock Text="{Binding PlatformNameText}" FontSize="12" VerticalAlignment="Center" />
+            </StackPanel>
+          </Border>
+        </Grid>
+      </Border>
+
+      <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+        <Grid x:Name="PageContent" MaxWidth="1180" Margin="24,22,24,32">
+          <StackPanel x:Name="HomePage" Spacing="18">
+            <Border Classes="hero-card">
+              <Grid x:Name="HomeHeroGrid" ColumnDefinitions="*,Auto" ColumnSpacing="20" RowSpacing="14">
+                <StackPanel Spacing="8" VerticalAlignment="Center">
+                  <TextBlock Text="{Binding WelcomeTitle}" FontSize="28" FontWeight="Bold" TextWrapping="Wrap" />
+                  <TextBlock Text="{Binding GameLauncherHint}" Classes="hint" FontSize="14" LineHeight="22" TextWrapping="Wrap" MaxWidth="680" />
+                </StackPanel>
+                <Button x:Name="HomePlayButton" Grid.Column="1" Classes="primary play" Command="{Binding OpenGameLauncherCommand}" IsVisible="{Binding ShowGameLauncher}" VerticalAlignment="Center">
+                  <StackPanel Orientation="Horizontal" Spacing="8"><TextBlock Text="▶" /><TextBlock Text="{Binding OpenGameLauncherText}" TextWrapping="Wrap" /></StackPanel>
+                </Button>
+              </Grid>
+            </Border>
+
+            <Border Classes="card" IsVisible="{Binding HasStatus}">
+              <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
+                <Border Width="9" Height="9" CornerRadius="5" Background="{DynamicResource AccentBrush}" Margin="0,6,0,0" />
+                <TextBlock Grid.Column="1" Text="{Binding Status}" TextWrapping="Wrap" LineHeight="21" />
+              </Grid>
+            </Border>
+
+            <Grid x:Name="HomeColumns" ColumnDefinitions="*,*" ColumnSpacing="18" RowSpacing="18">
+              <Border Classes="card">
+                <StackPanel Spacing="10">
+                  <TextBlock Text="{Binding LibraryText}" FontSize="17" FontWeight="SemiBold" />
+                  <TextBlock Text="{Binding GameLauncherTitle}" Classes="hint" TextWrapping="Wrap" />
+                  <Button Classes="secondary" Tag="library" Click="OnNavigate" HorizontalAlignment="Stretch" Content="{Binding LibraryOpenText}" />
+                </StackPanel>
+              </Border>
+              <Border Grid.Column="1" Classes="card">
+                <StackPanel Spacing="10">
+                  <TextBlock Text="{Binding MultiplayerText}" FontSize="17" FontWeight="SemiBold" />
+                  <TextBlock Text="{Binding TunnelHint}" Classes="hint" TextWrapping="Wrap" />
+                  <Button Classes="secondary" Tag="multiplayer" Click="OnNavigate" HorizontalAlignment="Stretch" Content="{Binding MultiplayerOpenText}" />
+                </StackPanel>
+              </Border>
+            </Grid>
+          </StackPanel>
+
+          <StackPanel x:Name="LibraryPage" IsVisible="False" Spacing="18">
+            <Grid x:Name="LibraryColumns" ColumnDefinitions="1.35*,*" ColumnSpacing="18" RowSpacing="18">
+              <Border Classes="hero-card">
+                <StackPanel Spacing="12">
+                  <TextBlock Text="{Binding GameLauncherTitle}" FontSize="24" FontWeight="Bold" />
+                  <TextBlock Text="{Binding GameLauncherHint}" Classes="hint" TextWrapping="Wrap" LineHeight="22" />
+                  <Button Classes="primary play" Command="{Binding OpenGameLauncherCommand}" IsVisible="{Binding ShowGameLauncher}" HorizontalAlignment="Stretch">
+                    <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center"><TextBlock Text="▶" /><TextBlock Text="{Binding OpenGameLauncherText}" /></StackPanel>
+                  </Button>
+                </StackPanel>
+              </Border>
+              <Border Grid.Column="1" Classes="card">
+                <StackPanel Spacing="10">
+                  <TextBlock Text="{Binding ScopeTitle}" FontSize="17" FontWeight="SemiBold" />
+                  <TextBlock Text="{Binding ScopeDescription}" Classes="hint" TextWrapping="Wrap" LineHeight="21" />
+                </StackPanel>
+              </Border>
+            </Grid>
+          </StackPanel>
+
+          <StackPanel x:Name="MultiplayerPage" IsVisible="False" Spacing="18">
+            <Grid x:Name="ContentColumns" ColumnDefinitions="*,*" ColumnSpacing="18" RowSpacing="18">
+              <StackPanel Spacing="18" VerticalAlignment="Top">
+                <Border Classes="card">
+                  <StackPanel Spacing="10">
+                    <TextBlock Text="{Binding DeviceTitle}" FontSize="17" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding DeviceFingerprint}" FontFamily="monospace" FontSize="16" TextWrapping="Wrap" />
+                    <TextBlock Text="{Binding DeviceHint}" Classes="hint" TextWrapping="Wrap" />
+                  </StackPanel>
+                </Border>
+                <Border Classes="card">
+                  <StackPanel Spacing="12">
+                    <TextBlock Text="{Binding EnrollTitle}" FontSize="17" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding EnrollHint}" Classes="hint" TextWrapping="Wrap" />
+                    <TextBox Text="{Binding InviteText}" AcceptsReturn="True" MinHeight="96" MaxHeight="200" ScrollViewer.VerticalScrollBarVisibility="Auto" TextWrapping="Wrap" PlaceholderText="JAYS2-..." />
+                    <TextBox Text="{Binding InvitePassphrase}" IsVisible="{Binding InviteIsSealed}" PlaceholderText="{Binding PassphrasePlaceholder}" />
+                    <Button Classes="primary" Command="{Binding EnrollCommand}" IsEnabled="{Binding !IsBusy}" HorizontalAlignment="Stretch" Content="{Binding EnrollButtonText}" />
+                    <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsBusy}" />
+                  </StackPanel>
+                </Border>
+              </StackPanel>
+
+              <StackPanel x:Name="ServerColumn" Grid.Column="1" Spacing="18" VerticalAlignment="Top">
+                <Border Classes="card" IsVisible="{Binding IsConnected}" BorderBrush="{DynamicResource SuccessBrush}">
+                  <StackPanel Spacing="10">
+                    <TextBlock Text="{Binding TunnelTitle}" FontSize="17" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding LocalAddress}" FontFamily="monospace" FontSize="20" FontWeight="Bold" TextWrapping="Wrap" />
+                    <TextBlock Text="{Binding TunnelHint}" Classes="hint" TextWrapping="Wrap" />
+                    <Button Classes="secondary" Command="{Binding DisconnectCommand}" Content="{Binding DisconnectButtonText}" />
+                  </StackPanel>
+                </Border>
+                <TextBlock Text="{Binding SavedServersTitle}" FontSize="20" FontWeight="SemiBold" />
+                <TextBlock Text="{Binding NoServersText}" IsVisible="{Binding HasNoServers}" Classes="hint" TextWrapping="Wrap" />
+                <ItemsControl ItemsSource="{Binding Servers}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:MobileServerItem">
+                      <Border Classes="card" Margin="0,0,0,12">
+                        <StackPanel Spacing="10">
+                          <TextBlock Text="{Binding Title}" FontSize="17" FontWeight="SemiBold" TextWrapping="Wrap" />
+                          <TextBlock Text="{Binding Detail}" Classes="hint" TextWrapping="Wrap" />
+                          <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
+                            <Button Classes="primary" Command="{Binding ConnectCommand}" Content="{Binding ConnectText}" />
+                            <Button Grid.Column="1" Classes="secondary" Command="{Binding RemoveCommand}" Content="{Binding RemoveText}" />
+                          </Grid>
+                        </StackPanel>
+                      </Border>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
+            </Grid>
+          </StackPanel>
+
+          <StackPanel x:Name="SettingsPage" IsVisible="False" Spacing="18">
+            <Border Classes="card">
+              <StackPanel Spacing="12">
+                <TextBlock Text="{Binding AppearanceTitle}" FontSize="20" FontWeight="SemiBold" />
+                <TextBlock Text="{Binding AppearanceHint}" Classes="hint" TextWrapping="Wrap" />
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                  <StackPanel><TextBlock Text="{Binding LanguageTitle}" FontWeight="SemiBold" /><TextBlock Text="{Binding LanguageValue}" Classes="hint" /></StackPanel>
+                  <TextBlock Grid.Column="1" Text="{Binding LanguageValue}" VerticalAlignment="Center" />
+                </Grid>
+              </StackPanel>
+            </Border>
+            <Border Classes="card">
+              <StackPanel Spacing="8"><TextBlock Text="{Binding ScopeTitle}" FontSize="17" FontWeight="SemiBold" /><TextBlock Text="{Binding ScopeDescription}" Classes="hint" TextWrapping="Wrap" LineHeight="21" /></StackPanel>
+            </Border>
+          </StackPanel>
+
+          <StackPanel x:Name="MePage" IsVisible="False" Spacing="18">
+            <Border Classes="hero-card">
+              <StackPanel Spacing="10">
+                <Border Width="64" Height="64" CornerRadius="32" Background="{DynamicResource AccentTint}" HorizontalAlignment="Left"><TextBlock Text="J" FontSize="28" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" /></Border>
+                <TextBlock Text="{Binding DeviceTitle}" FontSize="22" FontWeight="Bold" />
+                <TextBlock Text="{Binding DeviceFingerprint}" FontFamily="monospace" FontSize="16" TextWrapping="Wrap" />
+                <TextBlock Text="{Binding DeviceHint}" Classes="hint" TextWrapping="Wrap" />
+              </StackPanel>
+            </Border>
+          </StackPanel>
+        </Grid>
+      </ScrollViewer>
+    </Grid>
+
+    <Border x:Name="BottomNav" Grid.Row="1" Grid.ColumnSpan="2" Classes="mobile-bottom" IsVisible="False" BorderThickness="0,1,0,0">
+      <Grid ColumnDefinitions="*,*,*,*,*" Margin="4,4,4,6">
+        <Button x:Name="BottomHome" Classes="bottom-nav active" Tag="home" Click="OnNavigate"><StackPanel><TextBlock Text="▶" HorizontalAlignment="Center" /><TextBlock Text="{Binding HomeText}" FontSize="10" HorizontalAlignment="Center" /></StackPanel></Button>
+        <Button x:Name="BottomLibrary" Grid.Column="1" Classes="bottom-nav" Tag="library" Click="OnNavigate"><StackPanel><TextBlock Text="▦" FontSize="17" HorizontalAlignment="Center" /><TextBlock Text="{Binding LibraryText}" FontSize="10" HorizontalAlignment="Center" /></StackPanel></Button>
+        <Button x:Name="BottomMultiplayer" Grid.Column="2" Classes="bottom-nav" Tag="multiplayer" Click="OnNavigate"><StackPanel><TextBlock Text="◉" FontSize="17" HorizontalAlignment="Center" /><TextBlock Text="{Binding MultiplayerText}" FontSize="10" HorizontalAlignment="Center" /></StackPanel></Button>
+        <Button x:Name="BottomSettings" Grid.Column="3" Classes="bottom-nav" Tag="settings" Click="OnNavigate"><StackPanel><TextBlock Text="⚙" FontSize="17" HorizontalAlignment="Center" /><TextBlock Text="{Binding SettingsText}" FontSize="10" HorizontalAlignment="Center" /></StackPanel></Button>
+        <Button x:Name="BottomMe" Grid.Column="4" Classes="bottom-nav" Tag="me" Click="OnNavigate"><StackPanel><TextBlock Text="●" FontSize="17" HorizontalAlignment="Center" /><TextBlock Text="{Binding MeText}" FontSize="10" HorizontalAlignment="Center" /></StackPanel></Button>
+      </Grid>
+    </Border>
+  </Grid>
 </UserControl>

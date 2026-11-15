@@ -47,7 +47,7 @@ public static partial class ErrorReport
             sb.AppendLine("## Crash report");
             sb.AppendLine(crash);
         }
-        return Redact(sb.ToString(), userName ?? Environment.UserName, homeDir ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+        return Diagnostics.Redaction.ForSharing(sb.ToString(), userName: userName, homeDir: homeDir);
     }
 
     /// <summary>Removes secrets and the computer user name. Safe to run more than once.</summary>

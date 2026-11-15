@@ -122,7 +122,7 @@ public sealed partial class MultiplayerViewModel
     {
         if (_relinking) return;
         var keys = LoadRelink();
-        if (keys.Count == 0 || Post is not { } post || Contacts.MyCertificate is null) return;
+        if (keys.Count == 0 || Post is not { } post) return;
         _relinking = true;
         var sent = 0;
         try

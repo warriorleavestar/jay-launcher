@@ -41,13 +41,31 @@ public sealed class NetworkServerFrameworkTests : IAsyncDisposable
         Salt = mode == RoomVisibility.Password ? new string('b', 32) : null,
     };
 
-    private JsonObject Announce(RoomSigner signer, RoomListing listing, bool listed = true) => new()
+    private JsonObject Announce(RoomSigner signer, RoomListing listing, bool listed = true)
     {
-        ["op"] = "announce",
-        ["room"] = signer.Sign(listing, _now).ToJson(),
-        ["listed"] = listed,
-        ["lookup"] = new JsonArray(listed ? [] : [(JsonNode)new string('c', 64)]),
-    };
+        var signed = signer.Sign(listing, _now);
+        return new()
+        {
+            ["op"] = "announce",
+            ["room"] = signed.ToJson(),
+            ["listed"] = listed,
+            ["hidden"] = new JsonArray(listed ? [] : [HiddenFor(signed)]),
+        };
+    }
+
+    /// <summary>A hidden entry under a fresh invite (each hidden test room gets its own index).</summary>
+    private static JsonNode HiddenFor(RoomListing listing)
+    {
+        var lobby = System.Security.Cryptography.RandomNumberGenerator.GetBytes(16);
+        var sealedEntry = HiddenEntry.Seal(lobby, new DirectoryHit("room", "10.235.0.7", new byte[32]));
+        return new JsonObject
+        {
+            ["k"] = Convert.ToHexStringLower(HiddenEntry.Index(lobby)),
+            ["b"] = Convert.ToBase64String(sealedEntry),
+            ["p"] = Convert.ToHexStringLower(HiddenEntry.PublicKey(lobby)),
+            ["s"] = Convert.ToHexStringLower(HiddenEntry.SignPublish(lobby, sealedEntry, listing.Id, listing.Seq)),
+        };
+    }
 
     private static bool Ok(JsonObject reply) => reply["ok"]?.GetValue<bool>() == true;
 
@@ -490,7 +508,7 @@ public sealed class NetworkServerFrameworkTests : IAsyncDisposable
         var server = await StartAsync(b => b.UseConfig(config));
         JsonObject List(string? version)
         {
-            var request = new JsonObject { ["op"] = "list" };
+            var request = new JsonObject { ["op"] = "snap" };
             if (version is not null) request["jay"] = version;
             return server.Directory!.Handle(request);
         }
@@ -686,9 +704,11 @@ public sealed class NetworkServerFrameworkTests : IAsyncDisposable
         var client = new RoomDirectoryClient(net) { NetworkSecret = main.NetworkSecret };
         var host = X25519KeyPair.Generate();
         var signer = new RoomSigner();
-        var lobby = new byte[32];
-        Random.Shared.NextBytes(lobby);
-        await client.AnnounceAsync(signer.Sign(Listing(host), _now), true, [RoomDirectoryProtocol.LookupKey(lobby)], default);
+        // A public room is found by its invite from the listing itself.
+        var room = Listing(host);
+        Assert.True(JayInvite.TryParse(room.Invite, out var invite));
+        var lobby = invite.LobbyKey;
+        await client.AnnounceAsync(signer.Sign(room, _now), true, [lobby], default);
 
         // 两个目录都有，列表合并后不重复。
         Assert.Equal(1, main.Count);

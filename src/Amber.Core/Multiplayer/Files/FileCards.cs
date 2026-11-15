@@ -120,20 +120,25 @@ public static class FileKinds
         return FileKind.File;
     }
 
-    /// <summary>A received zip holds a world when it has a level.dat somewhere (what importing a world looks for).</summary>
-    public static bool LooksLikeWorld(string zipPath)
+    /// <summary>
+    /// A received zip holds a world when it has a level.dat somewhere (what importing a world looks for). A zip too big
+    /// to look into, or not a zip, is not a world. Reads from disk: call it off the UI thread.
+    /// </summary>
+    public static bool LooksLikeWorld(string zipPath, CancellationToken ct = default)
     {
-        if (!zipPath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)) return false;
+        if (!MayBeWorld(zipPath)) return false;
         try
         {
-            using var zip = System.IO.Compression.ZipFile.OpenRead(zipPath);
-            return FilePacker.HasWorld(zip);
+            return FilePacker.HasWorld(zipPath, ct);
         }
         catch (Exception e) when (e is IOException or InvalidDataException or UnauthorizedAccessException) { return false; }
     }
 
-    /// <summary>The kind of a file that arrived (by name, and a world inside a zip).</summary>
-    public static FileKind OfReceived(string path) => Of(path) is var kind && kind == FileKind.File && LooksLikeWorld(path) ? FileKind.World : kind;
+    /// <summary>Only a zip can be a world (checked by name, no reading).</summary>
+    public static bool MayBeWorld(string path) => Of(path) == FileKind.File && path.EndsWith(".zip", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>The kind of a file that arrived (by name, and a world inside a zip). Reads from disk: call it off the UI thread.</summary>
+    public static FileKind OfReceived(string path, CancellationToken ct = default) => MayBeWorld(path) && LooksLikeWorld(path, ct) ? FileKind.World : Of(path);
 
     /// <summary>The localization key of the type line ("World", "Mod list", …).</summary>
     public static string LabelKey(FileKind kind) => kind switch

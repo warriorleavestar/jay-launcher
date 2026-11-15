@@ -398,8 +398,9 @@ public sealed class DirectSession : IAsyncDisposable
     /// <summary>EasyTier 启动或重启过几次（包括已提权会话的原地重启）：界面按它判断要不要重新计时。</summary>
     public int EasyTierStarts { get; private set; }
 
+
     private static bool SameConfig(EasyTierOptions a, EasyTierOptions b) =>
-        a.Tun == b.Tun && a.AllowExit == b.AllowExit && a.ExitNode == b.ExitNode && a.Peers.SequenceEqual(b.Peers)
+        a.Tun == b.Tun && a.AllowExit == b.AllowExit && a.ExitNode == b.ExitNode && (a.ConfiguredPeers ?? a.Peers).SequenceEqual(b.ConfiguredPeers ?? b.Peers)
         && (a.ExtraArgs ?? []).SequenceEqual(b.ExtraArgs ?? [])
         && (a.ExitNode is null || (a.DirectUnderlayAddresses.SequenceEqual(b.DirectUnderlayAddresses)
             && a.DirectUnderlayUsesIpv6 == b.DirectUnderlayUsesIpv6));

@@ -132,6 +132,10 @@ internal sealed partial class SelfTest
             Check("正在玩：不是实心琥珀，是正在玩的颜色", instance.StartPlaying && page?.StartButton.Classes.Contains("playing") == true
                 && !page.StartButton.Classes.Contains("play"), instance.StartLabel);
             Check("正在玩：写了玩了几分钟", instance.StartLabel.Contains("分钟"), instance.StartLabel);
+            await Task.Delay(200);
+            // The quit button beside the start button is shorter than it: its label must still sit in the middle.
+            var offCentre = page is null ? ["no page"] : ButtonsWithOffCentreContent(page.Hero);
+            Check("Playing: the labels and icons in the header sit in the middle of their buttons", offCentre.Count == 0, string.Join("; ", offCentre));
             await ShotAsync("instance-playing");
             window.Width = 600;
             await Task.Delay(400);

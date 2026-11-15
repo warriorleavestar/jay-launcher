@@ -65,6 +65,7 @@ internal static class AndroidEmbeddedGame
             "-Dorg.lwjgl.opengl.explicitInit=true",
             "-Dorg.lwjgl.freetype.libname=" + Path.Combine(nativeRoot, "libfreetype.so"),
             "-Dorg.lwjgl.openal.libname=" + Path.Combine(nativeRoot, "libopenal.so"),
+            "-Djay.minecraft.version=" + FirstPlayableVersion,
         };
 
         var launcher = new GameLauncher(gameDirectory) { BaseRules = rules };

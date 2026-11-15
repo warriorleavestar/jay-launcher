@@ -30,7 +30,8 @@ public sealed class PublicNetworkTests : IAsyncDisposable
         public Task<string?> MyIpAsync(CancellationToken ct) => Task.FromResult(Ip);
     }
 
-    private DateTimeOffset _now = new(2026, 11, 9, 0, 0, 0, TimeSpan.Zero);
+    // Real time, truncated: the announcer signs with the wall clock and hidden entries are checked against the directory clock.
+    private DateTimeOffset _now = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds());
     private readonly RoomDirectoryServer _directory;
     private readonly FakeNetwork _net = new();
     private readonly X25519KeyPair _host = X25519KeyPair.Generate();
@@ -101,7 +102,7 @@ public sealed class PublicNetworkTests : IAsyncDisposable
         var signer = new RoomSigner();
         var book = new InviteBook();
         var standing = book.CreateStanding(false, TunnelSettings.Default);
-        var key = RoomDirectoryProtocol.LookupKey(standing.Invite.LobbyKey);
+        var key = standing.Invite.LobbyKey;
         await client.AnnounceAsync(signer.Sign(Listing(invite: standing.Invite.ToString()), _now), true, [key], default);
 
         var rooms = await client.ListAsync(default);
@@ -127,7 +128,7 @@ public sealed class PublicNetworkTests : IAsyncDisposable
         var client = new RoomDirectoryClient(_net);
         var book = new InviteBook();
         var invite = book.Create(1, TimeSpan.FromMinutes(10), false, TunnelSettings.Default);
-        await client.AnnounceAsync(new RoomSigner().Sign(Listing(RoomVisibility.Hidden, invite: ""), _now), false, [RoomDirectoryProtocol.LookupKey(invite.Invite.LobbyKey)], default);
+        await client.AnnounceAsync(new RoomSigner().Sign(Listing(RoomVisibility.Hidden, invite: ""), _now), false, [invite.Invite.LobbyKey], default);
         Assert.Empty(await client.ListAsync(default));
         Assert.NotNull(await client.LookupAsync(invite.Invite.LobbyKey, default));
     }
@@ -165,13 +166,15 @@ public sealed class PublicNetworkTests : IAsyncDisposable
     }
 
     [Fact]
-    public async Task LookupKeysAreFirstComeFirstServed()
+    public async Task OneInvitesIndexHoldsOnlyAFewRooms()
     {
         var client = new RoomDirectoryClient(_net);
-        var key = RoomDirectoryProtocol.LookupKey(new byte[16]);
-        await client.AnnounceAsync(new RoomSigner().Sign(Listing(), _now), true, [key], default);
-        var squat = await Assert.ThrowsAsync<DirectoryRejectedException>(() => client.AnnounceAsync(new RoomSigner().Sign(Listing(), _now), true, [key], default));
-        Assert.Equal("lookup", squat.Code);
+        var key = new byte[16];
+        for (var i = 0; i < RoomDirectoryServer.MaxEntriesPerIndex; i++)
+            await client.AnnounceAsync(new RoomSigner().Sign(Listing(RoomVisibility.Hidden, invite: ""), _now), false, [key], default);
+        // One more hidden room with nothing else to register is refused.
+        var more = await Assert.ThrowsAsync<DirectoryRejectedException>(() => client.AnnounceAsync(new RoomSigner().Sign(Listing(RoomVisibility.Hidden, invite: ""), _now), false, [key], default));
+        Assert.Equal("lookup", more.Code);
     }
 
 
@@ -276,7 +279,7 @@ public sealed class PublicNetworkTests : IAsyncDisposable
         var book = new InviteBook();
         StartKnock(book, new MemberTable());
         var invite = book.Create(1, TimeSpan.FromMinutes(10), true, TunnelSettings.Default);
-        await using (var announcer = new RoomAnnouncer(_net, () => Listing(RoomVisibility.Hidden, invite: ""), () => [RoomDirectoryProtocol.LookupKey(invite.Invite.LobbyKey)]))
+        await using (var announcer = new RoomAnnouncer(_net, () => Listing(RoomVisibility.Hidden, invite: ""), () => [invite.Invite.LobbyKey]))
         {
             await announcer.AnnounceOnceAsync(default);
             Assert.True(announcer.Published, announcer.LastError);
@@ -286,6 +289,164 @@ public sealed class PublicNetworkTests : IAsyncDisposable
         }
         // 关房间时撤下：再找就找不到。
         Assert.Null(await PublicJoin.TryKnockByInviteAsync(_net, book.Create(1, null, true, TunnelSettings.Default).Invite, _guest, "Steve", "0.8.0", default));
+    }
+
+    [Fact]
+    public async Task AddressesThatHangOrAnswerGarbageDontStopTheHost()
+    {
+        var book = new InviteBook();
+        StartKnock(book, new MemberTable());
+        var standing = book.CreateStanding(false, TunnelSettings.Default);
+        var client = new RoomDirectoryClient(_net);
+        await client.AnnounceAsync(new RoomSigner().Sign(Listing(invite: standing.Invite.ToString()), _now), true, [], default);
+        // Someone lists the same invite under the host's (public) key at addresses of their own: one accepts and never
+        // answers, the other answers garbage.
+        var silent = new TcpListener(IPAddress.Loopback, 0);
+        var garbage = new TcpListener(IPAddress.Loopback, 0);
+        silent.Start();
+        garbage.Start();
+        var held = new System.Collections.Concurrent.ConcurrentBag<TcpClient>();
+        using var stop = new CancellationTokenSource();
+        var accepting = Task.Run(async () =>
+        {
+            try { while (true) held.Add(await silent.AcceptTcpClientAsync(stop.Token)); }
+            catch (Exception e) when (e is OperationCanceledException or SocketException or ObjectDisposedException) { }
+        });
+        var answering = Task.Run(async () =>
+        {
+            try
+            {
+                while (true)
+                {
+                    using var c = await garbage.AcceptTcpClientAsync(stop.Token);
+                    var junk = new byte[64];
+                    Array.Fill(junk, (byte)0x7f);
+                    try { await c.GetStream().WriteAsync(junk, stop.Token); await Task.Delay(200, stop.Token); } catch (IOException) { }
+                }
+            }
+            catch (Exception e) when (e is OperationCanceledException or SocketException or ObjectDisposedException) { }
+        });
+        try
+        {
+            _net.Map[("10.235.0.66", KnockProtocol.Port)] = ((IPEndPoint)silent.LocalEndpoint).Port;
+            _net.Map[("10.235.0.67", KnockProtocol.Port)] = ((IPEndPoint)garbage.LocalEndpoint).Port;
+            foreach (var ip in new[] { "10.235.0.66", "10.235.0.67" })
+                await client.AnnounceAsync(new RoomSigner().Sign(Listing(invite: standing.Invite.ToString()) with { Ip = ip }, _now), true, [], default);
+            await client.Snapshots.RefreshAsync(client, default);
+            Assert.Equal(3, (await client.LookupAllAsync(standing.Invite.LobbyKey, default, _host.PublicKey)).Count);
+            // Whatever order they come in, the host is still reached.
+            var failed = new List<string>();
+            var outcome = await PublicJoin.TryKnockByInviteAsync(_net, standing.Invite, _guest, "Steve", "0.8.0", default, client: client,
+                expectedHost: _host.PublicKey, failed: (ip, _) => { lock (failed) failed.Add(ip); });
+            Assert.NotNull(outcome);
+            Assert.True(outcome.Approved);
+            Assert.DoesNotContain("10.235.0.7", failed);
+        }
+        finally
+        {
+            stop.Cancel();
+            silent.Stop();
+            garbage.Stop();
+            await Task.WhenAll(accepting, answering);
+            foreach (var c in held) c.Dispose();
+        }
+    }
+
+    /// <summary>Knocks at the host go to its knock port and drop once it has the request; other addresses refuse.</summary>
+    private sealed class DroppingNetwork(int hostPort, Task drop) : IPublicNetwork
+    {
+        public readonly List<string> Order = [];
+
+        public async Task<Stream> ConnectAsync(string ip, int port, CancellationToken ct)
+        {
+            lock (Order) Order.Add(ip);
+            if (ip != "10.235.0.7") throw new SocketException((int)SocketError.ConnectionRefused);
+            var client = new TcpClient();
+            await client.ConnectAsync(IPAddress.Loopback, hostPort, ct);
+            return new DropsAfter(client.GetStream(), drop);
+        }
+
+        public Task<string?> MyIpAsync(CancellationToken ct) => Task.FromResult<string?>("10.235.0.8");
+    }
+
+    private sealed class DropsAfter(NetworkStream inner, Task drop) : Stream
+    {
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => true;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() => inner.Flush();
+        public override Task FlushAsync(CancellationToken ct) => inner.FlushAsync(ct);
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default)
+        {
+            var read = inner.ReadAsync(buffer, ct).AsTask();
+            if (await Task.WhenAny(read, drop) != read) throw new IOException("connection dropped");
+            return await read;
+        }
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken ct) => ReadAsync(buffer.AsMemory(offset, count), ct).AsTask();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => inner.Write(buffer, offset, count);
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken ct = default) => inner.WriteAsync(buffer, ct);
+        public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken ct) => inner.WriteAsync(buffer, offset, count, ct);
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) inner.Dispose();
+            base.Dispose(disposing);
+        }
+    }
+
+    [Fact]
+    public async Task AFailureAfterReachingTheHostTriesNoOtherAddress()
+    {
+        var book = new InviteBook();
+        var asked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var credentials = RoomCredentials.Create(_host.PublicKey, 25565, TunnelSettings.Default);
+        var server = new KnockServer(book, _host, () => credentials, _ => false, async (_, ct) =>
+        {
+            asked.TrySetResult();
+            await Task.Delay(Timeout.Infinite, ct);
+            return false;
+        }, IPAddress.Loopback, 0, members: new MemberTable());
+        _cleanup.Add(server);
+        var standing = book.CreateStanding(false, TunnelSettings.Default);
+        var client = new RoomDirectoryClient(_net);
+        // The host's listing, and others under its (public) key at addresses that refuse.
+        await client.AnnounceAsync(new RoomSigner().Sign(Listing(invite: standing.Invite.ToString()), _now), true, [], default);
+        foreach (var ip in new[] { "10.235.0.66", "10.235.0.67" })
+            await client.AnnounceAsync(new RoomSigner().Sign(Listing(invite: standing.Invite.ToString()) with { Ip = ip }, _now), true, [], default);
+        await client.Snapshots.RefreshAsync(client, default);
+        // The connection drops while the guest waits for the host's answer: that is the outcome, reported as such.
+        var network = new DroppingNetwork(server.Port, asked.Task);
+        var e = await Assert.ThrowsAsync<HostReachedException>(() => PublicJoin.TryKnockByInviteAsync(network, standing.Invite, _guest, "Steve", "0.8.0", default,
+            client: client, expectedHost: _host.PublicKey));
+        Assert.IsType<IOException>(e.InnerException);
+        // The host was knocked once (no retry), and nothing else was tried after it.
+        Assert.Single(network.Order, "10.235.0.7");
+        Assert.Equal("10.235.0.7", network.Order[^1]);
+    }
+
+    private sealed class NeverAnswers : IPublicNetwork
+    {
+        public async Task<Stream> ConnectAsync(string ip, int port, CancellationToken ct)
+        {
+            await Task.Delay(Timeout.Infinite, ct);
+            throw new InvalidOperationException();
+        }
+
+        public Task<string?> MyIpAsync(CancellationToken ct) => Task.FromResult<string?>("10.235.0.8");
+    }
+
+    [Fact]
+    public async Task AHostThatNeverAnswersIsATimeoutNotACancel()
+    {
+        // Joining from the room list: an address that never answers ends in a message, not in a knock left waiting.
+        var invite = new InviteBook().CreateStanding(false, TunnelSettings.Default).Invite;
+        var e = await Assert.ThrowsAsync<TimeoutException>(() =>
+            PublicJoin.KnockAsync(new NeverAnswers(), "10.235.0.66", invite, _guest, "Steve", "0.8.0", null, default));
+        Assert.False(string.IsNullOrEmpty(e.Message));
     }
 
     [Fact]

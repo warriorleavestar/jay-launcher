@@ -601,6 +601,25 @@ public sealed class KnockTests : IAsyncDisposable
         Assert.Single(_asked);
     }
 
+    /// <summary>An invite that asks each time is answered by the host even for someone on the "let straight in" list.</summary>
+    [Fact]
+    public async Task AnInviteThatAsksEachTimeAsksEvenATrustedGuest()
+    {
+        _trusted = pub => pub.AsSpan().SequenceEqual(_guest.PublicKey);
+        _decide = (_, _) => Task.FromResult(false);
+        var invite = _book.Create(5, TimeSpan.FromMinutes(10), false, TunnelSettings.Default, askEachTime: true);
+        var refused = await KnockAsync(invite.Invite);
+        Assert.False(refused.Approved);
+        Assert.Null(refused.Credentials);
+        Assert.True(Assert.Single(_asked).Trusted);
+
+        _decide = (_, _) => Task.FromResult(true);
+        Assert.True((await KnockAsync(invite.Invite)).Approved);
+        Assert.Equal(2, _asked.Count);
+        // It can't also let people in without asking.
+        Assert.Throws<ArgumentException>(() => _book.Create(1, null, true, TunnelSettings.Default, askEachTime: true));
+    }
+
     /// <summary>prologue 里带着邀请编号：报的是这张邀请的编号、握手却按另一个编号做，第一条消息就失败。</summary>
     [Fact]
     public async Task PrologueBindsTheInviteId()
@@ -635,10 +654,16 @@ public sealed class KnockTests : IAsyncDisposable
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         Assert.Equal(0, await ReadToEndAsync(stream, timeout.Token));
 
-        // The reader also refuses frames over 8 KB instead of allocating whatever length it was given.
-        using var big = new MemoryStream([0x20, 0x01, .. new byte[8193]]);
+        // The reader also refuses frames over 32 KB instead of allocating whatever length it was given.
+        Assert.Equal(32 * 1024, KnockProtocol.MaxFrame);
+        using var big = new MemoryStream([0x80, 0x01, .. new byte[KnockProtocol.MaxFrame + 1]]);
         await Assert.ThrowsAsync<InvalidDataException>(() => KnockProtocol.ReadFrameAsync(big, default));
-        await Assert.ThrowsAsync<InvalidDataException>(() => KnockProtocol.WriteFrameAsync(new MemoryStream(), new byte[8193], default));
+        // Frames before anyone has proven anything keep the old 8 KB limit.
+        using var early = new MemoryStream([0x20, 0x01, .. new byte[KnockProtocol.MaxEarlyFrame + 1]]);
+        await Assert.ThrowsAsync<InvalidDataException>(() => KnockProtocol.ReadFrameAsync(early, default, KnockProtocol.MaxEarlyFrame));
+        using var proof = new MemoryStream([0x20, 0x01, .. new byte[KnockProtocol.MaxEarlyFrame + 1]]);
+        Assert.Equal(KnockProtocol.MaxEarlyFrame + 1, (await KnockProtocol.ReadFrameAsync(proof, default)).Length);
+        await Assert.ThrowsAsync<InvalidDataException>(() => KnockProtocol.WriteFrameAsync(new MemoryStream(), new byte[KnockProtocol.MaxFrame + 1], default));
     }
 
     [Fact]
