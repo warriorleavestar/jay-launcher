@@ -82,9 +82,7 @@ public static class TouchControlLayout
         // Match Bedrock mobile: one slot-sized key, flush with the hotbar's right edge and
         // vertically centred on the slots. The Android activity runs immersive fullscreen, so
         // lifting this for the system gesture area would visibly detach it from the hotbar.
-        new(TouchControlAction.Inventory, 0.620, 0.980, 0.024, "背包"),
-        new(TouchControlAction.SecondaryAction, 0.940, 0.455, 0.044, "拆分",
-            GameplayVisible: false, MenuVisible: true)
+        new(TouchControlAction.Inventory, 0.620, 0.980, 0.024, "背包")
     ];
 
     private static readonly IReadOnlyDictionary<TouchControlMode, IReadOnlyList<TouchControlDefinition>> Layouts =
