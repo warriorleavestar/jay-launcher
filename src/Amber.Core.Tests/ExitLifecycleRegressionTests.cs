@@ -160,8 +160,10 @@ public sealed class ExitLifecycleRegressionTests
         await session.StartEasyTierAsync(Original, default);
         await session.SetExitNodeAsync(EasyTierArgs.HostIp).WaitAsync(Deadline);
         var only = IPAddress.Parse("2001:db8::7");
-        Assert.Equal(3, holds.Count);
-        Assert.All(holds, h => Assert.Equal([only], h!));
+        // Before the switch, nothing was limited; from its start on, only the member's address.
+        var during = holds.SkipWhile(h => h is null).ToList();
+        Assert.True(during.Count >= 3);
+        Assert.All(during, h => Assert.Equal([only], h!));
 
         await session.SetExitNodeAsync(null).WaitAsync(Deadline);
         Assert.Null(holds[^1]);
@@ -171,10 +173,19 @@ public sealed class ExitLifecycleRegressionTests
         await Assert.ThrowsAsync<IOException>(() => session.SetExitNodeAsync(EasyTierArgs.HostIp));
         Assert.Equal([only], holds[0]!);
         Assert.Null(holds[^1]);
+
+        // Any other restart leaves the limit matching what runs: a start without the exit (a test run, a room change)
+        // lifts it, so new IPv6 peers are taken again.
+        Volatile.Write(ref member._verified, true);
+        await session.SetExitNodeAsync(EasyTierArgs.HostIp).WaitAsync(Deadline);
+        Assert.Equal([only], holds[^1]!);
+        await session.StartEasyTierAsync(Original, default);
+        Assert.Null(session.EasyTier!.Options.ExitNode);
+        Assert.Null(holds[^1]);
     }
 
     [Fact]
-    public async Task APeerThatSlipsInWhileTheExitStartsIsReported()
+    public async Task APeerThatSlipsInWhileTheExitStartsKeepsTheRunningSession()
     {
         var member = Ipv6Member(verified: true);
         var late = new DirectPeer { Remote = new IPEndPoint(IPAddress.Parse("2001:db8::9"), 40000), Path = PathKind.IPv6, Admitted = true, _verified = true };
@@ -185,16 +196,24 @@ public sealed class ExitLifecycleRegressionTests
         {
             StartForTest = (o, _) =>
             {
-                if (o.ExitNode is not null) lock (peers) peers.Add(late);
+                if (o.ExitNode is not null) lock (peers) if (!peers.Contains(late)) peers.Add(late);
                 return Task.FromResult<IEasyTierSession>(new FakeEasyTier(o));
             },
             BridgePeersForTest = () => { lock (peers) return [.. peers]; },
         };
         await session.StartEasyTierAsync(Original, default);
-        await session.SetExitNodeAsync(EasyTierArgs.HostIp).WaitAsync(Deadline);
-        Assert.DoesNotContain("2001:db8::9", session.EasyTier!.Options.DirectUnderlayAddresses);
+        // It would be cut off: the switch goes back to what ran before (late keeps its connection) and asks to try again.
+        var error = await Assert.ThrowsAsync<IOException>(() => session.SetExitNodeAsync(EasyTierArgs.HostIp).WaitAsync(Deadline));
+        Assert.Equal(L.T("core.mp.session.bearer_unverified"), error.Message);
+        Assert.Null(session.EasyTier!.Options.ExitNode);
+        Assert.False(session.EasyTier.HasExited);
+        Assert.Equal(3, session.EasyTierStarts);
         Assert.Contains(log.Snapshot(), e => e.Text.Contains(L.T("core.mp.session.exit_peer_rejoin"), StringComparison.Ordinal));
-        Assert.Single(DirectSession.PeersOutsideThePlan([member, late], session.EasyTier.Options.DirectUnderlayAddresses));
+        Assert.Single(DirectSession.PeersOutsideThePlan([member, late], [member.Remote.Address.ToString()]));
+
+        // Tried again with it present: it is in the plan.
+        await session.SetExitNodeAsync(EasyTierArgs.HostIp).WaitAsync(Deadline);
+        Assert.Contains("2001:db8::9", session.EasyTier!.Options.DirectUnderlayAddresses);
     }
 
     [Fact]

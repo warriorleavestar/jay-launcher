@@ -367,15 +367,20 @@ public sealed class DirectSession : IAsyncDisposable
             if (exitNode is not null) HoldIpv6(PlannedAddresses(options));
             await StartEasyTierLockedAsync(options, ct);
             ObjectDisposedException.ThrowIf(_disposed, this);
-            // Anything that still slipped in between (a peer the bridge already had that finished joining just then).
+            // A peer the bridge already had that finished joining just then would be cut off by the gate: go back to what
+            // ran before, so it keeps its connection, and let the switch be tried again (it is then waited for).
             if (exitNode is not null && PeersOutsideThePlan(BridgePeersCarryingTheRoom(IsHost, UsingFallbackNode, CurrentBridgePeers()),
                     options.DirectUnderlayAddresses).Any())
+            {
                 Log(L.T("core.mp.session.exit_peer_rejoin"));
+                await StartEasyTierLockedAsync(current, ct, force: true);
+                throw new IOException(L.T("core.mp.session.bearer_unverified"));
+            }
         }
         finally
         {
             // Whatever happened, the limit matches what runs now: the running exit's addresses, or none without an exit.
-            HoldIpv6(EasyTier?.Options is { ExitNode: not null } running ? PlannedAddresses(running) : null);
+            SyncIpv6Hold();
             _startLock.Release();
             StateChanged?.Invoke();
         }
@@ -469,7 +474,16 @@ public sealed class DirectSession : IAsyncDisposable
             catch (Exception stopError) { Log(L.T("core.mp.matrix.restorefailedsettings") + stopError.Message); }
             throw;
         }
+        finally
+        {
+            // Every start, by any path (an exit switch, a test run, a room change), leaves the bridge's IPv6 limit
+            // matching what runs: the running exit's addresses, or no limit without an exit.
+            SyncIpv6Hold();
+        }
     }
+
+    private void SyncIpv6Hold() =>
+        HoldIpv6(EasyTier is { HasExited: false, Options: { ExitNode: not null } running } ? PlannedAddresses(running) : null);
 
     /// <summary>加入方：同意了一次测试，给它一个取消源（最长 <see cref="GuestTestConsent.MaxDuration"/>）。</summary>
     internal void BeginRun(string run)
