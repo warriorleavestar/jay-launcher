@@ -12,7 +12,7 @@ Friends are people you have checked once. After that you invite each other witho
 ## How to
 - Add: send your **friend code** to a friend, or paste theirs under **Add a friend…**. When they accept, the two of you compare four emoji, by voice or in person. If they match, you are friends.
 - See a friend: click them on the Friends page. You see their Jay account, each of their devices and its safety code.
-- Invite: open a room first, then use **Invite to my room** on the Friends page, or **Invite a friend** in the room.
+- Invite: open a room first, then use **Invite to my room** on the Friends page, or **Invite** in the room and then **Send to a friend**.
 - Remove a friend or one of their devices: **Manage friends**.
 
 ## Good to know

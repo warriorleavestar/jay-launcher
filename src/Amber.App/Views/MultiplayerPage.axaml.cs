@@ -78,6 +78,13 @@ public partial class MultiplayerPage : UserControl
                     InviteCard.BringIntoView();
                     (CopyInviteButton.IsEffectivelyVisible ? CopyInviteButton : (Control)CreateFirstInviteButton).Focus();
                 }, DispatcherPriority.Background);
+                vm.WhoSeesFocusRequested = () => Dispatcher.UIThread.Post(() =>
+                {
+                    ApplyRoomLayout(Bounds.Width);
+                    WhoSeesCard.BringIntoView();
+                    (RelayOnlyBox.IsEffectivelyEnabled ? RelayOnlyBox : (Control)WhoSeesCloseButton).Focus();
+                }, DispatcherPriority.Background);
+                SyncRoomSwitches(vm);
                 // A knock: "No" gets the focus (Enter or Space never lets anyone in by accident).
                 vm.ApprovalCards.CollectionChanged += (_, e) =>
                 {
@@ -102,6 +109,7 @@ public partial class MultiplayerPage : UserControl
                     if (e.PropertyName == nameof(MultiplayerViewModel.DiagnosticsOpen) && vm.DiagnosticsOpen)
                         Dispatcher.UIThread.Post(() => DiagnosticsCheckButton.Focus(), DispatcherPriority.Background);
                     if (e.PropertyName is nameof(MultiplayerViewModel.CompactSection) or nameof(MultiplayerViewModel.Mode)) ApplyRoomLayout(Bounds.Width);
+                    if (e.PropertyName is nameof(MultiplayerViewModel.MyRelayOnly) or nameof(MultiplayerViewModel.SharingGameProxy)) SyncRoomSwitches(vm);
                 };
                 vm.ChatLines.CollectionChanged += (_, _) => Dispatcher.UIThread.Post(() => this.FindControl<ScrollViewer>("ChatScroll")?.ScrollToEnd(), DispatcherPriority.Background);
                 vm.DebugLines.CollectionChanged += (_, _) => Dispatcher.UIThread.Post(() => this.FindControl<ScrollViewer>("DebugScroll")?.ScrollToEnd(), DispatcherPriority.Background);
@@ -204,7 +212,29 @@ public partial class MultiplayerPage : UserControl
         Grid.SetRow(RoomHeaderActions, sections ? 1 : 0);
         Grid.SetColumn(RoomHeaderActions, sections ? 0 : 1);
         RoomHeaderActions.HorizontalAlignment = sections ? Avalonia.Layout.HorizontalAlignment.Left : Avalonia.Layout.HorizontalAlignment.Right;
-        RoomHeaderActions.Margin = sections ? new Avalonia.Thickness(0, 6, 0, 0) : new Avalonia.Thickness(0);
+        RoomHeaderActions.Margin = sections ? new Avalonia.Thickness(0, 8, 0, 0) : new Avalonia.Thickness(0);
+        // Compact: the faces are in the people section already, and the header must leave room for the page.
+        RoomFacesRow.IsVisible = !sections;
+    }
+
+    /// <summary>
+    /// The two switches that restart the multiplayer component ("relays only", "forward their game") show what is true
+    /// now, not what was clicked: a click asks the view model, and the box follows it when it is done (or refused).
+    /// </summary>
+    private void SyncRoomSwitches(MultiplayerViewModel vm)
+    {
+        RelayOnlyBox.IsChecked = vm.MyRelayOnly;
+        ShareProxyBox.IsChecked = vm.SharingGameProxy;
+    }
+
+    private void RelayOnly_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (DataContext is MultiplayerViewModel vm) vm.MyRelayOnly = RelayOnlyBox.IsChecked == true;
+    }
+
+    private void ShareProxy_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (DataContext is MultiplayerViewModel vm) vm.SharingGameProxy = ShareProxyBox.IsChecked == true;
     }
 
     /// <summary>The first knock's "No" button (default focus).</summary>

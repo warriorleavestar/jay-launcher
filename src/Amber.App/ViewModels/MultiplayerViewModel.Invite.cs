@@ -12,13 +12,6 @@ using System.Collections.ObjectModel;
 
 namespace Amber.App.ViewModels;
 
-/// <summary>邀请的有效期选项。</summary>
-public sealed record InviteExpiryChoice(TimeSpan? Lifetime, string Key) : LocalizedRecord
-{
-    public string Label => L.T(Key);
-    public override string ToString() => Label;
-}
-
 /// <summary>还能用的一张邀请（房主的“待用邀请”列表）。</summary>
 public sealed record PendingInviteItem(PendingInvite Invite) : LocalizedRecord
 {
@@ -37,9 +30,22 @@ public sealed record PendingInviteItem(PendingInvite Invite) : LocalizedRecord
         }
     }
 
-    public string Label => L.F("multiplayer.invite.pending_item", Shown ? Invite.Invite.ToString() : Invite.Invite.Masked, Invite.UsesLeft, Invite.Uses,
-        Invite.ExpiresAt is { } at ? L.F("multiplayer.invite.expires_at", at.ToLocalTime().ToString("HH:mm")) : L.T("multiplayer.invite.expiry.room"),
-        Invite.AutoApprove ? L.T("multiplayer.invite.auto_suffix") : "");
+    public string Label => Invite.Unlimited
+        ? L.F("multiplayer.invite.pending_item_unlimited", Shown ? Invite.Invite.ToString() : Invite.Invite.Masked, Until,
+            Invite.AutoApprove ? L.T("multiplayer.invite.auto_suffix") : "")
+        : L.F("multiplayer.invite.pending_item", Shown ? Invite.Invite.ToString() : Invite.Invite.Masked, Invite.UsesLeft, Invite.Uses, Until,
+            Invite.AutoApprove ? L.T("multiplayer.invite.auto_suffix") : "");
+
+    /// <summary>"valid until 21:40"; with the date when that is not today (a one-day invite).</summary>
+    private string Until
+    {
+        get
+        {
+            if (Invite.ExpiresAt is not { } at) return L.T("multiplayer.invite.expiry.room");
+            var local = at.ToLocalTime();
+            return L.F("multiplayer.invite.expires_at", local.ToString(local.Date == DateTimeOffset.Now.Date ? "HH:mm" : "MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture));
+        }
+    }
 }
 
 /// <summary>有人敲门、等房主批准的卡片。120 秒没点算拒绝（卡片自己消失）。</summary>
@@ -159,16 +165,7 @@ public sealed partial class MultiplayerViewModel
     /// <summary>测试用：换一个联机身份（自检里同一个进程开好几个成员，要各自不同的身份）。</summary>
     internal void UseTestIdentity(string directory) => _identity = MemberIdentity.LoadOrCreate(directory);
 
-    public IReadOnlyList<InviteExpiryChoice> InviteExpiryChoices { get; } =
-    [
-        new(TimeSpan.FromMinutes(10), "multiplayer.invite.expiry.ten_minutes"),
-        new(TimeSpan.FromHours(1), "multiplayer.invite.expiry.hour"),
-        new(null, "multiplayer.invite.expiry.room"),
-    ];
-
     [ObservableProperty] public partial bool InviteDialogOpen { get; set; }
-    [ObservableProperty] public partial decimal? InviteUses { get; set; } = 1;
-    [ObservableProperty] public partial InviteExpiryChoice? SelectedInviteExpiry { get; set; }
     [ObservableProperty] public partial bool InviteAutoApprove { get; set; }
 
     [ObservableProperty]
@@ -180,8 +177,8 @@ public sealed partial class MultiplayerViewModel
     /// <summary>The invite card offers a new invite: not in a "No server" room, whose guests use a sealed code.</summary>
     public bool ShowCreateInvite => !HasInvite && !IsDirect;
     /// <summary>
-    /// Every room, direct or not, shares the same plain invite (JAY2-): it holds no address. A direct room's addresses go
-    /// only to approved guests, inside the encrypted knock. Masked by default.
+    /// The plain invite (JAY2-): it holds no address. A "No server" room makes none (its guests use a sealed code).
+    /// Masked by default.
     /// </summary>
     public string InviteDisplay => _lastInvite is not { } invite ? "" : InviteShown ? invite.ToString() : invite.Masked;
 
@@ -318,6 +315,29 @@ public sealed partial class MultiplayerViewModel
         _lobby = lobby;
     }
 
+    /// <summary>
+    /// Tests and self-checks: a host lobby that never leaves this computer. No multiplayer component is started and the
+    /// knock service listens on a free loopback port, so invites can be made, listed and revoked like in a real room.
+    /// </summary>
+    private void StartTestLobby(RoomCode room)
+    {
+        var members = new MemberTable();
+        _credentials = NewCredentials(room.Port, room.Tunnel);
+        _members = members;
+        var lobby = new HostLobby(_ => new StandInLobby(), () => [],
+            book => new KnockServer(book, Identity.KeyPair, () => _credentials ?? throw new InvalidOperationException(), _ => false,
+                (_, _) => Task.FromResult(false), System.Net.IPAddress.Loopback, EasyTierArgs.FreeTcpPort(), null, members: members));
+        lobby.Book.Changed += () => Dispatcher.UIThread.Post(RefreshInvites);
+        _lobby = lobby;
+    }
+
+    private sealed class StandInLobby : IDisposable
+    {
+        public void Dispose()
+        {
+        }
+    }
+
     private void StopHostLobby()
     {
         var lobby = _lobby;
@@ -326,11 +346,7 @@ public sealed partial class MultiplayerViewModel
         _credentials = null;
         _members?.Clear();
         _members = null;
-        _lastInvite = null;
-        InviteShown = false;
-        OnPropertyChanged(nameof(InviteDisplay));
-        OnPropertyChanged(nameof(HasInvite));
-        OnPropertyChanged(nameof(ShowCreateInvite));
+        ForgetShownInvite();
         InviteDialogOpen = false;
         foreach (var card in ApprovalCards) card.Decision.TrySetResult(false);
         ApprovalCards.Clear();
@@ -421,7 +437,7 @@ public sealed partial class MultiplayerViewModel
             return true;
         }
         if (_session is not { } old) return false;
-        var options = old.Options with { Room = next };
+        var options = (CurrentSessionOptions ?? old.Options) with { Room = next };
         StopTransport();
         old.Dispose();
         _session = null;
@@ -541,20 +557,38 @@ public sealed partial class MultiplayerViewModel
             _ = InviteFriendsAsync();
             return;
         }
-        SelectedInviteExpiry ??= InviteExpiryChoices[0];
         InviteDialogOpen = true;
     }
 
     [RelayCommand]
     private void CloseInviteDialog() => InviteDialogOpen = false;
 
+    /// <summary>
+    /// [Create invite] in the room's invite panel, with the two choices next to it: how long, and once or unlimited.
+    /// Thirty days makes a long-lived invite, which every room I open accepts.
+    /// </summary>
     [RelayCommand]
     private async Task CreateInviteAsync()
     {
-        var uses = (int)Math.Clamp(InviteUses ?? 1, 1, 20);
-        if (await IssueInviteAsync(uses, (SelectedInviteExpiry ?? InviteExpiryChoices[0]).Lifetime, InviteAutoApprove) is not null)
+        if (IsDirect)
+        {
+            SetStatus(StatusMessage.Warning("multiplayer.direct.use_sealed"));
+            return;
+        }
+        var life = SelectedInviteLife.Life;
+        if (InviteOffer.IsLongLived(life))
+        {
+            await CreateLongInviteAsync();
+            return;
+        }
+        var uses = InviteOffer.Uses(InviteOffer.Normalize(life, SelectedInviteUse.Use));
+        if (await IssueInviteAsync(uses, InviteOffer.Lifetime(life), InviteAutoApproveNow) is not null)
             SetStatus(StatusMessage.Success("multiplayer.invite.created"));
     }
+
+    /// <summary>Self-checks: an invite with exact terms, as the panel's button would make it.</summary>
+    internal async Task<bool> CreateInviteForTestAsync(int uses, TimeSpan? lifetime, bool autoApprove) =>
+        await IssueInviteAsync(uses, lifetime, autoApprove) is not null;
 
     /// <summary>
     /// 发一张邀请、确保大厅开着。大厅开不起来时撤掉这张邀请、显示原因，返回 null。
@@ -568,16 +602,22 @@ public sealed partial class MultiplayerViewModel
             SetStatus(StatusMessage.Warning("multiplayer.direct.use_sealed"));
             return null;
         }
+        // An invite without a use limit always asks me first, whatever the caller remembered.
+        autoApprove = Child.MayAutoAdmit(autoApprove) && uses != InviteBook.UnlimitedUses;
         lobby.Book.Game = await HostGameAsync();
         if (_lobby != lobby) return null;
-        var invite = lobby.Book.Create(uses, lifetime, Child.MayAutoAdmit(autoApprove), credentials.Tunnel);
+        var invite = lobby.Book.Create(uses, lifetime, autoApprove, credentials.Tunnel);
         _lastInvite = invite.Invite;
-        RememberInviteTerms(uses, lifetime, Child.MayAutoAdmit(autoApprove));
+        _lastPending = invite;
+        _lastLongInvite = null;
+        _longInviteWaits = false;
+        RememberInviteTerms(uses, lifetime, autoApprove);
         InviteShown = false;
         OnPropertyChanged(nameof(InviteDisplay));
         OnPropertyChanged(nameof(HasInvite));
         OnPropertyChanged(nameof(ShowCreateInvite));
         RefreshInvites();
+        NotifyInvitePanel();
         try
         {
             await lobby.UpdateAsync();
@@ -587,10 +627,7 @@ public sealed partial class MultiplayerViewModel
         {
             // 敲门端口被占（比如另一个 Amber 正在当房主）：这张邀请没法用，撤掉。
             lobby.Book.Revoke(invite);
-            _lastInvite = null;
-            OnPropertyChanged(nameof(InviteDisplay));
-            OnPropertyChanged(nameof(HasInvite));
-            OnPropertyChanged(nameof(ShowCreateInvite));
+            ForgetShownInvite();
             SetStatus(StatusMessage.Failure("multiplayer.invite.lobby_failed", e, KnockProtocol.Port, ErrorText.Of(e)));
             return null;
         }
@@ -635,13 +672,7 @@ public sealed partial class MultiplayerViewModel
         if (item is null || _lobby is not { } lobby) return;
         lobby.Book.Revoke(item.Invite);
         RefreshInvites();
-        if (_lastInvite == item.Invite.Invite)
-        {
-            _lastInvite = null;
-            OnPropertyChanged(nameof(InviteDisplay));
-            OnPropertyChanged(nameof(HasInvite));
-            OnPropertyChanged(nameof(ShowCreateInvite));
-        }
+        if (_lastInvite == item.Invite.Invite) ForgetShownInvite();
         SetStatus(StatusMessage.Info("multiplayer.invite.revoked"));
     }
 

@@ -36,7 +36,21 @@ public sealed partial class MultiplayerViewModel
 {
     private LongLivedInvites? _longInvites;
 
-    private LongLivedInvites LongInvites => _longInvites ??= new LongLivedInvites(Path.Combine(AppSettings.DataDir, "long-invites.json"));
+    private string? _longInvitesFile;
+
+    /// <summary>Where the thirty-day invites are kept. Tests point it at a folder of their own.</summary>
+    internal string LongInvitesFile
+    {
+        get => _longInvitesFile ?? Path.Combine(AppSettings.DataDir, "long-invites.json");
+        set
+        {
+            _longInvitesFile = value;
+            _longInvites = null;
+            RefreshLongInvites();
+        }
+    }
+
+    private LongLivedInvites LongInvites => _longInvites ??= new LongLivedInvites(LongInvitesFile);
 
     public ObservableCollection<LongInviteItem> LongInviteItems { get; } = [];
 
@@ -53,13 +67,18 @@ public sealed partial class MultiplayerViewModel
         OnPropertyChanged(nameof(HasLongInvites));
     }
 
-    /// <summary>Make one (30 days), show it in the list and copy it (cleared from the clipboard later).</summary>
-    [RelayCommand]
+    /// <summary>
+    /// Make one (30 days) from the room's invite panel: it goes on the invite card like any other invite, and into the
+    /// list of thirty-day invites under it, where it can be revoked. When this room cannot accept it (its other
+    /// invites use another lobby key), the card says it works from the next room on.
+    /// </summary>
     private async Task CreateLongInviteAsync()
     {
         LongLivedInvite invite;
         try
         {
+            // Thirty-day invites keep a lobby key of their own, never the open room's: this room accepts the new
+            // invite at once only when it has no other invite out (or already runs on that key).
             invite = LongInvites.Create(LongInviteLabel);
         }
         catch (InvalidOperationException)
@@ -69,10 +88,25 @@ public sealed partial class MultiplayerViewModel
         }
         LongInviteLabel = "";
         RefreshLongInvites();
-        // A room is open: it accepts the new invite at once (when it already shares the key).
-        if (_lobby is { } lobby && LongInvites.SeedInto(lobby.Book, _credentials?.Tunnel ?? TunnelSettings.Default) > 0) _ = UpdateLobbyQuietlyAsync(lobby);
-        if (await SecretClipboard.CopyAsync(LongInvites.CodeOf(invite, TunnelSettings.Default).ToString()))
-            SetStatus(StatusMessage.Success("multiplayer.longinvite.created"));
+        var accepted = true;
+        if (_lobby is { } lobby)
+        {
+            lobby.Book.Game = await HostGameAsync();
+            if (_lobby == lobby)
+            {
+                LongInvites.SeedInto(lobby.Book, _credentials?.Tunnel ?? TunnelSettings.Default);
+                accepted = lobby.Book.Pending.Any(p => p.Standing && p.Invite.Token.AsSpan().SequenceEqual(invite.Token));
+                // The knock lobby has to (re)start for it: if it can't, the invite is kept for the next room and the
+                // lobby's error stays on screen instead of "created".
+                if (accepted && !await UpdateLobbyQuietlyAsync(lobby))
+                {
+                    ShowLongInvite(invite, worksNow: false);
+                    return;
+                }
+            }
+        }
+        ShowLongInvite(invite, worksNow: accepted);
+        SetStatus(StatusMessage.Success(accepted ? "multiplayer.longinvite.created" : "multiplayer.longinvite.created_next_room"));
     }
 
     [RelayCommand]
@@ -96,7 +130,9 @@ public sealed partial class MultiplayerViewModel
         if (_lobby is { } lobby)
             foreach (var pending in lobby.Book.Pending.Where(p => p.Standing && p.Invite.Token.AsSpan().SequenceEqual(item.Invite.Token)))
                 lobby.Book.Revoke(pending);
+        var shown = _lastLongInvite?.Invite.Id == item.Invite.Id;
         RefreshLongInvites();
+        if (shown) ForgetShownInvite();
         SetStatus(StatusMessage.Info("multiplayer.longinvite.revoked", item.Label));
     }
 
@@ -106,15 +142,21 @@ public sealed partial class MultiplayerViewModel
         if (LongInvites.SeedInto(lobby.Book, tunnel) > 0) _ = UpdateLobbyQuietlyAsync(lobby);
     }
 
-    private async Task UpdateLobbyQuietlyAsync(HostLobby lobby)
+    /// <summary>Tests: stands in for starting the knock lobby (to make it fail).</summary>
+    internal Func<Task>? LobbyUpdateForTest { get; set; }
+
+    /// <summary>False when the lobby couldn't start (the error is on screen).</summary>
+    private async Task<bool> UpdateLobbyQuietlyAsync(HostLobby lobby)
     {
         try
         {
-            await lobby.UpdateAsync();
+            await (LobbyUpdateForTest?.Invoke() ?? lobby.UpdateAsync());
+            return true;
         }
         catch (Exception e) when (e is System.Net.Sockets.SocketException or IOException or InvalidOperationException or System.ComponentModel.Win32Exception)
         {
             SetStatus(StatusMessage.Failure("multiplayer.invite.lobby_failed", e, KnockProtocol.Port, ErrorText.Of(e)));
+            return false;
         }
     }
 }

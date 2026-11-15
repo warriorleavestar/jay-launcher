@@ -391,7 +391,21 @@ public sealed partial class MultiplayerViewModel
         _room = room;
         Mode = mode;
         Members.Clear();
-        if (member is not null) Members.Add(member);
+        OnlinePeers.Clear();
+        HostFingerprint = "";
+        if (member is not null)
+        {
+            Members.Add(member);
+            OnlinePeers.Add(new OnlinePeerItem(new RosterEntry(member.Fingerprint, member.PublicKey, member.Name)));
+        }
+        else if (mode == "join")
+        {
+            // A guest sees the host in the roster: remote help is asked from the host's "Share with them" group.
+            var key = Amber.Core.Multiplayer.Transport.X25519KeyPair.Generate().PublicKey.ToArray();
+            HostFingerprint = MemberIdentity.FingerprintOf(key);
+            OnlinePeers.Add(new OnlinePeerItem(new RosterEntry(HostFingerprint, key, "Host")));
+        }
+        SelectedPerson = People.FirstOrDefault(p => !p.IsMe);
         NotifyRemoteAvailability();
     }
 

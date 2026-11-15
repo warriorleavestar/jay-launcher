@@ -121,15 +121,17 @@ internal sealed class RemoteSelfTest(MainWindow window, MainViewModel main, stri
         var (hostRoom, _, guestRoom, entry) = Rooms();
         main.CurrentPage = mp;
         mp.ShowRemoteLayoutForTest(hostRoom, "host", new MemberItem("Alice", entry.PublicKey, false, Confirmed: true));
-        Check("房主：邀请房间里成员行有“远程控制”按钮且可用", await WaitAsync(() => mp.CanRemoteControl, 3));
-        await ScrollToButtonAsync(L.T("multiplayer.remote.button"));
+        Check("房主：选中成员后“和 TA 共享”里的远程协助可用", await WaitAsync(() => mp.CanRemoteControl && mp.CanAskRemoteHelp, 3));
+        await ScrollToButtonAsync(L.T("multiplayer.share.remote.ask"));
         await ShotAsync(window, "00-host-member-list");
         mp.ShowRemoteLayoutForTest(guestRoom, "join");
-        await ScrollToButtonAsync(L.T("multiplayer.remote.control_host"));
+        Check("加入方：选中房主后可以请求远程协助", await WaitAsync(() => mp.SelectedPerson is { IsHost: true } && mp.CanAskRemoteHelp, 3));
+        await ScrollToButtonAsync(L.T("multiplayer.share.remote.ask"));
         await ShotAsync(window, "00-guest-control-host");
         mp.ShowRemoteLayoutForTest(RoomCode.Create(25565), "join");
-        Check("AMB- 房间：按钮置灰并提示需要邀请房间", await WaitAsync(() => !mp.CanRemoteControl && mp.RemoteUnavailableText == L.T("multiplayer.remote.invite_only"), 3));
-        await ScrollToButtonAsync(L.T("multiplayer.remote.control_host"));
+        Check("AMB- 房间：按钮置灰并提示需要邀请房间", await WaitAsync(() => !mp.CanRemoteControl && !mp.CanAskRemoteHelp
+            && mp.RemoteUnavailableText == L.T("multiplayer.remote.invite_only") && mp.RemoteHelpNote == mp.RemoteUnavailableText, 3));
+        await ScrollToButtonAsync(L.T("multiplayer.share.remote.ask"));
         await ShotAsync(window, "00-old-room-disabled");
         mp.ShowRemoteLayoutForTest(null, "");
     }

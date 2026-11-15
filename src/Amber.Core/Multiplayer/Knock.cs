@@ -458,6 +458,8 @@ public sealed class PendingInvite
     internal byte[] Id { get; }
     public int Uses { get; }
     public int UsesLeft { get; internal set; }
+    /// <summary>No use count (<see cref="InviteBook.UnlimitedUses"/>, standing and long-lived invites).</summary>
+    public bool Unlimited => Uses == InviteBook.UnlimitedUses;
     public DateTimeOffset? ExpiresAt { get; }
     public bool AutoApprove { get; }
     public bool Revoked { get; internal set; }
@@ -530,11 +532,21 @@ public sealed class InviteBook(Func<DateTimeOffset>? clock = null)
     /// <summary>The host's game, written into new invites (invite v3) so the joiner can pick a matching instance.</summary>
     public InviteGame? Game { get; set; }
 
+    /// <summary>An invite without a use count: it works until it expires, is revoked, or the room closes.</summary>
+    public const int UnlimitedUses = int.MaxValue;
+
+    /// <param name="uses">1 to 20, or <see cref="UnlimitedUses"/>.</param>
+    /// <param name="autoApprove">
+    /// Whoever uses the invite comes in without the host being asked. Not with <see cref="UnlimitedUses"/>: one code
+    /// that lets any number of people in unasked is a room without a door (a public room says so openly and goes
+    /// through <see cref="CreateStanding"/>).
+    /// </param>
     /// <param name="boundTo">Only this identity key may use the invite (see <see cref="PendingInvite.BoundTo"/>).</param>
     public PendingInvite Create(int uses, TimeSpan? lifetime, bool autoApprove, TunnelSettings tunnel, byte[]? boundTo = null, bool askEachTime = false)
     {
         if (askEachTime && autoApprove) throw new ArgumentException(null, nameof(askEachTime));
-        if (uses is < 1 or > 20) throw new ArgumentOutOfRangeException(nameof(uses));
+        if (uses is < 1 or > 20 and not UnlimitedUses) throw new ArgumentOutOfRangeException(nameof(uses));
+        if (uses == UnlimitedUses && autoApprove) throw new ArgumentException("an invite without a use limit always asks the host", nameof(autoApprove));
         if (boundTo is { Length: not X25519KeyPair.Length }) throw new ArgumentException(null, nameof(boundTo));
         PendingInvite invite;
         lock (_gate)
@@ -576,7 +588,7 @@ public sealed class InviteBook(Func<DateTimeOffset>? clock = null)
     /// A long-lived invite for a trusted friend (<see cref="LongLivedInvites"/>): it brings its own lobby key, which must be
     /// added before any other invite of the room so they all share it. Unlimited uses until it expires or is revoked; the
     /// host still approves every knock (and checks the safety code) unless the person is a trusted friend.
-    /// Returns null when this room already uses another lobby key.
+    /// Returns null when this room already uses another lobby key. Adding the same invite twice gives back the first.
     /// </summary>
     public PendingInvite? AddLongLived(byte[] lobbyKey, byte[] token, DateTimeOffset expiresAt, TunnelSettings tunnel)
     {
@@ -586,6 +598,7 @@ public sealed class InviteBook(Func<DateTimeOffset>? clock = null)
         {
             PruneLocked();
             if (_lobbyKey is { } current && !CryptographicOperations.FixedTimeEquals(current, lobbyKey)) return null;
+            if (_invites.FirstOrDefault(i => i.Standing && !i.Revoked && CryptographicOperations.FixedTimeEquals(i.Invite.Token, token)) is { } same) return same;
             _lobbyKey ??= (byte[])lobbyKey.Clone();
             invite = new PendingInvite(new JayInvite((byte[])lobbyKey.Clone(), (byte[])token.Clone(), tunnel, Game), int.MaxValue, expiresAt, false, standing: true);
             _invites.Add(invite);

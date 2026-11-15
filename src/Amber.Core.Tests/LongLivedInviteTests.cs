@@ -92,6 +92,80 @@ public sealed class LongLivedInviteTests : IDisposable
     }
 
     [Fact]
+    public void ARoomsOwnKeyIsNeverTakenOver()
+    {
+        // The room already has an invite out, so a lobby key that every holder of that invite knows.
+        var book = new InviteBook(() => _now);
+        var ordinary = book.Create(1, TimeSpan.FromMinutes(10), false, TunnelSettings.Default);
+        var store = Store();
+        var invite = store.Create("Bob");
+        var key = store.CodeOf(invite, TunnelSettings.Default).LobbyKey;
+        Assert.NotEqual(ordinary.Invite.LobbyKey, key);
+        // That room keeps its key, so the new invite waits for the next room.
+        Assert.Equal(0, store.SeedInto(book, TunnelSettings.Default));
+        Assert.DoesNotContain(book.Pending, p => p.Standing);
+        var later = new InviteBook(() => _now);
+        Assert.Equal(1, Store().SeedInto(later, TunnelSettings.Default));
+        Assert.Equal(key, later.Pending.Single().Invite.LobbyKey);
+    }
+
+    [Fact]
+    public void ARoomWithNoInviteOutAcceptsItAtOnceAndItsLaterInvitesShareThatKey()
+    {
+        var store = Store();
+        var invite = store.Create("Bob");
+        var key = store.CodeOf(invite, TunnelSettings.Default).LobbyKey;
+        var book = new InviteBook(() => _now);
+        Assert.Equal(1, store.SeedInto(book, TunnelSettings.Default));
+        Assert.Contains(book.Pending, p => p.Standing && p.Invite.Token.AsSpan().SequenceEqual(invite.Token));
+        Assert.Equal(key, book.Create(1, TimeSpan.FromMinutes(10), false, TunnelSettings.Default).Invite.LobbyKey);
+    }
+
+    [Fact]
+    public void RevokingTheLastOneThenMakingAnotherStartsANewKey()
+    {
+        var store = Store();
+        var first = store.Create("A");
+        var firstKey = store.CodeOf(first, TunnelSettings.Default).LobbyKey;
+        // A room that accepted the first one, and still has another invite out after the first is revoked.
+        var book = new InviteBook(() => _now);
+        Assert.Equal(1, store.SeedInto(book, TunnelSettings.Default));
+        book.Create(1, TimeSpan.FromMinutes(10), false, TunnelSettings.Default);
+        store.Revoke(first.Id);
+        book.Revoke(book.Pending.Single(p => p.Standing));
+
+        var second = store.Create("B");
+        var secondKey = store.CodeOf(second, TunnelSettings.Default).LobbyKey;
+        // Whoever held the revoked code knows the old key: the new invite must not live on it, in this room or later.
+        Assert.NotEqual(firstKey, secondKey);
+        Assert.Equal(0, store.SeedInto(book, TunnelSettings.Default));
+        var again = Store();
+        Assert.Equal(secondKey, again.CodeOf(again.Active.Single(), TunnelSettings.Default).LobbyKey);
+    }
+
+    [Fact]
+    public void LaterOnesShareTheKeyOfTheFirstSoNobodyIsLockedOut()
+    {
+        var store = Store();
+        var first = store.Create("A");
+        var second = store.Create("B");
+        Assert.Equal(store.CodeOf(first, TunnelSettings.Default).LobbyKey, store.CodeOf(second, TunnelSettings.Default).LobbyKey);
+        Assert.NotEqual(first.Token, second.Token);
+    }
+
+    [Fact]
+    public void SeedingTwiceDoesNotDoubleAnInvite()
+    {
+        var store = Store();
+        store.Create("A");
+        var book = new InviteBook(() => _now);
+        store.SeedInto(book, TunnelSettings.Default);
+        store.Create("B");
+        store.SeedInto(book, TunnelSettings.Default);
+        Assert.Equal(2, book.Pending.Count(p => p.Standing));
+    }
+
+    [Fact]
     public void DamagedFileStartsEmpty()
     {
         File.WriteAllText(FilePath, "{ not json");

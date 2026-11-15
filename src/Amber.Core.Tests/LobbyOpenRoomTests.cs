@@ -189,6 +189,11 @@ public sealed class LobbyOpenRoomTests
         vm.NotifyLastRoom();
         Assert.Equal(L.F("multiplayer.lobby.last_room", string.Join(" · ", "World", L.T("multiplayer.invite.terms_ask"),
             L.T("multiplayer.open.who.invited"), L.T("multiplayer.open.route.relay"))), vm.LastRoomText);
+        // A room remembered with terms the panel never makes together says what "open like last time" will really do.
+        service.Settings.MultiplayerLastRoom = new LastRoom { World = "World", Uses = InviteBook.UnlimitedUses, LifetimeMinutes = 60, AutoApprove = true, Access = nameof(RoomAccess.Invited) };
+        vm.NotifyLastRoom();
+        Assert.Contains(L.T("multiplayer.invite.terms_ask"), vm.LastRoomText);
+        Assert.DoesNotContain(L.T("multiplayer.invite.terms_auto"), vm.LastRoomText);
         service.Settings.MultiplayerLastRoom = null;
     });
 

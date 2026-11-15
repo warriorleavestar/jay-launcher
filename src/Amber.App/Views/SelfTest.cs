@@ -1780,10 +1780,8 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
     private async Task<string> CreateInviteAsync(MultiplayerViewModel host, int uses, bool auto)
     {
         host.OpenInviteDialogCommand.Execute(null);
-        host.InviteUses = uses;
-        host.SelectedInviteExpiry = host.InviteExpiryChoices[0];
         host.InviteAutoApprove = auto;
-        await host.CreateInviteCommand.ExecuteAsync(null);
+        await host.CreateInviteForTestAsync(uses, TimeSpan.FromMinutes(10), auto);
         var full = host.TestInviteText ?? "";
         Check("邀请：生成邀请码，默认打码显示", host.HasInvite && full.StartsWith("JAY2-", StringComparison.Ordinal) && host.InviteDisplay != full && !host.InviteDisplay.Contains(full[^20..]), host.Status);
         Check("邀请：待用邀请列表里有它", host.PendingInvites.Count > 0, host.PendingInvites.Count.ToString());

@@ -21,13 +21,25 @@ public sealed partial class MultiplayerViewModel
         string.Join(" · ", new[]
         {
             last.World ?? "",
-            L.T(last.AutoApprove ? "multiplayer.invite.terms_auto" : "multiplayer.invite.terms_ask"),
+            L.T(LastInviteTerms(last).Auto ? "multiplayer.invite.terms_auto" : "multiplayer.invite.terms_ask"),
             // Rooms remembered before the four choices existed say how they were listed instead.
             last.Access is null ? VisibilityChoices.FirstOrDefault(v => v.Mode.ToString() == last.Visibility)?.Label ?? ""
                 : WhoChoices.FirstOrDefault(c => c.Id == last.Access)?.Label ?? "",
             last.Route is null or nameof(RoomRoute.Auto) ? "" : RouteChoices.FirstOrDefault(c => c.Id == last.Route)?.Label ?? "",
             last.Scope == nameof(RoomScope.WholeLan) ? ScopeChoices[1].Label : "",
         }.Where(p => p.Length > 0)));
+
+    /// <summary>
+    /// The first invite "open like last time" makes: the panel's own choices, never wider than what was remembered
+    /// (a room remembered by an older version may hold terms the panel no longer offers, such as five uses or an hour),
+    /// and let in without asking only when it is for one person.
+    /// </summary>
+    internal static (InviteLife Life, InviteUse Use, bool Auto) LastInviteTerms(LastRoom last)
+    {
+        var life = InviteOffer.LifeFromMinutes(last.LifetimeMinutes);
+        var use = InviteOffer.UseFromCount(last.Uses);
+        return (life, use, last.AutoApprove && InviteOffer.CanAutoApprove(life, use));
+    }
 
     internal void NotifyLastRoom()
     {
@@ -81,12 +93,13 @@ public sealed partial class MultiplayerViewModel
         }
         await CreateRoomAsync();
         if (!IsHosting) return;
-        var lifetime = last.LifetimeMinutes is { } minutes ? TimeSpan.FromMinutes(minutes) : (TimeSpan?)null;
-        SelectedInviteExpiry = InviteExpiryChoices.FirstOrDefault(c => c.Lifetime == lifetime) ?? InviteExpiryChoices[0];
-        InviteUses = last.Uses;
-        InviteAutoApprove = last.AutoApprove;
+        // The invite is made with exactly what the panel then shows, so the next [Create invite] is never wider
+        // than the one before it.
+        var (life, use, auto) = LastInviteTerms(last);
+        PickInviteChoices(life, use);
+        InviteAutoApprove = auto;
         InviteDialogOpen = true;
-        if (await IssueInviteAsync(Math.Clamp(last.Uses, 1, 20), lifetime, last.AutoApprove) is null) return;
+        if (await IssueInviteAsync(InviteOffer.Uses(use), InviteOffer.Lifetime(life), auto) is null) return;
         if (AutoCopyInvite && _lastInvite is { } invite && await SecretClipboard.CopyAsync(invite.ToString()))
             SetStatus(StatusMessage.Success("multiplayer.lobby.invite_copied"));
         if (last.Access == nameof(RoomAccess.Friends))
