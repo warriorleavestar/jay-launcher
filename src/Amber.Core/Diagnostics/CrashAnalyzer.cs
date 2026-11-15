@@ -111,9 +111,6 @@ public static partial class CrashAnalyzer
     [GeneratedRegex(@"Suspected Mods?:\s*\n((?:[ \t]+.+\n)+)", RegexOptions.None, matchTimeoutMilliseconds: 1000)]
     private static partial Regex SuspectedBlock();
 
-    [GeneratedRegex(@"[\s(]([A-Za-z][\w .-]{1,60}) \(([\w-]+)\)", RegexOptions.None, matchTimeoutMilliseconds: 1000)]
-    private static partial Regex ModNameAndId();
-
     /// <summary>分析一段文本（崩溃报告、日志拼起来都行）。</summary>
     public static CrashAnalysis Analyze(string text, IReadOnlyList<string>? sourceFiles = null)
     {

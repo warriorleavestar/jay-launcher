@@ -19,9 +19,6 @@ public static class LayoutTiers
     public const double Tight = 480;
     public const double Hysteresis = 32;
 
-    /// <summary>设置 › 外观 › 文字大小允许的三档。</summary>
-    public static readonly double[] TextScales = [1.0, 1.12, 1.25];
-
     /// <summary>不带回差的分档：第一次布局时用。</summary>
     public static WidthTier ForWidth(double contentWidth, double textScale = 1) =>
         Normalize(contentWidth, textScale) switch

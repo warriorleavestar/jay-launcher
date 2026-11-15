@@ -85,6 +85,23 @@ public sealed class WorldBackupsTests : IDisposable
     }
 
     [Fact]
+    public void AFailedSwapPutsTheCurrentWorldBack()
+    {
+        var world = MakeWorld("W", "old");
+        WorldBackups.Create(world, _work, now: new DateTime(2026, 11, 1, 10, 0, 0));
+        File.WriteAllText(Path.Combine(world.Path, "level.dat"), "current");
+        var moves = 0;
+        void Move(string from, string to)
+        {
+            if (++moves == 2) throw new IOException("locked");
+            Directory.Move(from, to);
+        }
+        Assert.Throws<IOException>(() => WorldBackups.Restore(WorldBackups.List(_work, "W").Single(), Saves, _work, Move));
+        Assert.Equal("current", File.ReadAllText(Path.Combine(Saves, "W", "level.dat")));
+        Assert.Equal(["W"], Directory.EnumerateDirectories(Saves).Select(Path.GetFileName));
+    }
+
+    [Fact]
     public void RestoreRejectsPathsOutsideTheWorld()
     {
         Directory.CreateDirectory(WorldBackups.Dir(_work));
