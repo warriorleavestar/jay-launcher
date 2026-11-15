@@ -325,6 +325,36 @@ public sealed class InstanceSettingsTrustTests : IDisposable
     }
 
     [Fact]
+    public void SettingsCopiedIntoAKnownFolderAreKeptThroughATrimWhileItIsAway()
+    {
+        UsePrivateStore();
+        InstanceSettingsTrust.MaxTrusted = 2;
+        var far = _game + "-far";
+        try
+        {
+            var farDir = new GameDirectory(far);
+            new InstanceSettings { JvmArgs = "-Dfar=" + _marker }.Save(farDir, "own");
+            new InstanceSettings { JvmArgs = "-Dcopied=" + _marker }.Save(Dir, "orig");
+            // The player copies an instance into the other folder by hand, and Jay reads it there once.
+            Directory.CreateDirectory(Path.Combine(far, "versions", "copy"));
+            File.Copy(FileOf("orig"), Path.Combine(far, "versions", "copy", InstanceSettings.FileName));
+            Assert.Equal("-Dcopied=" + _marker, InstanceSettings.Load(farDir, "copy").JvmArgs);
+            // That drive is unplugged, the original instance is deleted, and saves elsewhere trim the record.
+            Directory.Move(far, far + "-away");
+            Directory.Delete(Path.Combine(_game, "versions", "orig"), true);
+            for (var i = 0; i < 4; i++) new InstanceSettings { JvmArgs = $"-Dn{i}=" + _marker }.Save(Dir, "x");
+            Directory.Move(far + "-away", far);
+            var back = InstanceSettings.Load(farDir, "copy");
+            Assert.False(back.DroppedUnknownValues);
+            Assert.Equal("-Dcopied=" + _marker, back.JvmArgs);
+        }
+        finally
+        {
+            foreach (var d in new[] { far, far + "-away" }) try { Directory.Delete(d, true); } catch (IOException) { }
+        }
+    }
+
+    [Fact]
     public void ChecksOfARecordedFolderDoNotWaitForAnotherJay()
     {
         var store = UsePrivateStore();

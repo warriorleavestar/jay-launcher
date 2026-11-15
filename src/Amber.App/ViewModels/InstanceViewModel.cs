@@ -644,7 +644,17 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
     partial void OnIsolateIndexChanged(int value) => Edited(SettingsField.Isolate);
     partial void OnMemoryModeIndexChanged(int value) => Edited(SettingsField.MemoryMode);
     partial void OnMemoryTextChanged(string value) => Edited(SettingsField.Memory);
-    partial void OnSelectedJavaChanged(JavaChoice? value) => Edited(SettingsField.Java);
+    partial void OnSelectedJavaChanged(JavaChoice? value)
+    {
+        if (!_loadingSettings && Current is not null) _javaPath = value?.Path;
+        Edited(SettingsField.Java);
+    }
+
+    /// <summary>
+    /// The Java path the page holds. The choices fill in only after a scan, so until then the selection doesn't show it;
+    /// saves use this, not the selection, so a save during the scan keeps the path the file had.
+    /// </summary>
+    private string? _javaPath;
     partial void OnJvmArgsChanged(string value) => Edited(SettingsField.JvmArgs);
     partial void OnGameArgsChanged(string value) => Edited(SettingsField.GameArgs);
     partial void OnWidthTextChanged(string value) => Edited(SettingsField.Width);
@@ -712,7 +722,8 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
         if (take(SettingsField.PreLaunch)) PreLaunch = s.PreLaunchCommand ?? "";
         if (take(SettingsField.PostExit)) PostExit = s.PostExitCommand ?? "";
         if (take(SettingsField.JoinServer)) JoinServer = s.JoinServer ?? "";
-        _ = LoadJavaChoicesAsync(take(SettingsField.Java) ? s.JavaPath : SelectedJava?.Path);
+        if (take(SettingsField.Java)) _javaPath = s.JavaPath;
+        _ = LoadJavaChoicesAsync(_javaPath);
     }
 
     /// <summary>
@@ -799,6 +810,8 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
             SelectedJava = JavaChoices[0];
         }
         var found = await _service.Java.ScanAsync();
+        // A later load (or a change) may have set another path while this scan ran: show the one the page holds now.
+        current = _javaPath;
         var wasLoading = _loadingSettings;
         _loadingSettings = true;
         JavaChoices.Clear();
@@ -851,7 +864,7 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
             Isolate = IsolateIndex switch { 1 => true, 2 => false, _ => null },
             AutoMemory = MemoryModeIndex switch { 1 => true, 2 => false, _ => null },
             MaxMemoryMb = mb,
-            JavaPath = SelectedJava?.Path,
+            JavaPath = _javaPath,
             JvmArgs = SettingInput.QuotesBalanced(JvmArgs) ? NullIfBlank(JvmArgs) : old.JvmArgs,
             GameArgs = SettingInput.QuotesBalanced(GameArgs) ? NullIfBlank(GameArgs) : old.GameArgs,
             WindowWidth = w,

@@ -93,7 +93,8 @@ public sealed class InstanceSettingsPageTests : IDisposable
         try
         {
             var (service, page) = Open();
-            new InstanceSettings { MaxMemoryMb = 3072, JvmArgs = "-Dsaved=1" }.Save(service.Directory, "a");
+            var java = Path.Combine(_root, "jdk", "bin", "java");
+            new InstanceSettings { MaxMemoryMb = 3072, JvmArgs = "-Dsaved=1", JavaPath = java }.Save(service.Directory, "a");
             var file = Path.Combine(_root, "versions", "a", InstanceSettings.FileName);
             using (new FileStream(file, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
             {
@@ -113,6 +114,8 @@ public sealed class InstanceSettingsPageTests : IDisposable
             Assert.Equal("-Dsaved=1", saved.JvmArgs);
             Assert.Equal("example.invalid", saved.JoinServer);
             Assert.Equal("echo done", saved.PostExitCommand);
+            // Saved right after the read, before the Java scan shows the path: the path is kept all the same.
+            Assert.Equal(java, saved.JavaPath);
             Assert.Equal("3072", page.MemoryText);
             Assert.Equal("-Dsaved=1", page.JvmArgs);
         }

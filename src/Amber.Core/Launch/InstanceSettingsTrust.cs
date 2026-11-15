@@ -115,11 +115,32 @@ internal static class InstanceSettingsTrust
                 // file is left as it is; the next load adopts it), rather than adopt without the record.
                 Change(s => AdoptIfNew(dir, s), QuickWait, keepGoingIfUnwritable: true, then: s => store = s);
             }
-            return print is null || store.Trusted.Contains(print) ? Verdict.Trusted : Verdict.NotRecorded;
+            if (print is null) return Verdict.Trusted;
+            if (!store.Trusted.Contains(print)) return Verdict.NotRecorded;
+            NoteUseIfNew(dir, store, print);
+            return Verdict.Trusted;
         }
         catch (IOException)
         {
             return print is null ? Verdict.Trusted : Verdict.RecordUnavailable;
+        }
+    }
+
+    /// <summary>
+    /// Settings Jay trusts but has not seen in this folder before (an instance copied into it by hand): remembered as used
+    /// there, so a trim while the folder is away keeps them. Only that first sight writes, and a busy or unwritable
+    /// record just leaves it for the next check; the answer stands either way.
+    /// </summary>
+    private static void NoteUseIfNew(GameDirectory dir, Store store, string print)
+    {
+        var root = Key(dir.Root);
+        if (!store.Roots.Contains(root) || store.Uses.TryGetValue(root, out var uses) && uses.Contains(print)) return;
+        try
+        {
+            Change(s => s.Roots.Contains(root) && s.Trusted.Contains(print) && NoteUse(s, root, print), QuickWait, keepGoingIfUnwritable: true);
+        }
+        catch (IOException)
+        {
         }
     }
 
