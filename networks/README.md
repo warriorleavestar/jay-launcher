@@ -70,7 +70,7 @@ jay-server directory --network <上面打印的连接串>    # 在有公网 IP �
 jay-server network cosign <网络主人签好的连接串或文件> --key <自己的信任钥匙> [--prev <上一版>] --out 加签后.jaynet
 # 先逐项显示内容和被签内容的 SHA-256（两位信任人对一下这一行），手打网络编号最后 6 位才签；不在终端里运行就不签
 # 把输出交给下一个信任人，他在自己的离线电脑上再跑一次 cosign
-jay-server network show 加签后.jaynet   # 显示 “Jay 信任人签了 2/3，Jay 审核过”
+jay-server network show 加签后.jaynet   # 显示 “Jay 信任人签了 2/2，Jay 审核过”（分母是要几把，即 JayTrust.Need；名单里共 3 把，任 2 把就够）
 ```
 
 一个签名约 5.3 KB，主人加两个信任人的连接串约 23 KB，所以审核过的网络用 `.jaynet` 文件或网络列表传，不适合手打。
