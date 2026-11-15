@@ -219,6 +219,29 @@ public sealed class GateRecordTests : IAsyncLifetime
         }
     }
 
+    /// <summary>Records turned off and on again between two rounds still skip the wait after a failure.</summary>
+    [Fact]
+    public async Task TurningRecordsOffAndOnBetweenTwoRoundsSkipsTheWait()
+    {
+        _store.EnableRecords("jay");
+        var fail = 1;
+        var log = new List<string>();
+        var published = L.F("core.gate.record.published", GateRecordPublisher.Profile("jay").Name);
+        await using (GateRecordPublisher.Start(_store, _store.LoadConfig(), (_, _) =>
+        {
+            if (Volatile.Read(ref fail) == 1) throw new IOException("network down");
+            return Task.FromResult<GateRecordPublisher.IJoined>(new FakeJoined(Directories()));
+        }, line => { lock (log) log.Add(line); }, TimeSpan.FromSeconds(1), TimeSpan.FromHours(1)))
+        {
+            await Until(() => { lock (log) return Task.FromResult(log.Any(l => l.Contains("network down", StringComparison.Ordinal))); });
+            Volatile.Write(ref fail, 0);
+            // Both within one poll interval: the next round sees the same network as before.
+            _store.DisableRecords();
+            _store.EnableRecords("jay");
+            await Until(() => { lock (log) return Task.FromResult(log.Contains(published)); });
+        }
+    }
+
     /// <summary>A running gate follows records on/off and republishes when its entries change, without a restart.</summary>
     [Fact]
     public async Task RunningPublisherFollowsTheRecordsSetting()

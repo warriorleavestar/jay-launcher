@@ -240,9 +240,6 @@ public sealed class GateServer : IAsyncDisposable
                     if (login.Intent != McLogin.Intent.Status)
                     {
                         name = names.FirstOrDefault(n => string.Equals(n, login.Username, StringComparison.OrdinalIgnoreCase));
-                        // Any casing may log in, but the server gets the bound spelling: an offline-mode server treats each
-                        // casing as a different player, which would sidestep its bans and whitelist.
-                        if (name is not null) login = login.WithUsername(name);
                         if (name is null)
                         {
                             await WriteLoginDisconnectAsync(session, L.F("core.gate.mc.name_not_bound", login.Username!), timeout.Token);
@@ -250,6 +247,10 @@ public sealed class GateServer : IAsyncDisposable
                             _log(L.F("core.gate.log.wrong_name", fingerprint, login.Username!, string.Join(", ", names)));
                             return;
                         }
+                        // Any casing may log in, but the server always gets one spelling per name: an offline-mode server
+                        // treats each casing as a different player, which would sidestep its bans and whitelist. That
+                        // spelling is the one of the first join, so a player keeps the save they already have.
+                        login = login.WithUsername(_store.ServerSpelling(name, login.Username!));
                     }
                 }
                 Release(remote);

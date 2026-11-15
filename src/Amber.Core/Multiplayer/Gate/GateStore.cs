@@ -35,6 +35,8 @@ public sealed class GateState
     public string? RecordNetwork { get; set; }
     /// <summary>The locator id (Base64, 16 bytes). Kept when records are turned off, so old invites work again after turning them on.</summary>
     public string? RecordId { get; set; }
+    /// <summary>Counts every turn of the address record on or off, so a running gate sees a change even when it is undone at once.</summary>
+    public int RecordChanges { get; set; }
     /// <summary>
     /// Devices taken off a name by revoke or remove. Redeem refuses such a device for any invite of that name made
     /// before it was taken off, so a multi-use invite it still holds does not bring it back; a new invite does.
@@ -47,6 +49,12 @@ public sealed class GateState
 public sealed class GateMember
 {
     public string Name { get; set; } = "";
+    /// <summary>
+    /// The letter case of the name that the Minecraft server sees, set at the first join through the gate. An offline-mode
+    /// server keeps each casing as a different player, so the gate forwards this one spelling whatever casing the player
+    /// types. Taken from the first join, not from the invite, so a player who joined as "steve" before keeps that save.
+    /// </summary>
+    public string? Spelling { get; set; }
     public bool Disabled { get; set; }
     public List<GateDevice> Devices { get; set; } = [];
 }
@@ -118,11 +126,6 @@ public sealed class GatePendingInvite
     public DateTimeOffset Created { get; set; }
     public DateTimeOffset Expires { get; set; }
     public int UsesLeft { get; set; }
-    /// <summary>
-    /// Device keys (Base64) this invite turned away because the name had no free device slot. Once a device of the name
-    /// is revoked, this invite may only enroll these keys: the player who was told to revoke an old device can retry.
-    /// </summary>
-    public List<string> RefusedForLimit { get; set; } = [];
 }
 
 /// <summary>网关的设置（gate.json）。</summary>
@@ -165,8 +168,6 @@ public sealed class GateStore
     private static readonly TimeSpan LastSeenResolution = TimeSpan.FromHours(1);
     /// <summary>The longest an invite lives. A revoked-device entry older than this can no longer match an invite.</summary>
     public static readonly TimeSpan MaxInviteTtl = TimeSpan.FromDays(30);
-    /// <summary>How many device-limit refusals one invite remembers.</summary>
-    public const int MaxRefusedPerInvite = 8;
 
     private readonly string _dir;
     private readonly Lock _gate = new();
@@ -327,15 +328,10 @@ public sealed class GateStore
         }
         if (!member.Devices.Any(d => d.PublicKey == key))
         {
-            // A device of this name was revoked after the invite was made: the invite still serves a device it turned away
-            // for the device limit before then (revoke an old device, then retry), but not a device it has not seen.
-            if (revokedSince.Count > 0 && !invite.RefusedForLimit.Contains(key)) return (RedeemOutcome.Revoked, null);
-            if (member.Devices.Count >= s.MaxDevicesPerMember)
-            {
-                if (revokedSince.Count == 0 && !invite.RefusedForLimit.Contains(key) && invite.RefusedForLimit.Count < MaxRefusedPerInvite)
-                    invite.RefusedForLimit.Add(key);
-                return (RedeemOutcome.DeviceLimit, null);
-            }
+            // A device of this name was revoked after the invite was made: the invite adds no device to the name any more,
+            // whichever key asks (devices still on the name re-enroll as before). A replacement device needs a new invite.
+            if (revokedSince.Count > 0) return (RedeemOutcome.Revoked, null);
+            if (member.Devices.Count >= s.MaxDevicesPerMember) return (RedeemOutcome.DeviceLimit, null);
             member.Devices.Add(new GateDevice { PublicKey = key, Fingerprint = MemberIdentity.FingerprintOf(devicePublicKey), Added = now });
         }
         invite.UsesLeft--;
@@ -347,6 +343,21 @@ public sealed class GateStore
     {
         var key = Convert.ToBase64String(devicePublicKey);
         return Read().Members.Where(m => !m.Disabled && m.Devices.Any(d => d.PublicKey == key)).Select(m => m.Name).ToList();
+    }
+
+    /// <summary>
+    /// The spelling the server gets for <paramref name="name"/>: the one recorded at the first join, or <paramref name="typed"/>
+    /// (which must match the name apart from letter case), recorded now when there is none yet.
+    /// </summary>
+    public string ServerSpelling(string name, string typed)
+    {
+        if (!string.Equals(name, typed, StringComparison.OrdinalIgnoreCase)) throw new ArgumentException(L.T("core.gate.admin.badname"), nameof(typed));
+        if (Read().Member(name)?.Spelling is { } known) return known;
+        return Mutate(s =>
+        {
+            if (s.Member(name) is not { } member) return typed;
+            return member.Spelling ??= typed;
+        });
     }
 
     /// <summary>记下最后在线时间（一小时精度，免得每次连接都写盘）。</summary>
@@ -471,6 +482,7 @@ public sealed class GateStore
         Mutate(s =>
         {
             s.RecordNetwork = network;
+            s.RecordChanges++;
             s.RecordId ??= Convert.ToBase64String(RandomNumberGenerator.GetBytes(GateLocator.IdLength));
             return 0;
         });
@@ -480,6 +492,7 @@ public sealed class GateStore
     public void DisableRecords() => Mutate(s =>
     {
         s.RecordNetwork = null;
+        s.RecordChanges++;
         return 0;
     });
 

@@ -95,8 +95,9 @@ public sealed class GateRecordPublisher : IAsyncDisposable
         string? lastContent = null;
         var lastPut = DateTimeOffset.MinValue;
         var nextTry = DateTimeOffset.MinValue;
-        // The network the wait after a failure is for: records turned off and on again, or another network, try at once.
-        string? failedNetwork = null;
+        // The record setting the wait after a failure is for: records turned off and on again (even between two rounds),
+        // or another network, try at once.
+        (string? Network, int Changes)? failedFor = null;
         string? readFailure = null;
         void Leave()
         {
@@ -125,10 +126,10 @@ public sealed class GateRecordPublisher : IAsyncDisposable
                     continue;
                 }
                 var network = state.RecordNetwork;
-                if (network != failedNetwork)
+                if (failedFor is { } failed && failed != (network, state.RecordChanges))
                 {
                     nextTry = DateTimeOffset.MinValue;
-                    failedNetwork = null;
+                    failedFor = null;
                 }
                 // Records turned off, moved to another network, or the connection ended: leave.
                 if (joined is not null && (network != joinedNetwork || joined.HasExited)) Leave();
@@ -158,7 +159,7 @@ public sealed class GateRecordPublisher : IAsyncDisposable
                         log(L.F("core.gate.record.failed", e.Message));
                         Leave();
                         nextTry = DateTimeOffset.UtcNow + retry;
-                        failedNetwork = network;
+                        failedFor = (network, state.RecordChanges);
                     }
                 }
                 await Task.Delay(poll, ct);
