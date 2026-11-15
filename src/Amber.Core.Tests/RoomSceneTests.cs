@@ -556,7 +556,7 @@ public sealed class RoomSceneTests : IDisposable
         {
             var hostRoom = room with { Split = split };
             Assert.True(vm.RefusesForMyRelayChoice(hostRoom));
-            Assert.False(vm.StartJoinForTest(hostRoom));
+            Assert.False(Wait(vm.StartJoinForTestAsync(hostRoom)));
             Assert.Equal("multiplayer.split.relay_only_mine", vm.StatusInfo?.Key);
             Assert.Empty(started);
             Assert.True(vm.IsIdle);
@@ -564,7 +564,7 @@ public sealed class RoomSceneTests : IDisposable
         }
         // A room whose own rule is relays only is joined as it is.
         Assert.False(vm.RefusesForMyRelayChoice(strict with { RelayOnly = true }));
-        vm.StartJoinForTest(room);
+        Wait(vm.StartJoinForTestAsync(room));
         Assert.True(Assert.Single(started).Room.RelayOnly);
         // With my default off, the strict room is joined as before.
         vm.DefaultRelayOnly = false;

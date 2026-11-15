@@ -734,7 +734,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         var members = new MemberTable();
         // My own "always relays only" setting turns direct connections off on this computer without making it the room's rule.
         var room = WithMyRelayChoice(credentials.ToHostRoom(members, ChatName));
-        if (!TryStartSession(new EasyTierOptions(room, true, TestPeers ?? _service.MultiplayerPeers, EasyTierArgs.FreeTcpPort(), null, TestListeners, Guid.NewGuid().ToString(), FullLanMode, null, FullLanMode && AllowExitNode)
+        if (!await TryStartSessionAsync(new EasyTierOptions(room, true, TestPeers ?? _service.MultiplayerPeers, EasyTierArgs.FreeTcpPort(), null, TestListeners, Guid.NewGuid().ToString(), FullLanMode, null, FullLanMode && AllowExitNode)
             {
                 AllowProxy = AllowGameProxy,
             }))
@@ -799,7 +799,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
     }
 
     /// <summary>拿到房间凭据之后：启动 EasyTier 加入房间。</summary>
-    private bool StartJoin(RoomCode room)
+    private async Task<bool> StartJoinAsync(RoomCode room)
     {
         if (!IsIdle) return false;
         // A room that sends part of its traffic only directly, while I chose "always relays only": joining would show the
@@ -817,7 +817,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         // What the host decided for the room, then my own "always relays only" setting on top of it.
         var relayRule = room.RelayOnly;
         room = WithMyRelayChoice(room);
-        if (!TryStartSession(new EasyTierOptions(room, false, TestPeers ?? _service.MultiplayerPeers, EasyTierArgs.FreeTcpPort(), local, TestListeners, Guid.NewGuid().ToString(), FullLanMode, chatPort, FullLanMode && AllowExitNode)
+        if (!await TryStartSessionAsync(new EasyTierOptions(room, false, TestPeers ?? _service.MultiplayerPeers, EasyTierArgs.FreeTcpPort(), local, TestListeners, Guid.NewGuid().ToString(), FullLanMode, chatPort, FullLanMode && AllowExitNode)
             {
                 LocalTunnelPort = wraps && !FullLanMode ? EasyTierArgs.FreeTcpPort() : null,
                 // One local port per split leg (each forwarded over its own network); none when the room doesn't split.
@@ -844,22 +844,59 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         return true;
     }
 
+    /// <summary>A whole-LAN start is waiting for the permission prompt: another start can't begin meanwhile.</summary>
+    private bool _awaitingPermission;
+
+    /// <summary>Cancels a whole-LAN start that waits for the permission prompt; <see cref="StopSession"/> cancels it.</summary>
+    private CancellationTokenSource? _permissionCts;
+
+    /// <summary>Counts <see cref="StopSession"/> calls, so a start that waited for the permission prompt sees it was stopped meanwhile.</summary>
+    private int _sessionStops;
+
     /// <summary>Tests: stands in for starting EasyTier (gets the options it would start with; true as if it started).</summary>
     internal Func<EasyTierOptions, bool>? TestStartSession { get; set; }
 
-    /// <summary>Tests: what <see cref="StartJoin"/> does with a room the host let me into.</summary>
-    internal bool StartJoinForTest(RoomCode room) => StartJoin(room);
+    /// <summary>Tests: what <see cref="StartJoinAsync"/> does with a room the host let me into.</summary>
+    internal Task<bool> StartJoinForTestAsync(RoomCode room) => StartJoinAsync(room);
 
-    private bool TryStartSession(EasyTierOptions options)
+    private async Task<bool> TryStartSessionAsync(EasyTierOptions options)
     {
         if (TestStartSession is { } test) return test(options);
+        if (_awaitingPermission) return false;
         StopSession();
+        var stops = _sessionStops;
         try
         {
             var workDir = Path.Combine(EasyTierWorkRoot, options.Tun ? "run-lan" : "run");
-            _session = options.Tun
-                ? EasyTierElevatedSession.Start(_service.EasyTier, options, workDir)
-                : EasyTierSession.Start(_service.EasyTier, options, workDir);
+            if (options.Tun)
+            {
+                // The Mac/Linux password dialog doesn't cover the screen: keep the window responsive while it is open.
+                _awaitingPermission = true;
+                SetStatus(StatusMessage.Info("multiplayer.room.waiting_permission"));
+                IEasyTierSession started;
+                // Cancelled when the user leaves: that closes the Mac/Linux password dialog.
+                using var leave = new CancellationTokenSource();
+                _permissionCts = leave;
+                try { started = await EasyTierElevatedSession.StartAsync(_service.EasyTier, options, workDir, leave.Token); }
+                finally
+                {
+                    _awaitingPermission = false;
+                    if (_permissionCts == leave) _permissionCts = null;
+                }
+                if (stops != _sessionStops || !IsIdle)
+                {
+                    // Left the room or started something else while the prompt was open.
+                    started.Dispose();
+                    return false;
+                }
+                _session = started;
+            }
+            else _session = EasyTierSession.Start(_service.EasyTier, options, workDir);
+        }
+        catch (OperationCanceledException) when (stops != _sessionStops)
+        {
+            // Left the room while the permission prompt was open.
+            return false;
         }
         catch (Exception e) when (e is OperationCanceledException or IOException or System.ComponentModel.Win32Exception or InvalidOperationException or PlatformNotSupportedException)
         {
@@ -1338,7 +1375,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
                 else
                 {
                     old.Dispose();
-                    var next = EasyTierElevatedSession.Start(_service.EasyTier, options, Path.Combine(EasyTierWorkRoot, "run-lan"));
+                    var next = await EasyTierElevatedSession.StartAsync(_service.EasyTier, options, Path.Combine(EasyTierWorkRoot, "run-lan"), lifetime.Token);
                     replacement = next;
                     await next.WaitForReadyAsync(lifetime.Token);
                     if (_sessionCts != lifetime || _direct != direct) return false;
@@ -1409,6 +1446,42 @@ public sealed partial class MultiplayerViewModel : PageViewModel
 
     private bool _refreshing;
 
+    /// <summary>The last member list read from EasyTier, for the refreshes that skip reading it (see <see cref="ShouldQueryPeers"/>).</summary>
+    private List<PeerInfo>? _lastPeers;
+    private IEasyTierSession? _lastPeersSession;
+    private string _lastPeersKey = "";
+    private DateTime _peersSteadySince;
+    private int _peersSkipped;
+
+    /// <summary>
+    /// Every read of the member list starts an easytier-cli process. The refresh runs every 2 s; the list is read on every
+    /// one while the session is new or the list changed in the last 30 s, and on every third one (6 s) once it has stayed
+    /// the same, which is when nothing on the page depends on it changing quickly.
+    /// </summary>
+    internal static bool ShouldQueryPeers(bool haveList, TimeSpan steadyFor, int skipped) =>
+        !haveList || steadyFor < TimeSpan.FromSeconds(30) || skipped >= 2;
+
+    private async Task<List<PeerInfo>> ReadPeersAsync(IEasyTierSession session)
+    {
+        if (_lastPeers is { } cached && ReferenceEquals(_lastPeersSession, session) && !ShouldQueryPeers(true, DateTime.UtcNow - _peersSteadySince, _peersSkipped))
+        {
+            _peersSkipped++;
+            return cached;
+        }
+        var peers = await session.PeersAsync();
+        _peersSkipped = 0;
+        // Who is there and how they are reached: a change here keeps the fast refresh going.
+        var key = string.Join(";", peers.Select(p => p.Ip + "|" + p.Cost).Order(StringComparer.Ordinal));
+        if (_lastPeers is null || !ReferenceEquals(_lastPeersSession, session) || key != _lastPeersKey)
+        {
+            _lastPeersKey = key;
+            _peersSteadySince = DateTime.UtcNow;
+        }
+        _lastPeers = peers;
+        _lastPeersSession = session;
+        return peers;
+    }
+
     private async Task RefreshPeersAsync()
     {
         ExpireRoomGames();
@@ -1427,7 +1500,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         {
             SyncHotspotSharing();
             ExitWarning = _transport?.ExitProblem ?? "";
-            var peers = await session.PeersAsync();
+            var peers = await ReadPeersAsync(session);
             TickDirect(peers);
             if (UsingExit) OnPropertyChanged(nameof(ExitBanner));
             if (_session != session) return;
@@ -1601,6 +1674,11 @@ public sealed partial class MultiplayerViewModel : PageViewModel
 
     private void StopSession()
     {
+        _sessionStops++;
+        _permissionCts?.Cancel();
+        _permissionCts = null;
+        _lastPeers = null;
+        _lastPeersSession = null;
         _timer?.Stop();
         _timer = null;
         _sessionCts?.Cancel();
