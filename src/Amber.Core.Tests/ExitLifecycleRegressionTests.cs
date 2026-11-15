@@ -451,6 +451,8 @@ public sealed class ExitLifecycleRegressionTests
             Avalonia.Threading.Dispatcher.UIThread.RunJobs();
             Thread.Sleep(10);
         }
+        // Never block the shared UI thread on a task that may need it: a stuck one fails this test, not the ones after.
+        if (!task.IsCompleted) throw new TimeoutException("the task didn't finish while the UI thread ran its work");
         task.GetAwaiter().GetResult();
     }
 

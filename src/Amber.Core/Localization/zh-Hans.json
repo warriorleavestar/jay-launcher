@@ -394,7 +394,6 @@
   "core.mp.component.invalidexit": "经谁上网只能填房间里成员的虚拟 IP：{0}",
   "core.mp.component.missingexecutable": "EasyTier 安装包里没有命令行程序",
   "core.mp.component.startfailed": "easytier-core 启动失败",
-  "core.mp.exit.ipv6path": "经 TA 上网（全部流量）只支持 IPv4 的联机连接，不能在 IPv6 路径上打开。",
   "core.mp.exit.notmember": "只能经房间里另一位成员上网（IPv4 地址）。",
   "core.mp.exit.mixedpeers": "直连同时用着备用中转时，暂时不能安全地经 TA 上网。请只用直连，或只用中转开房间。",
   "core.mp.exit.toomany": "经 TA 上网时，联机连接自己用的地址太多。",

@@ -394,7 +394,6 @@
   "core.mp.component.invalidexit": "經誰上網只能填房間裡成員的虛擬 IP：{0}",
   "core.mp.component.missingexecutable": "EasyTier 安裝套件中沒有命令列程式",
   "core.mp.component.startfailed": "easytier-core 啟動失敗",
-  "core.mp.exit.ipv6path": "經 TA 上網（全部流量）只支援 IPv4 的連線，不能在 IPv6 路徑上開啟。",
   "core.mp.exit.notmember": "只能經房間裡另一位成員上網（IPv4 位址）。",
   "core.mp.exit.mixedpeers": "直連同時用著備用中轉時，暫時不能安全地經 TA 上網。請只用直連，或只用中轉開房間。",
   "core.mp.exit.toomany": "經 TA 上網時，連線本身用的位址太多。",

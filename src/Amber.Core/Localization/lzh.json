@@ -389,7 +389,6 @@
   "core.mp.component.invalidexit": "出口須為房中成員之虛 IP：{0}",
   "core.mp.component.missingexecutable": "EasyTier 安置包中無命令列之程式",
   "core.mp.component.startfailed": "easytier-core 啟之未成",
-  "core.mp.exit.ipv6path": "今之全域出口唯容 IPv4 承載，不可啟於 IPv6 之徑。",
   "core.mp.exit.notmember": "借機上網者，須為房中他成員（IPv4 址）。",
   "core.mp.exit.mixedpeers": "直連橋兼用備轉驛時，暫不能安啟系統出口。請用純直連，或獨立轉驛之房。",
   "core.mp.exit.toomany": "出口承載之址過多。",

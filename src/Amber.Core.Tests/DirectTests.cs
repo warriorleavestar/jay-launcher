@@ -216,6 +216,23 @@ public class TestMatrixTests
     }
 
     [Fact]
+    public void AnIpv6ExitStepConnectsFirstAndTurnsTheExitOnAfterwards()
+    {
+        var host = new[] { C(PathKind.IPv6, "[2001:db8::1]:1"), C(PathKind.Punch, "203.0.113.5:1") };
+        var guest = new[] { C(PathKind.IPv6, "[2001:db8::2]:1"), C(PathKind.Punch, "198.51.100.7:1") };
+        // The plan has an exit step over IPv6 wherever the exit works; only that one waits for the connection.
+        var steps = TestMatrix.Plan(new MatrixInputs(host, guest, 3, false, true));
+        if (PlatformFeatures.FullTrafficExit) Assert.Contains(steps, s => s.Path == PathKind.IPv6 && s.Exit);
+        Assert.True(DirectSession.ExitAfterConnecting(new MatrixStep(1, RouteKind.Direct, PathKind.IPv6, true, true)));
+        Assert.All(new[]
+        {
+            new MatrixStep(1, RouteKind.Direct, PathKind.IPv6, true, false),
+            new MatrixStep(1, RouteKind.Direct, PathKind.Punch, true, true),
+            new MatrixStep(1, RouteKind.Relay, null, true, true),
+        }, s => Assert.False(DirectSession.ExitAfterConnecting(s)));
+    }
+
+    [Fact]
     public void SimulatedPlanIncludesLan()
     {
         var a = new[] { C(PathKind.Lan, "127.0.0.1:1") };

@@ -1190,8 +1190,6 @@ public sealed class DirectSession : IAsyncDisposable
     /// <summary>两边都要做的切换：只允许这一步的路径、重新认证直连，按需切换 EasyTier 配置。</summary>
     private async Task ApplyStepAsync(MatrixStep step, CancellationToken ct)
     {
-        if (step.Exit && step.Path == PathKind.IPv6)
-            throw new InvalidOperationException(L.T("core.mp.exit.ipv6path"));
         var bridge = Bridge!;
         lock (_pathGate)
         {
@@ -1213,8 +1211,17 @@ public sealed class DirectSession : IAsyncDisposable
             if (step.FullLan && _speed is not null && !_speedOnVirtualIp)
                 for (var i = 0; i < 20 && !(_speedOnVirtualIp = _speed.TryAddListener(IPAddress.Parse(EasyTierArgs.HostIp))); i++) await Task.Delay(500, ct);
         }
-        else await StartEasyTierAsync(GuestOptions(step.Route != RouteKind.Node, step.FullLan, step.Exit ? EasyTierArgs.HostIp : null, relay, step.Route != RouteKind.Direct), ct);
+        else await StartEasyTierAsync(GuestOptions(step.Route != RouteKind.Node, step.FullLan,
+            step.Exit && !ExitAfterConnecting(step) ? EasyTierArgs.HostIp : null, relay, step.Route != RouteKind.Direct), ct);
     }
+
+    /// <summary>
+    /// A test step that goes online through the host over a direct IPv6 path. The exit only trusts an IPv6 address the
+    /// bridge is connected over and that answered a fresh ping, and this step drops its peers first: the guest connects
+    /// without the exit and then turns it on the way a player does (<see cref="SetExitNodeAsync"/>), which waits for the
+    /// host to be confirmed and fixes its address.
+    /// </summary>
+    internal static bool ExitAfterConnecting(MatrixStep step) => step.Exit && step.Route == RouteKind.Direct && step.Path == PathKind.IPv6;
 
     /// <summary>解析房主发来的一步；字段缺失或类型不对时返回 null。</summary>
     internal static MatrixStep? ParseStep(JsonObject message)
@@ -1274,6 +1281,7 @@ public sealed class DirectSession : IAsyncDisposable
             {
                 var punched = await Bridge!.PunchAsync(_remote!.Candidates, _remote.Nat, TimeSpan.FromSeconds(30), cts.Token);
                 if (punched is null) throw new DirectFailedException(L.F("core.mp.matrix.pathfailed", DirectText.Path(step.Path!.Value)));
+                if (ExitAfterConnecting(step)) await SetExitNodeAsync(EasyTierArgs.HostIp, cts.Token);
             }
             // 等 EasyTier 看到房主。
             PeerInfo? host = null;

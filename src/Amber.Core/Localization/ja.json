@@ -394,7 +394,6 @@
   "core.mp.component.invalidexit": "インターネット接続に使う相手には、ルームメンバーの仮想 IP を指定してください：{0}",
   "core.mp.component.missingexecutable": "EasyTier パッケージにコマンドラインプログラムがありません",
   "core.mp.component.startfailed": "easytier-core を起動できませんでした",
-  "core.mp.exit.ipv6path": "メンバー経由のインターネット接続（すべての通信）は IPv4 の接続経路のみ対応しており、IPv6 経路では有効にできません。",
   "core.mp.exit.notmember": "インターネット接続に使えるのは、ルーム内の別のメンバー（IPv4 アドレス）だけです。",
   "core.mp.exit.mixedpeers": "直結ブリッジが予備の中継も使っている間は、メンバー経由のインターネット接続を安全に有効にできません。直接接続のみ、または中継のみのルームを使ってください。",
   "core.mp.exit.toomany": "メンバー経由のインターネット接続：マルチプレイの接続自体が使うアドレスが多すぎます。",

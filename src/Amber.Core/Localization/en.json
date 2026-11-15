@@ -402,7 +402,6 @@
   "core.mp.component.invalidexit": "Who you go online through must be a room member's virtual IP: {0}",
   "core.mp.component.missingexecutable": "The EasyTier package does not contain the command-line programs",
   "core.mp.component.startfailed": "easytier-core failed to start",
-  "core.mp.exit.ipv6path": "Going online through a member (all traffic) works over an IPv4 connection only and cannot be turned on over an IPv6 path.",
   "core.mp.exit.notmember": "You can only go online through another room member (IPv4 address).",
   "core.mp.exit.mixedpeers": "Going online through a member can’t be turned on safely while the direct bridge also uses a fallback relay. Use a direct-only room or a relay-only room.",
   "core.mp.exit.toomany": "Going online through a member: the multiplayer connection itself uses too many addresses.",
