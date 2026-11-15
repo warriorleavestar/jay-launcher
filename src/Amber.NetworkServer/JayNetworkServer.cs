@@ -57,7 +57,7 @@ public sealed class JayNetworkServerBuilder
     public JayNetworkServerBuilder UseSeeds(IEnumerable<string> seeds)
     {
         foreach (var s in seeds)
-            if (!RelayNodes.IsValid(s)) throw new ArgumentException($"种子节点地址不对：{s}（例：tcp://1.2.3.4:11010）");
+            if (!RelayNodes.IsValid(s)) throw new ArgumentException($"种子节点地址不对：{s}（例：tcp://203.0.113.10:11010）");
         Seeds = [.. seeds.Select(s => s.Trim())];
         return this;
     }

@@ -14,7 +14,7 @@ The coding rules for this repository are in [CLAUDE.md](CLAUDE.md) and [CONTRIBU
 
 - No telemetry, analytics or remote kill switches. Network access only for user-initiated downloads, Microsoft login, the Modrinth and CurseForge APIs, the update check and multiplayer. A new network destination must fit one of these.
 - A new feature that connects to the network or makes something public is off for users who upgrade from an older version; only new installs may have it on.
-- No public IP addresses, personal data or machine-specific paths in code strings, tests, comments or docs (see the privacy section below). One exception: the two public DNS resolvers that exit mode uses through the tunnel may appear in `src/Amber.Core/Multiplayer/ExitDnsServers.cs`, and only there. Everything else refers to them through that class or by name.
+- No public IP addresses, personal data or machine-specific paths in code strings, tests, comments or docs (see the privacy section below). One exception: the two public DNS resolvers that exit mode uses through the tunnel may appear in `src/Amber.Core/Multiplayer/ExitDnsServers.cs`, and only there. Everything else refers to them through that class or by name. `NoPublicAddressesInRepositoryTests` checks every tracked file for this.
 - Tests and self-checks use a separate test game directory and `AMBER_DATA_DIR`. Nothing may write to a real `.minecraft`.
 - Established cryptographic primitives and libraries only.
 - `Amber.Core` stays free of UI dependencies. Platform-specific code is behind `OperatingSystem.IsWindows()` (or the matching check) or in a platform-only type.

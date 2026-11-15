@@ -11,7 +11,7 @@
 #   PORT=11010            监听端口（TCP 和 UDP）/ listen port (TCP and UDP)
 #   RELAY=amber           amber：只转发 Jay 联机房间（网络名 jay-* 和 amber-*）；all：转发所有 EasyTier 网络
 #   NODE_NAME=我的节点     分享码里显示的名字 / name shown in the share code
-#   PUBLIC_HOST=1.2.3.4   公网 IP 或域名（不填就从本机网卡猜）/ public IP or domain (guessed if empty)
+#   PUBLIC_HOST=203.0.113.10 公网 IP 或域名（不填就从本机网卡猜）/ public IP or domain (guessed if empty)
 #   BANDWIDTH_LIMIT=0     转发别的网络的限速，字节/秒，0 不限 / relay limit for foreign networks, bytes/s, 0 = none
 
 set -euo pipefail
