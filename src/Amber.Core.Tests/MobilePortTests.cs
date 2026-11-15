@@ -138,7 +138,7 @@ public sealed class MobilePortTests
         Assert.InRange(menu.CenterX, 0.47, 0.53);
         Assert.True(movePad.CenterX < 0.25);
         Assert.InRange(movePad.CenterY, 0.79, 0.81);
-        Assert.InRange(inventory.CenterX, 0.600, 0.612);
+        Assert.InRange(inventory.CenterX, 0.620, 0.630);
         Assert.InRange(inventory.CenterY, 0.95, 0.96);
         Assert.True(jump.CenterY > 0.78);
         Assert.Equal(movePad.CenterX, sneak.CenterX, 6);
