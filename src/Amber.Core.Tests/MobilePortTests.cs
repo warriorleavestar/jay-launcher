@@ -106,7 +106,10 @@ public sealed class MobilePortTests
             Assert.InRange(control.CenterX - control.Radius, 0, 1);
             Assert.InRange(control.CenterX + control.Radius, 0, 1);
             Assert.InRange(control.CenterY - control.Radius, 0, 1);
-            Assert.InRange(control.CenterY + control.Radius, 0, 1);
+            // The inventory hit circle intentionally reaches a few pixels below immersive
+            // fullscreen; its rendered square uses 82% of that radius and remains on-screen.
+            Assert.InRange(control.CenterY + control.Radius, 0,
+                control.Action == TouchControlAction.Inventory ? 1.01 : 1);
             if (control.GameplayVisible)
             {
                 if (control.Action == TouchControlAction.Move)
@@ -130,7 +133,6 @@ public sealed class MobilePortTests
 
         var menu = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Menu);
         var movePad = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Move);
-        var split = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.SecondaryAction);
         var inventory = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Inventory);
         var jump = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Jump);
         var sneak = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Sneak);
@@ -144,9 +146,8 @@ public sealed class MobilePortTests
         Assert.Equal(movePad.CenterX, sneak.CenterX, 6);
         Assert.Equal(movePad.CenterY, sneak.CenterY, 6);
         Assert.True(jump.Radius >= 0.05 && sneak.Radius >= 0.035);
-        Assert.False(split.GameplayVisible);
-        Assert.True(split.MenuVisible);
-        Assert.Null(TouchControlLayout.HitTest(split.CenterX, split.CenterY));
+        Assert.DoesNotContain(TouchControlLayout.Default,
+            control => control.Action == TouchControlAction.SecondaryAction);
     }
 
     [Fact]
@@ -385,25 +386,33 @@ public sealed class MobilePortTests
     }
 
     [Fact]
-    public void TouchInputRouterUsesMenuSplitAsRightClickModifier()
+    public void TouchInputRouterDoubleTapPicksHalfAnInventoryStack()
     {
         var sink = new RecordingTouchSink();
-        var router = new TouchInputRouter(sink);
-        var split = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.SecondaryAction);
+        var now = 1_000L;
+        var router = new TouchInputRouter(sink, clock: () => now);
 
-        Assert.True(router.Press(40, split.CenterX, split.CenterY, controlsEnabled: false));
-        Assert.DoesNotContain(sink.Actions, action => action.Action == TouchControlAction.SecondaryAction);
-
-        Assert.True(router.Press(41, 0.48, 0.36, controlsEnabled: false));
-        Assert.Equal((0.48, 0.36, false), sink.LastPointer);
-        Assert.Contains((TouchControlAction.SecondaryAction, true), sink.Actions);
-        Assert.True(router.Move(41, 0.62, 0.54));
-        Assert.Equal((0.62, 0.54, false), sink.LastPointer);
-        Assert.DoesNotContain((TouchControlAction.SecondaryAction, false), sink.Actions);
-
-        Assert.True(router.Release(41));
-        Assert.Contains((TouchControlAction.SecondaryAction, false), sink.Actions);
+        Assert.True(router.Press(40, 0.48, 0.36, controlsEnabled: false));
         Assert.True(router.Release(40));
+        Assert.Equal([
+            (TouchControlAction.PrimaryAction, true),
+            (TouchControlAction.PrimaryAction, false)
+        ], sink.Actions);
+
+        now += 200;
+        Assert.True(router.Press(41, 0.48, 0.36, controlsEnabled: false));
+        Assert.Equal(2, sink.Actions.Count);
+        Assert.True(router.Release(41));
+        Assert.Equal([
+            (TouchControlAction.PrimaryAction, true),
+            (TouchControlAction.PrimaryAction, false),
+            (TouchControlAction.PrimaryAction, true),
+            (TouchControlAction.PrimaryAction, false),
+            (TouchControlAction.SecondaryAction, true),
+            (TouchControlAction.SecondaryAction, false)
+        ], sink.Actions);
+        Assert.DoesNotContain(TouchControlLayout.Default,
+            control => control.Action == TouchControlAction.SecondaryAction);
     }
 
     [Fact]
