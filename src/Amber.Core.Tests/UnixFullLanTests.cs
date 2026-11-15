@@ -221,4 +221,379 @@ public sealed class UnixFullLanTests
             File.Delete(core);
         }
     }
+
+    /// <summary>A package like the pinned one, holding a shell script as easytier-core.</summary>
+    private static (byte[] Zip, EasyTierRelease.Asset Asset) FakePackage(string script)
+    {
+        using var ms = new MemoryStream();
+        using (var zip = new System.IO.Compression.ZipArchive(ms, System.IO.Compression.ZipArchiveMode.Create, true))
+        {
+            using (var w = new StreamWriter(zip.CreateEntry("easytier-test/easytier-core").Open())) w.Write(script);
+            using (var w = new StreamWriter(zip.CreateEntry("easytier-test/easytier-cli").Open())) w.Write("#!/bin/sh\n");
+            using (var w = new StreamWriter(zip.CreateEntry("easytier-test/readme.txt").Open())) w.Write("not extracted");
+        }
+        var bytes = ms.ToArray();
+        var asset = new EasyTierRelease.Asset("test-unix", "easytier-test.zip", Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bytes)),
+            bytes.Length, "easytier-core", "easytier-cli");
+        return (bytes, asset);
+    }
+
+    private static void WithCoreStore(Action<string, string, EasyTierRelease.Asset, byte[]> test, string script = "#!/bin/sh\nexit 0\n")
+    {
+        var dir = Directory.CreateTempSubdirectory("jay-core-store-");
+        var (zip, asset) = FakePackage(script);
+        var package = Path.Combine(dir.FullName, "user", asset.Name);
+        Directory.CreateDirectory(Path.GetDirectoryName(package)!);
+        File.WriteAllBytes(package, zip);
+        ElevatedCoreStore.RootForTest = Path.Combine(dir.FullName, "protected", "Jay", "easytier");
+        ElevatedCoreStore.AssetForTest = asset;
+        try { test(dir.FullName, package, asset, zip); }
+        finally
+        {
+            ElevatedCoreStore.RootForTest = null;
+            ElevatedCoreStore.AssetForTest = null;
+            ElevatedCoreStore.OwnerForTest = null;
+            dir.Delete(true);
+        }
+    }
+
+    [Fact]
+    public void GuardCopyComesFromTheCheckedPackageAndIsReused()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        WithCoreStore((_, package, asset, _) =>
+        {
+            var core = ElevatedCoreStore.Prepare(package);
+            Assert.Equal(Path.Combine(ElevatedCoreStore.RootForTest!, EasyTierRelease.InstallTag, asset.Platform, "easytier-core"), core);
+            Assert.StartsWith("#!/bin/sh", File.ReadAllText(core));
+            var dir = Path.GetDirectoryName(core)!;
+            Assert.False(File.Exists(Path.Combine(dir, "readme.txt")));
+            // Only the owner may write anything in it.
+            foreach (var path in Directory.EnumerateFileSystemEntries(dir).Append(dir))
+                Assert.Equal((UnixFileMode)0, File.GetUnixFileMode(path) & (UnixFileMode.GroupWrite | UnixFileMode.OtherWrite));
+            Assert.NotEqual((UnixFileMode)0, File.GetUnixFileMode(core) & UnixFileMode.UserExecute);
+            // A change to the user's package afterwards doesn't matter: the guard's own copy is used.
+            File.Delete(package);
+            Assert.Equal(core, ElevatedCoreStore.Prepare(package));
+        });
+    }
+
+    [Fact]
+    public void GuardRefusesAPackageThatDoesNotMatch()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        WithCoreStore((_, package, _, zip) =>
+        {
+            var tampered = (byte[])zip.Clone();
+            tampered[^30] ^= 0xFF;
+            File.WriteAllBytes(package, tampered);
+            Assert.Throws<InvalidDataException>(() => ElevatedCoreStore.Prepare(package));
+            File.WriteAllBytes(package, [.. zip, 0]);
+            Assert.Throws<InvalidDataException>(() => ElevatedCoreStore.Prepare(package));
+            File.Delete(package);
+            Assert.Throws<InvalidDataException>(() => ElevatedCoreStore.Prepare(package));
+            Assert.False(Directory.Exists(Path.Combine(ElevatedCoreStore.RootForTest!, EasyTierRelease.InstallTag)) &&
+                Directory.EnumerateFileSystemEntries(Path.Combine(ElevatedCoreStore.RootForTest!, EasyTierRelease.InstallTag)).Any(e => !e.Contains(".tmp-")));
+        });
+    }
+
+    [Fact]
+    public void GuardRefusesACopyOthersCouldChange()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        WithCoreStore((root, package, asset, _) =>
+        {
+            var core = ElevatedCoreStore.Prepare(package);
+            File.SetUnixFileMode(core, File.GetUnixFileMode(core) | UnixFileMode.OtherWrite);
+            Assert.Throws<IOException>(() => ElevatedCoreStore.Prepare(package));
+            File.SetUnixFileMode(core, File.GetUnixFileMode(core) & ~UnixFileMode.OtherWrite);
+            Assert.Equal(core, ElevatedCoreStore.Prepare(package));
+            // A link in place of the folder is refused too.
+            var dir = Path.GetDirectoryName(core)!;
+            var elsewhere = Path.Combine(root, "elsewhere");
+            Directory.Move(dir, elsewhere);
+            Directory.CreateSymbolicLink(dir, elsewhere);
+            Assert.Throws<IOException>(() => ElevatedCoreStore.Prepare(package));
+        });
+    }
+
+    [Fact]
+    public void OnlyStaleExtractionFoldersAreRemoved()
+    {
+        var parent = Directory.CreateTempSubdirectory("jay-core-temps-");
+        try
+        {
+            var now = DateTime.UtcNow;
+            // Another guard is extracting into this one right now.
+            var busy = Directory.CreateDirectory(Path.Combine(parent.FullName, "test.tmp-busy")).FullName;
+            File.WriteAllText(Path.Combine(busy, "easytier-core"), "partial");
+            var stale = Directory.CreateDirectory(Path.Combine(parent.FullName, "test.tmp-stale")).FullName;
+            Directory.SetLastWriteTimeUtc(stale, now - ElevatedCoreStore.StaleTempAge - TimeSpan.FromMinutes(1));
+            var other = Directory.CreateDirectory(Path.Combine(parent.FullName, "other.tmp-stale")).FullName;
+            Directory.SetLastWriteTimeUtc(other, now - ElevatedCoreStore.StaleTempAge - TimeSpan.FromMinutes(1));
+            ElevatedCoreStore.RemoveStaleTemps(parent.FullName, "test", now);
+            Assert.True(File.Exists(Path.Combine(busy, "easytier-core")));
+            Assert.False(Directory.Exists(stale));
+            Assert.True(Directory.Exists(other)); // another platform's folder is not this guard's to remove
+        }
+        finally { parent.Delete(true); }
+    }
+
+    [Fact]
+    public void TwoGuardsPreparingAtOnceBothGetTheCopy()
+    {
+        if (OperatingSystem.IsWindows() && !IsElevatedOnWindows()) return;
+        WithCoreStore((_, package, asset, _) =>
+        {
+            // A third guard is half-way through its own extraction; it must not lose its folder.
+            var parent = Path.Combine(ElevatedCoreStore.RootForTest!, EasyTierRelease.InstallTag);
+            Directory.CreateDirectory(parent);
+            var busy = Directory.CreateDirectory(Path.Combine(parent, asset.Platform + ".tmp-0123456789abcdef")).FullName;
+            using var start = new Barrier(2);
+            var cores = new string?[2];
+            var errors = new Exception?[2];
+            var threads = Enumerable.Range(0, 2).Select(i => new Thread(() =>
+            {
+                start.SignalAndWait();
+                try { cores[i] = ElevatedCoreStore.Prepare(package); }
+                catch (Exception e) { errors[i] = e; }
+            })).ToList();
+            threads.ForEach(t => t.Start());
+            threads.ForEach(t => t.Join());
+            Assert.All(errors, Assert.Null);
+            Assert.Equal(cores[0], cores[1]);
+            Assert.True(File.Exists(cores[0]));
+            Assert.True(Directory.Exists(busy));
+        });
+    }
+
+    /// <summary>The Windows guard runs elevated; creating an administrators-owned folder needs that too.</summary>
+    private static bool IsElevatedOnWindows() =>
+        OperatingSystem.IsWindows() && new System.Security.Principal.WindowsPrincipal(System.Security.Principal.WindowsIdentity.GetCurrent())
+            .IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator);
+
+    [Fact]
+    public void WindowsGuardCopyIsAdminOnlyCheckedAndReused()
+    {
+        // CI runs Windows tests elevated, like the guard; a normal developer shell can't create such a folder.
+        if (!OperatingSystem.IsWindows() || !IsElevatedOnWindows()) return;
+        WithCoreStore((_, package, asset, zip) =>
+        {
+            var tampered = (byte[])zip.Clone();
+            tampered[^30] ^= 0xFF;
+            File.WriteAllBytes(package, tampered);
+            Assert.Throws<InvalidDataException>(() => ElevatedCoreStore.Prepare(package));
+            File.WriteAllBytes(package, zip);
+            var core = ElevatedCoreStore.Prepare(package);
+            Assert.Equal(Path.Combine(ElevatedCoreStore.RootForTest!, EasyTierRelease.InstallTag, asset.Platform, "easytier-core"), core);
+            Assert.False(File.Exists(Path.Combine(Path.GetDirectoryName(core)!, "readme.txt")));
+            var security = new DirectoryInfo(ElevatedCoreStore.RootForTest!).GetAccessControl(
+                System.Security.AccessControl.AccessControlSections.Owner | System.Security.AccessControl.AccessControlSections.Access);
+            Assert.Null(ElevatedCoreStore.AdminOnlyProblem(security));
+            // A change to the user's package afterwards doesn't matter: the guard's own copy is used.
+            File.Delete(package);
+            Assert.Equal(core, ElevatedCoreStore.Prepare(package));
+        });
+    }
+
+    [Fact]
+    public void WindowsGuardRefusesARootUsersCanChange()
+    {
+        if (!OperatingSystem.IsWindows() || !IsElevatedOnWindows()) return;
+        WithCoreStore((_, package, _, _) =>
+        {
+            // Made by an ordinary create under the user's temp folder: it inherits the user's own full control.
+            Directory.CreateDirectory(ElevatedCoreStore.RootForTest!);
+            Assert.Throws<IOException>(() => ElevatedCoreStore.Prepare(package));
+            Assert.False(Directory.Exists(Path.Combine(ElevatedCoreStore.RootForTest!, EasyTierRelease.InstallTag)));
+        });
+    }
+
+    [Fact]
+    public void WindowsAdminOnlyCheckReadsFolderSecurity()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var admins = new System.Security.Principal.SecurityIdentifier(System.Security.Principal.WellKnownSidType.BuiltinAdministratorsSid, null);
+        var users = new System.Security.Principal.SecurityIdentifier(System.Security.Principal.WellKnownSidType.BuiltinUsersSid, null);
+        var creatorOwner = new System.Security.Principal.SecurityIdentifier(System.Security.Principal.WellKnownSidType.CreatorOwnerSid, null);
+        System.Security.AccessControl.DirectorySecurity Folder(System.Security.Principal.SecurityIdentifier owner, System.Security.AccessControl.FileSystemRights usersMay, bool creatorOwnerFull = false)
+        {
+            var security = new System.Security.AccessControl.DirectorySecurity();
+            security.SetOwner(owner);
+            security.AddAccessRule(new(admins, System.Security.AccessControl.FileSystemRights.FullControl, System.Security.AccessControl.AccessControlType.Allow));
+            security.AddAccessRule(new(users, usersMay, System.Security.AccessControl.AccessControlType.Allow));
+            if (creatorOwnerFull)
+                security.AddAccessRule(new(creatorOwner, System.Security.AccessControl.FileSystemRights.FullControl, System.Security.AccessControl.AccessControlType.Allow));
+            return security;
+        }
+        Assert.Null(ElevatedCoreStore.AdminOnlyProblem(Folder(admins, System.Security.AccessControl.FileSystemRights.ReadAndExecute)));
+        Assert.Null(ElevatedCoreStore.AdminOnlyProblem(Folder(admins, System.Security.AccessControl.FileSystemRights.ReadAndExecute, creatorOwnerFull: true)));
+        Assert.NotNull(ElevatedCoreStore.AdminOnlyProblem(Folder(users, System.Security.AccessControl.FileSystemRights.ReadAndExecute)));
+        Assert.NotNull(ElevatedCoreStore.AdminOnlyProblem(Folder(admins, System.Security.AccessControl.FileSystemRights.Modify)));
+        Assert.NotNull(ElevatedCoreStore.AdminOnlyProblem(Folder(admins, System.Security.AccessControl.FileSystemRights.ReadAndExecute | System.Security.AccessControl.FileSystemRights.WriteData)));
+    }
+
+    [Fact]
+    public void FileOwnerReadsTheOwnerOfAPath()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var dir = Directory.CreateTempSubdirectory("jay-owner-");
+        try
+        {
+            Assert.Equal(UnixIds.EffectiveUserId(), UnixIds.FileOwner(dir.FullName));
+            Assert.Equal(0u, UnixIds.FileOwner("/"));
+            // A link is reported itself, not followed.
+            var link = Path.Combine(dir.FullName, "link");
+            File.CreateSymbolicLink(link, "/");
+            Assert.Equal(UnixIds.EffectiveUserId(), UnixIds.FileOwner(link));
+            Assert.Throws<IOException>(() => UnixIds.FileOwner(Path.Combine(dir.FullName, "missing")));
+        }
+        finally { dir.Delete(true); }
+    }
+
+    [Fact]
+    public void GuardRefusesARootThatSomeoneElseOwns()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        WithCoreStore((root, package, _, _) =>
+        {
+            var store = ElevatedCoreStore.RootForTest!;
+            var someone = UnixIds.EffectiveUserId() == 1234u ? 4321u : 1234u;
+            // The root already exists and belongs to another account: nothing is extracted into it.
+            Directory.CreateDirectory(store);
+            ElevatedCoreStore.OwnerForTest = p => p == store ? someone : UnixIds.FileOwner(p);
+            var e = Assert.Throws<IOException>(() => ElevatedCoreStore.Prepare(package));
+            Assert.Contains("not owned by root", e.Message);
+            Assert.False(Directory.Exists(Path.Combine(store, EasyTierRelease.InstallTag)));
+            // The same for a folder above it.
+            var above = Path.Combine(root, "protected");
+            ElevatedCoreStore.OwnerForTest = p => p == above ? someone : UnixIds.FileOwner(p);
+            Assert.Throws<IOException>(() => ElevatedCoreStore.Prepare(package));
+            Assert.False(Directory.Exists(Path.Combine(store, EasyTierRelease.InstallTag)));
+            // A copy that is already in place, but whose program or folder belongs to another account, is refused too.
+            ElevatedCoreStore.OwnerForTest = null;
+            var core = ElevatedCoreStore.Prepare(package);
+            ElevatedCoreStore.OwnerForTest = p => p == core ? someone : UnixIds.FileOwner(p);
+            Assert.Throws<IOException>(() => ElevatedCoreStore.Prepare(package));
+            var folder = Path.GetDirectoryName(core)!;
+            ElevatedCoreStore.OwnerForTest = p => p == folder ? someone : UnixIds.FileOwner(p);
+            Assert.Throws<IOException>(() => ElevatedCoreStore.Prepare(package));
+            ElevatedCoreStore.OwnerForTest = null;
+            Assert.Equal(core, ElevatedCoreStore.Prepare(package));
+            // A group-writable root is refused as well.
+            File.SetUnixFileMode(store, File.GetUnixFileMode(store) | UnixFileMode.GroupWrite);
+            Assert.Throws<IOException>(() => ElevatedCoreStore.Prepare(package));
+        });
+    }
+
+    [Fact]
+    public void GuardRemovesCopiesOfEarlierBuildsOnceTheCurrentOneChecksOut()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        WithCoreStore((_, package, asset, zip) =>
+        {
+            var store = ElevatedCoreStore.RootForTest!;
+            var older = Path.Combine(store, "2.6.3-jay-0123456789ab");
+            var retired = Path.Combine(store, "2.6.2-jay-0123456789ab.old-0011223344556677");
+            var other = Path.Combine(store, "notes");
+            foreach (var d in new[] { Path.Combine(older, asset.Platform), retired, other }) Directory.CreateDirectory(d);
+            File.WriteAllText(Path.Combine(older, asset.Platform, "easytier-core"), "old");
+            // A package that doesn't check out leaves the earlier copies alone.
+            File.WriteAllBytes(package, [1, 2, 3]);
+            Assert.Throws<InvalidDataException>(() => ElevatedCoreStore.Prepare(package));
+            Assert.True(Directory.Exists(older));
+            File.WriteAllBytes(package, zip);
+            var core = ElevatedCoreStore.Prepare(package);
+            Assert.True(File.Exists(core));
+            Assert.False(Directory.Exists(older));
+            Assert.False(Directory.Exists(retired));
+            Assert.True(Directory.Exists(other)); // not named like a build: never touched
+            Assert.Equal([EasyTierRelease.InstallTag, "notes"], Directory.EnumerateDirectories(store).Select(Path.GetFileName).Order(StringComparer.Ordinal));
+        });
+    }
+
+    [Fact]
+    public void ElevatedGuardRunsCoreFromItsOwnCopyOfThePackage()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        WithCoreStore((_, package, _, _) =>
+        {
+            Thread? host = null;
+            UnixElevatedGuard.LaunchForTest = command =>
+            {
+                var flag = command.ToList().IndexOf(UnixElevatedGuard.GuardFlag);
+                var args = command.Skip(flag).ToArray();
+                host = new Thread(() => UnixElevatedGuardHost.RunForTest(args)) { IsBackground = true };
+                host.Start();
+                return Process.GetCurrentProcess();
+            };
+            UnixElevatedGuard.AcceptAnyUserForTest = true;
+            try
+            {
+                using var guard = UnixElevatedGuard.Start(package, ["one"], new Dictionary<string, string>(), null, "10.233.144.250");
+                guard.WaitForReadyAsync().Wait(TimeSpan.FromSeconds(10));
+                Assert.True(SpinWait.SpinUntil(() => guard.RecentOutput.Any(l => l.StartsWith("from ", StringComparison.Ordinal)), 5000));
+                var from = guard.RecentOutput.First(l => l.StartsWith("from ", StringComparison.Ordinal))["from ".Length..];
+                Assert.StartsWith(ElevatedCoreStore.RootForTest!, from, StringComparison.Ordinal);
+                guard.Dispose();
+                Assert.True(host!.Join(TimeSpan.FromSeconds(10)));
+            }
+            finally
+            {
+                UnixElevatedGuard.LaunchForTest = null;
+                UnixElevatedGuard.AcceptAnyUserForTest = false;
+            }
+        }, "#!/bin/sh\necho \"from $0\"\nexec sleep 30\n");
+    }
+
+    [Fact]
+    public async Task WaitingForThePasswordDialogDoesNotBlockAndCanBeCancelled()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        // A launcher that stays open like a password dialog nobody answers.
+        var dialogPid = 0;
+        UnixElevatedGuard.LaunchForTest = _ =>
+        {
+            var dialog = Process.Start(new ProcessStartInfo("/bin/sh", ["-c", "exec sleep 30"]) { UseShellExecute = false })!;
+            dialogPid = dialog.Id;
+            return dialog;
+        };
+        static bool Running(int pid)
+        {
+            try { using var p = Process.GetProcessById(pid); return !p.HasExited; }
+            catch (ArgumentException) { return false; }
+        }
+        try
+        {
+            using var cts = new CancellationTokenSource();
+            var caller = Environment.CurrentManagedThreadId;
+            var start = UnixElevatedGuard.StartAsync("/nonexistent/package.zip", ["one"], new Dictionary<string, string>(), null, "10.233.144.250", cts.Token);
+            // Returned to the caller while the dialog is still open.
+            Assert.False(start.IsCompleted);
+            cts.CancelAfter(200);
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => start.WaitAsync(TimeSpan.FromSeconds(10)));
+            // The dialog is closed too.
+            Assert.True(SpinWait.SpinUntil(() => !Running(dialogPid), 5000));
+        }
+        finally
+        {
+            UnixElevatedGuard.LaunchForTest = null;
+            if (dialogPid != 0 && Running(dialogPid)) Process.GetProcessById(dialogPid).Kill();
+        }
+    }
+
+    [Fact]
+    public async Task ClosingThePasswordDialogEndsTheWaitAsDeclined()
+    {
+        if (!OperatingSystem.IsLinux()) return;
+        // pkexec exits with 126 when the user closes the dialog.
+        UnixElevatedGuard.LaunchForTest = _ => Process.Start(new ProcessStartInfo("/bin/sh", ["-c", "exit 126"]) { UseShellExecute = false })!;
+        try
+        {
+            var start = UnixElevatedGuard.StartAsync("/nonexistent/package.zip", ["one"], new Dictionary<string, string>(), null, "10.233.144.250");
+            var e = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => start.WaitAsync(TimeSpan.FromSeconds(10)));
+            Assert.Contains(Amber.Core.Localization.L.T("core.mp.component.elevationdeclined.linux"), e.Message);
+        }
+        finally { UnixElevatedGuard.LaunchForTest = null; }
+    }
 }

@@ -12,7 +12,7 @@ public sealed class EasyTierHardenedBuildTests : IDisposable
 
     public static TheoryData<string, Architecture> Platforms => new()
     {
-        { "windows", Architecture.X64 }, { "windows", Architecture.Arm64 }, { "windows", Architecture.X86 },
+        { "windows", Architecture.X64 }, { "windows", Architecture.Arm64 },
         { "macos", Architecture.X64 }, { "macos", Architecture.Arm64 },
         { "linux", Architecture.X64 }, { "linux", Architecture.Arm64 },
     };

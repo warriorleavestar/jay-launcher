@@ -150,6 +150,9 @@ public sealed class EasyTierInstallTests : IDisposable
 
         Assert.True(installer.IsInstalled);
         Assert.Contains(handler.Requests, u => u.Contains("c.test"));
+        // The elevated guard gets the checked download, not the broken bundle.
+        Assert.Equal(installer.KeptPackagePath, installer.PackagePath);
+        Assert.Equal(_good, File.ReadAllBytes(installer.PackagePath));
         // 装好后下载用的临时文件不留。
         Assert.False(File.Exists(Path.Combine(_root, "data", "easytier", "download", _asset.Name)));
     }
@@ -187,6 +190,21 @@ public sealed class EasyTierInstallTests : IDisposable
         var good = Path.Combine(_root, "good.zip");
         File.WriteAllBytes(good, _good);
         await installer.ImportAsync(good).WaitAsync(Bound);
+        Assert.True(installer.IsInstalled);
+        Assert.Equal(_good, File.ReadAllBytes(installer.PackagePath));
+    }
+
+    [Fact]
+    public async Task APackageIsKeptForTheElevatedGuard()
+    {
+        var (installer, _) = Create(_ => Bytes(_good));
+        await installer.EnsureAsync();
+        Assert.True(installer.IsInstalled);
+        Assert.Equal(_good, File.ReadAllBytes(installer.PackagePath));
+        // Without the package (an install from before it was kept) the component counts as missing and is fetched again.
+        File.Delete(installer.KeptPackagePath);
+        Assert.False(installer.IsInstalled);
+        await installer.EnsureAsync();
         Assert.True(installer.IsInstalled);
     }
 
@@ -276,8 +294,10 @@ public sealed class EasyTierInstallTests : IDisposable
     public async Task ImportAndAutomaticInstallIntoTheSameFolderDoNotInterleave(bool automaticFirst)
     {
         var data = Path.Combine(_root, "data-mixed");
-        var (auto, autoHandler) = Create(NoNetwork, Bundle("bundle-mixed"), data);
-        var import = Create(NoNetwork, dataDir: data).Installer;
+        // Both belong to the same Jay, so they share its bundled package: the elevated guard's copy counts toward "installed".
+        var bundle = Bundle("bundle-mixed");
+        var (auto, autoHandler) = Create(NoNetwork, bundle, data);
+        var import = Create(NoNetwork, bundle, data).Installer;
         var zip = WriteFile("import.zip", _good);
         Task Start(EasyTierInstaller i) => i == auto ? i.EnsureAsync() : i.ImportAsync(zip);
         var (holder, waiter) = automaticFirst ? (auto, import) : (import, auto);
@@ -405,5 +425,62 @@ public sealed class EasyTierInstallTests : IDisposable
     {
         Assert.Equal(L.T("common.request_timeout"), EasyTierInstaller.Describe(new TaskCanceledException()));
         Assert.Equal(L.T("common.request_timeout"), EasyTierInstaller.Describe(new TimeoutException("x", new TaskCanceledException())));
+    }
+
+    [Fact]
+    public async Task InstallRemovesOldBuildsButKeepsWorkFoldersAndFolderInUse()
+    {
+        var data = Path.Combine(_root, "data");
+        var easytier = Path.Combine(data, "easytier");
+        var upstream = Path.Combine(easytier, "2.4.5", "test-x64");
+        var oldBuild = Path.Combine(easytier, "2.6.4-jay-0123456789ab", "test-x64");
+        var inUse = Path.Combine(easytier, "2.6.4-jay-ba9876543210", "test-x64");
+        var lobby = Path.Combine(easytier, "lobby");
+        foreach (var dir in new[] { upstream, oldBuild, inUse, lobby }) Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(lobby, "keep.txt"), "work");
+        var downloads = Path.Combine(easytier, "download");
+        Directory.CreateDirectory(downloads);
+        var oldPart = Path.Combine(downloads, "easytier-test-x64-v2.6.3.zip.part");
+        var freshPart = Path.Combine(downloads, "easytier-test-x64-v2.6.5.zip.part");
+        File.WriteAllText(oldPart, "x");
+        File.SetLastWriteTimeUtc(oldPart, DateTime.UtcNow - EasyTierInstaller.StaleDownloadAge - TimeSpan.FromHours(1));
+        File.WriteAllText(freshPart, "x");
+        var bundle = Path.Combine(_root, "bundle");
+        Directory.CreateDirectory(bundle);
+        File.WriteAllBytes(Path.Combine(bundle, _asset.Name), _good);
+        var downloader = new Downloader(new HttpClient(new Handler(_ => throw new InvalidOperationException())), new SourceChain([new OfficialSource()]));
+        var installer = new EasyTierInstaller(downloader, data, bundle, _asset, [])
+        {
+            RunningForTest = () => [Path.Combine(inUse, "easytier-core.exe")],
+        };
+
+        await installer.EnsureAsync();
+
+        Assert.True(installer.IsInstalled);
+        Assert.False(Directory.Exists(Path.GetDirectoryName(upstream)));
+        Assert.False(Directory.Exists(Path.GetDirectoryName(oldBuild)));
+        Assert.True(Directory.Exists(inUse));
+        Assert.True(File.Exists(Path.Combine(lobby, "keep.txt")));
+        Assert.False(File.Exists(oldPart));
+        Assert.True(File.Exists(freshPart));
+    }
+
+    [Fact]
+    public async Task OldBuildsStayWhenARunningEasyTierCannotBeChecked()
+    {
+        var data = Path.Combine(_root, "data");
+        var oldBuild = Path.Combine(data, "easytier", "2.6.4-jay-0123456789ab", "test-x64");
+        Directory.CreateDirectory(oldBuild);
+        var bundle = Path.Combine(_root, "bundle");
+        Directory.CreateDirectory(bundle);
+        File.WriteAllBytes(Path.Combine(bundle, _asset.Name), _good);
+        var downloader = new Downloader(new HttpClient(new Handler(_ => throw new InvalidOperationException())), new SourceChain([new OfficialSource()]));
+        var installer = new EasyTierInstaller(downloader, data, bundle, _asset, []) { RunningForTest = () => null };
+
+        await installer.EnsureAsync();
+        await installer.EnsureAsync();
+
+        Assert.True(installer.IsInstalled);
+        Assert.True(Directory.Exists(oldBuild));
     }
 }

@@ -476,6 +476,10 @@ public sealed class KnockTests : IAsyncDisposable
             var sealedReply = await KnockProtocol.ReadFrameAsync(stream, default);
             var reply = KnockProtocol.ParseJson(receive.DecryptWithAd([], sealedReply));
             var credentials = RoomCredentials.FromJson(reply);
+            // The host hands out the member's room address with the approval, and the joiner's EasyTier uses it.
+            Assert.InRange(credentials.MemberHost!.Value, 2, 254);
+            var joinerOptions = new EasyTierOptions(credentials.ToRoom(), false, [], 15888, MachineId: Guid.NewGuid().ToString());
+            Assert.Equal(EasyTierArgs.Subnet + credentials.MemberHost, EasyTierArgs.VirtualIp(joinerOptions));
             // 不回确认，直接走。
             client.Dispose();
             Assert.True(await WaitAsync(() => { lock (issued) return issued.Count == 1; }));
@@ -648,6 +652,46 @@ public sealed class KnockTests : IAsyncDisposable
             bad[key] = value;
             Assert.Throws<InvalidDataException>(() => RoomCredentials.FromJson(bad));
         }
+    }
+
+    [Fact]
+    public void CredentialsCarryTheMemberAddressAndRejectBadOnes()
+    {
+        var withKey = _credentials with { Member = MemberKey.Create(), MemberHost = 77 };
+        Assert.Equal(77, RoomCredentials.FromJson(withKey.ToJson()).MemberHost);
+        Assert.Equal(77, RoomCredentials.FromJson(withKey.ToJson()).ToRoom().MemberHost);
+        // A host that sends none: the joiner picks its own.
+        Assert.Null(RoomCredentials.FromJson((withKey with { MemberHost = null }).ToJson()).MemberHost);
+        foreach (var value in new System.Text.Json.Nodes.JsonNode[] { 0, 1, 255, 1000, "7" })
+        {
+            var bad = withKey.ToJson();
+            bad["vhost"] = value;
+            Assert.Throws<InvalidDataException>(() => RoomCredentials.FromJson(bad));
+        }
+        Assert.Null(withKey.Rotate().MemberHost);
+    }
+
+    [Fact]
+    public void EveryApprovedMemberGetsTheirOwnAddress()
+    {
+        var table = new MemberTable();
+        var host = table.Issue(RandomNumberGenerator.GetBytes(32), "Host", isHost: true);
+        Assert.Equal(1, host.VirtualHost);
+        var keys = Enumerable.Range(0, 253).Select(_ => RandomNumberGenerator.GetBytes(32)).ToList();
+        var members = keys.Select((k, i) => table.Issue(k, "P" + i)).ToList();
+        // 253 members fill every address from 2 to 254 exactly once.
+        Assert.Equal(Enumerable.Range(2, 253), members.Select(m => m.VirtualHost).Order());
+        // The same person approved again keeps their address.
+        var again = table.Issue(keys[5], "P5");
+        Assert.Equal(members[5].VirtualHost, again.VirtualHost);
+    }
+
+    [Fact]
+    public void FreeAddressAvoidsTakenOnes()
+    {
+        var taken = Enumerable.Range(2, 252).ToList(); // only 254 is left
+        for (var i = 0; i < 20; i++) Assert.Equal(254, MemberTable.FreeVirtualHost(taken));
+        Assert.InRange(MemberTable.FreeVirtualHost(Enumerable.Range(1, 254)), 2, 254);
     }
 
     [Fact]

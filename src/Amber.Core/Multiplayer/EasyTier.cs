@@ -44,11 +44,10 @@ public static class EasyTierRelease
         public string Url => BaseUrl + Name;
 
         /// <summary>
-        /// The WinDivert driver the Windows package ships (full-LAN broadcast relay): WinDivert32.sys in the
-        /// 32-bit package, WinDivert64.sys in the x64 and arm64 ones (arm64's is upstream's placeholder). Null elsewhere.
+        /// The WinDivert driver the Windows package ships (full-LAN broadcast relay): WinDivert64.sys in the x64 and arm64
+        /// ones (arm64's is upstream's placeholder). Null elsewhere.
         /// </summary>
-        public string? DriverName => Platform == "windows-i686" ? "WinDivert32.sys"
-            : Platform.StartsWith("windows-", StringComparison.Ordinal) ? "WinDivert64.sys" : null;
+        public string? DriverName => Platform.StartsWith("windows-", StringComparison.Ordinal) ? "WinDivert64.sys" : null;
     }
 
     /// <summary>The package for this system. Hashes and sizes come from SHA256SUMS.txt and SIZES.txt of the ReleaseTag release.</summary>
@@ -58,7 +57,6 @@ public static class EasyTierRelease
     {
         ("windows", Architecture.X64) => A("windows-x86_64", "cdb113651de1f37244f16d405447806a76cd9012780a4e519ed7eba062306888", 11_621_165, true),
         ("windows", Architecture.Arm64) => A("windows-arm64", "a5ce68a4a6f0e458e10ff3dbabadedacc6ddcf621bd5c4338efe613cabfceefa", 10_643_891, true),
-        ("windows", Architecture.X86) => A("windows-i686", "32e8d1c6b06ba53614c5581295d317f1bcf1d044398631ab486c616e2e9cfe7b", 11_223_763, true),
         ("macos", Architecture.X64) => A("macos-x86_64", "74e059185ba6cc32e3464cad66eab0ff8c86c5cbbb12b51ffaa41dda38a3724b", 12_104_239),
         ("macos", Architecture.Arm64) => A("macos-aarch64", "57063f611183f30804f3104498859166845eaa7b9e93a8a769cedb9eca66bc79", 10_738_210),
         ("linux", Architecture.X64) => A("linux-x86_64", "6ad63ed07f270f2942387d1257ef0db45a31b2e525c73f8aa981c7c94fbcb300", 13_500_986),
@@ -66,10 +64,13 @@ public static class EasyTierRelease
         _ => throw new PlatformNotSupportedException(L.F("core.mp.component.unsupportedplatform", os, arch)),
     };
 
-    /// <summary>Every package of this build, one per supported system.</summary>
+    /// <summary>
+    /// Every package of this build, one per supported system. No 32-bit Windows: every Jay release is 64-bit, so its
+    /// package could never be chosen.
+    /// </summary>
     public static IReadOnlyList<Asset> All =>
     [
-        For("windows", Architecture.X64), For("windows", Architecture.Arm64), For("windows", Architecture.X86),
+        For("windows", Architecture.X64), For("windows", Architecture.Arm64),
         For("macos", Architecture.X64), For("macos", Architecture.Arm64), For("linux", Architecture.X64), For("linux", Architecture.Arm64),
     ];
 
@@ -210,9 +211,19 @@ public sealed class EasyTierInstaller
     public string BundledPath => Path.Combine(_bundledDir, Asset.Name);
     /// <summary>手动导入时需要的文件名。</summary>
     public string ExpectedFileName => Asset.Name;
-    /// <summary>The WinDivert driver (full-LAN broadcast relay on Windows) must be there too; if it's missing, extract again.</summary>
+    /// <summary>
+    /// The WinDivert driver (full-LAN broadcast relay on Windows) must be there too; if it's missing, extract again. So must
+    /// the package itself: the elevated guard checks and extracts it again on its own (<see cref="ElevatedCoreStore"/>).
+    /// </summary>
     public bool IsInstalled => File.Exists(CorePath) && File.Exists(CliPath)
-        && (!OperatingSystem.IsWindows() || Asset.DriverName is not { } driver || File.Exists(Path.Combine(InstallDir, driver)));
+        && (!OperatingSystem.IsWindows() || Asset.DriverName is not { } driver || File.Exists(Path.Combine(InstallDir, driver)))
+        && File.Exists(PackagePath);
+
+    /// <summary>A copy of the checked package, kept for the elevated guard when it didn't come from the bundled one.</summary>
+    public string KeptPackagePath => Path.Combine(_dataDir, "easytier", EasyTierRelease.InstallTag, Asset.Name);
+
+    /// <summary>The package the elevated guard checks and runs easytier-core from: the kept copy, otherwise the bundled one.</summary>
+    public string PackagePath => File.Exists(KeptPackagePath) ? KeptPackagePath : BundledPath;
 
     /// <summary>下载来源，按尝试顺序排列。</summary>
     public IReadOnlyList<(string Name, string Url)> Sources => _sources ?? EasyTierRelease.Sources(Asset, SourceChain.PrefersMirrors());
@@ -246,7 +257,11 @@ public sealed class EasyTierInstaller
         {
             await WhileLocked(ct);
             // Another install may have finished while this one waited.
-            if (IsInstalled) return;
+            if (IsInstalled)
+            {
+                RemoveOldInstalls();
+                return;
+            }
             await InstallAsync(progress, ct);
         }
         finally { gate.Release(); }
@@ -331,7 +346,87 @@ public sealed class EasyTierInstaller
         Extract(zip, InstallDir, Asset);
         MakeExecutable(CorePath);
         MakeExecutable(CliPath);
+        // Keep the checked package for the elevated guard, unless it is the bundled one (which stays where it is).
+        var full = Path.GetFullPath(zip);
+        if (full != Path.GetFullPath(BundledPath) && full != Path.GetFullPath(KeptPackagePath)) File.Copy(full, KeptPackagePath, overwrite: true);
         if (!IsInstalled) throw new InvalidDataException(L.T("core.mp.component.missingexecutable"));
+        RemoveOldInstalls();
+    }
+
+    /// <summary>Install folders of earlier builds: <c>2.4.5</c> (upstream) or <c>2.6.4-jay-0123456789ab</c>.</summary>
+    private static readonly System.Text.RegularExpressions.Regex OldInstallName =
+        new(@"^\d+\.\d+\.\d+(-jay-[0-9a-f]{12})?$", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    /// <summary>A partial download is only removed when no Jay has touched it for this long (an older Jay may still be downloading it).</summary>
+    internal static readonly TimeSpan StaleDownloadAge = TimeSpan.FromDays(1);
+
+    /// <summary>Tests: the full paths of the running EasyTier programs, or null when one could not be read.</summary>
+    internal Func<IReadOnlyList<string>?>? RunningForTest { get; init; }
+
+    /// <summary>
+    /// Once this build is installed: removes the install folders of earlier builds and their downloads, which nothing uses
+    /// any more. Skipped while any EasyTier program runs from an old folder, or when a running one can't be checked (an
+    /// elevated guard's core, for example), since an older Jay open at the same time may be using it. Work folders under
+    /// <c>easytier/</c> are never touched: only folders named like a version are.
+    /// </summary>
+    internal void RemoveOldInstalls()
+    {
+        try
+        {
+            var root = Path.Combine(_dataDir, "easytier");
+            if (!Directory.Exists(root)) return;
+            var old = Directory.EnumerateDirectories(root)
+                .Where(d => Path.GetFileName(d) is var name && name != EasyTierRelease.InstallTag && OldInstallName.IsMatch(name)
+                    && (File.GetAttributes(d) & FileAttributes.ReparsePoint) == 0)
+                .Select(Path.GetFullPath).ToList();
+            if (old.Count > 0)
+            {
+                var running = (RunningForTest ?? RunningEasyTier)();
+                if (running is null) return;
+                foreach (var dir in old)
+                {
+                    var prefix = dir + Path.DirectorySeparatorChar;
+                    if (running.Any(p => p.StartsWith(prefix, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))) continue;
+                    try { Directory.Delete(dir, recursive: true); }
+                    catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+                }
+            }
+            var downloads = Path.Combine(root, "download");
+            if (!Directory.Exists(downloads)) return;
+            foreach (var file in Directory.EnumerateFiles(downloads, "easytier-*"))
+            {
+                var name = Path.GetFileName(file);
+                if (name == Asset.Name || name.StartsWith(Asset.Name + ".", StringComparison.Ordinal)) continue;
+                if (DateTime.UtcNow - File.GetLastWriteTimeUtc(file) < StaleDownloadAge) continue;
+                TryDelete(file);
+            }
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+    }
+
+    /// <summary>Paths of the running easytier-core and easytier-cli programs; null when any of them can't be read.</summary>
+    private static IReadOnlyList<string>? RunningEasyTier()
+    {
+        var paths = new List<string>();
+        foreach (var name in new[] { "easytier-core", "easytier-cli" })
+        {
+            foreach (var process in Process.GetProcessesByName(name))
+            {
+                using (process)
+                {
+                    try
+                    {
+                        if (process.MainModule?.FileName is not { } path) return null;
+                        paths.Add(Path.GetFullPath(path));
+                    }
+                    catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException or NotSupportedException)
+                    {
+                        return null;
+                    }
+                }
+            }
+        }
+        return paths;
     }
 
     /// <summary>把异常说成人话：超时不要显示成“操作已取消”。</summary>
@@ -355,23 +450,26 @@ public sealed class EasyTierInstaller
         var temp = target + ".tmp";
         if (Directory.Exists(temp)) Directory.Delete(temp, true);
         Directory.CreateDirectory(temp);
-        using (var zip = ZipFile.OpenRead(zipPath))
-        {
-            foreach (var entry in zip.Entries)
-            {
-                if (entry.FullName.EndsWith('/')) continue;
-                var name = Path.GetFileName(entry.FullName);
-                if (name.Length == 0 || name.Contains("..")) continue;
-                // 只要命令行程序、它们用的库和 WinDivert 驱动文件（完整局域网模式转发广播用）；网页控制台用不到。
-                if (name != asset.CoreName && name != asset.CliName && name != asset.DriverName
-                    && !name.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)
-                    && !name.EndsWith(".so", StringComparison.Ordinal)
-                    && !name.EndsWith(".dylib", StringComparison.Ordinal)) continue;
-                entry.ExtractToFile(Path.Combine(temp, name), true);
-            }
-        }
+        using (var zip = ZipFile.OpenRead(zipPath)) ExtractEntries(zip, temp, asset);
         if (Directory.Exists(target)) Directory.Delete(target, true);
         Directory.Move(temp, target);
+    }
+
+    /// <summary>The files Jay uses from a package, flattened into <paramref name="dir"/> (also used by the elevated guard).</summary>
+    internal static void ExtractEntries(ZipArchive zip, string dir, EasyTierRelease.Asset asset)
+    {
+        foreach (var entry in zip.Entries)
+        {
+            if (entry.FullName.EndsWith('/')) continue;
+            var name = Path.GetFileName(entry.FullName);
+            if (name.Length == 0 || name.Contains("..")) continue;
+            // 只要命令行程序、它们用的库和 WinDivert 驱动文件（完整局域网模式转发广播用）；网页控制台用不到。
+            if (name != asset.CoreName && name != asset.CliName && name != asset.DriverName
+                && !name.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)
+                && !name.EndsWith(".so", StringComparison.Ordinal)
+                && !name.EndsWith(".dylib", StringComparison.Ordinal)) continue;
+            entry.ExtractToFile(Path.Combine(dir, name), true);
+        }
     }
 
     private static void MakeExecutable(string path)
@@ -493,7 +591,7 @@ public static class EasyTierArgs
         var args = new List<string>
         {
             "--network-name", o.Room.EasyTierNetworkName,
-            "--ipv4", o.IsHost ? HostIp : Subnet + JoinerHost(o.MachineId),
+            "--ipv4", o.IsHost ? HostIp : Subnet + JoinerHost(o),
             "--rpc-portal", $"127.0.0.1:{o.RpcPort}",
             "--hostname", o.IsHost ? "amber-host" : "amber-guest",
             "--instance-name", $"amber-{(o.IsHost ? "host" : "guest")}-{o.RpcPort}",
@@ -605,12 +703,21 @@ public static class EasyTierArgs
     internal static bool SplitsOnThisInstance(EasyTierOptions o) => o.Room.FromInvite && o.Room.Tunnel.Wraps && o.Room.Split.Enabled && !o.Tun;
 
     /// <summary>这次会话里本机的虚拟 IP。</summary>
-    public static string VirtualIp(EasyTierOptions o) => o.IsHost ? HostIp : Subnet + JoinerHost(o.MachineId);
+    public static string VirtualIp(EasyTierOptions o) => o.IsHost ? HostIp : Subnet + JoinerHost(o);
 
     private static bool IsLoopback(string url) =>
         Uri.TryCreate(url.Trim(), UriKind.Absolute, out var u) && (u.IsLoopback || u.Host == "localhost");
 
-    /// <summary>加入方地址的最后一段：2–254，按机器标识稳定地选，避免每次变。</summary>
+    /// <summary>
+    /// The last part of a joiner's address: the one the host handed out with the knock approval, so members don't clash;
+    /// otherwise derived from the machine id the caller passes (callers make a new one for every session).
+    /// </summary>
+    internal static int JoinerHost(EasyTierOptions o) => o.Room.MemberHost ?? JoinerHost(o.MachineId);
+
+    /// <summary>
+    /// 2–254 from the given machine id (or the computer's name when there is none). Callers pass a fresh id per session,
+    /// so this is random per session, not stable per machine, and two members can land on the same value.
+    /// </summary>
     internal static int JoinerHost(string? machineId)
     {
         var seed = machineId ?? System.Environment.MachineName;

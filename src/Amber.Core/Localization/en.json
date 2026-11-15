@@ -934,7 +934,7 @@
   "multiplayer.exit.direct_route": " (direct connection)",
   "multiplayer.exit.peer_label": "Go online through this person (all traffic)",
   "multiplayer.exit.relay_route": " (forwarded by other members or relays; may be slower)",
-  "multiplayer.exit.start_tooltip": "The other member must first turn on “Let people in the room go online through me”. On Windows you will be asked for permission again.",
+  "multiplayer.exit.start_tooltip": "The other member must first turn on “Let people in the room go online through me”. On Windows you will be asked for permission again. While it is on, your computer's name lookups (DNS) also go through them, to the public DNS servers of Cloudflare and Google.",
   "multiplayer.exit.stop": "Stop",
   "multiplayer.exit.stopped": "Stopped going online through a member. Normal access restored.",
   "multiplayer.exit.switch_failed": "Couldn't switch who you go online through; the multiplayer session ended: {0}",

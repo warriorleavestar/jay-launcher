@@ -891,7 +891,7 @@
   "multiplayer.exit.direct_route": "（直連）",
   "multiplayer.exit.peer_label": "藉此人之機上網（盡流）",
   "multiplayer.exit.relay_route": "（經他成員或轉驛中繼，其速稍遲）",
-  "multiplayer.exit.start_tooltip": "彼須先啟「許成員藉吾機上網」。Windows 將復問其權。",
+  "multiplayer.exit.start_tooltip": "彼須先啟「許成員藉吾機上網」。Windows 將復問其權。啟時，君機之名址查詢（DNS）亦經彼而達 Cloudflare 與 Google 之公共 DNS。",
   "multiplayer.exit.stop": "止而復常",
   "multiplayer.exit.stopped": "已止藉他人之機上網，網復常矣",
   "multiplayer.exit.switch_failed": "出口未易，連已終：{0}",

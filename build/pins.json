@@ -45,21 +45,6 @@
       "usedBy": ["src/Amber.Core/Multiplayer/EasyTier.cs", "scripts/bundle-easytier.sh"]
     },
     {
-      "id": "easytier-windows-i686",
-      "name": "EasyTier, Jay's hardened build (Windows x86)",
-      "version": "2.6.4",
-      "tag": "jay-v2.6.4-3",
-      "commit": "9407746b1ce1",
-      "platform": "windows-i686",
-      "file": "easytier-windows-i686-v2.6.4-jay-9407746b1ce1.zip",
-      "urls": ["https://github.com/Yumao-Feather/jay-easytier/releases/download/jay-v2.6.4-3/easytier-windows-i686-v2.6.4-jay-9407746b1ce1.zip"],
-      "source": "https://github.com/Yumao-Feather/jay-easytier",
-      "license": "LGPL-3.0",
-      "sha256": "32e8d1c6b06ba53614c5581295d317f1bcf1d044398631ab486c616e2e9cfe7b",
-      "size": 11223763,
-      "usedBy": ["src/Amber.Core/Multiplayer/EasyTier.cs", "scripts/bundle-easytier.sh"]
-    },
-    {
       "id": "easytier-macos-x86_64",
       "name": "EasyTier, Jay's hardened build (macOS Intel)",
       "version": "2.6.4",
