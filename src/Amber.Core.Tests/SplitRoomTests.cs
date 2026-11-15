@@ -246,9 +246,7 @@ public sealed class SplitRoomTests
                 Assert.True(await SecureStream.ReadExactAsync(stream, back, CancellationToken.None));
                 Assert.Equal(5, back[0]);
             }
-            // Each leg evicts a stalled one only when every slot is taken: a leg that arrives after another finished its
-            // handshake finds a free slot, so between one eviction and one per leg.
-            Assert.InRange(rig.Server.Evicted, 1, ports.Count);
+            Assert.Equal(ports.Count, rig.Server.Evicted);
             Assert.True(rig.Server.PendingHandshakes <= SplitTunnelServer.MaxPendingHandshakes);
         }
         finally
