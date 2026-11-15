@@ -50,6 +50,39 @@ public sealed class RunLifecycleTests : IDisposable
     private static void Drain() => Dispatcher.UIThread.RunJobs();
 
     [Fact]
+    public void CancellingWhileTheSandboxQuestionIsUpEndsTheWaitAndTakesItOffTheBar()
+    {
+        using var service = Service();
+        UiTestThread.Run(() =>
+        {
+            var home = new HomeViewModel(service, new LogViewModel());
+            using var cts = new CancellationTokenSource();
+            var asked = home.AskSandboxForTest(cts.Token);
+            Assert.Contains(service.Requests.Pending, r => r.Spec.DedupeKey == HomeViewModel.SandboxConsentKey);
+            Assert.False(asked.IsCompleted);
+
+            cts.Cancel();
+            Drain();
+            Assert.True(asked.IsCanceled);
+            Assert.DoesNotContain(service.Requests.Pending, r => r.Spec.DedupeKey == HomeViewModel.SandboxConsentKey);
+            Assert.Equal(HomeViewModel.SandboxConsentCancelled, service.Requests.History[0].Choice);
+
+            // The next start asks again, and an answer still counts.
+            var again = home.AskSandboxForTest();
+            var request = service.Requests.Pending.Single(r => r.Spec.DedupeKey == HomeViewModel.SandboxConsentKey);
+            service.Requests.Resolve(request, "later", Amber.Core.Activity.RequestSource.Bar);
+            Drain();
+            Assert.True(again.IsCompletedSuccessfully);
+            Assert.False(again.Result);
+
+            // Already cancelled before asking: nothing is posted.
+            var none = home.AskSandboxForTest(new CancellationToken(true));
+            Assert.True(none.IsCanceled);
+            Assert.Empty(service.Requests.Pending);
+        });
+    }
+
+    [Fact]
     public async Task PrimaryButtonCanCancelWhileItIsPreparing()
     {
         using var server = new TestServer();
@@ -97,6 +130,23 @@ public sealed class RunLifecycleTests : IDisposable
                 await launching.WaitAsync(TimeSpan.FromSeconds(1));
             }
         }
+        // The session stays for the start button, but the ended run no longer listens to its steps (nothing holds the run).
+        UiTestThread.Run(() => Assert.False(home!.SessionOf("A")?.Steps?.HasListeners ?? false));
+    }
+
+    [Fact]
+    public void ARemovedRunLetsGoOfItsSteps()
+    {
+        using var service = Service();
+        UiTestThread.Run(() =>
+        {
+            var home = new HomeViewModel(service, new LogViewModel());
+            var run = home.AddPreparingRunForTest("A");
+            var steps = HomeViewModel.StepsForTest(run);
+            Assert.True(steps.HasListeners);
+            home.RemoveRunForTest(run);
+            Assert.False(steps.HasListeners);
+        });
     }
 
     [Fact]

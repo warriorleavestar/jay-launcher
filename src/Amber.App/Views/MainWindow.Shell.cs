@@ -83,6 +83,7 @@ public partial class MainWindow
         AttachLogDock();
         AddHandler(KeyDownEvent, OnShellKeyDown, RoutingStrategies.Tunnel);
         AddHandler(PointerPressedEvent, OnShellPointerPressed, RoutingStrategies.Tunnel);
+        AddHandler(GotFocusEvent, OnRequestFocus, RoutingStrategies.Bubble, handledEventsToo: true);
         ApplyShell();
     }
 
@@ -336,8 +337,27 @@ public partial class MainWindow
         return regions[next].Target.Focus(NavigationMethod.Tab);
     }
 
+    /// <summary>
+    /// Keyboard focus coming into a request (F6, Tab) lands on its safe choice, whatever comes first in the layout
+    /// (the "why" link above the buttons, say). Clicks are left alone.
+    /// </summary>
+    private void OnRequestFocus(object? sender, FocusChangedEventArgs e)
+    {
+        if (e.NavigationMethod is not (NavigationMethod.Tab or NavigationMethod.Directional) || e.NewFocusedElement is not Visual now) return;
+        var item = now.GetSelfAndVisualAncestors().OfType<Control>().Select(c => c.DataContext).OfType<RequestItem>().FirstOrDefault();
+        // The outermost control of that request (its template root).
+        var request = item is null ? null : now.GetSelfAndVisualAncestors().OfType<Control>().LastOrDefault(c => ReferenceEquals(c.DataContext, item));
+        if (request is null || !RequestBar.IsVisualAncestorOf(request)) return;
+        if (e.OldFocusedElement is Visual before && (before == request || request.IsVisualAncestorOf(before))) return;
+        if (DefaultChoice(request) is { } safe && safe != now) safe.Focus(NavigationMethod.Tab);
+    }
+
+    /// <summary>The safe choice of the request shown in <paramref name="area"/>, or null.</summary>
+    internal static Button? DefaultChoice(Control area) =>
+        area.GetVisualDescendants().OfType<Button>().FirstOrDefault(b => b.Classes.Contains("request-default") && b.IsEffectivelyVisible && b.IsEffectivelyEnabled);
+
     private static InputElement? FirstFocusable(Control region) =>
-        region.GetVisualDescendants().OfType<InputElement>().FirstOrDefault(c => c.Focusable && c.IsEffectivelyVisible && c.IsEffectivelyEnabled
+        DefaultChoice(region) ?? region.GetVisualDescendants().OfType<InputElement>().FirstOrDefault(c => c.Focusable && c.IsEffectivelyVisible && c.IsEffectivelyEnabled
             && c is not ScrollViewer && c is not ContentControl { Content: null } && c.Bounds.Width > 0 && KeyboardNavigation.GetIsTabStop(c));
 
     private static async Task PasteCodeAsync(MainViewModel main)

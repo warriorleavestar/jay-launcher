@@ -37,6 +37,9 @@ public sealed class LaunchSession(string instanceId, DateTimeOffset started)
     /// <summary>失败、崩溃时的一句话原因。</summary>
     public string? Reason { get; private set; }
 
+    /// <summary>The steps of this start (check files, Java, prepare mods, sandbox, start, window), as they run.</summary>
+    public LaunchSteps Steps { get; set; } = new();
+
     public bool IsActive => State is LaunchState.Preparing or LaunchState.Entering or LaunchState.Playing or LaunchState.Exiting;
     public bool HasProcess => State is LaunchState.Entering or LaunchState.Playing or LaunchState.Exiting;
 

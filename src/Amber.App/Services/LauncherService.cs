@@ -502,7 +502,10 @@ public sealed class LauncherService : IDisposable
         var decision = DecideWindowsSandbox(javaPath);
         if (decision.AskFirst)
         {
-            if (!await ask())
+            var allowed = await ask();
+            // A cancel that came with the answer: no admin prompt, and nothing remembered.
+            ct.ThrowIfCancellationRequested();
+            if (!allowed)
             {
                 RememberSandboxFallback(WindowsSandboxPolicy.Refused, null);
             }

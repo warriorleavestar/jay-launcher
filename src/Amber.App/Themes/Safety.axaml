@@ -113,6 +113,20 @@
       <Setter Property="BorderBrush" Value="{DynamicResource Focus}" />
       <Setter Property="BorderThickness" Value="2" />
     </Style>
+    <!-- A quiet text button inside a safety surface ("Why is Windows asking?"): still locked, never themed. -->
+    <Style Selector="^.link">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Padding" Value="0,2" />
+      <Setter Property="MinWidth" Value="0" />
+      <Setter Property="MinHeight" Value="0" />
+      <Setter Property="FontSize" Value="12" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Foreground" Value="{DynamicResource SafetyFrame}" />
+    </Style>
+    <Style Selector="^.link:pointerover /template/ Border#PART_Border">
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
     <Style Selector="^:disabled /template/ Border#PART_Border">
       <Setter Property="Background" Value="{DynamicResource DisabledFill}" />
     </Style>

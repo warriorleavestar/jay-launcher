@@ -59,6 +59,8 @@ public sealed partial class RunItem(LaunchSession session) : ObservableObject
 
     public string StateText => Session.State switch
     {
+        // While starting: the step running now ("Prepare mods with the Jay loader 12/87", and when it is slow, what it waits on).
+        LaunchState.Preparing or LaunchState.Entering when Session.Steps.Current is { } step => step.StatusLine(),
         LaunchState.Preparing => L.T("activity.run.preparing"),
         LaunchState.Entering => L.T("activity.run.entering"),
         LaunchState.Playing => L.F("activity.run.playing", (int)Session.PlayTime(DateTimeOffset.Now).TotalMinutes),
@@ -78,6 +80,13 @@ public sealed partial class RequestButton(RequestItem owner, RequestChoice choic
     public RequestChoice Choice { get; } = choice;
     public string Label => Choice.Label;
 
+    /// <summary>The safe choice: first, and where keyboard focus lands when it comes into the request.</summary>
+    public bool IsDefault => Choice.IsDefault;
+
+    /// <summary>How the locked safety banner draws it (the same as the pinned request window).</summary>
+    public Amber.App.Controls.Safety.SafetyKind Kind => Choice.IsDanger ? Amber.App.Controls.Safety.SafetyKind.Danger
+        : Choice.IsDefault ? Amber.App.Controls.Safety.SafetyKind.Safe : Amber.App.Controls.Safety.SafetyKind.Confirm;
+
     [RelayCommand]
     private void Choose() => owner.Choose(Choice.Id);
 }
@@ -91,13 +100,25 @@ public sealed partial class RequestItem : ObservableObject
     {
         _center = center;
         Handle = handle;
-        Buttons = handle.Spec.Choices.Select(c => new RequestButton(this, c)).ToList();
+        // A safety request puts the safe choice first, so neither the eye nor Tab meets "Allow" before it.
+        var choices = handle.Spec.IsSafety ? handle.Spec.Choices.OrderByDescending(c => c.IsDefault).ToList() : handle.Spec.Choices.ToList();
+        Buttons = choices.Select(c => new RequestButton(this, c)).ToList();
     }
 
     public RequestHandle Handle { get; }
     public string Title => Handle.Spec.Title;
     public string? Body => Handle.Spec.Body;
     public bool HasBody => !string.IsNullOrEmpty(Body);
+    public string? Note => Handle.Spec.Note;
+    public bool HasNote => !string.IsNullOrEmpty(Note);
+    public string? Details => Handle.Spec.Details;
+    public bool HasDetails => !string.IsNullOrEmpty(Details);
+    /// <summary>The disclosure's text: what it opens, or 收起 while open.</summary>
+    public string DetailsLabel => ShowDetails ? L.T("activity.request.details_hide") : Handle.Spec.DetailsLabel ?? L.T("activity.request.details");
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(DetailsLabel))] public partial bool ShowDetails { get; set; }
+
+    [RelayCommand]
+    private void ToggleDetails() => ShowDetails = !ShowDetails;
     public bool IsSafety => Handle.Spec.IsSafety;
     public IReadOnlyList<RequestButton> Buttons { get; }
 
@@ -303,6 +324,7 @@ public sealed partial class ActivityViewModel : ObservableObject
             Runs.FirstOrDefault(r => r.Session == session)?.Refresh();
             RaisePill();
         });
+        session.Steps.Changed += () => Dispatcher.UIThread.Post(() => Runs.FirstOrDefault(r => r.Session == session)?.Refresh());
         _pill = null;
         OnPropertyChanged(nameof(HasRuns));
         RaisePill();
