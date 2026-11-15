@@ -72,6 +72,25 @@ public static partial class ErrorReport
         return text;
     }
 
+    /// <summary>
+    /// Replaces known local folders (an app's data, cache or runtime folder, for example) with placeholders such as
+    /// <c>&lt;files&gt;</c>. The longest folder goes first, so a folder inside another one keeps its own placeholder.
+    /// Only whole path segments match: <c>/data/files</c> does not touch <c>/data/files2</c>.
+    /// </summary>
+    public static string RedactPaths(string text, IEnumerable<(string Directory, string Placeholder)> directories)
+    {
+        var options = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? RegexOptions.IgnoreCase : RegexOptions.None;
+        foreach (var (directory, placeholder) in directories
+                     .Select(d => (Directory: Path.TrimEndingDirectorySeparator(d.Directory ?? ""), d.Placeholder))
+                     .Where(d => d.Directory.Length > 3)
+                     .OrderByDescending(d => d.Directory.Length))
+        {
+            foreach (var spelling in new[] { directory, directory.Replace('\\', '/') }.Distinct())
+                text = Regex.Replace(text, Regex.Escape(spelling) + @"(?![A-Za-z0-9._\-])", placeholder.Replace("$", "$$"), options);
+        }
+        return text;
+    }
+
     [GeneratedRegex(@"(--(?:accessToken|session|uuid|xuid|clientId|userProperties))\s+(?:""[^""]*""|\S+)", RegexOptions.IgnoreCase)]
     private static partial Regex ArgSecret();
 
