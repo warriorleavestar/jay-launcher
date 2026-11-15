@@ -1,6 +1,6 @@
 # Directory identity
 
-Status: implemented and waiting for security review. Every directory request goes through this channel; the old plaintext JSON protocol is gone. Pinning is per network and nothing is pinned yet for the built-in Jay network. Code: `src/Amber.Core/Multiplayer/Public/DirectoryChannel.cs`. Tests: `src/Amber.Core.Tests/DirectoryIdentityTests.cs`.
+Status: implemented and waiting for security review. Every directory request goes through this channel; the old plaintext JSON protocol is gone. The built-in Jay network accepts only directories certified by the Jay trust keys (`JayTrust`); other networks pin keys, name root keys, or fall back to first use. Code: `src/Amber.Core/Multiplayer/Public/DirectoryChannel.cs`. Tests: `src/Amber.Core.Tests/DirectoryIdentityTests.cs`.
 
 ## The problem
 
@@ -21,14 +21,14 @@ The address proves nothing, so Jay needs to know it is talking to the directory 
 
 ## The fix
 
-A network can pin its directory nodes' keys in its signed connection string. When it has, Jay checks that the other end holds one of those keys before it sends anything.
+A network can pin its directory nodes' keys in its signed connection string, or name root keys (`dirRoots`) that certify them (see zero-leak-codes.md, "Directory trust"). When it has, Jay checks that the other end holds a pinned or certified key before it sends anything.
 
 ### Keys and where they come from
 
 - Each directory node has an X25519 key pair in `directory.key` in its data dir. The node makes it on first start, and the file is created mode 0600 on Unix. `jay-server directory` prints the public key at startup, and `/health` reports it as `directoryKey`.
 - `jay-server network dir-key <network.json> --dir <node data dir>` adds the node's public key to the network JSON's `"dirKeys"` array and bumps `seq`. The operator then re-signs the network (`jay-server network sign`).
-- `NetworkInfo.DirectoryKeys` is base64 in JSON. You can pin 1 to 8 keys (four directory nodes, each with a spare slot for rotation), and each must be 32 bytes. `NetworkString.Validate` enforces both limits. The connection string's Ed25519 signature covers the raw JSON bytes, so the keys are as trustworthy as the string: the registry's signature for reviewed networks, or the user's own confirmation for unreviewed ones.
-- Older Jay versions ignore unknown fields, so adding `dirKeys` doesn't break them. They keep using the unauthenticated protocol (see Downgrade below).
+- `NetworkInfo.DirectoryKeys` is base64 in JSON. You can pin 1 to 8 keys (four directory nodes, each with a spare slot for rotation), and each must be 32 bytes. `NetworkString.Validate` enforces both limits. The connection string's hybrid Ed25519 + ML-DSA-65 signatures cover the raw JSON bytes, so the keys are as trustworthy as the string: the registry's signature for reviewed networks, or the user's own confirmation for unreviewed ones.
+- Older Jay versions ignore unknown fields, so adding `dirKeys` doesn't break them. Jay versions from before this channel cannot reach a directory at all (see Old clients below).
 - `PublicNetworkProfile.DirectoryKeys` carries the keys to `RoomDirectoryClient`, through `IPublicNetwork.Profile`.
 
 ### Protocol
@@ -38,7 +38,7 @@ Each connection carries one request, using `Noise_XXhfspsk0_25519+MLKEM768_ChaCh
 | Step | Direction | Content |
 |---|---|---|
 | 1 | Jay → directory | `psk, e, e1` with an empty payload (32 + 1184 + 16 + 16 = 1248 bytes) |
-| 2 | directory → Jay | `e, ee, ekem1, s, es` with an empty payload. Jay decrypts the directory's static key `s` and checks the tag, which proves the directory holds the private half of `s` (the `es` DH). Jay compares `s` in constant time against every pinned key. If none matches, Jay throws `DirectoryImpostorException` and closes the connection. Message 3 is never written, so the request never leaves the machine. |
+| 2 | directory → Jay | `e, ee, ekem1, s, es` with the directory's certificate as payload (empty when it has none). Jay decrypts the directory's static key `s` and checks the tag, which proves the directory holds the private half of `s` (the `es` DH). Jay compares `s` in constant time against every pinned key, or checks the certificate against the network's root keys. If neither accepts it, Jay throws `DirectoryImpostorException` and closes the connection. Message 3 is never written, so the request never leaves the machine. |
 | 3 | Jay → directory | `s, se`, with the JSON request as payload. Jay's static key is a throwaway generated for this connection, so the directory learns nothing that links two requests. |
 | 4 | directory → Jay | One ChaCha20-Poly1305 record: the JSON reply under the responder's split key, with nonce 0 and AD `"jay-directory-v2"`. |
 
@@ -48,7 +48,7 @@ Details:
 - **Psk.** `HKDF-SHA256(ikm = network EasyTier secret, salt = prologue, info = "jay-directory-psk-v1")`. The secret is public for public networks, so the psk only keeps handshakes of different networks apart. It is not an authentication factor; the pinned static key is.
 - **Framing.** Every message is a 2-byte big-endian length followed by the bytes. The request JSON is capped at `RoomDirectoryProtocol.MaxLine`. The reply is one encrypted frame holding the JSON, readable by every Jay version. A `snap` reply instead starts with one encrypted frame holding its 4-byte length (first byte 0, which no JSON starts with), then encrypted frames of at most `MaxLine` bytes each, up to `RoomDirectoryProtocol.MaxReply` (16 MB, for a full snapshot), padded with spaces to a multiple of 64 KB.
 - **Old clients.** There is no plaintext protocol any more. An old Jay's JSON request starts with `{` (0x7B) and is dropped at once; a Noise frame starts with the high byte of its length, 0x04 for the 1248-byte first message. A directory with no configured key uses a throwaway one, so the channel is still encrypted; clients can then only trust it on first use.
-- **Server failures.** A first frame that isn't exactly 1248 bytes is dropped before any DH or ML-KEM work. Any other handshake or decrypt failure on the server just closes the connection. The existing 64-slot concurrency cap and the request timeout apply to both protocols.
+- **Server failures.** A first frame that isn't exactly 1248 bytes is dropped before any DH or ML-KEM work. Any other handshake or decrypt failure on the server just closes the connection. The existing 64-slot concurrency cap and the request timeout apply to every request.
 
 ### Downgrade
 
@@ -63,8 +63,8 @@ Details:
 
 ## What this does not cover
 
-- **The built-in Jay network.** `PublicNetworkProfile.JayNodes` is still empty, so nothing is pinned yet. When the author deploys the official nodes, their keys have to be compiled in (`PublicNetworkProfile.Jay()` would set `DirectoryKeys`).
-- **Unpinned networks.** Networks without `dirKeys`, and Jay clients older than this change, are unprotected. PR #137 also adds a client guard, `PublicNetwork.IsMemberAddress`, which stops counting a directory address as "connected" when the peer at it is an ordinary member. That is a heuristic, not authentication.
+- **The built-in Jay network.** It uses directory certificates signed by the Jay trust keys (`DirectoryRoots` = `JayTrust`). `PublicNetworkProfile.JayNodes` is still empty, so there are no official nodes yet.
+- **Unpinned networks.** Networks with neither `dirKeys` nor `dirRoots` are protected only by first use. PR #137 also adds a client guard, `PublicNetworkSession.IsMemberAddress`, which stops counting a directory address as "connected" when the peer at it is an ordinary member. That is a heuristic, not authentication.
 - **Denial of service.** A member who takes the address can still drop traffic. Backups at other addresses reduce the impact.
 - **A malicious real directory.** The directory is still trusted with everything it legitimately sees. Room listings stay signed by hosts, and the knock handshake still authenticates hosts end to end.
 - **Traffic analysis.** Someone inside EasyTier, such as a relay node, sees that a member talked to the directory, and roughly how much.

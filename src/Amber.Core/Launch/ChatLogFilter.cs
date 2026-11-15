@@ -207,9 +207,6 @@ public static partial class ChatLogFilter
         }
     }
 
-    /// <summary>这个版本的版本文件里有没有 log4j2 配置。</summary>
-    public static bool Supported(VersionJson version) => version.Logging?.GetValueOrDefault("client") is { Argument: not null, File: not null };
-
     /// <summary>classpath 里有 log4j（有的话游戏会写 latest.log）。</summary>
     public static bool UsesLog4j(IEnumerable<string> classpath) =>
         classpath.Any(p => Path.GetFileName(p).StartsWith("log4j-core", StringComparison.OrdinalIgnoreCase));
