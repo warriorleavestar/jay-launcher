@@ -24,6 +24,13 @@ public sealed class InstanceSettings
     public string? PostExitCommand { get; set; }
     public string? JoinServer { get; set; }
     /// <summary>
+    /// "Start and go to…": title, world, server or room (<see cref="QuickPlay.Key"/>). Null means as before: the
+    /// server above when one is set, else the title screen. Per instance, never taken from the defaults.
+    /// </summary>
+    public string? StartInto { get; set; }
+    /// <summary>The world folder (under saves) for <c>StartInto = "world"</c>.</summary>
+    public string? StartWorld { get; set; }
+    /// <summary>
     /// Launch through the universal loader, which prepares mods from other ecosystems ahead of time. Null on an instance
     /// means "as the default says" (Settings › Game › Universal loader).
     /// </summary>
@@ -100,6 +107,8 @@ public sealed class InstanceSettings
         PreLaunchCommand = Empty(PreLaunchCommand) ?? fallback.PreLaunchCommand,
         PostExitCommand = Empty(PostExitCommand) ?? fallback.PostExitCommand,
         JoinServer = Empty(JoinServer) ?? fallback.JoinServer,
+        StartInto = StartInto,
+        StartWorld = Empty(StartWorld),
         UniversalLoader = UniversalLoader ?? fallback.UniversalLoader,
     };
 

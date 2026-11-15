@@ -176,8 +176,8 @@ public sealed class GameLauncher(GameDirectory dir)
             ["launcher_version"] = options.LauncherVersion,
             ["resolution_width"] = options.WindowWidth?.ToString() ?? "854",
             ["resolution_height"] = options.WindowHeight?.ToString() ?? "480",
-            ["quickPlayMultiplayer"] = options.JoinServer ?? "",
-            ["quickPlaySingleplayer"] = options.JoinWorld ?? "",
+            ["quickPlayMultiplayer"] = OwnJoinServer(options) ?? "",
+            ["quickPlaySingleplayer"] = OwnJoinWorld(options) ?? "",
         };
 
         var args = new List<string>
@@ -269,7 +269,7 @@ public sealed class GameLauncher(GameDirectory dir)
 
         // 1.20 以上的版本 JSON 里有快速进入参数，由上面的 feature 打开；更老的版本用 --server。
         var hasQuickPlay = version.Arguments?.Game.Any(e => e.ToString().Contains("quickPlayMultiplayer", StringComparison.Ordinal)) == true;
-        if (options.JoinServer is { } server && !hasQuickPlay)
+        if (OwnJoinServer(options) is { } server && !hasQuickPlay)
         {
             var (host, port) = ServerList.ParseAddress(server);
             args.AddRange(["--server", host, "--port", port.ToString()]);
@@ -282,10 +282,18 @@ public sealed class GameLauncher(GameDirectory dir)
     {
         var features = new HashSet<string>();
         if (options.WindowWidth is not null) features.Add("has_custom_resolution");
-        if (options.JoinServer is not null) features.Add("is_quick_play_multiplayer");
-        if (options.JoinWorld is not null) features.Add("is_quick_play_singleplayer");
+        if (OwnJoinServer(options) is not null) features.Add("is_quick_play_multiplayer");
+        if (OwnJoinWorld(options) is not null) features.Add("is_quick_play_singleplayer");
+        // has_quick_plays_support (the game writing a quick play log) is never on.
         return features;
     }
+
+    /// <summary>
+    /// The server / world Jay joins with its own arguments: none when the universal loader's launch block already
+    /// carries the quick play (bake interface 1.3.3); then every is_quick_play_* rule is false and no --server is added.
+    /// </summary>
+    private static string? OwnJoinServer(LaunchOptions options) => options.Baked?.QuickPlay is null ? options.JoinServer : null;
+    private static string? OwnJoinWorld(LaunchOptions options) => options.Baked?.QuickPlay is null ? options.JoinWorld : null;
 
     /// <summary>准备 natives 与旧版资源后启动游戏。路径含系统语言表示不了的字符时改用英文名的联接启动。</summary>
     public Process Launch(LaunchOptions options, Action<string>? onOutput = null)
