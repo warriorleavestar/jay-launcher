@@ -40,7 +40,9 @@ public sealed class TouchInputRouter
             control = null;
         if (control is null)
         {
-            var clickOnRelease = controlsEnabled && Profile.Mode != TouchControlMode.JoystickAndCrosshair;
+            // Every touch scheme uses the same Bedrock-style interaction: tap to interact,
+            // hold to mine and drag to look. Crosshair mode changes aiming, not the gesture set.
+            var clickOnRelease = controlsEnabled;
             var pointerHeld = !controlsEnabled;
             TouchControlAction? heldAction = pointerHeld
                 ? IsMenuSplitModifierHeld() ? TouchControlAction.SecondaryAction : TouchControlAction.PrimaryAction
@@ -68,7 +70,6 @@ public sealed class TouchInputRouter
 
     public bool BeginLongPress(int pointerId)
     {
-        if (Profile.Mode == TouchControlMode.JoystickAndCrosshair) return false;
         if (!_pointers.TryGetValue(pointerId, out var pointer) ||
             pointer.Action is not null || pointer.HasDragged || pointer.LongPressAction ||
             !pointer.ClickOnRelease)
