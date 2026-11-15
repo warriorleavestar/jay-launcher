@@ -316,8 +316,31 @@ public sealed class DirectBridge : IAsyncDisposable
     public IReadOnlySet<IPAddress>? Ipv6Allowed
     {
         get => Volatile.Read(ref _ipv6Allowed);
-        set => Volatile.Write(ref _ipv6Allowed, value);
+        // Under the same lock that checks and registers a new peer: once this returns, no peer that passed the old
+        // limit is still on its way in.
+        set
+        {
+            lock (_peerGate) Volatile.Write(ref _ipv6Allowed, value);
+        }
     }
+
+    /// <summary>
+    /// Limits new IPv6 peers to the addresses of the peers this bridge has now, and returns those peers, in one step
+    /// with registering: a peer is either in the returned list or turned away by the limit, never neither.
+    /// </summary>
+    public IReadOnlyList<DirectPeer> HoldNewIpv6()
+    {
+        lock (_peerGate)
+        {
+            List<DirectPeer> now = [.. _peers.Values];
+            Volatile.Write(ref _ipv6Allowed, now.Select(p => p.Remote.Address.IsIPv4MappedToIPv6 ? p.Remote.Address.MapToIPv4() : p.Remote.Address)
+                .Where(a => a.AddressFamily == AddressFamily.InterNetworkV6).ToHashSet());
+            return now;
+        }
+    }
+
+    /// <summary>Tests: runs inside the registration lock just before a new peer is registered.</summary>
+    internal Action? BeforeRegisterForTest { get; set; }
     private IReadOnlySet<IPAddress>? _ipv6Allowed;
     private long _ipv6HeldLogged;
 
@@ -769,6 +792,7 @@ public sealed class DirectBridge : IAsyncDisposable
             _pausedPeers.Clear();
         }
         var peer = new DirectPeer { Remote = from, Path = path, ConnectedMs = _clock.ElapsedMilliseconds, TargetPort = LobbyPort ?? LocalPort, Admitted = LobbyPort is null };
+        BeforeRegisterForTest?.Invoke();
         if (_isHost)
         {
             // 每个加入方一个本机套接字，去连本机 EasyTier 的监听端口。先建好再登记：建不了就不接这个加入方，

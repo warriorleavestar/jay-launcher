@@ -200,6 +200,35 @@ public sealed class ExitPeerTrustTests
     }
 
     [Fact]
+    public async Task APeerBeingRegisteredIsEitherInTheHoldSnapshotOrHeld()
+    {
+        // A new peer that already passed the limit check and is being registered when the switch takes its snapshot:
+        // the snapshot waits for the registration, so the peer is in it (then waited for and planned), never lost.
+        await using var host = new DirectBridge(DirectBridge.CreateSocket(), DirectTestKeys.Bridge, true, 1, _ => { });
+        using var registering = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        host.BeforeRegisterForTest = () =>
+        {
+            registering.Set();
+            release.Wait(TimeSpan.FromSeconds(10));
+        };
+        using var guest = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
+        using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await guest.SendAsync(host.Seal(Probe, [Guest]), new IPEndPoint(IPAddress.Loopback, host.SocketEndPoint.Port), limit.Token);
+        Assert.True(registering.Wait(TimeSpan.FromSeconds(10)));
+        host.BeforeRegisterForTest = null;
+
+        var snapshot = Task.Run(host.HoldNewIpv6);
+        await Task.Delay(200, limit.Token);
+        Assert.False(snapshot.IsCompleted);
+        release.Set();
+        var peers = await snapshot.WaitAsync(limit.Token);
+        Assert.Single(peers);
+        Assert.Equal(((IPEndPoint)guest.Client.LocalEndPoint!).Port, peers[0].Remote.Port);
+        Assert.NotNull(host.Ipv6Allowed);
+    }
+
+    [Fact]
     public async Task WithAnIpv6LimitNewIpv6PeersOutsideItAreTurnedAwayAndIpv4IsNot()
     {
         if (!Socket.OSSupportsIPv6) return;

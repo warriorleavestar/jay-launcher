@@ -356,7 +356,7 @@ public sealed class DirectSession : IAsyncDisposable
             {
                 // From here no IPv6 peer the bridge doesn't have yet gets in: one arriving after the addresses are fixed
                 // would be cut off by the gate. Peers already here may finish joining, and are waited for.
-                HoldIpv6([.. CurrentBridgePeers().Select(p => p.Remote.Address)]);
+                HoldNewIpv6();
                 var bearers = await BearersVerifiedAsync(() => BridgePeersCarryingTheRoom(IsHost, UsingFallbackNode,
                     CurrentBridgePeers()), BearerWait, ct);
                 if (bearers == BearerWaitResult.Outdated) throw new IOException(L.T("core.mp.session.bearer_outdated"));
@@ -388,6 +388,17 @@ public sealed class DirectSession : IAsyncDisposable
 
     /// <summary>Tests: sees every change of the bridge's IPv6 limit (see <see cref="DirectBridge.Ipv6Allowed"/>).</summary>
     internal Action<IReadOnlySet<IPAddress>?>? Ipv6HoldForTest { get; init; }
+
+    /// <summary>No new IPv6 peers from addresses the bridge doesn't have now, set atomically with its registrations.</summary>
+    private void HoldNewIpv6()
+    {
+        if (Bridge is { } bridge)
+        {
+            bridge.HoldNewIpv6();
+            Ipv6HoldForTest?.Invoke(bridge.Ipv6Allowed);
+        }
+        else HoldIpv6([.. CurrentBridgePeers().Select(p => p.Remote.Address)]);
+    }
 
     private void HoldIpv6(IEnumerable<IPAddress>? allowed)
     {
