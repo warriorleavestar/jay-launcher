@@ -175,7 +175,12 @@ public sealed partial class MultiplayerViewModel
         };
         PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName is nameof(Mode) or nameof(Tab)) OnPropertyChanged(nameof(ShowRoomHeader));
+            if (e.PropertyName is nameof(Mode) or nameof(Tab))
+            {
+                OnPropertyChanged(nameof(ShowRoomHeader));
+                OnPropertyChanged(nameof(ShowLobbySandboxLine));
+                OnPropertyChanged(nameof(ShowRoomSandboxLine));
+            }
             if (e.PropertyName == nameof(NetworkCheckText))
             {
                 OnPropertyChanged(nameof(NetworkVerdict));

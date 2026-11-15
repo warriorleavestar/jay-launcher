@@ -95,6 +95,26 @@ internal sealed partial class SelfTest
             var child = await WaitAsync(() => Dispatcher.UIThread.Invoke(() => window.RevealedField?.Name == "ChildModeBox" && window.RevealedField.IsEffectivelyVisible), 3);
             Check("settings#ChildMode 定位到总开关", child);
             await ShotAsync("settings-privacy-child-1440");
+
+            // The game sandbox card, right after the network list: status, the strong mode switch, quiet buttons.
+            main.Shell.Navigate("settings#GameSandbox");
+            var sandboxCard = await WaitAsync(() => Dispatcher.UIThread.Invoke(() => window.RevealedField?.Name == "GameSandbox" && window.RevealedField.IsEffectivelyVisible), 3);
+            Check("settings#GameSandbox 定位到游戏沙盒卡片", sandboxCard);
+            var order = Dispatcher.UIThread.Invoke(() =>
+            {
+                var cards = window.PageHost.GetVisualDescendants().OfType<Border>().Where(b => b.Classes.Contains("card") && b.IsEffectivelyVisible).ToList();
+                var list = cards.FindIndex(b => b.GetVisualDescendants().OfType<Control>().Any(c => c.Name == "NetworkListBox"));
+                var card = cards.FindIndex(b => b.Name == "GameSandbox");
+                return (list, card);
+            });
+            Check("游戏沙盒卡片紧跟在联网清单那张卡后面", order.list >= 0 && order.card == order.list + 1, $"{order.list} {order.card}");
+            Check("卡片里：状态一行，Windows 上强沙盒是和这页其他项一样的勾选框", Dispatcher.UIThread.Invoke(() =>
+                window.PageHost.GetVisualDescendants().OfType<TextBlock>().Any(t => t.Name == "SandboxStatusLine" && t.IsEffectivelyVisible && t.Text == settings.SandboxStatusText)
+                && (!OperatingSystem.IsWindows() || window.PageHost.GetVisualDescendants().OfType<CheckBox>().Any(t => t.Name == "StrongSandboxBox" && t.IsEffectivelyVisible))),
+                settings.SandboxStatusText);
+            Check("卡片里：撤掉沙盒权限 / 重试强沙盒是不显眼的按钮", Dispatcher.UIThread.Invoke(() =>
+                window.PageHost.GetVisualDescendants().OfType<Button>().Where(b => b.Name is "RetryStrongSandboxButton" or "RemoveSandboxPermissionsButton").All(b => b.Classes.Contains("ghost"))));
+            await ShotAsync("settings-privacy-sandbox-1440");
             main.Shell.Navigate("about");
             await Task.Delay(300);
             Check("关于页写“给孩子用：开 · 上次改动…”", about.ChildModeText == settings.ChildModeStatusText, about.ChildModeText);

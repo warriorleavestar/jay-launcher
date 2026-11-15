@@ -287,8 +287,13 @@ public sealed partial class MultiplayerViewModel
     /// </summary>
     public bool RunsWithoutSandbox => _service.Settings.LaunchWithoutSandbox;
 
+    /// <summary>Outside a room the line sits under the page title; in a room it is one muted line under the room header.</summary>
+    public bool ShowLobbySandboxLine => RunsWithoutSandbox && !ShowRoomHeader;
+    public bool ShowRoomSandboxLine => RunsWithoutSandbox && ShowRoomHeader;
+
+    /// <summary>Both lines open the game sandbox card in Settings › Privacy and security.</summary>
     [RelayCommand]
-    private void OpenSandboxSettings() => Navigate?.Invoke("settings#LaunchWithoutSandbox");
+    private void OpenSandboxSettings() => Navigate?.Invoke("settings#GameSandbox");
 
     [RelayCommand]
     private void OpenHelp(string? article) => Navigate?.Invoke(string.IsNullOrEmpty(article) ? "help" : "help/" + article);
