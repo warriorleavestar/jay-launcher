@@ -254,6 +254,46 @@ public sealed class JavaVersionProbeTests : IDisposable
         java.AssertContained();
     }
 
+    [Theory]
+    [InlineData(int.MaxValue, 4096)]
+    [InlineData(int.MaxValue - 3, 4096)]
+    [InlineData(-1, 4096)]
+    [InlineData(int.MinValue, 64)]
+    [InlineData(4090, 4096)]
+    [InlineData(4091, 4096)]
+    [InlineData(60, 64)]
+    public void ABrokenProgramHeaderIsNotAJava_AndTheScanGoesOn(int peOffset, int size)
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var home = Path.Combine(_root, "broken-" + Guid.NewGuid().ToString("N")[..8]);
+        var bin = Directory.CreateDirectory(Path.Combine(home, "bin")).FullName;
+        var exe = Path.Combine(bin, "java.exe");
+        var bytes = new byte[size];
+        bytes[0] = (byte)'M';
+        bytes[1] = (byte)'Z';
+        BitConverter.GetBytes(peOffset).CopyTo(bytes, 0x3C);
+        File.WriteAllBytes(exe, bytes);
+        Assert.Null(JavaVersionProbe.Is64Executable(exe));
+        Assert.Null(JavaVersionProbe.FromFiles(home, exe));
+    }
+
+    [Fact]
+    public void AProgramHeaderRightAtTheEndOfTheReadPartIsStillRead()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var exe = Path.Combine(Directory.CreateDirectory(Path.Combine(_root, "edge")).FullName, "java.exe");
+        var bytes = new byte[4096];
+        bytes[0] = (byte)'M';
+        bytes[1] = (byte)'Z';
+        const int pe = 4096 - 6;
+        BitConverter.GetBytes(pe).CopyTo(bytes, 0x3C);
+        bytes[pe] = (byte)'P';
+        bytes[pe + 1] = (byte)'E';
+        BitConverter.GetBytes((ushort)0x8664).CopyTo(bytes, pe + 4);
+        File.WriteAllBytes(exe, bytes);
+        Assert.True(JavaVersionProbe.Is64Executable(exe));
+    }
+
     private static void AssertMajor(int expected, int actual) =>
         Assert.True(expected == actual, $"expected Java {expected}, got {actual}; probe: {JavaVersionProbe.LastProblem}");
 }

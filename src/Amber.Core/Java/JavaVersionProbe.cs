@@ -133,7 +133,7 @@ public static partial class JavaVersionProbe
             var read = stream.ReadAtLeast(head, head.Length, throwOnEndOfStream: false);
             if (read < 0x40 || head[0] != (byte)'M' || head[1] != (byte)'Z') return null;
             var pe = BitConverter.ToInt32(head, 0x3C);
-            if (pe < 0 || pe + 6 > read || head[pe] != (byte)'P' || head[pe + 1] != (byte)'E' || head[pe + 2] != 0 || head[pe + 3] != 0) return null;
+            if (pe < 0 || pe > read - 6 || head[pe] != (byte)'P' || head[pe + 1] != (byte)'E' || head[pe + 2] != 0 || head[pe + 3] != 0) return null;
             var machine = BitConverter.ToUInt16(head, pe + 4);
             return machine is 0x8664 or 0xAA64;
         }
