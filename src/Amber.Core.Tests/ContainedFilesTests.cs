@@ -191,15 +191,16 @@ public sealed class ContainedFilesTests : IDisposable
                     FolderLink(real, _outside);
                     Directory.Delete(real);
                     Directory.Move(aside, real);
-                    swaps++;
+                    Interlocked.Increment(ref swaps);
                 }
                 catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception) { }
             }
         });
         try
         {
-            var until = DateTime.UtcNow.AddSeconds(2);
-            while (DateTime.UtcNow < until)
+            // At least two seconds, and on a busy machine until the game got some swaps in.
+            var start = DateTime.UtcNow;
+            while (DateTime.UtcNow < start.AddSeconds(2) || (Volatile.Read(ref swaps) < 20 && DateTime.UtcNow < start.AddSeconds(20)))
             {
                 try { BakePlatform.DisableLegacyForgeUpdateCheck(_work); }
                 catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }

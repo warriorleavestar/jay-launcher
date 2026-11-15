@@ -88,6 +88,7 @@ public sealed class JavaRuntimeManifestTests : IDisposable
     [Fact]
     public void AJavaWithoutAReleaseFileIsAskedForItsVersion()
     {
+        if (!EscapingJava.Runs) return;
         Assert.Equal(0, JavaFinder.MajorOf(Path.Combine(Path.GetTempPath(), "no-such-java", "bin", "java.exe")));
         // A Java home with no release file (as some older Mojang runtimes): a stand-in java that only answers the
         // version question, so the answer can only come from running it.
@@ -108,7 +109,8 @@ public sealed class JavaRuntimeManifestTests : IDisposable
                 File.SetUnixFileMode(java, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             }
             Assert.False(File.Exists(Path.Combine(home, "release")));
-            Assert.Equal(17, JavaFinder.MajorOf(java));
+            var major = JavaFinder.MajorOf(java);
+            Assert.True(major == 17, $"got {major}; probe: {JavaVersionProbe.LastProblem}");
             // The sandbox's own check (which Java 9+ flags to pass) takes the same way when the release file is missing.
             Assert.Equal(17, Amber.Core.Launch.WindowsSandbox.JavaMajor(java));
         }
