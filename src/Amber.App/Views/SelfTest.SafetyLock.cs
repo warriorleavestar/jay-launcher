@@ -65,19 +65,28 @@ internal sealed class SafetyLockSelfTest(MainWindow window, MainViewModel main, 
             // The friends page's two locked confirms, as the page builds them, with a long name and device name and as
             // wide as a 600×420 window leaves them: a new device their account vouched for, and removing a friend.
             var (newDevice, removeFriend) = FriendPanels();
+            // Settings › Multiplayer's [Reset all to defaults] question, as the real view shows it.
+            var mpView = new MultiplayerSettingsView { DataContext = settings, Width = 560, HorizontalAlignment = HorizontalAlignment.Left };
             var stage = new ScrollViewer
             {
                 Content = new StackPanel
                 {
                     Margin = new Thickness(24),
                     Spacing = 16,
-                    Children = { new Border { Classes = { "card" }, Child = panel }, row, new Border { Classes = { "card" }, Child = newDevice }, new Border { Classes = { "card" }, Child = removeFriend } },
+                    Children = { new Border { Classes = { "card" }, Child = panel }, row, new Border { Classes = { "card" }, Child = newDevice }, new Border { Classes = { "card" }, Child = removeFriend }, mpView },
                 },
             };
             window.Content = stage;
+            // Asked once the view is on screen, as a click on [Reset all to defaults] would.
+            await Task.Delay(200);
+            settings.ConfirmingAdvancedReset = true;
             Check("安全面板标题行写的是 Jay 安全提示", panel.BadgeText == Amber.Core.Localization.L.T("safety.title"), panel.BadgeText);
-            _locked = [("安全面板", panel), ("隐私行", row), ("朋友新设备", newDevice), ("移除朋友", removeFriend)];
+            _locked = [("安全面板", panel), ("隐私行", row), ("朋友新设备", newDevice), ("移除朋友", removeFriend), ("联机设置的恢复默认确认", mpView.MultiplayerResetConfirm)];
             await Task.Delay(300);
+            Check("设置 › 联机【全部恢复默认】的确认是锁定的安全面板，按钮是安全按钮，焦点在【取消】",
+                mpView.MultiplayerResetConfirm is SafetyPanel && mpView.MultiplayerResetConfirm.IsEffectivelyVisible
+                    && mpView.MultiplayerResetCancel.GetType() == typeof(SafetyButton) && mpView.MultiplayerResetDo.GetType() == typeof(SafetyButton)
+                    && mpView.MultiplayerResetCancel.IsFocused);
             foreach (var (name, friendPanel) in new[] { ("朋友新设备", newDevice), ("移除朋友", removeFriend) })
             {
                 var buttons = Dispatcher.UIThread.Invoke(() => friendPanel.GetVisualDescendants().OfType<SafetyButton>().ToList());
@@ -112,6 +121,17 @@ internal sealed class SafetyLockSelfTest(MainWindow window, MainViewModel main, 
                     }
                 }
             }
+
+            // Esc in the question cancels; nothing is reset.
+            var customizedBefore = settings.AnyAdvancedCustomized;
+            await Dispatcher.UIThread.InvokeAsync(() => mpView.MultiplayerResetCancel.RaiseEvent(new Avalonia.Input.KeyEventArgs
+                { RoutedEvent = Avalonia.Input.InputElement.KeyDownEvent, Key = Avalonia.Input.Key.Escape }));
+            await Task.Delay(200);
+            Check("【全部恢复默认】的确认按 Esc 等于取消，什么都不改", !settings.ConfirmingAdvancedReset && settings.AnyAdvancedCustomized == customizedBefore);
+            settings.ConfirmingAdvancedReset = true;
+            window.Content = original;
+            await Task.Delay(200);
+            Check("离开页面也等于取消", !settings.ConfirmingAdvancedReset && settings.AnyAdvancedCustomized == customizedBefore);
 
             // A theme's sidebar picture can't show through the privacy row: the real window, a noisy sidebar picture
             // with no cover, both colour modes, a wide and the smallest window; the composited pixels of the row match.
@@ -148,6 +168,8 @@ internal sealed class SafetyLockSelfTest(MainWindow window, MainViewModel main, 
             // Back to the size the baseline was taken at, so the later comparisons see the same layout.
             (window.Width, window.Height) = (windowWidth, windowHeight);
             window.Content = stage;
+            // The leave-the-page check cancelled the question; ask it again for the comparisons below.
+            settings.ConfirmingAdvancedReset = true;
             await Task.Delay(300);
 
             // 带保留词的主题包：名字、作者、布局文字里有“Jay 安全提示”都整包拒绝。

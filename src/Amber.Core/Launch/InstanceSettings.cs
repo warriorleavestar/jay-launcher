@@ -23,6 +23,11 @@ public sealed class InstanceSettings
     public string? PreLaunchCommand { get; set; }
     public string? PostExitCommand { get; set; }
     public string? JoinServer { get; set; }
+    /// <summary>
+    /// Launch through the universal loader, which prepares mods from other ecosystems ahead of time. Null on an instance
+    /// means "as the default says" (Settings › Game › Universal loader).
+    /// </summary>
+    public bool? UniversalLoader { get; set; }
 
     private static readonly JsonSerializerOptions Options = new()
     {
@@ -95,6 +100,7 @@ public sealed class InstanceSettings
         PreLaunchCommand = Empty(PreLaunchCommand) ?? fallback.PreLaunchCommand,
         PostExitCommand = Empty(PostExitCommand) ?? fallback.PostExitCommand,
         JoinServer = Empty(JoinServer) ?? fallback.JoinServer,
+        UniversalLoader = UniversalLoader ?? fallback.UniversalLoader,
     };
 
     private static string? Empty(string? s) => string.IsNullOrWhiteSpace(s) ? null : s;

@@ -6,6 +6,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Presenters;
 using Avalonia.Input;
+using Avalonia.Threading;
 using Avalonia.VisualTree;
 
 namespace Amber.App.Views;
@@ -16,10 +17,12 @@ internal sealed partial class SelfTest
     private async Task HotspotAsync()
     {
         var page = Page<MultiplayerViewModel>();
-        // The hotspot card lives in Settings › Multiplayer; in any other group it is collapsed (0×0 bounds).
+        // The hotspot card lives in Settings › Multiplayer › What people can do in my rooms; elsewhere it is collapsed (0×0 bounds).
         main.Shell.Navigate(Amber.Core.Navigation.LegacyRoutes.MultiplayerSettings);
         window.Width = 1080;
         window.Height = 700;
+        await Task.Delay(300);
+        Dispatcher.UIThread.Invoke(() => window.GetVisualDescendants().OfType<MultiplayerSettingsView>().Single().MpGroupRoom.IsExpanded = true);
         await Task.Delay(300);
         var panel = window.GetVisualDescendants().OfType<HotspotSharingPanel>().Single();
         var vm = page.Hotspot;

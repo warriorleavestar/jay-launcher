@@ -107,7 +107,7 @@ public sealed class MixedContentTests : IDisposable
 
         // A mixed pack on a core-only package is refused.
         var info = new ModpackInfo("Modrinth", "M", null, "1.21.1", LoaderKind.NeoForge, "21.1.1", 0) { ExtraLoaders = [LoaderKind.Fabric] };
-        Assert.NotNull(ModpackService.MixedRefusal(info, CrossLoader.Extras(coreOnly, "neoforge", "1.21.1"), bakeReady: true));
+        Assert.NotNull(ModpackService.MixedRefusal(info, CrossLoader.Extras(coreOnly, "neoforge", "1.21.1"), loaderInstalled: true));
     }
 
     [Fact]
@@ -276,12 +276,12 @@ public sealed class MixedContentTests : IDisposable
     {
         var info = new ModpackInfo("Modrinth", "M", null, "1.21.1", LoaderKind.NeoForge, "21.1.1", 0) { ExtraLoaders = [LoaderKind.Fabric] };
         var extras = CrossLoader.Extras(Full, "neoforge", "1.21.1");
-        Assert.Null(ModpackService.MixedRefusal(info, extras, bakeReady: true));
-        Assert.NotNull(ModpackService.MixedRefusal(info, extras, bakeReady: false));
-        Assert.NotNull(ModpackService.MixedRefusal(info, [], bakeReady: true));
+        Assert.Null(ModpackService.MixedRefusal(info, extras, loaderInstalled: true));
+        Assert.NotNull(ModpackService.MixedRefusal(info, extras, loaderInstalled: false));
+        Assert.NotNull(ModpackService.MixedRefusal(info, [], loaderInstalled: true));
         var onOld = info with { McVersion = "1.20.4" };
-        Assert.NotNull(ModpackService.MixedRefusal(onOld, CrossLoader.Extras(Full, "neoforge", "1.20.4"), bakeReady: true));
-        Assert.Null(ModpackService.MixedRefusal(info with { ExtraLoaders = [] }, [], bakeReady: false));
+        Assert.NotNull(ModpackService.MixedRefusal(onOld, CrossLoader.Extras(Full, "neoforge", "1.20.4"), loaderInstalled: true));
+        Assert.Null(ModpackService.MixedRefusal(info with { ExtraLoaders = [] }, [], loaderInstalled: false));
         Assert.Equal("NeoForge + Fabric", ModpackService.MixedLoaders(info));
     }
 

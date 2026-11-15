@@ -53,6 +53,10 @@ internal sealed class BakeNoticeSelfTest(MainWindow window, MainViewModel main, 
         Home.CrashInstance = Instance;
     }
 
+    private string FormScrollState() =>
+        window.PageHost.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault(v => v.Name == "FormScroll") is { } sv
+            ? $"offset {sv.Offset}, extent {sv.Extent}, viewport {sv.Viewport}, at {BoundsIn(sv, window)}" : "-";
+
     private void Check(string name, bool ok, string detail = "")
     {
         _report.Add($"{(ok ? "PASS" : "FAIL")} {name}{(detail.Length > 0 ? " — " + detail : "")}");
@@ -384,6 +388,9 @@ internal sealed class BakeNoticeSelfTest(MainWindow window, MainViewModel main, 
             {
                 window.Width = width;
                 window.Height = height;
+                // The window manager resizes a moment later; a reflow after scrolling would move the button again.
+                for (var i = 0; i < 40 && (Math.Abs(window.ClientSize.Width - width) > 1 || Math.Abs(window.ClientSize.Height - height) > 1); i++) await Task.Delay(50);
+                await Task.Delay(100);
                 main.Shell.Navigate("settings#BakeCleanup");
                 for (var i = 0; i < 60 && window.RevealedField?.Name != "BakeCleanup"; i++) await Task.Delay(50);
                 Check($"清理烘焙缓存 {language}-{width}：settings#BakeCleanup 定位到按钮", window.RevealedField?.Name == "BakeCleanup");
@@ -391,8 +398,9 @@ internal sealed class BakeNoticeSelfTest(MainWindow window, MainViewModel main, 
                 button.BringIntoView();
                 await Task.Delay(150);
                 window.UpdateLayout();
-                Check($"清理烘焙缓存 {language}-{width}：按钮完整可见、文案随语言", button.IsEffectivelyVisible && new Rect(window.ClientSize).Contains(BoundsIn(button, window))
-                    && button.Content?.ToString() == L.T("settings.bake.gc"));
+                var viewport = window.PageHost.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault(v => v.Name == "FormScroll") is { } scroller ? BoundsIn(scroller, window) : new Rect(window.ClientSize);
+                Check($"清理烘焙缓存 {language}-{width}：按钮完整可见、文案随语言", button.IsEffectivelyVisible && viewport.Inflate(1).Contains(BoundsIn(button, window))
+                    && button.Content?.ToString() == L.T("settings.bake.gc"), $"{BoundsIn(button, window)} in {window.ClientSize}; scroll {FormScrollState()}");
                 await ShotAsync($"settings-bake-cleanup-{language}-{width}x{height}");
             }
         }
@@ -433,8 +441,8 @@ internal sealed class BakeNoticeSelfTest(MainWindow window, MainViewModel main, 
                     && ToolTip.GetTip(download)?.ToString() == L.T(published ? "settings.bake.download_hint" : "core.bake.download_unpublished"));
                 var unpublished = window.PageHost.GetVisualDescendants().OfType<TextBlock>().Single(t => t.Name == "BakeDownloadUnpublishedText");
                 Check($"下载加载器 {language}-{width}：未发布时按钮关着并写明原因", published
-                    // The whole install row follows the "Bake" switch, so with bake off the button is greyed by its parent.
-                    ? download.IsEnabled && download.IsEffectivelyEnabled == settings.ExperimentalBake && !unpublished.IsVisible
+                    // Since batch 10 the install row no longer follows the default switch: instances turn the loader on themselves.
+                    ? download.IsEffectivelyEnabled && !unpublished.IsVisible
                     : !download.IsEffectivelyEnabled && unpublished.IsEffectivelyVisible && unpublished.Text == L.T("core.bake.download_unpublished"));
                 var cancel = window.PageHost.GetVisualDescendants().OfType<Button>().Single(b => b.Name == "BakeDownloadCancelButton");
                 Check($"下载加载器 {language}-{width}：没在下载时不显示取消", !cancel.IsVisible);

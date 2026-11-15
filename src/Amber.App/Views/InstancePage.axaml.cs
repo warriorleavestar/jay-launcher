@@ -215,13 +215,22 @@ public partial class InstancePage : UserControl
 
     private InstanceViewModel? _logsWired;
 
+    /// <summary>The chip next to the start button: once the Settings tab is shown, scroll its universal loader card into view.</summary>
+    private void OnUniversalLoaderCard() =>
+        Avalonia.Threading.Dispatcher.UIThread.Post(() => UniversalLoaderCard.BringIntoView(), Avalonia.Threading.DispatcherPriority.Background);
+
     /// <summary>Gives the Logs tab its clipboard, save picker, locked privacy preview and scrolling.</summary>
     private void WireLogs()
     {
         if (Vm is not { } vm || ReferenceEquals(vm, _logsWired)) return;
-        if (_logsWired is { } old) old.LogJumpRequested -= OnLogJump;
+        if (_logsWired is { } old)
+        {
+            old.LogJumpRequested -= OnLogJump;
+            old.UniversalLoaderCardRequested -= OnUniversalLoaderCard;
+        }
         _logsWired = vm;
         vm.LogJumpRequested += OnLogJump;
+        vm.UniversalLoaderCardRequested += OnUniversalLoaderCard;
         vm.CopyText = async text =>
         {
             try

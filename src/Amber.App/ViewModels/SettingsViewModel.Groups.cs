@@ -150,9 +150,18 @@ public sealed partial class SettingsViewModel
         get;
         set
         {
-            if (field is not null) field.ActionStatus -= OnMultiplayerActionStatus;
+            if (field is { } old)
+            {
+                old.PropertyChanged -= OnMultiplayerChanged;
+                old.ActionStatus -= OnMultiplayerActionStatus;
+            }
             field = value;
-            if (value is not null) value.ActionStatus += OnMultiplayerActionStatus;
+            if (value is not null)
+            {
+                value.PropertyChanged += OnMultiplayerChanged;
+                value.ActionStatus += OnMultiplayerActionStatus;
+            }
+            RefreshAdvanced();
         }
     }
 

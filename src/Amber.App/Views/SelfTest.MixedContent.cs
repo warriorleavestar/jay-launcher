@@ -86,7 +86,8 @@ internal sealed partial class SelfTest
                 content.CrossPrompt == CrossLoaderPrompt.TurnOn && Dispatcher.UIThread.Invoke(() => page.TurnOnBakeButton.IsEffectivelyVisible && !page.DownloadLoaderButton.IsVisible),
                 $"{content.CrossPrompt} {content.LoaderNote}");
             await ShotAsync("mixed-turn-on");
-            Check("点【开启烘焙】：设置里实验性烘焙打开", Press(page.TurnOnBakeButton) && await WaitAsync(() => settings.ExperimentalBake, 10));
+            Check("Turn on for this instance: only this instance uses the universal loader, the default in Settings stays off",
+                Press(page.TurnOnBakeButton) && await WaitAsync(() => service.UsesUniversalLoader(id), 10) && !settings.ExperimentalBake);
 
             // 3. Baking ready: the instance's own search finds it, with the badge; its versions carry a note and no prompt.
             content.FilterByInstance = true;
@@ -104,6 +105,9 @@ internal sealed partial class SelfTest
             await SearchMixedAsync(content, "sodium");
             var sodium = content.Results.FirstOrDefault(r => r.Title.Equals("Sodium", StringComparison.OrdinalIgnoreCase));
             Check("有 NeoForge 版的模组不带标记", sodium is { ViaUniversalLoader: false }, string.Join(", ", content.Results.Select(r => r.Title + (r.ViaUniversalLoader ? "*" : "")).Take(6)));
+
+            // 3b. The instance's own card and the chip next to the start button (redesign batch 10).
+            await UniversalLoaderCardAsync(service, id);
 
             // 4. A mixed pack: the preview names the loader that runs the extra mods.
             var pack = Path.Combine(reportDir, "mixed.mrpack");
@@ -214,6 +218,41 @@ internal sealed partial class SelfTest
         content.Detail = item;
         await WaitAsync(() => content.SelectedFile is not null, 30);
         return item;
+    }
+
+    /// <summary>
+    /// The instance's "Universal loader" card and chip: on for this instance, the chip opens the card, one mod runs through
+    /// it, "See what it changed" before any game, off hides the chip and is written to the instance only.
+    /// </summary>
+    private async Task UniversalLoaderCardAsync(LauncherService service, string id)
+    {
+        var instancePage = Page<InstanceViewModel>();
+        main.Shell.Navigate("library/" + id);
+        await WaitAsync(() => main.CurrentPage is InstanceViewModel && instancePage.Current?.Id == id, 10);
+        var view = await Dispatcher.UIThread.InvokeAsync(() => window.PageHost.GetVisualDescendants().OfType<InstancePage>().First());
+        await WaitAsync(() => instancePage.UniversalLoaderMods.Length > 0, 10);
+        Check("Instance header: the chip says the universal loader is on and not prepared yet",
+            instancePage.ShowUniversalLoaderChip && Dispatcher.UIThread.Invoke(() => view.UniversalLoaderChip.IsEffectivelyVisible)
+            && instancePage.UniversalLoaderChip.Contains(Amber.Core.Localization.L.T("instance.ul.state.pending")), instancePage.UniversalLoaderChip);
+        Check("The chip opens the card in the Settings tab", Press(view.UniversalLoaderChip)
+            && await WaitAsync(() => instancePage.TabIndex == (int)InstanceTab.Settings && Dispatcher.UIThread.Invoke(() => view.UniversalLoaderCard.IsEffectivelyVisible), 5));
+        await Task.Delay(300);
+        Check("Card: switch on, runs this instance, one mod runs through it, [Prepare again] and [Start without it this time]",
+            Dispatcher.UIThread.Invoke(() => view.UniversalLoaderSwitch.IsChecked == true && view.UniversalLoaderSwitch.IsEffectivelyEnabled
+                && !view.UniversalLoaderUnsupportedText.IsVisible && view.UniversalLoaderPrepareButton.IsEffectivelyVisible && view.UniversalLoaderSkipButton.IsEffectivelyVisible)
+            && instancePage.UniversalLoaderMods == Amber.Core.Localization.L.F("instance.ul.mods", 1), instancePage.UniversalLoaderMods);
+        await ShotAsync("mixed-instance-card");
+        Check("[See what it changed] before any game says it has not run here yet",
+            Press(view.UniversalLoaderChangesButton) && await WaitAsync(() => instancePage.ShowUniversalLoaderChanges, 3)
+            && instancePage.UniversalLoaderChangesNote == Amber.Core.Localization.L.T("instance.ul.changes_never"), instancePage.UniversalLoaderChangesNote);
+        Dispatcher.UIThread.Invoke(() => view.UniversalLoaderSwitch.IsChecked = false);
+        Check("Turning it off hides the chip and is written to this instance only",
+            await WaitAsync(() => !instancePage.ShowUniversalLoaderChip, 3) && !service.UsesUniversalLoader(id)
+            && Amber.Core.Launch.InstanceSettings.Load(service.Directory, id).UniversalLoader == false && !service.Settings.ExperimentalBake);
+        Dispatcher.UIThread.Invoke(() => view.UniversalLoaderSwitch.IsChecked = true);
+        Check("Turning it back on shows the chip again", await WaitAsync(() => instancePage.ShowUniversalLoaderChip && service.UsesUniversalLoader(id), 3));
+        main.Shell.Navigate("discover");
+        await WaitAsync(() => main.CurrentPage is ContentViewModel, 5);
     }
 
     private static void WriteMixedVersions(string game, string id)

@@ -78,12 +78,24 @@ internal sealed partial class SelfTest
             var forge = download.LoaderChoices.First(c => c.Kind == LoaderKind.Forge);
             Check("加载器：1.12.2 的 Fabric、NeoForge 置灰并写原因，Forge 可选",
                 !fabric.IsAvailable && fabric.BlockReason.Contains("1.14") && !neo.IsAvailable && forge.IsAvailable, $"{fabric.BlockReason} / {neo.BlockReason}");
+            var jayLoader = download.LoaderChoices.Single(c => c.IsJay);
+            Check("Jay loader: its own choice after the others; greyed on 1.12.2 (pinned release) with the versions it does run",
+                ReferenceEquals(download.LoaderChoices[^1], jayLoader) && jayLoader.Label == L.T("newinstance.loader.jay")
+                && (jayLoader.IsAvailable == (jayLoader.Kind is not null)) && (jayLoader.IsAvailable || jayLoader.BlockReason.Length > 0), jayLoader.BlockReason);
             await Task.Delay(300);
             var fabricItem = Dispatcher.UIThread.Invoke(() => page.LoaderSegment.ContainerFromItem(fabric) as ListBoxItem);
             Check("加载器：置灰的项点不了", Dispatcher.UIThread.Invoke(() => fabricItem is { IsEffectivelyEnabled: false }),
                 Dispatcher.UIThread.Invoke(() => $"{fabricItem is null} {fabricItem?.IsEnabled} {fabricItem?.DataContext} {page.LoaderSegment.IsEffectivelyVisible}"));
+            // Universal loader tick box (batch 10): Forge 1.12.2 is out of its range, so the box is off with the reason under it.
+            download.SelectedLoader = forge;
+            await Task.Delay(200);
+            Check("Forge 1.12.2: the universal loader box shows, is off and says why",
+                Dispatcher.UIThread.Invoke(() => page.NewInstanceUniversalLoaderBox.IsEffectivelyVisible && !page.NewInstanceUniversalLoaderBox.IsEffectivelyEnabled
+                    && page.NewInstanceUniversalLoaderReason.IsEffectivelyVisible) && !download.UseUniversalLoader && download.UniversalLoaderUnavailable.Length > 0,
+                download.UniversalLoaderUnavailable);
             download.SelectedLoader = fabric;
             Check("加载器：代码里选了不支持的也会退回原版", download.SelectedLoader.Kind is null);
+            Check("Vanilla: no universal loader box", Dispatcher.UIThread.Invoke(() => !page.NewInstanceUniversalLoaderBox.IsVisible));
             download.ConfigureCommand.Execute(snapshot);
             Check("加载器：快照的 Forge 置灰、Fabric 可选", !forge.IsAvailable && forge.BlockReason.Length > 0 && fabric.IsAvailable, forge.BlockReason);
             Check("原版：名字就是版本号，不能改；可以直接装", download.CustomName == snapshot.Id && !download.CanRename && download.InstallCommand.CanExecute(null));
@@ -99,6 +111,24 @@ internal sealed partial class SelfTest
                 download.SelectedLoaderVersion is not null && download.CustomName == "1.21.1-Fabric" && download.LoaderDescription.StartsWith("Fabric", StringComparison.Ordinal),
                 $"{download.CustomName} {download.LoaderHint}");
             Check("名字合格时【安装】可用", download.InstallCommand.CanExecute(null));
+            Check("Fabric 1.21.1: the universal loader box can be ticked where the loader runs it, unticked by default",
+                Dispatcher.UIThread.Invoke(() => page.NewInstanceUniversalLoaderBox.IsEffectivelyVisible
+                    && page.NewInstanceUniversalLoaderBox.IsEffectivelyEnabled == (service.UniversalLoaderCapabilities is not null)) && !download.UseUniversalLoader,
+                download.UniversalLoaderUnavailable);
+            await ShotAsync("new-universal-loader");
+            if (jayLoader.IsAvailable)
+            {
+                Dispatcher.UIThread.Invoke(() => page.LoaderSegment.SelectedItem = jayLoader);
+                await WaitAsync(() => download.SelectedLoaderVersion is not null, 30);
+                Check("Jay loader on 1.21.1: builds on NeoForge, name 1.21.1-Jay, no separate tick box",
+                    jayLoader.Kind == LoaderKind.NeoForge && download.SelectedLoaderVersion?.Kind == LoaderKind.NeoForge && download.CustomName == "1.21.1-Jay"
+                    && download.LoaderDescription.Contains("NeoForge", StringComparison.Ordinal) && !download.ShowUniversalLoaderOption
+                    && Dispatcher.UIThread.Invoke(() => !page.NewInstanceUniversalLoaderBox.IsVisible) && download.InstallCommand.CanExecute(null),
+                    $"{download.CustomName} {download.LoaderHint}");
+                await ShotAsync("new-jay-loader");
+                Dispatcher.UIThread.Invoke(() => page.LoaderSegment.SelectedItem = fabric);
+                await WaitAsync(() => download.SelectedLoaderVersion?.Kind == LoaderKind.Fabric, 30);
+            }
             foreach (var (name, expect) in new[] { ("CON", "保留"), ("a/b", "不能有"), ("fabric-iso", "同名"), ("", "起个名字") })
             {
                 Dispatcher.UIThread.Invoke(() => page.NameBox.Text = name);

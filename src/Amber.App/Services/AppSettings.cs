@@ -235,7 +235,10 @@ public sealed class AppSettings
     /// <summary>打开启动器时检查一次更新（只在设置导航上显示提示，不自动下载）。</summary>
     public bool CheckUpdatesOnStart { get; set; } = true;
 
-    /// <summary>实验功能“烘焙”：Fabric / Quilt 实例启动前先用通用加载器预先处理，启动时用处理结果。</summary>
+    /// <summary>
+    /// The universal loader's default: instances that have not chosen for themselves (and new instances, which start from
+    /// this) launch through it. It used to be the one global "bake" switch; the name stays so old settings keep their meaning.
+    /// </summary>
     public bool ExperimentalBake { get; set; }
 
     /// <summary>通用加载器原型的目录（实验）；为空时看环境变量 AMBER_BAKE_LOADER。</summary>
@@ -273,6 +276,7 @@ public sealed class AppSettings
         Fullscreen = Fullscreen,
         PreLaunchCommand = PreLaunchCommand,
         PostExitCommand = PostExitCommand,
+        UniversalLoader = ExperimentalBake,
     };
 
     public static AppSettings Load() => Load(FilePath, File.ReadAllText);

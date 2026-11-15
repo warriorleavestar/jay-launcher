@@ -142,6 +142,11 @@
                 </Button.Flyout>
               </Button>
               <TextBlock x:Name="HeroAccount" Classes="on-cover-dim" Text="{Binding AccountText}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="240" />
+              <!-- On while the universal loader runs this instance; opens its card. -->
+              <Button x:Name="UniversalLoaderChip" Classes="ghost small on-cover" Command="{Binding GoToUniversalLoaderCommand}" IsVisible="{Binding ShowUniversalLoaderChip}"
+                      VerticalAlignment="Center" ToolTip.Tip="{l:T instance.ul.chip_hint}" AutomationProperties.Name="{Binding UniversalLoaderChip}">
+                <TextBlock Classes="on-cover" Text="{Binding UniversalLoaderChip}" FontSize="12" />
+              </Button>
             </WrapPanel>
             <TextBlock x:Name="HeroNote" Classes="on-cover-dim" Text="{Binding HeroNote}" IsVisible="{Binding HasHeroNote}" FontSize="12" TextWrapping="Wrap" />
           </StackPanel>
@@ -975,8 +980,9 @@
         </TabItem>
 
         <TabItem Header="{l:T instance.settings.title}" FontSize="14">
-          <ScrollViewer>
-            <Grid Classes="form" ColumnSpacing="12" ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto" Margin="0,0,14,0">
+          <ScrollViewer x:Name="SettingsScroll">
+            <StackPanel Spacing="12" Margin="0,0,14,0">
+            <Grid Classes="form" ColumnSpacing="12" ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
               <Grid.Styles>
                 <Style Selector="TextBlock.label"><Setter Property="VerticalAlignment" Value="Center" /><Setter Property="Margin" Value="0,8,0,0" /></Style>
               </Grid.Styles>
@@ -1033,6 +1039,44 @@
 
               <TextBlock Grid.Row="10" Grid.Column="1" Classes="hint" Margin="0,12,0,4" Text="{l:T instance.settings.autosave_hint}" TextWrapping="Wrap" />
             </Grid>
+
+            <!-- The universal loader for this instance (redesign batch 10): switch, fit, mods through it, and what it changed. -->
+            <Border x:Name="UniversalLoaderCard" Classes="card">
+              <StackPanel Spacing="8">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                  <TextBlock Classes="h2" Text="{l:T instance.ul.title}" Margin="0" VerticalAlignment="Center" />
+                  <Border Classes="tag" VerticalAlignment="Center"><TextBlock Text="{l:T instance.ul.experimental}" FontSize="12" /></Border>
+                </StackPanel>
+                <TextBlock Classes="hint" Text="{l:T instance.ul.hint}" TextWrapping="Wrap" />
+                <ToggleSwitch x:Name="UniversalLoaderSwitch" IsChecked="{Binding UniversalLoaderOn}" IsEnabled="{Binding CanToggleUniversalLoader}"
+                              OnContent="{l:T instance.ul.toggle}" OffContent="{l:T instance.ul.toggle}" AutomationProperties.Name="{l:T instance.ul.toggle}" />
+                <TextBlock x:Name="UniversalLoaderInheritedText" Classes="hint" FontSize="12" Text="{l:T instance.ul.inherited}" IsVisible="{Binding UniversalLoaderInherited}" />
+                <TextBlock x:Name="UniversalLoaderUnsupportedText" Classes="hint" Text="{Binding UniversalLoaderUnsupported}" IsVisible="{Binding !UniversalLoaderSupported}" TextWrapping="Wrap" />
+                <StackPanel Spacing="4" IsVisible="{Binding UniversalLoaderOn}">
+                  <TextBlock x:Name="UniversalLoaderStateText" Text="{Binding UniversalLoaderState}" FontWeight="SemiBold" />
+                  <TextBlock x:Name="UniversalLoaderModsText" Classes="hint" Text="{Binding UniversalLoaderMods}" IsVisible="{Binding UniversalLoaderSupported}" />
+                </StackPanel>
+                <WrapPanel ItemSpacing="8" LineSpacing="6">
+                  <Button x:Name="UniversalLoaderDownloadButton" Classes="primary" Content="{l:T settings.bake.download}" Command="{Binding DownloadUniversalLoaderCommand}"
+                          IsVisible="{Binding CanDownloadUniversalLoader}" />
+                  <Button x:Name="UniversalLoaderPrepareButton" Classes="secondary" Content="{l:T instance.bake.now}" Command="{Binding BakeNowCommand}"
+                          IsVisible="{Binding BakeEnabled}" ToolTip.Tip="{l:T instance.bake.now_hint}" />
+                  <Button x:Name="UniversalLoaderSkipButton" Classes="secondary" Content="{l:T instance.ul.launch_without}" Command="{Binding LaunchWithoutUniversalLoaderCommand}"
+                          IsVisible="{Binding BakeEnabled}" ToolTip.Tip="{l:T home.bake.retry_once}" />
+                  <Button x:Name="UniversalLoaderChangesButton" Classes="ghost" Content="{l:T instance.ul.changes}" Command="{Binding ShowUniversalLoaderChangesNowCommand}"
+                          IsVisible="{Binding UniversalLoaderOn}" />
+                </WrapPanel>
+                <StackPanel x:Name="UniversalLoaderChangesPanel" Spacing="4" IsVisible="{Binding ShowUniversalLoaderChanges}">
+                  <TextBlock Classes="hint" Text="{Binding UniversalLoaderChangesNote}" IsVisible="{Binding !!UniversalLoaderChangesNote.Length}" TextWrapping="Wrap" />
+                  <ItemsControl ItemsSource="{Binding UniversalLoaderChanges}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate><TextBlock Text="{Binding}" TextWrapping="Wrap" Margin="0,2" /></DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </StackPanel>
+              </StackPanel>
+            </Border>
+            </StackPanel>
           </ScrollViewer>
         </TabItem>
       </TabControl>

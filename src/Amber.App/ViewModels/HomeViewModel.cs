@@ -621,7 +621,7 @@ public sealed partial class HomeViewModel : PageViewModel
             await using var relay = relayClient;
             var memory = options.MaxMemoryMb;
 
-            if (_service.Settings.ExperimentalBake && !request.SkipBake)
+            if (_service.UsesUniversalLoader(ctx, id) && !request.SkipBake)
             {
                 SetStatus(StatusMessage.Info("home.status.baking"));
                 try
