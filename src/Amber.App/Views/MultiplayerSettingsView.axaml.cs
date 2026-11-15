@@ -20,6 +20,10 @@ public partial class MultiplayerSettingsView : UserControl
     {
         InitializeComponent();
         foreach (var group in AllGroups) group.PropertyChanged += OnGroupChanged;
+        DataContextChanged += (_, _) =>
+        {
+            if (DataContext is SettingsViewModel settings) settings.PickFilesFolder ??= PickFolderAsync;
+        };
         MultiplayerResetConfirm.PropertyChanged += (_, e) =>
         {
             if (e.Property == IsVisibleProperty && MultiplayerResetConfirm.IsVisible)
@@ -44,7 +48,7 @@ public partial class MultiplayerSettingsView : UserControl
 
     /// <summary>Every group, including the calls group that shows only while calls are switched on.</summary>
     private IReadOnlyList<Expander> AllGroups =>
-        [MpGroupProtection, MpGroupConnection, MpGroupInvites, MpGroupRoom, MpGroupNetwork, MpGroupTroubleshoot, MpGroupCalls];
+        [MpGroupProtection, MpGroupConnection, MpGroupInvites, MpGroupRoom, MpGroupFiles, MpGroupNetwork, MpGroupTroubleshoot, MpGroupCalls];
 
     private void OnGroupChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
     {
@@ -56,6 +60,13 @@ public partial class MultiplayerSettingsView : UserControl
                 if (!ReferenceEquals(group, opened)) group.IsExpanded = false;
         }
         finally { _closingOthers = false; }
+    }
+
+    private async Task<string?> PickFolderAsync()
+    {
+        if (TopLevel.GetTopLevel(this)?.StorageProvider is not { } storage) return null;
+        var picked = await storage.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = L.T("settings.files.folder_choose"), AllowMultiple = false });
+        return picked.Count > 0 ? picked[0].TryGetLocalPath() : null;
     }
 
     private async void ImportComponent_Click(object? sender, RoutedEventArgs e)

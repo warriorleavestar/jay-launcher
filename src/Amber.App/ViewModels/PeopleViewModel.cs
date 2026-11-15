@@ -377,7 +377,7 @@ public sealed partial class PeopleViewModel : PageViewModel
     private void NotifyFriend()
     {
         foreach (var name in (string[])[nameof(SafetyText), nameof(SafetyShortText), nameof(SafetyNeedsLook), nameof(SafetyIsFine), nameof(SafetyHint), nameof(CanJoinRoom), nameof(JoinRoomText),
-                     nameof(CanInvite), nameof(ShowInviteHint), nameof(AutoAdmit), nameof(CanMessage), nameof(ShowMessageHint), nameof(DraftPlaceholder)])
+                     nameof(CanInvite), nameof(ShowInviteHint), nameof(AutoAdmit), nameof(CanMessage), nameof(ShowMessageHint), nameof(DraftPlaceholder), nameof(CanAttach)])
             OnPropertyChanged(name);
         NotifyCallButtons();
     }

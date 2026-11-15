@@ -1,0 +1,69 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:l="using:Amber.App.Localization"
+             xmlns:vm="using:Amber.App.ViewModels"
+             x:Class="Amber.App.Views.Controls.FileCard"
+             x:DataType="vm:TransferItem">
+  <!--
+    One file in a conversation or a room (redesign batch 12): icon, name, size, kind, who to whom, and one line for where
+    it is now. A progress bar while it moves; the buttons are only what this state allows. A program someone sent keeps
+    a warning that cannot be closed. Jay never opens a received file: [Open folder] shows where it is.
+  -->
+  <Border x:Name="CardPart" Classes="card file-card" Padding="12" MaxWidth="420" AutomationProperties.Name="{Binding Spoken}">
+    <StackPanel Spacing="6">
+      <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10">
+        <Border Classes="file-icon" Width="36" Height="36" CornerRadius="6" Background="{DynamicResource AccentTint}" VerticalAlignment="Top">
+          <Path x:Name="IconPart" Classes="icon" Width="20" Height="20" HorizontalAlignment="Center" VerticalAlignment="Center" />
+        </Border>
+        <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+          <TextBlock x:Name="NamePart" Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Name}" />
+          <TextBlock x:Name="MetaPart" Classes="hint" FontSize="12" Text="{Binding Meta}" TextTrimming="CharacterEllipsis" />
+        </StackPanel>
+      </Grid>
+      <ProgressBar x:Name="ProgressPart" Maximum="100" Value="{Binding Percent}" IsVisible="{Binding IsMoving}" />
+      <TextBlock x:Name="StatusPart" FontSize="12" Text="{Binding StatusLine}" TextWrapping="Wrap" />
+      <Border x:Name="ProgramWarningPart" Classes="callout warning" IsVisible="{Binding ShowProgramWarning}" Padding="8">
+        <TextBlock FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.file.program_warning}" />
+      </Border>
+      <TextBlock x:Name="ComparePart" Classes="hint" FontSize="12" Text="{Binding CompareText}" TextWrapping="Wrap" IsVisible="{Binding HasCompare}" />
+      <WrapPanel ItemSpacing="6" LineSpacing="6">
+        <Button x:Name="CancelPart" Classes="secondary small" Content="{l:T common.cancel}" Command="{Binding CancelCommand}" IsVisible="{Binding CanCancel}" />
+        <Button x:Name="ResumePart" Classes="secondary small" Content="{l:T files.resume}" Command="{Binding ResumeCommand}" IsVisible="{Binding CanResume}" />
+        <Button x:Name="SendAgainPart" Classes="secondary small" Content="{l:T files.send_again}" Command="{Binding SendAgainCommand}" IsVisible="{Binding CanSendAgain}" />
+        <Button x:Name="OpenFolderPart" Classes="secondary small" Content="{l:T multiplayer.private.open_folder}" Command="{Binding OpenFolderCommand}" IsVisible="{Binding CanOpen}" />
+        <Button x:Name="ImportWorldPart" Classes="secondary small" IsVisible="{Binding CanImportWorld}">
+          <StackPanel Orientation="Horizontal" Spacing="4">
+            <TextBlock Text="{l:T files.import_world}" />
+            <Path Classes="icon sm" Data="{StaticResource Icon.ChevronDown}" />
+          </StackPanel>
+          <Button.Flyout>
+            <MenuFlyout ItemsSource="{Binding ImportTargets}">
+              <MenuFlyout.ItemContainerTheme>
+                <ControlTheme TargetType="MenuItem" BasedOn="{StaticResource {x:Type MenuItem}}" x:DataType="vm:CardTarget">
+                  <Setter Property="Header" Value="{Binding Name}" />
+                  <Setter Property="Command" Value="{Binding GoCommand}" />
+                </ControlTheme>
+              </MenuFlyout.ItemContainerTheme>
+            </MenuFlyout>
+          </Button.Flyout>
+        </Button>
+        <Button x:Name="CompareModsPart" Classes="secondary small" IsVisible="{Binding CanCompareMods}">
+          <StackPanel Orientation="Horizontal" Spacing="4">
+            <TextBlock Text="{l:T files.compare_mods}" />
+            <Path Classes="icon sm" Data="{StaticResource Icon.ChevronDown}" />
+          </StackPanel>
+          <Button.Flyout>
+            <MenuFlyout ItemsSource="{Binding CompareTargets}">
+              <MenuFlyout.ItemContainerTheme>
+                <ControlTheme TargetType="MenuItem" BasedOn="{StaticResource {x:Type MenuItem}}" x:DataType="vm:CardTarget">
+                  <Setter Property="Header" Value="{Binding Name}" />
+                  <Setter Property="Command" Value="{Binding GoCommand}" />
+                </ControlTheme>
+              </MenuFlyout.ItemContainerTheme>
+            </MenuFlyout>
+          </Button.Flyout>
+        </Button>
+      </WrapPanel>
+    </StackPanel>
+  </Border>
+</UserControl>

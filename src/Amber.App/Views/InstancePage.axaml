@@ -596,6 +596,7 @@
                       <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
                         <Button Content="{l:T common.play}" IsVisible="{Binding $parent[ListBox].((vm:InstanceViewModel)DataContext).SupportsQuickPlay}"
                                 Command="{Binding $parent[ListBox].((vm:InstanceViewModel)DataContext).JoinWorldCommand}" CommandParameter="{Binding}" />
+                        <Button Classes="secondary" Content="{l:T files.send_world}" Command="{Binding $parent[ListBox].((vm:InstanceViewModel)DataContext).SendWorldToFriendCommand}" CommandParameter="{Binding}" />
                         <Button Classes="ghost" Content="⋯" ToolTip.Tip="{l:T common.more_actions}" AutomationProperties.Name="{l:T common.more_actions}">
                           <Button.Flyout>
                             <MenuFlyout>

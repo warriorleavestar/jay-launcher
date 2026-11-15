@@ -283,6 +283,7 @@ public sealed partial class MainViewModel : ObservableObject
         var content = new ContentViewModel(service);
         var multiplayer = new MultiplayerViewModel(service);
         Multiplayer = multiplayer;
+        instance.SendWorld = (path, id) => multiplayer.OpenSendPanel(kind: Amber.Core.Multiplayer.Files.FileKind.World, path: path, instanceId: id);
         var download = new DownloadViewModel(service);
         var settings = new SettingsViewModel(service);
         multiplayer.Tools = settings.Tools;
@@ -406,6 +407,7 @@ public sealed partial class MainViewModel : ObservableObject
                 await download.PreviewPackAsync(path);
             },
             ImportTheme = settingsPage.ImportThemePack,
+            SendTarget = () => CurrentPage is PeopleViewModel people ? people.DropRecipient() : null,
             PictureForTheme = (path, slot) =>
             {
                 shell.Navigate("settings#ImageThemeCard");

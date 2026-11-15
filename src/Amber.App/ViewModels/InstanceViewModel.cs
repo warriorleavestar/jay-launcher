@@ -1008,6 +1008,15 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
         NavigateHome?.Invoke();
     }
 
+    /// <summary>[Send to a friend] on a world (batch 12): the "Send a file" panel opens with this world filled in.</summary>
+    public Action<string, string>? SendWorld { get; set; }
+
+    [RelayCommand]
+    private void SendWorldToFriend(WorldItem? item)
+    {
+        if (Current is { } c && item is not null) SendWorld?.Invoke(item.World.Path, c.Id);
+    }
+
     [RelayCommand]
     private void OpenWorld(WorldItem? item)
     {

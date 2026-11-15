@@ -27,11 +27,16 @@ public sealed record AdvancedValues(
     bool CallsPushToTalk = false,
     string CallsQuality = "auto",
     bool CallsShareGameOnly = true,
-    bool CallsAllowControl = true);
+    bool CallsAllowControl = true,
+    bool FilesCustomFolder = false,
+    bool FilesAutoAccept = false,
+    bool FilesQueue = true,
+    string FilesSpeed = Files.TransferPace.Unlimited,
+    bool FilesNotify = true);
 
 /// <summary>
 /// The multiplayer advanced settings panel (redesign batch 10): Settings › Multiplayer, one group open at a time.
-/// The files group comes with the batch that adds files; the calls group shows only while calls are switched on
+/// The files group came with batch 12; the calls group shows only while calls are switched on
 /// (<see cref="CallFeature.Enabled"/>), since calls are reserved.
 /// </summary>
 public static class AdvancedSettings
@@ -40,6 +45,7 @@ public static class AdvancedSettings
     public const string Connection = "connection";
     public const string Invites = "invites";
     public const string Room = "room";
+    public const string Files = "files";
     public const string Network = "network";
     public const string Troubleshoot = "troubleshoot";
     public const string Calls = "calls";
@@ -48,7 +54,7 @@ public static class AdvancedSettings
     public static IReadOnlyList<string> Groups => GroupsFor(CallFeature.Enabled);
 
     public static IReadOnlyList<string> GroupsFor(bool calls) =>
-        calls ? [Protection, Connection, Invites, Room, Network, Troubleshoot, Calls] : [Protection, Connection, Invites, Room, Network, Troubleshoot];
+        calls ? [Protection, Connection, Invites, Room, Files, Network, Troubleshoot, Calls] : [Protection, Connection, Invites, Room, Files, Network, Troubleshoot];
 
     /// <summary>What a fresh install starts with: the "standard" protection level and everything else off or at its usual value.</summary>
     public static readonly AdvancedValues Defaults = new(
@@ -86,6 +92,9 @@ public static class AdvancedSettings
         // Routing through me needs the full LAN; without it the switch has no effect, so it is not a change.
         if (values.ModSync != d.ModSync || values.GameProxy != d.GameProxy || (values.FullLan && values.NetworkExit != d.NetworkExit))
             changed.Add(Room);
+        if (values.FilesCustomFolder != d.FilesCustomFolder || values.FilesAutoAccept != d.FilesAutoAccept || values.FilesQueue != d.FilesQueue
+            || Multiplayer.Files.TransferPace.Normalize(values.FilesSpeed) != Multiplayer.Files.TransferPace.Normalize(d.FilesSpeed) || values.FilesNotify != d.FilesNotify)
+            changed.Add(Files);
         // The calls group is hidden while calls are off, so its values do not count then.
         if (calls && (CallRules.Parse(values.CallsWho) != CallRules.Parse(d.CallsWho) || values.CallsNoise != d.CallsNoise || values.CallsPushToTalk != d.CallsPushToTalk
             || !string.Equals(values.CallsQuality, d.CallsQuality, StringComparison.OrdinalIgnoreCase) || values.CallsShareGameOnly != d.CallsShareGameOnly

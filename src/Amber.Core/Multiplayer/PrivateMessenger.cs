@@ -21,6 +21,25 @@ public sealed record FileProgress(string Id, string Peer, string Name, long Size
     public string? SavedPath { get; init; }
     public string? Error { get; init; }
     public bool Finished { get; init; }
+    /// <summary>Why a finished transfer did not complete (<see cref="FileEnd.None"/> when it did).</summary>
+    public FileEnd End { get; init; }
+    /// <summary>The other side accepted and the bytes are moving (before that, an outgoing file waits for an answer).</summary>
+    public bool Started { get; init; }
+}
+
+/// <summary>Why a transfer stopped without completing. The file cards turn these into one plain line each.</summary>
+public enum FileEnd
+{
+    None,
+    /// <summary>The other person was not in the room when the offer or a chunk went out.</summary>
+    Offline,
+    /// <summary>They declined, or did not answer within five minutes. The cards say the same for both.</summary>
+    NotAccepted,
+    Cancelled,
+    /// <summary>The connection stalled part way; sending again resumes where it stopped.</summary>
+    Stalled,
+    /// <summary>Anything else (corrupt data, a full disk, an unreadable file).</summary>
+    Failed,
 }
 
 /// <summary>私聊、传文件要用的那条连接（真的是房间聊天的 <see cref="ChatClient"/>，测试里可以换）。</summary>
@@ -55,7 +74,6 @@ public sealed partial class PrivateMessenger : IAsyncDisposable
 
     private readonly IPrivateLink _link;
     private readonly X25519KeyPair _me;
-    private readonly string _downloads;
     private readonly Func<string, byte[]?> _keyOf;
     private readonly CancellationTokenSource _cts = new();
 
@@ -73,6 +91,7 @@ public sealed partial class PrivateMessenger : IAsyncDisposable
         /// <summary>对方已经有的块数（断点续传：上次没收完的部分），接收时对方告诉我们。</summary>
         public long From;
         public volatile bool Cancelled;
+        public volatile bool Started;
     }
 
     private sealed class Incoming
@@ -101,6 +120,15 @@ public sealed partial class PrivateMessenger : IAsyncDisposable
     private readonly Task _pump;
     private readonly Task _sweeper;
 
+    /// <summary>Where received files go (Settings › Multiplayer › Files can change it; a receive in progress keeps its folder).</summary>
+    public string Downloads { get; set; }
+
+    /// <summary>
+    /// The most bytes per second a file may go out at; 0 means as fast as the room allows. Read before every chunk,
+    /// so a change (a game starting with "give way while playing") takes effect at once.
+    /// </summary>
+    public Func<long> SendLimit { get; set; } = () => 0;
+
     public event Action<PrivateMessage>? MessageReceived;
     public event Action<FileOffer>? FileOffered;
     public event Action<FileProgress>? Progress;
@@ -117,7 +145,7 @@ public sealed partial class PrivateMessenger : IAsyncDisposable
         _link = link;
         _me = me;
         _keyOf = keyOf;
-        _downloads = downloads;
+        Downloads = downloads;
         _link.PrivateReceived += OnFrame;
         _pump = PumpAsync();
         _sweeper = SweepLoopAsync();
@@ -152,7 +180,7 @@ public sealed partial class PrivateMessenger : IAsyncDisposable
             {
                 // Re-check under the gate: a chunk may have arrived meanwhile.
                 if (now - job.LastActivity < (accepted ? ReceiveIdleTimeout : OfferTimeout) || !_incoming.TryRemove(new(id, job))) continue;
-                if (accepted) Abort(job, L.T("core.mp.private.stalled"));
+                if (accepted) Abort(job, L.T("core.mp.private.stalled"), FileEnd.Stalled);
             }
             finally
             {
@@ -199,9 +227,21 @@ public sealed partial class PrivateMessenger : IAsyncDisposable
     /// 发文件：先问对方，对方接收后开始传。返回 true 表示对方完整收到；拒绝、超时、断开返回 false。
     /// 进度经 <see cref="Progress"/> 报告。
     /// </summary>
-    public Task<bool> SendFileAsync(string to, string path, CancellationToken ct = default) => SendFileAsync(to, path, null, ct);
+    public Task<bool> SendFileAsync(string to, string path, CancellationToken ct = default) => SendFileCoreAsync(to, path, null, ct);
 
-    private async Task<bool> SendFileAsync(string to, string path, string? modSha1, CancellationToken ct)
+    /// <summary>
+    /// <see cref="SendFileAsync(string,string,CancellationToken)"/> under an id the caller made with <see cref="NewTransferId"/>,
+    /// so a file card can follow the transfer from the first progress report.
+    /// </summary>
+    public Task<bool> SendFileAsync(string to, string path, string id, CancellationToken ct = default) =>
+        IsTransferId(id) && !_outgoing.ContainsKey(id) ? SendFileCoreAsync(to, path, null, ct, id) : throw new ArgumentException("bad transfer id", nameof(id));
+
+    /// <summary>A fresh transfer id (16 hex characters, the form the other side accepts).</summary>
+    public static string NewTransferId() => Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(8));
+
+    public static bool IsTransferId(string? id) => id is { Length: 16 } && id.All(char.IsAsciiHexDigitLower);
+
+    private async Task<bool> SendFileCoreAsync(string to, string path, string? modSha1, CancellationToken ct, string? id = null)
     {
         var info = new FileInfo(path);
         if (!info.Exists) throw new FileNotFoundException(path);
@@ -210,7 +250,7 @@ public sealed partial class PrivateMessenger : IAsyncDisposable
         await using (var read = File.OpenRead(path)) hash = await SHA256.HashDataAsync(read, ct);
         var job = new Outgoing
         {
-            Id = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(8)),
+            Id = id ?? NewTransferId(),
             To = to,
             Path = path,
             Name = SafeName(info.Name),
@@ -222,12 +262,13 @@ public sealed partial class PrivateMessenger : IAsyncDisposable
         try
         {
             if (!await SendAsync(to, OfferBody(job, modSha1), linked.Token))
-                return Fail(job, L.T("core.mp.private.offline"));
+                return Fail(job, L.T("core.mp.private.offline"), FileEnd.Offline);
             Report(job, 0);
             bool accepted;
             try { accepted = await job.Answer.Task.WaitAsync(OfferTimeout, linked.Token); }
-            catch (TimeoutException) { return Fail(job, L.T("core.mp.private.no_answer")); }
-            if (!accepted) return Fail(job, L.T("core.mp.private.declined"));
+            catch (TimeoutException) { return Fail(job, L.T("core.mp.private.no_answer"), FileEnd.NotAccepted); }
+            if (!accepted) return job.Cancelled ? Fail(job, L.T("core.mp.private.cancelled"), FileEnd.Cancelled) : Fail(job, L.T("core.mp.private.declined"), FileEnd.NotAccepted);
+            job.Started = true;
 
             await using var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, ChunkSize, useAsync: true);
             var buffer = new byte[ChunkSize];
@@ -236,37 +277,39 @@ public sealed partial class PrivateMessenger : IAsyncDisposable
             file.Seek(index * ChunkSize, SeekOrigin.Begin);
             Interlocked.Exchange(ref job.Acked, index);
             Report(job, index * ChunkSize);
+            var pace = new Pace(System.Diagnostics.Stopwatch.StartNew());
             while (true)
             {
-                if (job.Cancelled) return Fail(job, L.T("core.mp.private.cancelled"));
+                if (job.Cancelled) return Fail(job, L.T("core.mp.private.cancelled"), FileEnd.Cancelled);
                 var read = await file.ReadAtLeastAsync(buffer, buffer.Length, throwOnEndOfStream: false, linked.Token);
                 if (read == 0) break;
-                if (!await job.Credits.WaitAsync(AckTimeout, linked.Token)) return Fail(job, L.T("core.mp.private.stalled"));
-                if (job.Cancelled) return Fail(job, L.T("core.mp.private.cancelled"));
+                if (!await job.Credits.WaitAsync(AckTimeout, linked.Token)) return Fail(job, L.T("core.mp.private.stalled"), FileEnd.Stalled);
+                if (job.Cancelled) return Fail(job, L.T("core.mp.private.cancelled"), FileEnd.Cancelled);
                 if (!await SendAsync(to, new JsonObject { ["t"] = "chunk", ["id"] = job.Id, ["i"] = index, ["d"] = Convert.ToBase64String(buffer, 0, read) }, linked.Token))
-                    return Fail(job, L.T("core.mp.private.offline"));
+                    return Fail(job, L.T("core.mp.private.offline"), FileEnd.Stalled);
                 index++;
+                await PaceAsync(pace, read, linked.Token);
             }
             // 等最后几块的确认，再告诉对方“发完了”。
             var deadline = DateTime.UtcNow + AckTimeout;
             while (Interlocked.Read(ref job.Acked) < index)
             {
-                if (job.Cancelled) return Fail(job, L.T("core.mp.private.cancelled"));
-                if (DateTime.UtcNow > deadline) return Fail(job, L.T("core.mp.private.stalled"));
+                if (job.Cancelled) return Fail(job, L.T("core.mp.private.cancelled"), FileEnd.Cancelled);
+                if (DateTime.UtcNow > deadline) return Fail(job, L.T("core.mp.private.stalled"), FileEnd.Stalled);
                 await Task.Delay(50, linked.Token);
             }
             await SendAsync(to, new JsonObject { ["t"] = "done", ["id"] = job.Id }, linked.Token);
-            Progress?.Invoke(new FileProgress(job.Id, to, job.Name, job.Size, job.Size, true) { Finished = true, SavedPath = "" });
+            Progress?.Invoke(new FileProgress(job.Id, to, job.Name, job.Size, job.Size, true) { Finished = true, SavedPath = "", Started = true });
             return true;
         }
         catch (OperationCanceledException)
         {
             _ = SendAsync(to, new JsonObject { ["t"] = "cancel", ["id"] = job.Id }, CancellationToken.None);
-            return Fail(job, L.T("core.mp.private.cancelled"));
+            return Fail(job, L.T("core.mp.private.cancelled"), FileEnd.Cancelled);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Net.Sockets.SocketException or ObjectDisposedException or InvalidOperationException)
         {
-            return Fail(job, e.Message);
+            return Fail(job, e.Message, FileEnd.Failed);
         }
         finally
         {
@@ -274,13 +317,40 @@ public sealed partial class PrivateMessenger : IAsyncDisposable
         }
     }
 
-    private bool Fail(Outgoing job, string error)
+    private bool Fail(Outgoing job, string error, FileEnd end)
     {
-        Progress?.Invoke(new FileProgress(job.Id, job.To, job.Name, job.Size, Interlocked.Read(ref job.Acked) * ChunkSize, true) { Finished = true, Error = error });
+        // Leaving the room ends every transfer: that is a lost connection (send again to resume), not a cancel.
+        if (_closing && end == FileEnd.Cancelled) (end, error) = job.Started ? (FileEnd.Stalled, L.T("core.mp.private.stalled")) : (FileEnd.Offline, L.T("core.mp.private.offline"));
+        Progress?.Invoke(new FileProgress(job.Id, job.To, job.Name, job.Size, Math.Min(Interlocked.Read(ref job.Acked) * ChunkSize, job.Size), true)
+            { Finished = true, Error = error, End = end, Started = job.Started });
         return false;
     }
 
-    private void Report(Outgoing job, long done) => Progress?.Invoke(new FileProgress(job.Id, job.To, job.Name, job.Size, Math.Min(done, job.Size), true));
+    private void Report(Outgoing job, long done) =>
+        Progress?.Invoke(new FileProgress(job.Id, job.To, job.Name, job.Size, Math.Min(done, job.Size), true) { Started = job.Started });
+
+    /// <summary>Where a paced send is: when it started (after resuming) and how much has gone since.</summary>
+    private sealed class Pace(System.Diagnostics.Stopwatch clock)
+    {
+        public readonly System.Diagnostics.Stopwatch Clock = clock;
+        public long Sent;
+    }
+
+    /// <summary>Waits as long as <see cref="SendLimit"/> asks: the bytes sent so far may not run ahead of the limit.</summary>
+    private async Task PaceAsync(Pace pace, int bytes, CancellationToken ct)
+    {
+        pace.Sent += bytes;
+        var limit = SendLimit();
+        if (limit <= 0)
+        {
+            // Unlimited now: start counting afresh, so a later limit does not see a debt from the fast part.
+            pace.Sent = 0;
+            pace.Clock.Restart();
+            return;
+        }
+        var due = TimeSpan.FromSeconds((double)pace.Sent / limit) - pace.Clock.Elapsed;
+        if (due > TimeSpan.Zero) await Task.Delay(due < TimeSpan.FromSeconds(2) ? due : TimeSpan.FromSeconds(2), ct);
+    }
 
     /// <summary>
     /// 收方点了接收：开始收，存到下载文件夹。
@@ -289,18 +359,18 @@ public sealed partial class PrivateMessenger : IAsyncDisposable
     public async Task AcceptAsync(string id)
     {
         if (!_incoming.TryGetValue(id, out var job) || job.Stream is not null) return;
-        Directory.CreateDirectory(_downloads);
-        var temp = PartPath(_downloads, job.Offer.Name, job.Hash);
+        Directory.CreateDirectory(Downloads);
+        var temp = PartPath(Downloads, job.Offer.Name, job.Hash);
         var have = File.Exists(temp) ? new FileInfo(temp).Length : 0;
         if (have > job.Offer.Size) have = 0;
         var from = have / ChunkSize;
-        if (FreeSpaceOf(_downloads) is { } free && free < job.Offer.Size - from * ChunkSize + DiskReserve)
+        if (FreeSpaceOf(Downloads) is { } free && free < job.Offer.Size - from * ChunkSize + DiskReserve)
         {
             _incoming.TryRemove(id, out _);
             await SendAsync(job.Offer.FromFingerprint, new JsonObject { ["t"] = "decline", ["id"] = id }, _cts.Token);
             throw new IOException(L.F("core.mp.private.no_space", job.Offer.Name));
         }
-        job.TargetPath = UniquePath(_downloads, job.Offer.Name);
+        job.TargetPath = UniquePath(Downloads, job.Offer.Name);
         job.TempPath = temp;
         var stream = new FileStream(temp, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None, ChunkSize, useAsync: true);
         var hasher = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
@@ -354,7 +424,7 @@ public sealed partial class PrivateMessenger : IAsyncDisposable
         {
             // 先关掉临时文件再告诉对方：对方马上重发时，这边要已经能接着收。
             await _incomingGate.WaitAsync();
-            try { Abort(receive, L.T("core.mp.private.cancelled")); }
+            try { Abort(receive, L.T("core.mp.private.cancelled"), FileEnd.Cancelled); }
             finally { _incomingGate.Release(); }
             await SendAsync(receive.Offer.FromFingerprint, new JsonObject { ["t"] = "cancel", ["id"] = id }, _cts.Token);
         }
@@ -386,11 +456,13 @@ public sealed partial class PrivateMessenger : IAsyncDisposable
                     var text = RoomChat.Clean(body["text"]?.GetValue<string>(), MaxTextLength);
                     if (text.Length > 0) MessageReceived?.Invoke(new PrivateMessage(frame.FromFingerprint, frame.FromPublicKey, frame.FromName, text, DateTimeOffset.UtcNow));
                     break;
-                case "offer" when id is { Length: 16 } && !_incoming.ContainsKey(id):
+                case "offer" when id is { Length: 16 }:
                     var size = body["size"]?.GetValue<long>() ?? -1;
                     var sha = body["sha"]?.GetValue<string>();
                     var name = SafeName(body["name"]?.GetValue<string>() ?? "");
-                    if (size < 0 || sha is not { Length: 64 } || _incoming.Count >= MaxIncoming) return;
+                    if (size < 0 || sha is not { Length: 64 }) return;
+                    if (_incoming.TryGetValue(id, out var earlier) && !await LetGoOfResumedAsync(earlier, frame.FromFingerprint, sha, size)) return;
+                    if (_incoming.Count >= MaxIncoming) return;
                     if (!AllowsFile(size))
                     {
                         await SendAsync(frame.FromFingerprint, new JsonObject { ["t"] = "decline", ["id"] = id }, _cts.Token);
@@ -423,7 +495,7 @@ public sealed partial class PrivateMessenger : IAsyncDisposable
                         cancelled.Credits.Release();
                     }
                     if (_incoming.TryGetValue(id, out var gone) && gone.Offer.FromFingerprint == frame.FromFingerprint && _incoming.TryRemove(id, out _))
-                        Abort(gone, L.T("core.mp.private.cancelled"));
+                        Abort(gone, L.T("core.mp.private.cancelled"), FileEnd.Cancelled);
                     break;
                 case "chunk" when id is not null && _incoming.TryGetValue(id, out var receiving) && receiving.Offer.FromFingerprint == frame.FromFingerprint:
                     await ReceiveChunkAsync(receiving, body);
@@ -450,7 +522,7 @@ public sealed partial class PrivateMessenger : IAsyncDisposable
             // 经房主的一条连接转交，顺序不会乱；乱了（或者超过声明的大小）就当出错，放弃这次接收。
             if (index != job.Next || data.Length is 0 or > ChunkSize || job.Received + data.Length > job.Offer.Size)
             {
-                if (_incoming.TryRemove(job.Offer.Id, out _)) Abort(job, L.T("core.mp.private.corrupt"));
+                if (_incoming.TryRemove(job.Offer.Id, out _)) Abort(job, L.T("core.mp.private.corrupt"), FileEnd.Failed);
                 await SendAsync(job.Offer.FromFingerprint, new JsonObject { ["t"] = "cancel", ["id"] = job.Offer.Id }, _cts.Token);
                 return;
             }
@@ -461,7 +533,7 @@ public sealed partial class PrivateMessenger : IAsyncDisposable
             catch (IOException)
             {
                 // 传到一半磁盘满了（或者盘被拔了）：放弃这次接收，已收的部分留着，腾出空间后再发一次就接着收。
-                if (_incoming.TryRemove(job.Offer.Id, out _)) Abort(job, L.F("core.mp.private.no_space", job.Offer.Name));
+                if (_incoming.TryRemove(job.Offer.Id, out _)) Abort(job, L.F("core.mp.private.no_space", job.Offer.Name), FileEnd.Failed);
                 await SendAsync(job.Offer.FromFingerprint, new JsonObject { ["t"] = "cancel", ["id"] = job.Offer.Id }, _cts.Token);
                 return;
             }
@@ -489,17 +561,17 @@ public sealed partial class PrivateMessenger : IAsyncDisposable
             var hash = job.Hasher.GetHashAndReset();
             if (job.Received != job.Offer.Size || !CryptographicOperations.FixedTimeEquals(hash, job.Hash))
             {
-                Abort(job, L.T("core.mp.private.corrupt"), discard: true);
+                Abort(job, L.T("core.mp.private.corrupt"), FileEnd.Failed, discard: true);
                 return;
             }
             if (job.ModSha1 is { } expected && !MatchesSha1(job.TempPath!, expected))
             {
-                Abort(job, L.T("core.mp.private.corrupt"), discard: true);
+                Abort(job, L.T("core.mp.private.corrupt"), FileEnd.Failed, discard: true);
                 return;
             }
-            var target = File.Exists(job.TargetPath!) ? UniquePath(_downloads, job.Offer.Name) : job.TargetPath!;
+            var target = File.Exists(job.TargetPath!) ? UniquePath(Path.GetDirectoryName(job.TargetPath!)!, job.Offer.Name) : job.TargetPath!;
             File.Move(job.TempPath!, target);
-            Progress?.Invoke(new FileProgress(job.Offer.Id, job.Offer.FromFingerprint, job.Offer.Name, job.Offer.Size, job.Received, false) { Finished = true, SavedPath = target });
+            Progress?.Invoke(new FileProgress(job.Offer.Id, job.Offer.FromFingerprint, job.Offer.Name, job.Offer.Size, job.Received, false) { Finished = true, SavedPath = target, Started = true });
             CompleteMod(job, target);
         }
         finally
@@ -509,11 +581,31 @@ public sealed partial class PrivateMessenger : IAsyncDisposable
     }
 
     private void ReportIn(Incoming job) =>
-        Progress?.Invoke(new FileProgress(job.Offer.Id, job.Offer.FromFingerprint, job.Offer.Name, job.Offer.Size, job.Received, false));
+        Progress?.Invoke(new FileProgress(job.Offer.Id, job.Offer.FromFingerprint, job.Offer.Name, job.Offer.Size, job.Received, false) { Started = true });
 
     /// <summary>放弃这次接收。没收完的部分默认留着（下次接着收）；只有整个文件对不上哈希时才删（<paramref name="discard"/>）。</summary>
-    private void Abort(Incoming job, string error, bool discard = false)
+    /// <summary>
+    /// An offer under an id that is already receiving. When it is the same sender sending the same file again (it lost
+    /// the connection and resumes before this side noticed), the earlier attempt ends and lets go of the part file so the
+    /// new one carries on from it: true. A repeated offer still waiting for an answer, or anyone else's, is ignored: false.
+    /// </summary>
+    private async Task<bool> LetGoOfResumedAsync(Incoming earlier, string from, string sha, long size)
     {
+        if (earlier.Offer.FromFingerprint != from || earlier.Offer.Size != size || earlier.Stream is null
+            || !Convert.ToHexStringLower(earlier.Hash).Equals(sha, StringComparison.OrdinalIgnoreCase)) return false;
+        await _incomingGate.WaitAsync();
+        try
+        {
+            if (!_incoming.TryRemove(new KeyValuePair<string, Incoming>(earlier.Offer.Id, earlier))) return false;
+            Abort(earlier, L.T("core.mp.private.stalled"), FileEnd.Stalled);
+        }
+        finally { _incomingGate.Release(); }
+        return true;
+    }
+
+    private void Abort(Incoming job, string error, FileEnd end, bool discard = false)
+    {
+        var started = job.Stream is not null || job.Received > 0;
         try
         {
             job.Stream?.Dispose();
@@ -522,7 +614,7 @@ public sealed partial class PrivateMessenger : IAsyncDisposable
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
         job.Hasher?.Dispose();
-        Progress?.Invoke(new FileProgress(job.Offer.Id, job.Offer.FromFingerprint, job.Offer.Name, job.Offer.Size, job.Received, false) { Finished = true, Error = error });
+        Progress?.Invoke(new FileProgress(job.Offer.Id, job.Offer.FromFingerprint, job.Offer.Name, job.Offer.Size, job.Received, false) { Finished = true, Error = error, End = end, Started = started });
         CompleteMod(job, null);
     }
 
@@ -555,8 +647,11 @@ public sealed partial class PrivateMessenger : IAsyncDisposable
         return path;
     }
 
+    private volatile bool _closing;
+
     public async ValueTask DisposeAsync()
     {
+        _closing = true;
         _link.PrivateReceived -= OnFrame;
         _inbox.Writer.TryComplete();
         _cts.Cancel();
@@ -568,7 +663,7 @@ public sealed partial class PrivateMessenger : IAsyncDisposable
             job.Answer.TrySetResult(false);
         }
         foreach (var id in _incoming.Keys.ToList())
-            if (_incoming.TryRemove(id, out var job)) Abort(job, L.T("core.mp.private.cancelled"));
+            if (_incoming.TryRemove(id, out var job)) Abort(job, L.T("core.mp.private.stalled"), FileEnd.Stalled);
         _cts.Dispose();
     }
 }

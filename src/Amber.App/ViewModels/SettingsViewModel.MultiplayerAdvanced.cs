@@ -65,7 +65,12 @@ public sealed partial class SettingsViewModel
             CallsPushToTalk: s.CallsPushToTalk,
             CallsQuality: s.CallsVideoQuality,
             CallsShareGameOnly: s.CallsShareGameOnly,
-            CallsAllowControl: s.CallsAllowControlRequests);
+            CallsAllowControl: s.CallsAllowControlRequests,
+            FilesCustomFolder: s.FilesSaveFolder.Length > 0,
+            FilesAutoAccept: s.FilesAutoAcceptFriends,
+            FilesQueue: s.FilesQueueOffline,
+            FilesSpeed: s.FilesSpeed,
+            FilesNotify: s.FilesNotifyDone);
     }
 
     private void RefreshAdvanced()
@@ -79,6 +84,7 @@ public sealed partial class SettingsViewModel
         OnPropertyChanged(nameof(InvitesCustomized));
         OnPropertyChanged(nameof(RoomCustomized));
         OnPropertyChanged(nameof(CallsCustomized));
+        OnPropertyChanged(nameof(FilesCustomized));
         OnPropertyChanged(nameof(AnyAdvancedCustomized));
         if (now.Count > 0) AdvancedResetStatus = "";
         else ConfirmingAdvancedReset = false;
@@ -108,6 +114,7 @@ public sealed partial class SettingsViewModel
         BreakerRestartDelay = d.BreakerDelay.ToString();
         BreakerSkipDelay = d.BreakerSkip;
         ResetCalls(d);
+        ResetFiles(d);
         var roomOpen = false;
         if (Multiplayer is { } m)
         {

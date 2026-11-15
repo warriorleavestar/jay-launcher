@@ -47,6 +47,8 @@ public enum FriendLineKind
     Note,
     Mine,
     Theirs,
+    /// <summary>A file card (<see cref="FriendLine.File"/>): sent or received, with where it is now.</summary>
+    File,
 }
 
 /// <summary>
@@ -70,6 +72,12 @@ public sealed partial class FriendLine : ObservableObject
     public bool IsNote => Kind == FriendLineKind.Note;
     public bool IsMine => Kind == FriendLineKind.Mine;
     public bool IsTheirs => Kind == FriendLineKind.Theirs;
+    public bool IsFile => Kind == FriendLineKind.File;
+    public bool IsBubble => Kind is FriendLineKind.Mine or FriendLineKind.Theirs;
+    public bool IsFileMine => File?.Outgoing == true;
+
+    /// <summary>The file this line is a card for (file lines only).</summary>
+    public TransferItem? File { get; init; }
     public string Text => _text();
     public string TimeText => Time.ToLocalTime().ToString("HH:mm");
 
