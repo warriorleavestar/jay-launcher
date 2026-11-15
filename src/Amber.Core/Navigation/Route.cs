@@ -99,8 +99,6 @@ public sealed record Route
         return new Route(Segments, query, Fragment);
     }
 
-    public Route WithFragment(string? fragment) => new(Segments, Query, string.IsNullOrEmpty(fragment) ? null : fragment);
-
     public override string ToString()
     {
         var s = string.Join('/', Segments.Select(Uri.EscapeDataString));
