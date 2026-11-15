@@ -109,7 +109,13 @@ public sealed class MobilePortTests
             Assert.InRange(control.CenterY - control.Radius, 0, 1);
             Assert.InRange(control.CenterY + control.Radius, 0, 1);
             if (control.GameplayVisible)
-                Assert.Equal(control.Action, TouchControlLayout.HitTest(control.CenterX, control.CenterY)!.Action);
+            {
+                if (control.Action == TouchControlAction.Move)
+                    Assert.Equal(TouchControlAction.Move,
+                        TouchControlLayout.HitTest(control.CenterX + control.Radius * 0.65, control.CenterY)!.Action);
+                else
+                    Assert.Equal(control.Action, TouchControlLayout.HitTest(control.CenterX, control.CenterY)!.Action);
+            }
             if (control.MenuVisible)
                 Assert.Equal(control.Action, TouchControlLayout.HitTest(control.CenterX, control.CenterY,
                     gameplayControlsActive: false)!.Action);
@@ -131,11 +137,13 @@ public sealed class MobilePortTests
         var sneak = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Sneak);
         Assert.InRange(menu.CenterX, 0.47, 0.53);
         Assert.True(movePad.CenterX < 0.25);
-        Assert.InRange(movePad.CenterY, 0.75, 0.82);
+        Assert.InRange(movePad.CenterY, 0.79, 0.81);
         Assert.InRange(inventory.CenterX, 0.600, 0.612);
         Assert.InRange(inventory.CenterY, 0.95, 0.96);
-        Assert.True(jump.CenterY > 0.75 && sneak.CenterY > 0.84);
-        Assert.True(jump.Radius >= 0.04 && sneak.Radius >= 0.04);
+        Assert.True(jump.CenterY > 0.78);
+        Assert.Equal(movePad.CenterX, sneak.CenterX, 6);
+        Assert.Equal(movePad.CenterY, sneak.CenterY, 6);
+        Assert.True(jump.Radius >= 0.05 && sneak.Radius >= 0.035);
         Assert.False(split.GameplayVisible);
         Assert.True(split.MenuVisible);
         Assert.Null(TouchControlLayout.HitTest(split.CenterX, split.CenterY));
@@ -156,8 +164,9 @@ public sealed class MobilePortTests
         Assert.Equal(0, direction.Y, 6);
 
         profile.Mode = TouchControlMode.JoystickAndCrosshair;
-        Assert.Contains(profile.Controls, control => control.Action == TouchControlAction.PrimaryAction);
-        Assert.Contains(profile.Controls, control => control.Action == TouchControlAction.SecondaryAction && control.GameplayVisible);
+        Assert.DoesNotContain(profile.Controls, control => control.Action == TouchControlAction.PrimaryAction);
+        Assert.DoesNotContain(profile.Controls, control =>
+            control.Action == TouchControlAction.SecondaryAction && control.GameplayVisible);
 
         profile.Mode = TouchControlMode.ExternalKeyboardMouse;
         Assert.Single(profile.Controls);
@@ -202,7 +211,7 @@ public sealed class MobilePortTests
         var move = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Move);
         var jump = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Jump);
 
-        Assert.True(router.Press(10, move.CenterX, move.CenterY));
+        Assert.True(router.Press(10, move.CenterX + move.Radius * 0.65, move.CenterY));
         Assert.True(router.Move(10, move.CenterX + move.Radius, move.CenterY));
         Assert.True(router.Press(11, jump.CenterX, jump.CenterY));
         Assert.Contains((TouchControlAction.Jump, true), sink.Actions);
@@ -222,7 +231,7 @@ public sealed class MobilePortTests
         var router = new TouchInputRouter(sink);
         var move = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Move);
 
-        Assert.True(router.Press(50, move.CenterX, move.CenterY));
+        Assert.True(router.Press(50, move.CenterX, move.CenterY - move.Radius * 0.65));
         Assert.True(router.Move(50, move.CenterX, move.CenterY - move.Radius));
         Assert.True(router.SprintLocked);
         Assert.True(router.IsPressed(TouchControlAction.Sprint));
@@ -271,7 +280,7 @@ public sealed class MobilePortTests
         var router = new TouchInputRouter(sink);
         var move = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Move);
 
-        Assert.True(router.Press(13, move.CenterX, move.CenterY));
+        Assert.True(router.Press(13, move.CenterX + move.Radius * 0.65, move.CenterY));
         Assert.True(router.Move(13, move.CenterX + move.Radius, move.CenterY));
         Assert.Equal(1, sink.LastMovement.X, 6);
 
