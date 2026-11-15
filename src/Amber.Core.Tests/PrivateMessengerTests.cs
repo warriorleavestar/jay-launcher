@@ -314,6 +314,27 @@ public sealed class PrivateMessengerTests : IDisposable
         Assert.False(Directory.Exists(Path.Combine(_dir, "bob")) && Directory.EnumerateFiles(Path.Combine(_dir, "bob")).Any());
     }
 
+    [Fact]
+    public async Task HugeDeclaredSizeDoesNotPassTheDiskCheck()
+    {
+        var (alice, bob, aliceLink) = PairWithLink();
+        await using var _a = alice;
+        await using var _b = bob;
+        bob.FreeSpaceOf = _ => 10L * 1024 * 1024 * 1024;
+        var offered = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        bob.FileOffered += offer => offered.TrySetResult(offer.Id);
+        // An offer whose declared size is near long.MaxValue (an honest sender never declares more than its file).
+        var body = new System.Text.Json.Nodes.JsonObject
+        {
+            ["t"] = "offer", ["id"] = "0123456789abcdef", ["name"] = "huge.bin", ["size"] = long.MaxValue, ["sha"] = new string('a', 64),
+        };
+        await aliceLink.SendPrivateAsync(Fp(_bob), PrivateSeal.Seal(_alice, _bob.PublicKey, System.Text.Encoding.UTF8.GetBytes(body.ToJsonString())), default);
+        var id = await offered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        await Assert.ThrowsAsync<IOException>(() => bob.AcceptAsync(id));
+        Assert.False(Directory.Exists(Path.Combine(_dir, "bob")) && Directory.EnumerateFiles(Path.Combine(_dir, "bob")).Any());
+    }
+
     // ---- 经真的聊天转发（邀请房间） ----
 
     private sealed record Room(RoomCredentials Credentials, MemberTable Table, RoomCode Host);
