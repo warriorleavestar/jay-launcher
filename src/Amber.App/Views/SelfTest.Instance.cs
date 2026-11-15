@@ -228,6 +228,34 @@ internal sealed partial class SelfTest
             window.RaiseEvent(new KeyEventArgs { RoutedEvent = InputElement.KeyDownEvent, Key = Key.Tab, KeyModifiers = KeyModifiers.Control, Source = window });
             Check("键盘：Ctrl+Tab 到下一个页签", instance.TabIndex == (int)InstanceTab.Mods);
 
+            // ---- Instance settings Jay didn't save, and a save that fails ----
+            var settingsFile = Path.Combine(game, "versions", id, InstanceSettings.FileName);
+            File.WriteAllText(settingsFile, """{"PreLaunchCommand":"echo selftest","MaxMemoryMb":3072}""");
+            instance.TabIndex = (int)InstanceTab.Settings;
+            await Task.Delay(300);
+            Check("实例设置：不是 Jay 保存的命令不填进来，页上写明，其余照常", instance.PreLaunch == "" && instance.MemoryText == "3072"
+                && instance.StatusInfo?.Key == "instance.settings.dropped_not_saved", $"{instance.PreLaunch} / {instance.MemoryText} / {instance.StatusInfo?.Key}");
+            Check("实例设置：启动时也知道少了哪些", service.EffectiveSettings(id).DroppedUnknownValues);
+            // Holding the record's lock (as another Jay window would) makes the next save fail. Only with a test data folder.
+            if (Environment.GetEnvironmentVariable("AMBER_DATA_DIR") is { Length: > 0 } data)
+            {
+                var lockPath = Path.Combine(data, "instance-settings-trust.json.lock");
+                using (new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
+                {
+                    instance.JvmArgs = "-Dselftest=1";
+                    await Task.Delay(300);
+                    Check("实例设置：存不进去时不退出，页上说没存上，填的还在", instance.StatusInfo?.Key == "instance.settings.save_failed" && instance.JvmArgs == "-Dselftest=1",
+                        instance.StatusInfo?.Key);
+                }
+                instance.JvmArgs = "";
+                await Task.Delay(300);
+                Check("实例设置：锁放开后存上了，原来那份收进 Jay 自己的文件夹", instance.StatusInfo?.Kind != StatusKind.Error
+                    && InstanceSettings.UnconfirmedCopies(service.Directory, id).Count == 1
+                    && !Directory.EnumerateFiles(Path.GetDirectoryName(settingsFile)!, InstanceSettings.FileName + "*").Skip(1).Any(), instance.StatusInfo?.Key);
+                try { Directory.Delete(InstanceSettings.UnconfirmedFolder(service.Directory, id), true); } catch (IOException) { }
+            }
+            File.Delete(settingsFile);
+
             // ---- English ----
             L.SetLanguage("en");
             instance.TabIndex = (int)InstanceTab.Overview;
