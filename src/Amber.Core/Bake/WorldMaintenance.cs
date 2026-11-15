@@ -151,9 +151,13 @@ public sealed record PregenState(int Radius, long Done, long Total, bool Complet
             if (ContainedFiles.ReadSmall(Path.Combine(worldDir, FileName), MaxBytes) is not { } bytes || JsonNode.Parse(bytes) is not JsonObject o) return null;
             if (MaintenanceLaunch.Str(o, "schema") != "amber-ul/pregen@1") return null;
             static long Long(JsonObject o, string key) => o[key] is JsonValue v && v.TryGetValue<long>(out var n) ? n : 0;
-            return new PregenState((int)Long(o, "radius"), Long(o, "done"), Long(o, "total"), o["complete"] is JsonValue c && c.TryGetValue<bool>(out var b) && b);
+            long radius = Long(o, "radius"), done = Long(o, "done"), total = Long(o, "total");
+            // Counts the loader could not have written are not a place to continue from.
+            if (radius is < 0 or > WorldMaintenance.MaxRadius || done < 0 || total < 0 || done > total || total > WorldMaintenance.Chunks((int)radius)) return null;
+            return new PregenState((int)radius, done, total, o["complete"] is JsonValue c && c.TryGetValue<bool>(out var b) && b);
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException) { return null; }
+        // A repeated property surfaces as ArgumentException or InvalidOperationException when the object is read.
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or ArgumentException or InvalidOperationException) { return null; }
     }
 
     /// <summary>Chunks already generated that a run with this radius does not need to do again (the same spiral continues).</summary>

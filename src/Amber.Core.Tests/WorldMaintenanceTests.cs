@@ -275,6 +275,23 @@ public sealed class WorldMaintenanceTests : IDisposable
         Assert.Equal(10, PregenState.Read(world)!.Done);
     }
 
+    [Theory]
+    [InlineData("""{"schema":"amber-ul/pregen@1","schema":"amber-ul/pregen@1","radius":64,"done":0,"total":16641,"complete":false}""")]
+    [InlineData("""{"schema":"amber-ul/pregen@1","radius":64,"radius":64,"done":0,"total":16641,"complete":false}""")]
+    [InlineData("""{"schema":"amber-ul/pregen@1","radius":64,"done":0,"total":16641,"complete":false,"complete":true}""")]
+    [InlineData("""{"schema":"amber-ul/pregen@1","radius":-1,"done":0,"total":10,"complete":false}""")]
+    [InlineData("""{"schema":"amber-ul/pregen@1","radius":100000,"done":0,"total":10,"complete":false}""")]
+    [InlineData("""{"schema":"amber-ul/pregen@1","radius":64,"done":-5,"total":10,"complete":false}""")]
+    [InlineData("""{"schema":"amber-ul/pregen@1","radius":64,"done":11,"total":10,"complete":false}""")]
+    [InlineData("""{"schema":"amber-ul/pregen@1","radius":64,"done":0,"total":9223372036854775807,"complete":false}""")]
+    public void AMalformedPregenFileIsNoPlaceToContinueFrom(string json)
+    {
+        // A world from someone else may carry any file: the panel must still open, with nothing to continue.
+        var world = Directory.CreateDirectory(Path.Combine(_root, "W")).FullName;
+        File.WriteAllText(Path.Combine(world, PregenState.FileName), json);
+        Assert.Null(PregenState.Read(world));
+    }
+
     [Fact]
     public void APregenFifoIsRefusedAtOnce()
     {
