@@ -7,7 +7,7 @@ related: tools, network-list, child-mode, recycle, themes
 
 # Settings
 
-Settings come in nine groups: General, Appearance, Game defaults, Downloads and services, Storage, Privacy and security, Multiplayer, Experimental, About.
+Settings come in ten groups: General, Appearance, Game defaults, Downloads and services, Storage, Privacy and security, Multiplayer, Network, Experimental, About.
 
 ## How to
 - Wide window: pick a group on the left; medium: a group menu at the top; narrow: the list of groups first, then one group.
