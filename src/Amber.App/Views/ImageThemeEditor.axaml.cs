@@ -10,12 +10,12 @@ namespace Amber.App.Views;
 
 /// <summary>
 /// The "make a theme from pictures" panel. Pictures come from a file picker, or from dragging them onto the window (its
-/// drop zones offer the four slots). In a narrow settings column the preview moves above the slots.
+/// drop zones offer the four slots). The preview sits above the slots.
 /// </summary>
 public partial class ImageThemeEditor : UserControl
 {
-    /// <summary>Below this width the preview sits above the slots instead of beside them.</summary>
-    public const double StackBelow = 760;
+    /// <summary>The preview's own width; in a narrower editor it is scaled down to fit.</summary>
+    private const double PreviewWidth = 360;
 
     public ImageThemeEditor()
     {
@@ -26,16 +26,10 @@ public partial class ImageThemeEditor : UserControl
 
     private ImageThemeViewModel? Model => DataContext as ImageThemeViewModel;
 
-    internal bool IsStacked { get; private set; }
-
     private void Arrange(double width)
     {
-        var stacked = width < StackBelow;
-        IsStacked = stacked;
-        Grid.SetColumn(PreviewColumn, stacked ? 0 : 1);
-        Grid.SetRow(PreviewColumn, 0);
-        Grid.SetRow(EditorColumn, stacked ? 1 : 0);
-        Grid.SetColumnSpan(EditorColumn, stacked ? 2 : 1);
+        var scale = Math.Min(1, width / PreviewWidth);
+        PreviewScale.LayoutTransform = scale >= 1 ? null : new Avalonia.Media.ScaleTransform(scale, scale);
     }
 
     private async void Pick_Click(object? sender, RoutedEventArgs e)

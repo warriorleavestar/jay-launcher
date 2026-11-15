@@ -143,7 +143,7 @@ internal sealed class RequestPopups
         _enabled = enabled;
         center.Posted += handle => Dispatcher.UIThread.Post(() =>
         {
-            if (handle.Spec.IsSafety && !handle.IsResolved && !_owner.IsActive && _enabled()) Show(handle);
+            if ((handle.Spec.IsSafety || handle.Spec.Popup) && !handle.IsResolved && !_owner.IsActive && _enabled()) Show(handle);
         });
         center.Resolved += handle => Dispatcher.UIThread.Post(() =>
         {

@@ -272,6 +272,26 @@ public class ThemePackTests : IDisposable
     }
 
     [Fact]
+    public void AnInstalledPackWithAnOddValueNeitherCrashesTheListNorImports()
+    {
+        // As an older Jay may have installed it: a slot focus that isn't two numbers.
+        var store = new ThemeStore(Path.Combine(_dir, "themes"));
+        var dir = Path.Combine(store.Root, "test-theme");
+        Directory.CreateDirectory(Path.Combine(dir, "assets"));
+        File.WriteAllText(Path.Combine(dir, "theme.json"), Manifest);
+        File.WriteAllText(Path.Combine(dir, "tokens.json"), """{ "slots": { "banner": { "image": "assets/a.png", "focus": ["x", 0] } } }""");
+        File.WriteAllBytes(Path.Combine(dir, "assets", "a.png"), Png(10, 10));
+        var all = store.ListAll();
+        Assert.Contains(all, p => p.Id == "test-theme");
+        Assert.Contains(all, p => BuiltInThemes.IsBuiltIn(p.Id));
+
+        var file = Path.Combine(_dir, "odd.jaytheme");
+        File.WriteAllBytes(file, Zip(Text("theme.json", Manifest), Text("tokens.json", """{ "slots": { "banner": { "image": "assets/a.png", "focus": [{}, []] } } }"""), ("assets/a.png", Png(10, 10))));
+        var installed = store.Install(file);
+        Assert.Contains(installed.Problems, p => p.Code == "bad_value");
+    }
+
+    [Fact]
     public void StartupGuardFallsBackAfterTwoCrashes()
     {
         var guard = new ThemeStartupGuard(Path.Combine(_dir, "guard.txt"));
