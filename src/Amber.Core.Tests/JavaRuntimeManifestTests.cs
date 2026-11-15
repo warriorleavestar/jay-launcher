@@ -108,7 +108,8 @@ public sealed class JavaRuntimeManifestTests : IDisposable
                 File.SetUnixFileMode(java, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             }
             Assert.False(File.Exists(Path.Combine(home, "release")));
-            Assert.Equal(17, JavaFinder.MajorOf(java));
+            var major = JavaFinder.MajorOf(java);
+            Assert.True(major == 17, $"got {major}; probe: {JavaVersionProbe.LastProblem}");
             // The sandbox's own check (which Java 9+ flags to pass) takes the same way when the release file is missing.
             Assert.Equal(17, Amber.Core.Launch.WindowsSandbox.JavaMajor(java));
         }

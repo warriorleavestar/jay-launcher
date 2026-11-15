@@ -107,13 +107,13 @@ public sealed class JavaVersionProbeTests : IDisposable
             java.AssertContained();
             return;
         }
-        Assert.Equal(8, major);
+        AssertMajor(8, major);
         Assert.True(JavaVersionProbe.RestrictedRuns > runs);
         java.AssertContained();
 
         // Remembered: the same file is not run again.
         var after = JavaVersionProbe.RestrictedRuns;
-        Assert.Equal(8, JavaFinder.MajorOf(java.Java));
+        AssertMajor(8, JavaFinder.MajorOf(java.Java));
         Assert.Equal(after, JavaVersionProbe.RestrictedRuns);
         java.AssertContained();
     }
@@ -123,7 +123,7 @@ public sealed class JavaVersionProbeTests : IDisposable
     {
         if (!OperatingSystem.IsWindows()) return;
         var java = new EscapingJava(_root);
-        Assert.Equal(8, JavaFinder.MajorOf(java.Java));
+        AssertMajor(8, JavaFinder.MajorOf(java.Java));
         var sid = WindowsSandbox.ContainerSid(JavaVersionProbe.ContainerName);
         Assert.False(WindowsSandbox.NamesExplicitly(java.Home, sid));
     }
@@ -184,7 +184,7 @@ public sealed class JavaVersionProbeTests : IDisposable
         using (var writer = new StreamWriter(zip.CreateEntry("META-INF/MANIFEST.MF").Open(), new UTF8Encoding(false)))
             writer.Write("Manifest-Version: 1.0\r\nImplementation-Version: 1.8.0_51\r\nSpecification-Version: 1.8\r\n\r\n");
         Assert.Equal("1.8.0_51", JavaVersionProbe.FromFiles(home, exe)?.Version);
-        Assert.Equal(8, JavaFinder.MajorOf(exe));
+        AssertMajor(8, JavaFinder.MajorOf(exe));
 
         // A release file says it first.
         File.WriteAllText(Path.Combine(home, "release"), "JAVA_VERSION=\"17.0.12\"\nOS_ARCH=\"x86_64\"\n");
@@ -229,7 +229,7 @@ public sealed class JavaVersionProbeTests : IDisposable
         var options = await service.SandboxForLaunchAsync(java.Java, _ => Task.FromResult(false), _ => { });
         Assert.Equal(WindowsSandboxLevel.Standard, options.WindowsLevel);
         java.AssertContained();
-        Assert.Equal(8, WindowsSandbox.JavaMajor(java.Java));
+        AssertMajor(8, WindowsSandbox.JavaMajor(java.Java));
         java.AssertContained();
     }
 
@@ -253,4 +253,7 @@ public sealed class JavaVersionProbeTests : IDisposable
         Assert.Equal(java.Java, e.JavaPath);
         java.AssertContained();
     }
+
+    private static void AssertMajor(int expected, int actual) =>
+        Assert.True(expected == actual, $"expected Java {expected}, got {actual}; probe: {JavaVersionProbe.LastProblem}");
 }
