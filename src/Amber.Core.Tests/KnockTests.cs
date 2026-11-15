@@ -585,6 +585,59 @@ public sealed class KnockTests : IAsyncDisposable
         Assert.True((await KnockAsync(room.Invite)).Approved);
     }
 
+    private async Task SendUnknownIdAsync(KnockServer server)
+    {
+        using var client = new TcpClient();
+        await client.ConnectAsync(IPAddress.Loopback, server.Port);
+        var stream = client.GetStream();
+        await KnockProtocol.WriteFrameAsync(stream, RandomNumberGenerator.GetBytes(KnockProtocol.IdLength), default);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        Assert.Equal(0, await ReadToEndAsync(stream, timeout.Token));
+    }
+
+    /// <summary>
+    /// Slow guessing (under the per-minute limit) is caught by the hourly budget, each pause soon after another lasts twice
+    /// as long, and the host is told.
+    /// </summary>
+    [Fact]
+    public async Task SlowPasswordGuessingIsLimitedPerHourWithLongerPauses()
+    {
+        var salt = Amber.Core.Multiplayer.Public.RoomPassword.NewSalt();
+        _book.CreateStanding(true, TunnelSettings.Default, Amber.Core.Multiplayer.Public.RoomPassword.Token("hunter2", salt));
+        var server = Server();
+        var told = 0;
+        server.PasswordGuessing += () => Interlocked.Increment(ref told);
+        for (var i = 0; i < Fast.MaxUnknownPerHour; i++)
+        {
+            Assert.False(server.IsPasswordPaused);
+            await SendUnknownIdAsync(server);
+            _now += TimeSpan.FromSeconds(100);
+        }
+        // The last guess paused the password invite, just before the clock moved on.
+        _now -= TimeSpan.FromSeconds(100);
+        Assert.True(server.IsPasswordPaused);
+        Assert.Equal(1, told);
+        _now += Fast.PauseAfterFailures + TimeSpan.FromSeconds(1);
+        Assert.False(server.IsPasswordPaused);
+
+        // Right after: a burst pauses again, for twice as long.
+        for (var i = 0; i < Fast.MaxUnknownPerMinute; i++) await SendUnknownIdAsync(server);
+        Assert.Equal(2, told);
+        _now += Fast.PauseAfterFailures + TimeSpan.FromSeconds(1);
+        Assert.True(server.IsPasswordPaused);
+        _now += Fast.PauseAfterFailures;
+        Assert.False(server.IsPasswordPaused);
+
+        // Waiting a couple of hours does not start the pauses over: the next one is twice as long again.
+        _now += TimeSpan.FromHours(2);
+        for (var i = 0; i < Fast.MaxUnknownPerMinute; i++) await SendUnknownIdAsync(server);
+        Assert.Equal(3, told);
+        _now += 3 * Fast.PauseAfterFailures;
+        Assert.True(server.IsPasswordPaused);
+        _now += Fast.PauseAfterFailures + TimeSpan.FromSeconds(1);
+        Assert.False(server.IsPasswordPaused);
+    }
+
     /// <summary>Child mode's "always ask" overrides both a trusted guest and an auto-approve invite, checked at each knock.</summary>
     [Fact]
     public async Task AlwaysAskOverridesTrustAndAutoApprove()
@@ -731,6 +784,130 @@ public sealed class KnockTests : IAsyncDisposable
         finally
         {
             if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    /// <summary>
+    /// After a kick, an open (auto-approve) standing invite asks the host for every knock: the kicked person can't come
+    /// back unasked under a new identity. Trusted friends still get straight in.
+    /// </summary>
+    [Fact]
+    public async Task AKickMakesOpenStandingInvitesAsk()
+    {
+        _decide = (_, _) => Task.FromResult(false);
+        var server = Server();
+        var open = _book.CreateStanding(true, TunnelSettings.Default);
+        Assert.True((await KnockAsync(open.Invite, "Griefer")).Approved);
+        lock (_asked) Assert.Empty(_asked);
+
+        var entry = server.Members.FindGuest(_guest.PublicKey)!;
+        Assert.False(server.Members.Kick(entry, _book));
+        Assert.False(open.AutoApprove);
+        Assert.False(open.Revoked);
+
+        using var reset = X25519KeyPair.Generate();
+        using (var c = new TcpClient())
+        {
+            await c.ConnectAsync(IPAddress.Loopback, server.Port);
+            Assert.False((await KnockClient.KnockAsync(c.GetStream(), open.Invite, reset, "Griefer2", "0.6.0", decisionTimeout: TimeSpan.FromSeconds(5))).Approved);
+        }
+        lock (_asked) Assert.Single(_asked);
+
+        using var friend = X25519KeyPair.Generate();
+        _trusted = pub => pub.AsSpan().SequenceEqual(friend.PublicKey);
+        using (var c = new TcpClient())
+        {
+            await c.ConnectAsync(IPAddress.Loopback, server.Port);
+            Assert.True((await KnockClient.KnockAsync(c.GetStream(), open.Invite, friend, "Friend", "0.6.0", decisionTimeout: TimeSpan.FromSeconds(5))).Approved);
+        }
+        lock (_asked) Assert.Single(_asked);
+    }
+
+    private static readonly KnockLimits Watching = Fast with { DecisionTimeout = TimeSpan.FromMinutes(5), DisconnectCheck = TimeSpan.FromMilliseconds(100) };
+
+    /// <summary>Waits until the host answers or the knock's token is cancelled (the card goes away).</summary>
+    private static async Task<bool> NeverAnswered(CancellationToken ct)
+    {
+        try { await Task.Delay(Timeout.Infinite, ct); } catch (OperationCanceledException) { }
+        return false;
+    }
+
+    private async Task<(TcpClient Client, Task<KnockOutcome> Knock)> StartKnock(JayInvite invite, X25519KeyPair key, string name)
+    {
+        var client = new TcpClient();
+        await client.ConnectAsync(IPAddress.Loopback, Server().Port);
+        return (client, KnockClient.KnockAsync(client.GetStream(), invite, key, name, "0.6.0", decisionTimeout: TimeSpan.FromMinutes(5)));
+    }
+
+    /// <summary>A guest who leaves while the host decides gives up the place, and the host's card is withdrawn.</summary>
+    [Fact]
+    public async Task AGuestWhoLeavesWhileWaitingWithdrawsTheCard()
+    {
+        var cancelled = new TaskCompletionSource();
+        _decide = async (_, ct) =>
+        {
+            var answer = await NeverAnswered(ct);
+            cancelled.TrySetResult();
+            return answer;
+        };
+        var server = Server(Watching);
+        var abandoned = 0;
+        var timedOut = 0;
+        server.Abandoned += _ => Interlocked.Increment(ref abandoned);
+        server.TimedOut += _ => Interlocked.Increment(ref timedOut);
+        var invite = Invite(uses: 2);
+        var (client, knock) = await StartKnock(invite.Invite, _guest, "Steve");
+        Assert.True(await WaitAsync(() => { lock (_asked) return _asked.Count == 1; }));
+        client.Dispose();
+        await cancelled.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.True(await WaitAsync(() => server.Active == 0));
+        Assert.Equal(1, Volatile.Read(ref abandoned));
+        Assert.Equal(0, Volatile.Read(ref timedOut));
+        // The guest side ended with its own socket closed: an error or a "closed" outcome, never an approval.
+        try { Assert.False((await knock).Approved); }
+        catch (Exception e) when (e is IOException or ObjectDisposedException or OperationCanceledException or EndOfStreamException) { }
+    }
+
+    /// <summary>
+    /// Three knocks waiting for the host fill its places, but a trusted friend and an auto-approve invite still get in;
+    /// a fourth knock that would wait is answered "busy" without using its invite up.
+    /// </summary>
+    [Fact]
+    public async Task TrustedGuestsGetInWhileThreeKnocksWait()
+    {
+        _decide = (_, ct) => NeverAnswered(ct);
+        Server(Watching);
+        var invite = Invite(uses: 10);
+        var keys = Enumerable.Range(0, 4).Select(_ => X25519KeyPair.Generate()).ToList();
+        var waiting = new List<TcpClient>();
+        try
+        {
+            for (var i = 0; i < 3; i++) waiting.Add((await StartKnock(invite.Invite, keys[i], "Guest" + i)).Client);
+            Assert.True(await WaitAsync(() => { lock (_asked) return _asked.Count == 3; }));
+            var usesLeft = invite.UsesLeft;
+
+            using (var fourth = new TcpClient())
+            {
+                await fourth.ConnectAsync(IPAddress.Loopback, Server().Port);
+                var late = await KnockClient.KnockAsync(fourth.GetStream(), invite.Invite, keys[3], "Late", "0.6.0", decisionTimeout: TimeSpan.FromSeconds(5));
+                Assert.False(late.Approved);
+                Assert.Equal("busy", late.Reason);
+            }
+            Assert.Equal(usesLeft, invite.UsesLeft);
+            lock (_asked) Assert.Equal(3, _asked.Count);
+
+            _trusted = pub => pub.AsSpan().SequenceEqual(_guest.PublicKey);
+            Assert.True((await KnockAsync(invite.Invite, "Friend")).Approved);
+            var open = _book.CreateStanding(true, TunnelSettings.Default);
+            using var stranger = X25519KeyPair.Generate();
+            using var c = new TcpClient();
+            await c.ConnectAsync(IPAddress.Loopback, Server().Port);
+            Assert.True((await KnockClient.KnockAsync(c.GetStream(), open.Invite, stranger, "Open", "0.6.0", decisionTimeout: TimeSpan.FromSeconds(5))).Approved);
+        }
+        finally
+        {
+            foreach (var w in waiting) w.Dispose();
+            foreach (var k in keys) k.Dispose();
         }
     }
 

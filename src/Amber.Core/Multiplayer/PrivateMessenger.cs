@@ -51,7 +51,8 @@ public interface IPrivateLink
 
 /// <summary>
 /// 房间成员之间的私聊和传文件，端到端加密（<see cref="PrivateSeal"/>），房主只按指纹转交。
-/// 传文件：发方先发“要发这个文件”（名字、大小、SHA-256），收方点接收后发方按 3 KB 一块发，最多 16 块没确认；
+/// 传文件：发方先发“要发这个文件”（名字、大小、SHA-256），收方点接收后发方按 3 KB 一块发，最多 16 块没确认
+/// (counted over all transfers to the same person; there is no resending, see <see cref="PeerWindow"/>)；
 /// 收方每收到一块回确认，写进临时文件，收完核对 SHA-256 后改成正式文件名。中途断开、被拒、被取消都会清掉临时文件。
 /// </summary>
 public sealed partial class PrivateMessenger : IAsyncDisposable
@@ -69,8 +70,13 @@ public sealed partial class PrivateMessenger : IAsyncDisposable
     /// <see cref="MaxIncoming"/> receive slots forever.
     /// </summary>
     internal static readonly TimeSpan ReceiveIdleTimeout = TimeSpan.FromSeconds(60);
-    /// <summary>At most this many incoming offers and receives at once; further offers are ignored.</summary>
-    public const int MaxIncoming = 8;
+    /// <summary>At most this many incoming offers and receives at once; further offers are declined.</summary>
+    public const int MaxIncoming = 16;
+    /// <summary>
+    /// At most this many from one sender, so one member's unanswered offers can't take every place. Mod files this side
+    /// asked for (mod sync) count against neither limit.
+    /// </summary>
+    public const int MaxIncomingPerSender = 8;
 
     private readonly IPrivateLink _link;
     private readonly X25519KeyPair _me;
@@ -88,6 +94,8 @@ public sealed partial class PrivateMessenger : IAsyncDisposable
         public readonly TaskCompletionSource<bool> Answer = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public readonly SemaphoreSlim Credits = new(Window, int.MaxValue);
         public long Acked;
+        /// <summary>Places in the receiver's shared window (<see cref="PeerWindow"/>) this transfer holds: chunks sent, not acked yet.</summary>
+        public int PeerHeld;
         /// <summary>对方已经有的块数（断点续传：上次没收完的部分），接收时对方告诉我们。</summary>
         public long From;
         public volatile bool Cancelled;
@@ -112,6 +120,14 @@ public sealed partial class PrivateMessenger : IAsyncDisposable
     }
 
     private readonly ConcurrentDictionary<string, Outgoing> _outgoing = new();
+    /// <summary>
+    /// Unacked chunks to one receiver across all transfers to them. There is no resending: the host passes frames on
+    /// through a small queue per receiver and drops them when it is full, so all transfers to one person together keep
+    /// at most <see cref="Window"/> chunks in flight, well below that queue, and other frames still fit.
+    /// </summary>
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> _peerWindow = new();
+
+    private SemaphoreSlim PeerWindow(string to) => _peerWindow.GetOrAdd(to, _ => new SemaphoreSlim(Window, int.MaxValue));
     private readonly ConcurrentDictionary<string, Incoming> _incoming = new();
     private readonly SemaphoreSlim _incomingGate = new(1, 1);
     /// <summary>收到的帧排队一个一个处理（文件块要按顺序写）。</summary>
@@ -247,7 +263,12 @@ public sealed partial class PrivateMessenger : IAsyncDisposable
         if (!info.Exists) throw new FileNotFoundException(path);
         if (!AllowsFile(info.Length)) throw new InvalidDataException(L.T("core.mp.private.not_allowed"));
         byte[] hash;
-        await using (var read = File.OpenRead(path)) hash = await SHA256.HashDataAsync(read, ct);
+        if (modSha1 is not null) hash = await ModHashAsync(info, ct);
+        else
+        {
+            await using var read = File.OpenRead(path);
+            hash = await SHA256.HashDataAsync(read, ct);
+        }
         var job = new Outgoing
         {
             Id = id ?? NewTransferId(),
@@ -284,6 +305,12 @@ public sealed partial class PrivateMessenger : IAsyncDisposable
                 var read = await file.ReadAtLeastAsync(buffer, buffer.Length, throwOnEndOfStream: false, linked.Token);
                 if (read == 0) break;
                 if (!await job.Credits.WaitAsync(AckTimeout, linked.Token)) return Fail(job, L.T("core.mp.private.stalled"), FileEnd.Stalled);
+                if (!await PeerWindow(to).WaitAsync(AckTimeout, linked.Token))
+                {
+                    job.Credits.Release();
+                    return Fail(job, L.T("core.mp.private.stalled"), FileEnd.Stalled);
+                }
+                Interlocked.Increment(ref job.PeerHeld);
                 if (job.Cancelled) return Fail(job, L.T("core.mp.private.cancelled"), FileEnd.Cancelled);
                 if (!await SendAsync(to, new JsonObject { ["t"] = "chunk", ["id"] = job.Id, ["i"] = index, ["d"] = Convert.ToBase64String(buffer, 0, read) }, linked.Token))
                     return Fail(job, L.T("core.mp.private.offline"), FileEnd.Stalled);
@@ -314,7 +341,21 @@ public sealed partial class PrivateMessenger : IAsyncDisposable
         finally
         {
             _outgoing.TryRemove(job.Id, out _);
+            // Chunks that were never acked give their places in the receiver's window back.
+            if (Interlocked.Exchange(ref job.PeerHeld, 0) is var held and > 0) PeerWindow(to).Release(held);
         }
+    }
+
+    /// <summary>One ack: gives one of this transfer's places in the receiver's window back.</summary>
+    private void ReleasePeerPlace(Outgoing job)
+    {
+        int held;
+        do
+        {
+            held = Volatile.Read(ref job.PeerHeld);
+            if (held <= 0) return;
+        } while (Interlocked.CompareExchange(ref job.PeerHeld, held - 1, held) != held);
+        PeerWindow(job.To).Release();
     }
 
     private bool Fail(Outgoing job, string error, FileEnd end)
@@ -432,12 +473,66 @@ public sealed partial class PrivateMessenger : IAsyncDisposable
 
     // ---- 接收 ----
 
+    /// <summary>Frames already taken from one sender, by the one-time key each frame is sealed with.</summary>
+    private sealed class SeenFrames
+    {
+        public readonly HashSet<string> Keys = new(StringComparer.Ordinal);
+        public readonly Queue<string> Order = new();
+        /// <summary>The newest sender time ("ts") of a message from this sender.</summary>
+        public long NewestMessage = long.MinValue;
+    }
+
+    /// <summary>How many sealed frames per sender are remembered to drop a second delivery of the same frame.</summary>
+    internal const int SeenPerSender = 4096;
+    private const int SeenSenders = 256;
+    /// <summary>A message more than this much older (by the sender's own clock) than the newest one from that sender is a replay.</summary>
+    internal static readonly TimeSpan MessageReorder = TimeSpan.FromMinutes(5);
+    private readonly Dictionary<string, SeenFrames> _seen = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// False when this sealed frame was already taken: the host passes frames on and could deliver an old one again.
+    /// Each frame is sealed with a fresh one-time key, so the same key twice means the same frame.
+    /// </summary>
+    private bool FirstDelivery(string from, ReadOnlySpan<byte> sealedData)
+    {
+        var key = Convert.ToBase64String(sealedData.Slice(1, X25519KeyPair.Length));
+        lock (_seen)
+        {
+            if (!_seen.TryGetValue(from, out var seen))
+            {
+                if (_seen.Count >= SeenSenders) _seen.Remove(_seen.Keys.First());
+                _seen[from] = seen = new SeenFrames();
+            }
+            if (!seen.Keys.Add(key)) return false;
+            seen.Order.Enqueue(key);
+            if (seen.Order.Count > SeenPerSender) seen.Keys.Remove(seen.Order.Dequeue());
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// False for a message older (by the sender's clock) than what this sender already sent, beyond <see cref="MessageReorder"/>:
+    /// an old message delivered again after its frame left <see cref="FirstDelivery"/>'s memory. Only the sender's own times
+    /// are compared, so a clock that is off doesn't matter.
+    /// </summary>
+    private bool FreshMessage(string from, long? sentAt)
+    {
+        if (sentAt is not { } ts) return true;
+        lock (_seen)
+        {
+            if (!_seen.TryGetValue(from, out var seen)) return true;
+            if (seen.NewestMessage != long.MinValue && ts < seen.NewestMessage - (long)MessageReorder.TotalMilliseconds) return false;
+            seen.NewestMessage = Math.Max(seen.NewestMessage, ts);
+            return true;
+        }
+    }
+
     private void OnFrame(PrivateFrame frame)
     {
         // Replies and offers are keyed by the sender's fingerprint, so it must be the fingerprint of the key that sealed it.
         if (MemberIdentity.FingerprintOf(frame.FromPublicKey) != frame.FromFingerprint) return;
         var plain = PrivateSeal.Open(_me, frame.FromPublicKey, frame.Sealed);
-        if (plain is null) return;
+        if (plain is null || !FirstDelivery(frame.FromFingerprint, frame.Sealed)) return;
         JsonObject? body;
         try { body = JsonNode.Parse(plain) as JsonObject; }
         catch (JsonException) { return; }
@@ -454,6 +549,7 @@ public sealed partial class PrivateMessenger : IAsyncDisposable
             {
                 case "msg":
                     var text = RoomChat.Clean(body["text"]?.GetValue<string>(), MaxTextLength);
+                    if (!FreshMessage(frame.FromFingerprint, body["ts"]?.GetValue<long>())) break;
                     if (text.Length > 0) MessageReceived?.Invoke(new PrivateMessage(frame.FromFingerprint, frame.FromPublicKey, frame.FromName, text, DateTimeOffset.UtcNow));
                     break;
                 case "offer" when id is { Length: 16 }:
@@ -462,14 +558,15 @@ public sealed partial class PrivateMessenger : IAsyncDisposable
                     var name = SafeName(body["name"]?.GetValue<string>() ?? "");
                     if (size < 0 || sha is not { Length: 64 }) return;
                     if (_incoming.TryGetValue(id, out var earlier) && !await LetGoOfResumedAsync(earlier, frame.FromFingerprint, sha, size)) return;
-                    if (_incoming.Count >= MaxIncoming) return;
-                    if (!AllowsFile(size))
+                    var wanted = WantedMod(frame.FromFingerprint, body["mod"]?.GetValue<string>(), size);
+                    var full = wanted is null && (_incoming.Count >= MaxIncoming
+                        || _incoming.Values.Count(i => i.ModSha1 is null && i.Offer.FromFingerprint == frame.FromFingerprint) >= MaxIncomingPerSender);
+                    if (full || !AllowsFile(size))
                     {
                         await SendAsync(frame.FromFingerprint, new JsonObject { ["t"] = "decline", ["id"] = id }, _cts.Token);
                         return;
                     }
                     var offer = new FileOffer(id, frame.FromFingerprint, frame.FromName, name, size);
-                    var wanted = WantedMod(frame.FromFingerprint, body["mod"]?.GetValue<string>(), size);
                     _incoming[id] = new Incoming { Offer = offer, Hash = Convert.FromHexString(sha), PeerKey = frame.FromPublicKey, ModSha1 = wanted, LastActivity = Clock() };
                     // A mod file we asked for during a sync: take it without a card. Anything else asks the user as before.
                     if (wanted is not null) await AcceptAsync(id);
@@ -485,6 +582,7 @@ public sealed partial class PrivateMessenger : IAsyncDisposable
                 case "ack" when id is not null && _outgoing.TryGetValue(id, out var acked) && acked.To == frame.FromFingerprint:
                     var done = Interlocked.Increment(ref acked.Acked);
                     acked.Credits.Release();
+                    ReleasePeerPlace(acked);
                     Report(acked, done * ChunkSize);
                     break;
                 case "cancel" when id is not null:

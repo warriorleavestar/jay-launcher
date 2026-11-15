@@ -397,7 +397,7 @@ public static class KnockClient
             var reply = KnockProtocol.ParseJson(receive.DecryptWithAd([], sealedReply));
             if (reply["ok"]?.GetValue<bool>() != true)
             {
-                var reason = reply["reason"]?.GetValue<string>() is var r && r is "denied" or "expired" or "full" or "removed" or "device" or "account" ? r : "denied";
+                var reason = reply["reason"]?.GetValue<string>() is var r && r is "denied" or "expired" or "full" or "busy" or "removed" or "device" or "account" ? r : "denied";
                 return new KnockOutcome(null, reason, hostPub);
             }
             var credentials = RoomCredentials.FromJson(reply);
@@ -461,10 +461,18 @@ public sealed class PendingInvite
     /// <summary>No use count (<see cref="InviteBook.UnlimitedUses"/>, standing and long-lived invites).</summary>
     public bool Unlimited => Uses == InviteBook.UnlimitedUses;
     public DateTimeOffset? ExpiresAt { get; }
-    public bool AutoApprove { get; }
+    /// <summary>
+    /// Lets people in without asking the host. A standing invite stops doing so after a kick in the room (see
+    /// <see cref="InviteBook.AskAfterKick"/>): bans go by key, and a new identity would otherwise walk straight back in.
+    /// </summary>
+    public bool AutoApprove { get; private set; }
+
+    internal void StopAutoApprove() => AutoApprove = false;
+
     public bool Revoked { get; internal set; }
     /// <summary>
-    /// 长期邀请：在公共网络上公开或设了密码的房间用它敲门，次数不限、房间关掉才失效。踢人时不作废它（被踢的人按公钥进了禁入名单）。
+    /// 长期邀请：在公共网络上公开或设了密码的房间用它敲门，次数不限、房间关掉才失效。踢人时不作废它（被踢的人按公钥进了禁入名单），
+    /// but from then on it asks the host for every knock (<see cref="InviteBook.AskAfterKick"/>).
     /// </summary>
     public bool Standing { get; }
 
@@ -607,6 +615,23 @@ public sealed class InviteBook(Func<DateTimeOffset>? clock = null)
         return invite;
     }
 
+    /// <summary>
+    /// After a kick: every standing invite that lets people in unasked asks the host from now on (public, password and
+    /// direct rooms keep their invite, but the kicked person can't come back as someone new). Returns how many changed.
+    /// </summary>
+    public int AskAfterKick()
+    {
+        int changed;
+        lock (_gate)
+        {
+            var open = _invites.Where(i => i.Standing && i.AutoApprove && !i.Revoked).ToList();
+            foreach (var invite in open) invite.StopAutoApprove();
+            changed = open.Count;
+        }
+        if (changed > 0) Changed?.Invoke();
+        return changed;
+    }
+
     public void Revoke(PendingInvite invite)
     {
         lock (_gate)
@@ -727,7 +752,15 @@ public sealed record KnockLimits
 {
     public TimeSpan HandshakeTimeout { get; init; } = TimeSpan.FromSeconds(10);
     public TimeSpan DecisionTimeout { get; init; } = TimeSpan.FromSeconds(120);
+    /// <summary>
+    /// Knocks waiting for the host's answer at once. Trusted guests and auto-approve invites don't wait and don't count;
+    /// a knock that would wait while these are taken is answered "busy" without using the invite up (the guest can knock again).
+    /// </summary>
     public int MaxConcurrent { get; init; } = 3;
+    /// <summary>Knock connections served at once, in the handshake or waiting (so a trusted friend gets in while cards wait).</summary>
+    public int MaxSessions { get; init; } = 8;
+    /// <summary>How often a knock waiting for the host checks that the guest is still connected (a gone guest's card is withdrawn).</summary>
+    public TimeSpan DisconnectCheck { get; init; } = TimeSpan.FromSeconds(1);
     public int MaxFailuresPerMinute { get; init; } = 10;
     public TimeSpan PauseAfterFailures { get; init; } = TimeSpan.FromSeconds(60);
 
@@ -737,13 +770,26 @@ public sealed record KnockLimits
     /// one may be a password guess, so only the password invite goes quiet. Random-token invites keep working.
     /// </summary>
     public int MaxUnknownPerMinute { get; init; } = 20;
+
+    /// <summary>
+    /// Unknown invite ids per hour before the password invite pauses, so slow guessing is limited too. Each pause that
+    /// follows another within <see cref="GuessStreakReset"/> lasts twice as long, up to <see cref="MaxGuessPause"/>.
+    /// </summary>
+    public int MaxUnknownPerHour { get; init; } = 30;
+    public TimeSpan MaxGuessPause { get; init; } = TimeSpan.FromHours(6);
+    /// <summary>
+    /// A pause after this long without one starts again from <see cref="PauseAfterFailures"/>. A day, so that waiting
+    /// for the streak to reset costs a guesser more time than the short pauses it gets back.
+    /// </summary>
+    public TimeSpan GuessStreakReset { get; init; } = TimeSpan.FromDays(1);
 }
 
 /// <summary>
 /// 房主的敲门服务：只在大厅里听 47660。流程：
 /// 收 8 字节邀请编号（明文，不认识就断开）→ XXhfspsk0 握手（psk 由邀请令牌派生、第一条消息就混入，令牌不对第一条就失败；双方交换长期身份）→ 第三条消息验证通过时用掉一次邀请 →
 /// 信任列表里的人或勾了“自动批准”的邀请直接批准，否则问房主（120 秒没点算拒绝）→ 加密发回房间凭据或拒绝原因 → 等对方确认。
-/// 同时最多 3 个人在敲；一分钟里失败 10 次就暂停 60 秒。
+/// 同时最多 3 个人在等房主（信任的人和自动批准的邀请不占），最多 8 条敲门连接；一分钟里失败 10 次就暂停 60 秒。
+/// A guest who disconnects while waiting gives up the place, and the host's card is withdrawn.
 /// </summary>
 public sealed class KnockServer : IAsyncDisposable
 {
@@ -759,9 +805,12 @@ public sealed class KnockServer : IAsyncDisposable
     private readonly CancellationTokenSource _stop = new();
     private readonly Queue<DateTimeOffset> _failures = new();
     private readonly Queue<DateTimeOffset> _unknown = new();
+    private readonly Queue<DateTimeOffset> _unknownHour = new();
+    private int _guessStreak;
     private readonly Lock _gate = new();
     private readonly Task _loop;
     private int _active;
+    private int _asking;
     private DateTimeOffset _pausedUntil;
     private DateTimeOffset _guessPausedUntil;
 
@@ -857,17 +906,31 @@ public sealed class KnockServer : IAsyncDisposable
         {
             var now = _book.Now;
             _unknown.Enqueue(now);
+            _unknownHour.Enqueue(now);
             while (_unknown.Count > 0 && now - _unknown.Peek() > TimeSpan.FromMinutes(1)) _unknown.Dequeue();
-            if (_unknown.Count >= _limits.MaxUnknownPerMinute)
+            while (_unknownHour.Count > 0 && now - _unknownHour.Peek() > TimeSpan.FromHours(1)) _unknownHour.Dequeue();
+            if (_unknown.Count >= _limits.MaxUnknownPerMinute || _unknownHour.Count >= _limits.MaxUnknownPerHour)
             {
+                // Guessing again soon after a pause: each pause lasts twice as long as the one before.
+                if (now - _guessPausedUntil > _limits.GuessStreakReset) _guessStreak = 0;
+                var pause = TimeSpan.FromTicks(Math.Min(_limits.MaxGuessPause.Ticks, _limits.PauseAfterFailures.Ticks << Math.Min(_guessStreak, 16)));
+                _guessStreak++;
                 started = now >= _guessPausedUntil;
-                _guessPausedUntil = now + _limits.PauseAfterFailures;
+                _guessPausedUntil = now + pause;
                 _unknown.Clear();
+                _unknownHour.Clear();
             }
         }
-        if (started) _log?.Invoke(L.T("core.mp.knock.guessing"));
+        if (started)
+        {
+            _log?.Invoke(L.T("core.mp.knock.guessing"));
+            PasswordGuessing?.Invoke();
+        }
         return started;
     }
+
+    /// <summary>Many unknown invite ids: someone may be guessing the room password, which is ignored for a while (the host is told).</summary>
+    public event Action? PasswordGuessing;
 
     private async Task AcceptLoopAsync()
     {
@@ -877,7 +940,7 @@ public sealed class KnockServer : IAsyncDisposable
             try { client = await _listener.AcceptTcpClientAsync(_stop.Token); }
             catch (Exception e) when (e is OperationCanceledException or ObjectDisposedException or SocketException) { return; }
             bool admit;
-            lock (_gate) admit = _book.Now >= _pausedUntil && _active < _limits.MaxConcurrent && (_active += 1) > 0;
+            lock (_gate) admit = _book.Now >= _pausedUntil && _active < _limits.MaxSessions && (_active += 1) > 0;
             if (!admit)
             {
                 client.Dispose();
@@ -1058,20 +1121,44 @@ public sealed class KnockServer : IAsyncDisposable
                 };
                 JsonObject reply;
                 MemberEntry? member = null;
-                if (!_book.TryConsume(invite)) reply = Reject("expired");
-                // 安全策略要求设备验证、对方却不支持（旧版或改过的客户端）：不放进来。旧版客户端只认识 denied。
-                else if (_members.RequireAttestation && (!guestAttests || _members.Attestation is null)) reply = Reject("denied");
-                else if ((AlwaysAsk?.Invoke() != true && !invite.AskEachTime && (request.Trusted || invite.AutoApprove)) || await AskAsync(request, ct))
+                var letIn = AlwaysAsk?.Invoke() != true && !invite.AskEachTime && (request.Trusted || invite.AutoApprove);
+                // Only knocks that wait for the host take one of its few places. When they are all taken, answer "busy"
+                // (the invite is not used up and the guest can try again).
+                var asking = !letIn;
+                if (asking)
                 {
-                    member = _members.Issue(guestPub, request.Name, invite: invite);
-                    var attestation = guestAttests ? _members.Attestation : null;
-                    member.Attests = attestation is not null;
-                    reply = (_credentials() with { Member = member.Key, Scheme = attestation?.Scheme }).ToJson();
-                    if (KnockProtocol.Says(about, KnockProtocol.JayProofField) && JayCertificate?.Invoke() is { } hostProof
-                        && hostProof.Certificate.DeviceKey.AsSpan().SequenceEqual(_identity.PublicKey)) reply["proof"] = hostProof.ToJson(hostContext);
-                    if (DirectOffer?.Invoke() is { } offered) reply["direct"] = offered.ToJson();
+                    bool place;
+                    lock (_gate) place = _asking < _limits.MaxConcurrent && (_asking += 1) > 0;
+                    if (!place)
+                    {
+                        _log?.Invoke(L.F("core.mp.knock.failed", L.T("core.mp.knock.busy")));
+                        using var busy = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                        busy.CancelAfter(_limits.HandshakeTimeout);
+                        await KnockProtocol.WriteFrameAsync(stream, send.EncryptWithAd([], KnockProtocol.Json(Reject("busy"))), busy.Token);
+                        return;
+                    }
                 }
-                else reply = Reject("denied");
+                try
+                {
+                    if (!_book.TryConsume(invite)) reply = Reject("expired");
+                    // 安全策略要求设备验证、对方却不支持（旧版或改过的客户端）：不放进来。旧版客户端只认识 denied。
+                    else if (_members.RequireAttestation && (!guestAttests || _members.Attestation is null)) reply = Reject("denied");
+                    else if (letIn || await AskAsync(request, () => Gone(client), ct))
+                    {
+                        member = _members.Issue(guestPub, request.Name, invite: invite);
+                        var attestation = guestAttests ? _members.Attestation : null;
+                        member.Attests = attestation is not null;
+                        reply = (_credentials() with { Member = member.Key, Scheme = attestation?.Scheme }).ToJson();
+                        if (KnockProtocol.Says(about, KnockProtocol.JayProofField) && JayCertificate?.Invoke() is { } hostProof
+                            && hostProof.Certificate.DeviceKey.AsSpan().SequenceEqual(_identity.PublicKey)) reply["proof"] = hostProof.ToJson(hostContext);
+                        if (DirectOffer?.Invoke() is { } offered) reply["direct"] = offered.ToJson();
+                    }
+                    else reply = Reject("denied");
+                }
+                finally
+                {
+                    if (asking) lock (_gate) _asking--;
+                }
                 _log?.Invoke(L.F(member is not null ? "core.mp.knock.approved" : "core.mp.knock.rejected", request.Name, request.Fingerprint));
                 // 发出去之前就记上：对方拿到凭据后不回确认也能进房间，房主得看得到他。
                 if (member is not null) Issued?.Invoke(request, member);
@@ -1128,12 +1215,42 @@ public sealed class KnockServer : IAsyncDisposable
     /// <summary>A knock was not answered in time and counted as declined (the host's card says so).</summary>
     public event Action<KnockRequest>? TimedOut;
 
-    /// <summary>问房主；超时或者服务关了算拒绝。</summary>
-    private async Task<bool> AskAsync(KnockRequest request, CancellationToken ct)
+    /// <summary>
+    /// The guest's connection has closed (it sends nothing while waiting for the answer, so a readable socket with no
+    /// data means the other end has gone). Checked without reading, so the reply and the ack are not disturbed.
+    /// </summary>
+    private static bool Gone(TcpClient client)
+    {
+        try { return client.Client.Poll(0, SelectMode.SelectRead) && client.Client.Available == 0; }
+        catch (Exception e) when (e is SocketException or ObjectDisposedException) { return true; }
+    }
+
+    /// <summary>A guest gave up (disconnected) while the host was deciding; the host's card was withdrawn.</summary>
+    public event Action<KnockRequest>? Abandoned;
+
+    /// <summary>问房主；超时或者服务关了算拒绝。对方断开了也算拒绝，并撤掉房主那边的卡片（取消决定用的令牌）。</summary>
+    private async Task<bool> AskAsync(KnockRequest request, Func<bool> gone, CancellationToken ct)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         var wait = DecisionWait?.Invoke() ?? _limits.DecisionTimeout;
         if (wait != Timeout.InfiniteTimeSpan) timeout.CancelAfter(wait);
+        var left = false;
+        using var watching = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token);
+        var watch = Task.Run(async () =>
+        {
+            try
+            {
+                while (true)
+                {
+                    await Task.Delay(_limits.DisconnectCheck, watching.Token);
+                    if (!gone()) continue;
+                    left = true;
+                    await timeout.CancelAsync();
+                    return;
+                }
+            }
+            catch (OperationCanceledException) { }
+        }, CancellationToken.None);
         try
         {
             var decision = _approve(request, timeout.Token);
@@ -1141,15 +1258,31 @@ public sealed class KnockServer : IAsyncDisposable
             // 超时之后才给出的答案（包括被取消时回的 true）一律不算。
             if (finished != decision || timeout.IsCancellationRequested)
             {
-                if (!ct.IsCancellationRequested) TimedOut?.Invoke(request);
+                Ended();
                 return false;
             }
             return await decision;
         }
         catch (OperationCanceledException)
         {
-            if (!ct.IsCancellationRequested) TimedOut?.Invoke(request);
+            Ended();
             return false;
+        }
+        finally
+        {
+            await watching.CancelAsync();
+            await watch;
+        }
+
+        void Ended()
+        {
+            if (ct.IsCancellationRequested) return;
+            if (left)
+            {
+                _log?.Invoke(L.F("core.mp.knock.failed", L.T("core.mp.knock.left")));
+                Abandoned?.Invoke(request);
+            }
+            else TimedOut?.Invoke(request);
         }
     }
 

@@ -225,6 +225,62 @@ public sealed class ZeroLeakCodesTests : IAsyncDisposable
         b.Book.Confirm(a.Key.PublicKey);
     }
 
+    /// <summary>A person whose mail can be made to fail, as when no directory can be reached.</summary>
+    private Person FlakyPerson(string name, RoomDirectoryServer server, Func<bool> failing)
+    {
+        var key = X25519KeyPair.Generate();
+        var book = new ContactBook(Path.Combine(_dir, name, ContactBook.FileName), () => _now);
+        var client = new RoomDirectoryClient(new Loopback(server.Port));
+        return new Person
+        {
+            Key = key, Book = book, Name = name,
+            Post = new ContactPost(() => key, book, client, Path.Combine(_dir, name, ContactPost.SeenFileName), () => _now)
+            {
+                PostForTest = async (box, blob, drop, ct) =>
+                {
+                    if (failing()) throw new IOException("no directory");
+                    await client.PostMailAsync(box, blob, drop, ct);
+                },
+            },
+        };
+    }
+
+    /// <summary>
+    /// Mail that can't be sent doesn't strand an add-contact exchange: a failed accept can be done again, and a reply that
+    /// failed while handling incoming mail is sent at the next check.
+    /// </summary>
+    [Fact]
+    public async Task AddContactRecoversFromMailThatCouldNotBeSent()
+    {
+        var server = StartDirectory();
+        bool alexDown = false, steveDown = false;
+        using var alex = FlakyPerson("alex", server, () => alexDown);
+        using var steve = FlakyPerson("steve", server, () => steveDown);
+        Assert.True(await alex.Post.AddAsync(steve.Key.PublicKey, alex.Name, default));
+        Assert.Empty(await steve.Post.CheckAsync(steve.Name, default));
+
+        steveDown = true;
+        await Assert.ThrowsAnyAsync<IOException>(() => steve.Post.AcceptAsync(alex.Key.PublicKey, steve.Name, default));
+        Assert.Equal(ContactStep.AskingMe, Assert.Single(steve.Book.Pending).Step);
+        steveDown = false;
+        await steve.Post.AcceptAsync(alex.Key.PublicKey, steve.Name, default);
+        Assert.Equal(ContactStep.WaitingForNonce, Assert.Single(steve.Book.Pending).Step);
+
+        // Alex's answer (his nonce) can't go out while handling Steve's reply.
+        alexDown = true;
+        await alex.Post.CheckAsync(alex.Name, default);
+        Assert.Equal(ContactStep.Compare, Assert.Single(alex.Book.Pending).Step);
+        await steve.Post.CheckAsync(steve.Name, default);
+        Assert.Equal(ContactStep.WaitingForNonce, Assert.Single(steve.Book.Pending).Step);
+
+        // The next check sends it.
+        alexDown = false;
+        await alex.Post.CheckAsync(alex.Name, default);
+        await steve.Post.CheckAsync(steve.Name, default);
+        Assert.Equal(ContactStep.Compare, Assert.Single(steve.Book.Pending).Step);
+        Assert.Equal(Assert.Single(alex.Book.Pending).Sas, Assert.Single(steve.Book.Pending).Sas);
+    }
+
     [Fact]
     public async Task InviteTravelsAsSealedMailAndComesBackWithAReceipt()
     {

@@ -44,6 +44,13 @@ public sealed class ContactPost(Func<X25519KeyPair> me, ContactBook book, RoomDi
     private readonly Lock _gate = new();
     private readonly List<SentMail> _outbox = [];
     private Dictionary<string, long>? _seen;
+    /// <summary>Replies that could not be mailed when the mail they answer was handled; sent again at the next check.</summary>
+    private readonly List<(byte[] To, MailMessage Message, DateTimeOffset Since)> _unsent = [];
+    /// <summary>At most this many replies wait to be sent again; the oldest goes first.</summary>
+    internal const int MaxUnsent = 50;
+
+    /// <summary>Test hook: posts one piece of mail (box, blob, drop hash) instead of the directories.</summary>
+    internal Func<string, byte[], string, CancellationToken, Task>? PostForTest { get; init; }
 
     /// <summary>A receipt came in for mail I sent.</summary>
     public event Action<SentMail>? Confirmed;
@@ -51,7 +58,9 @@ public sealed class ContactPost(Func<X25519KeyPair> me, ContactBook book, RoomDi
     public async Task SendAsync(ReadOnlyMemory<byte> to, MailMessage message, CancellationToken ct)
     {
         var blob = SealedMail.Seal(me(), to.Span, message);
-        await directory.PostMailAsync(SealedMail.MailboxId(to.Span, SealedMail.Day(_now())), blob, SealedMail.DropHash(message.DropToken), ct);
+        var box = SealedMail.MailboxId(to.Span, SealedMail.Day(_now()));
+        if (PostForTest is { } post) await post(box, blob, SealedMail.DropHash(message.DropToken), ct);
+        else await directory.PostMailAsync(box, blob, SealedMail.DropHash(message.DropToken), ct);
         if (message.Kind is MailKind.Invite)
             lock (_gate) _outbox.Add(new SentMail(to.ToArray(), message.IdHex, message.Kind, _now()));
     }
@@ -65,9 +74,16 @@ public sealed class ContactPost(Func<X25519KeyPair> me, ContactBook book, RoomDi
         return true;
     }
 
+    /// <summary>Accepts a request and mails the hello-r. When that fails the request is open again, so accepting can be retried.</summary>
     public async Task AcceptAsync(byte[] theirs, string myName, CancellationToken ct)
     {
-        if (book.Accept(theirs, myName) is { } reply) await SendAsync(theirs, reply, ct);
+        if (book.Accept(theirs, myName) is not { } reply) return;
+        try { await SendAsync(theirs, reply, ct); }
+        catch (Exception e) when (e is IOException or InvalidDataException or OperationCanceledException)
+        {
+            book.UndoAccept(theirs);
+            throw;
+        }
     }
 
     /// <summary>
@@ -108,6 +124,7 @@ public sealed class ContactPost(Func<X25519KeyPair> me, ContactBook book, RoomDi
     {
         var identity = me();
         book.Me = identity.PublicKey;
+        await ResendAsync(ct);
         var boxes = SealedMail.MailboxesToCheck(identity.PublicKey, _now());
         var items = await directory.FetchMailAsync(boxes, ct);
         var invites = new List<MailedInvite>();
@@ -139,10 +156,35 @@ public sealed class ContactPost(Func<X25519KeyPair> me, ContactBook book, RoomDi
         return invites;
     }
 
+    /// <summary>Sends a reply to mail that has been handled; if that fails, it is kept and sent again at the next check.</summary>
     private async Task TrySendAsync(byte[] to, MailMessage message, CancellationToken ct)
     {
         try { await SendAsync(to, message, ct); }
-        catch (Exception e) when (e is IOException or InvalidDataException) { }
+        catch (Exception e) when (e is IOException or InvalidDataException)
+        {
+            lock (_gate)
+            {
+                if (_unsent.Count >= MaxUnsent) _unsent.RemoveAt(0);
+                _unsent.Add((to, message, _now()));
+            }
+        }
+    }
+
+    /// <summary>Sends the replies that failed earlier. Ones older than an add-contact exchange may last are dropped.</summary>
+    private async Task ResendAsync(CancellationToken ct)
+    {
+        List<(byte[] To, MailMessage Message, DateTimeOffset Since)> waiting;
+        lock (_gate)
+        {
+            _unsent.RemoveAll(u => _now() - u.Since > ContactBook.PendingLifetime);
+            waiting = [.. _unsent];
+        }
+        foreach (var item in waiting)
+        {
+            try { await SendAsync(item.To, item.Message, ct); }
+            catch (Exception e) when (e is IOException or InvalidDataException) { continue; }
+            lock (_gate) _unsent.Remove(item);
+        }
     }
 
     private MailedInvite? ReadInvite(byte[] sender, MailMessage message)
