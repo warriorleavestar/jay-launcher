@@ -301,8 +301,9 @@ public sealed class NodeHardwareBindingTests : IDisposable
         Write("directory.key", "x");
         Assert.Throws<InvalidOperationException>(() => NodeWiper.Wipe(_dir, "test", false));
         Assert.True(Has("directory.key"));
-        Assert.Throws<InvalidOperationException>(() => NodeWiper.Wipe(Path.GetPathRoot(_dir)!, "test", true));
-        Assert.Throws<InvalidOperationException>(() => NodeWiper.Wipe(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "test", true));
+        // Every refusal throws the same type (an unmarked folder too), so check the message names the right guard.
+        Assert.Contains("drive or filesystem root", Assert.Throws<InvalidOperationException>(() => NodeWiper.Wipe(Path.GetPathRoot(_dir)!, "test", true)).Message);
+        Assert.Contains("system or home folder", Assert.Throws<InvalidOperationException>(() => NodeWiper.Wipe(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "test", true)).Message);
     }
 
     [Fact]
