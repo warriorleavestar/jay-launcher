@@ -109,4 +109,47 @@ public sealed class MultiplayerAdvancedTests : IDisposable
             Assert.False(settings.ConfirmingAdvancedReset);
         });
     }
+
+    [Fact]
+    public void AResetWhileARoomIsOpenPutsTheRoomOptionsBackWhenItCloses()
+    {
+        UiTestThread.Run(() =>
+        {
+            using var service = new LauncherService(new AppSettings { GameDirectory = _root, PlayerName = "" });
+            var settings = new SettingsViewModel(service);
+            var mp = new MultiplayerViewModel(service) { ContactsDir = _root, TrustedFile = Path.Combine(_root, "trusted.json") };
+            settings.Multiplayer = mp;
+            mp.SelectedTransport = mp.TransportChoices.First(c => c.Mode == TransportMode.High);
+            mp.FullLanMode = true;
+            mp.AllowGameProxy = true;
+            mp.DefaultRelayOnly = true;
+            mp.Mode = "host";
+
+            settings.AskAdvancedResetCommand.Execute(null);
+            settings.ResetAdvancedCommand.Execute(null);
+            Assert.Equal(L.T("settings.mp.reset_done_room"), settings.AdvancedResetStatus);
+            // The room keeps what it opened with; what is not fixed for the room is back at once.
+            Assert.Equal(TransportMode.High, mp.SelectedTransport.Mode);
+            Assert.True(mp.FullLanMode);
+            Assert.False(service.Settings.MultiplayerRelayOnly);
+            Assert.True(mp.HasPendingAfterRoom);
+            // Changed again while the room is open: that change stands.
+            mp.AllowGameProxy = false;
+            mp.AllowGameProxy = true;
+            mp.FullLanMode = false;
+
+            mp.Mode = "";
+            Assert.False(mp.HasPendingAfterRoom);
+            Assert.Equal(TransportMode.Minecraft, mp.SelectedTransport.Mode);
+            Assert.Equal(D.GameProxy, mp.AllowGameProxy);
+            Assert.False(mp.FullLanMode);
+            Assert.False(settings.AnyAdvancedCustomized);
+
+            // The next room is not touched again.
+            mp.FullLanMode = true;
+            mp.Mode = "host";
+            mp.Mode = "";
+            Assert.True(mp.FullLanMode);
+        });
+    }
 }

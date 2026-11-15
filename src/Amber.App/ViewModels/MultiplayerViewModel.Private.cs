@@ -144,8 +144,7 @@ public sealed partial class MultiplayerViewModel
             // Settings › Multiplayer › Files: a checked friend's file (never a program) may be taken without asking.
             if (TakeOfferAutomatically(offer, key))
             {
-                CardForAccepted(offer);
-                _ = messenger.AcceptAsync(offer.Id);
+                _ = TakeOfferAsync(messenger, offer);
                 return;
             }
             NoteFileOffer(offer, key);
@@ -266,13 +265,30 @@ public sealed partial class MultiplayerViewModel
         if (offer is null) return;
         FileOffers.Remove(offer);
         if (_messenger is not { } messenger) return;
-        CardForAccepted(offer.Offer);
-        try { await messenger.AcceptAsync(offer.Offer.Id); }
+        await TakeOfferAsync(messenger, offer.Offer);
+    }
+
+    /// <summary>
+    /// Accepts an offer (by hand or automatically) behind its card. When receiving cannot start (no room on the disk,
+    /// the downloads folder cannot be written), the card and its task in Activity end as failed with the reason.
+    /// </summary>
+    private async Task TakeOfferAsync(PrivateMessenger messenger, FileOffer offer)
+    {
+        var item = CardForAccepted(offer);
+        try { await (AcceptForTest?.Invoke(offer.Id) ?? messenger.AcceptAsync(offer.Id)); }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
             SetStatus(new StatusMessage("common.raw", [e.Message], StatusKind.Warning));
+            if (item.State is FileCardState.Waiting or FileCardState.Sending)
+            {
+                item.Error = e.Message;
+                Finish(item, FileCardState.Failed);
+            }
         }
     }
+
+    /// <summary>Tests: stands in for accepting an offer in the channel (to make it fail).</summary>
+    internal Func<string, Task>? AcceptForTest { get; set; }
 
     [RelayCommand]
     private async Task DeclineFileAsync(FileOfferItem? offer)

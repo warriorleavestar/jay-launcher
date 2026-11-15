@@ -72,9 +72,43 @@ public static class WorldManager
         return target;
     }
 
-    /// <summary>从压缩包导入世界（压缩包里某层有 level.dat 即可）。返回新文件夹名。</summary>
-    public static string Import(string zipPath, string savesDir)
+    /// <summary>
+    /// How much a world import may unpack. Zips come from other people (a received file, a download), so the entry count
+    /// and the sizes the zip claims are checked before anything is written, the bytes actually written are counted
+    /// against the same limits, and the free space must cover what the zip says it holds.
+    /// </summary>
+    public sealed record ImportLimits(int MaxEntries, long MaxDirectoryBytes, long MaxEntryBytes, long MaxTotalBytes, long KeepFree)
     {
+        public static readonly ImportLimits Default = new(200_000, 64L * 1024 * 1024, 8L * 1024 * 1024 * 1024, 64L * 1024 * 1024 * 1024, 256L * 1024 * 1024);
+
+        /// <summary>Free bytes on the drive of a folder; null when it can't be told (then only the other limits apply).</summary>
+        public Func<string, long?> FreeSpace { get; init; } = FreeBytes;
+
+        private static long? FreeBytes(string folder)
+        {
+            try { return new DriveInfo(Path.GetFullPath(folder)).AvailableFreeSpace; }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException) { return null; }
+        }
+    }
+
+    /// <summary>
+    /// 从压缩包导入世界（压缩包里某层有 level.dat 即可）。返回新文件夹名。
+    /// Unpacks into a staging folder next to saves and moves it in only when everything was written; a failure or a
+    /// cancel removes the staging folder, so saves never holds half a world and the worlds there are never touched.
+    /// </summary>
+    public static string Import(string zipPath, string savesDir, ImportLimits? limits = null, CancellationToken ct = default)
+    {
+        limits ??= ImportLimits.Default;
+        // The zip's own list first, one entry at a time: counts and claimed sizes, before the zip is opened for real.
+        long declared = 0;
+        ZipDirectory.Scan(zipPath, limits.MaxEntries, limits.MaxDirectoryBytes, e =>
+        {
+            if (e.Size > limits.MaxEntryBytes) throw new InvalidDataException(L.F("core.game.world.entry_too_big", e.Name));
+            declared += e.Size;
+            if (declared > limits.MaxTotalBytes) throw new InvalidDataException(L.T("core.game.world.too_big"));
+            return true;
+        }, ct);
+        var saves = Path.GetFullPath(savesDir);
         using var zip = ZipFile.OpenRead(zipPath);
         // 先统一归档路径的两种分隔符，并在任何写入前验证全部路径。
         var entries = zip.Entries.Select(e => (Entry: e, Name: ImportPath(e.FullName))).ToList();
@@ -83,20 +117,61 @@ public static class WorldManager
         var prefix = level.Name[..^"level.dat".Length];
         var baseName = prefix.TrimEnd('/').Split('/').LastOrDefault(s => s.Length > 0) ?? Path.GetFileNameWithoutExtension(zipPath);
         CheckWorldComponent(baseName);
-        var folder = baseName;
-        for (var i = 2; Directory.Exists(GameDirectory.Contained(savesDir, folder)) || File.Exists(GameDirectory.Contained(savesDir, folder))
-            || new DirectoryInfo(GameDirectory.Contained(savesDir, folder)).LinkTarget is not null; i++)
-            folder = $"{baseName} ({i})";
 
-        var target = GameDirectory.Contained(savesDir, folder);
-        var files = entries.Where(e => e.Name.StartsWith(prefix, StringComparison.Ordinal) && !e.Name.EndsWith('/'))
-            .Select(e => (e.Entry, Path: GameDirectory.Contained(target, e.Name[prefix.Length..]))).ToList();
-        foreach (var (entry, path) in files)
+        var files = entries.Where(e => e.Name.StartsWith(prefix, StringComparison.Ordinal) && !e.Name.EndsWith('/')).ToList();
+        // Every path has passed its check; only now is anything created.
+        Directory.CreateDirectory(saves);
+        if (limits.FreeSpace(saves) is { } free && free - limits.KeepFree < declared)
+            throw new IOException(L.T("core.game.world.no_space"));
+        // Next to saves (the game doesn't list it as a world while it fills); inside saves when saves is a link, so the
+        // last move stays on one drive.
+        var trimmed = saves.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var stagingParent = new DirectoryInfo(trimmed).LinkTarget is null ? Path.GetDirectoryName(trimmed) ?? saves : saves;
+        var staging = Path.Combine(stagingParent, ".jay-import-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(staging);
+        try
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            entry.ExtractToFile(path, true);
+            long written = 0;
+            var buffer = new byte[81920];
+            foreach (var (entry, name) in files)
+            {
+                ct.ThrowIfCancellationRequested();
+                var path = GameDirectory.Contained(staging, name[prefix.Length..]);
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                // Counted while copying: an entry that unpacks to more than its zip says is refused, whatever it claimed.
+                var limit = Math.Min(entry.Length, limits.MaxEntryBytes);
+                long done = 0;
+                using (var input = entry.Open())
+                using (var output = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None))
+                {
+                    int n;
+                    while ((n = input.Read(buffer)) > 0)
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        done += n;
+                        written += n;
+                        if (done > limit) throw new InvalidDataException(L.F("core.game.world.entry_too_big", name));
+                        if (written > declared || written > limits.MaxTotalBytes) throw new InvalidDataException(L.T("core.game.world.too_big"));
+                        output.Write(buffer, 0, n);
+                    }
+                }
+                try { File.SetLastWriteTime(path, entry.LastWriteTime.DateTime); }
+                catch (Exception e) when (e is ArgumentOutOfRangeException or IOException) { }
+            }
+
+            var folder = baseName;
+            for (var i = 2; Directory.Exists(GameDirectory.Contained(saves, folder)) || File.Exists(GameDirectory.Contained(saves, folder))
+                || new DirectoryInfo(GameDirectory.Contained(saves, folder)).LinkTarget is not null; i++)
+                folder = $"{baseName} ({i})";
+            Directory.Move(staging, GameDirectory.Contained(saves, folder));
+            return folder;
         }
-        return folder;
+        catch
+        {
+            try { if (Directory.Exists(staging)) Directory.Delete(staging, true); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+            throw;
+        }
     }
 
     internal static string ImportPath(string name)
