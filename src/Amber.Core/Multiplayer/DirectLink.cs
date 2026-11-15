@@ -114,18 +114,6 @@ public sealed record DirectAddresses(string Session, NatKind Nat, IReadOnlyList<
 }
 
 /// <summary>
-/// Codes of the removed direct-link format: JAY2D- / JAY2R- (and the even older AMBDIRECT / AMBREPLY). They carried both
-/// sides' public IP addresses in plain text, so they are refused; the paste box tells the person to ask for a current invite.
-/// </summary>
-public static class OldDirectCodes
-{
-    private static readonly string[] Prefixes = ["JAY2D-", "JAY2R-", "AMBDIRECT", "AMBREPLY"];
-
-    public static bool Contains(string? text) =>
-        text is not null && Prefixes.Any(p => text.Contains(p, StringComparison.OrdinalIgnoreCase));
-}
-
-/// <summary>
 /// 直连用的两种钥匙，都用 HKDF-SHA256（salt = "jay-direct-v1"）派生，和房间密钥无关：
 /// 桥的探测 / 控制包 HMAC 钥匙来自邀请里的大厅密钥 L；批准后的“这条桥是我的”证明来自这个成员自己的 psk。
 /// </summary>
@@ -282,7 +270,14 @@ public sealed class DirectBridge : IAsyncDisposable
     public int? LobbyPort { get; }
     public IPEndPoint SocketEndPoint => (IPEndPoint)_socket.LocalEndPoint!;
     public IReadOnlyCollection<DirectPeer> Peers => _peers.Values.ToList();
-    public HashSet<PathKind> AllowedPaths { get; } = [.. Enum.GetValues<PathKind>()];
+    // Replaced as a whole (never mutated) so the receive loop and PunchAsync can read it without a lock.
+    private volatile HashSet<PathKind> _allowedPaths = [.. Enum.GetValues<PathKind>()];
+
+    /// <summary>The paths this bridge accepts and tries. A snapshot; change it with <see cref="SetAllowedPaths"/>.</summary>
+    public IReadOnlySet<PathKind> AllowedPaths => _allowedPaths;
+
+    /// <summary>Replaces the allowed paths in one atomic swap.</summary>
+    public void SetAllowedPaths(IEnumerable<PathKind> paths) => _allowedPaths = [.. paths];
 
     /// <summary>
     /// 房主：现在收不收新的加入方。直连房间的大厅密钥 L（也就是桥钥匙）整个房间都不换，
@@ -381,8 +376,9 @@ public sealed class DirectBridge : IAsyncDisposable
     {
         var round = Interlocked.Increment(ref _probeRound);
         var acknowledged = new TaskCompletionSource<DirectPeer>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var targets = remote.Where(c => AllowedPaths.Contains(c.Kind)).ToList();
-        var spray = AllowedPaths.Contains(PathKind.PunchSpray) && remoteNat == NatKind.Symmetric
+        var allowed = _allowedPaths;
+        var targets = remote.Where(c => allowed.Contains(c.Kind)).ToList();
+        var spray = allowed.Contains(PathKind.PunchSpray) && remoteNat == NatKind.Symmetric
                     && remote.FirstOrDefault(c => c.Kind == PathKind.Punch) is { } punch ? punch.EndPoint : null;
         var startMessage = L.P("core.mp.punch.start", targets.Count, targets.Count);
         _log(spray is null ? startMessage : L.F("core.mp.punch.start_spray", startMessage,
@@ -537,7 +533,7 @@ public sealed class DirectBridge : IAsyncDisposable
         }
     }
 
-    private PathKind Classify(IPEndPoint from, IReadOnlyList<Candidate>? hints = null)
+    private PathKind Classify(IPEndPoint from)
     {
         if (from.AddressFamily == AddressFamily.InterNetworkV6) return PathKind.IPv6;
         if (!PortMapping.IsPublic(from.Address)) return PathKind.Lan;
@@ -664,7 +660,8 @@ public sealed class DirectBridge : IAsyncDisposable
         if (!_isHost && !_peers.IsEmpty) return false;
         if (_blocked.Contains(from)) return false;
         var path = Classify(from);
-        if (!AllowedPaths.Contains(path) && !(path == PathKind.Punch && AllowedPaths.Contains(PathKind.PunchSpray)))
+        var allowed = _allowedPaths;
+        if (!allowed.Contains(path) && !(path == PathKind.Punch && allowed.Contains(PathKind.PunchSpray)))
         {
             _log(L.F("core.mp.punch.disabled", from, DirectText.Path(path)));
             return false;
