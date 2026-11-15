@@ -40,7 +40,8 @@ public abstract class PageViewModel : ObservableObject
     public abstract string Icon { get; }
 
     private Geometry? _iconGeometry;
-    public Geometry IconGeometry => _iconGeometry ??= Geometry.Parse(Icon);
+    /// <summary>The icon with its full 24×24 box kept (see Themes/Icons.axaml), so a stretched icon stays centred.</summary>
+    public Geometry IconGeometry => _iconGeometry ??= Geometry.Parse("M0 0 M24 24 " + Icon);
 
     private bool _activated;
     private int _badge;

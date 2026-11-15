@@ -44,8 +44,11 @@
   </Style>
 
   <!-- 所有按钮：标准高 36、可点区域至少 32、焦点环用 Focus -->
+  <!-- Fluent leaves content at Stretch, so a label in a button taller than it (MinHeight 44 next to the start
+       button) sat at the top. Centre it vertically everywhere; horizontal stays Stretch so row buttons fill. -->
   <Style Selector="Button">
     <Setter Property="MinHeight" Value="{DynamicResource MinHitSize}" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
   </Style>
   <Style Selector="Button:focus-visible /template/ ContentPresenter#PART_ContentPresenter">
     <Setter Property="BorderBrush" Value="{DynamicResource Focus}" />
@@ -495,6 +498,7 @@
   <!-- 只放图标的按钮（返回、前进）：32×32 起，可点区域不小于 MinHitSize -->
   <Style Selector="Button.icon-only">
     <Setter Property="Padding" Value="6" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
     <Setter Property="MinWidth" Value="{DynamicResource MinHitSize}" />
     <Setter Property="MinHeight" Value="{DynamicResource MinHitSize}" />
   </Style>

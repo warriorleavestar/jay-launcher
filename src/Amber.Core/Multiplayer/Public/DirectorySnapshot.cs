@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
+using Amber.Core.Multiplayer.Transport;
 
 namespace Amber.Core.Multiplayer.Public;
 
@@ -112,7 +113,7 @@ public static class HiddenEntry
         var key = SealKey(lobbyKey);
         try
         {
-            using var aead = new ChaCha20Poly1305(key);
+            using var aead = new ChaChaPoly(key);
             var output = new byte[SealedLength];
             RandomNumberGenerator.Fill(output.AsSpan(0, NonceLength));
             aead.Encrypt(output.AsSpan(0, NonceLength), plaintext, output.AsSpan(NonceLength, PlaintextLength), output.AsSpan(NonceLength + PlaintextLength), index);
@@ -133,7 +134,7 @@ public static class HiddenEntry
         var plaintext = new byte[PlaintextLength];
         try
         {
-            using var aead = new ChaCha20Poly1305(key);
+            using var aead = new ChaChaPoly(key);
             aead.Decrypt(sealedEntry[..NonceLength], sealedEntry.Slice(NonceLength, PlaintextLength), sealedEntry[(NonceLength + PlaintextLength)..], plaintext, index);
             if (JsonNode.Parse(Encoding.UTF8.GetString(plaintext).TrimEnd(' ')) is not JsonObject o) return null;
             var id = o["id"]?.GetValue<string>();
