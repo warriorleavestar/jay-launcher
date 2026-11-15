@@ -178,8 +178,22 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
     public partial string? SelectedId { get; set; }
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(HasInstance), nameof(SupportsQuickPlay), nameof(IsSharedDir), nameof(IsVanilla))]
+    [NotifyPropertyChangedFor(nameof(HasInstance), nameof(SupportsQuickPlay), nameof(IsSharedDir), nameof(IsVanilla), nameof(ShowHero))]
     public partial GameInstance? Current { get; set; }
+
+    /// <summary>
+    /// The selected instance when its version files cannot be read. The page still shows its hero with the Repair start
+    /// button, Open folder and Delete, so a broken instance can be fixed or removed from its own page.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowHero))]
+    public partial string? BrokenId { get; set; }
+
+    /// <summary>The hero shows for a loaded instance and for a broken one.</summary>
+    public bool ShowHero => Current is not null || BrokenId is not null;
+
+    /// <summary>The instance the hero's buttons act on: the loaded one, or the broken one.</summary>
+    internal string? HeroId => Current?.Id ?? BrokenId;
 
     /// <summary>版本隔离关闭：模组、资源包、光影都在 .minecraft 下，所有实例共用（改版规格 2.3）。</summary>
     public bool IsSharedDir => Current is { } c && _service.UsesSharedDir(c.Id);
@@ -236,6 +250,7 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
         service.InstanceStateChanged += id => Dispatcher.UIThread.Post(() =>
         {
             if (Current?.Id == id) UpdateInfoText();
+            else if (BrokenId == id) RetryBroken();
         });
         service.ContentChanged += () => Dispatcher.UIThread.Post(() => { _loadedTabs.Clear(); LoadTab(TabIndex); });
         service.UniversalLoaderChanged += id => Dispatcher.UIThread.Post(() =>
@@ -259,7 +274,9 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
         var keep = IsCurrent || IsBusy ? SelectedId : null;
         Instances.Clear();
         foreach (var v in _service.InstalledVersions()) Instances.Add(v);
+        var before = SelectedId;
         SelectedId = keep is not null && Instances.Contains(keep) ? keep : _service.CurrentOr(Instances, Instances.FirstOrDefault());
+        if (SelectedId == before) RetryBroken();
     }
 
     protected override void OnBecameCurrent()
@@ -289,6 +306,7 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
         _service.SetCurrentInstance(value);
         _loadedTabs.Clear();
         Current = null;
+        BrokenId = null;
         InfoText = "";
         if (value is null) return;
         try
@@ -300,10 +318,19 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
             if (TabIndex != tab) TabIndex = tab; // OnTabIndexChanged 会加载这个 Tab
             LoadTab(TabIndex);
         }
-        catch (Exception e) when (e is IOException or System.Text.Json.JsonException or InvalidDataException)
+        catch (Exception e) when (GameDirectory.IsUnreadable(e))
         {
             InfoText = L.F("home.version.read_failed", e.Message);
+            Current = null;
+            RefreshUniversalLoader();
+            BrokenId = value;
         }
+    }
+
+    /// <summary>The broken instance on show may have been repaired or replaced: read it again.</summary>
+    private void RetryBroken()
+    {
+        if (BrokenId is { } id && SelectedId == id) OnSelectedIdChanged(id, id);
     }
 
     partial void OnTabIndexChanged(int value)
@@ -374,6 +401,7 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
     private void OpenFolder()
     {
         if (Current is { } c) OpenPath(c.WorkDir);
+        else if (BrokenId is { } broken) OpenPath(_service.Directory.VersionDir(broken));
     }
 
     [RelayCommand]
@@ -407,25 +435,26 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
     [RelayCommand]
     private async Task DeleteVersionAsync()
     {
-        if (Current is not { } c) return;
-        var dir = _service.Directory.VersionDir(c.Id);
+        // A broken instance can be deleted from its page too (it has only an id).
+        if (HeroId is not { } id) return;
+        var dir = _service.Directory.VersionDir(id);
         if (Avalonia.Application.Current?.ApplicationLifetime is not Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime { MainWindow: { } owner })
             return;
         var ok = await Views.ConfirmDialog.AskAsync(owner, L.T("instance.version.delete"),
-            L.F("instance.delete.body", c.Id, L.T("instance.delete.computing")), L.T("common.confirm_delete"),
-            () => Task.Run(() => L.F("instance.delete.body", c.Id, Fmt.Size(TrashService.SizeOf(dir)))));
+            L.F("instance.delete.body", id, L.T("instance.delete.computing")), L.T("common.confirm_delete"),
+            () => Task.Run(() => L.F("instance.delete.body", id, Fmt.Size(TrashService.SizeOf(dir)))));
         if (!ok) return;
         // 游戏还在用这个实例的文件：不删（删到一半会留下半个实例）。
-        if (_service.IsRunningIn(_service.WorkDirFor(c.Id)) || _service.IsRunningIn(dir))
+        if (_service.IsRunningIn(_service.WorkDirFor(id)) || _service.IsRunningIn(dir))
         {
-            SetStatus(StatusMessage.Warning("instance.delete.running", c.Id));
+            SetStatus(StatusMessage.Warning("instance.delete.running", id));
             return;
         }
         try
         {
             // 整个文件夹改名进回收目录（同卷改名，有文件被占用时整体失败、原样不动），可以撤销。
             var entry = await Task.Run(() => TrashService.MoveToTrash(dir, _service.Directory.Root));
-            SetStatus(StatusMessage.Success("instance.delete.done", c.Id));
+            SetStatus(StatusMessage.Success("instance.delete.done", id));
             _service.NotifyInstalledChanged();
             // Baked instances: their cache files are no longer used by anything (a restore simply bakes again).
             _service.CleanBakeCacheInBackground();
@@ -468,6 +497,7 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
         }
         // 连续勾选时只认最后一次的结果：旧的还在算的作废，算完也不会盖掉新的。
         _pendingCheck?.Cancel();
+        _pendingCheck?.Dispose();
         var cts = _pendingCheck = new CancellationTokenSource();
         var mods = Mods.Select(m => m.Mod).ToList();
         _ = UpdateAsync();
@@ -779,12 +809,15 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
         _modsLoadedFor = null;
         var list = await Task.Run(() => new ModManager(c.ModsDir).List());
         if (generation != _modsGeneration || Current != c) return;
-        foreach (var mod in list)
+        BulkMods(() =>
         {
-            var item = new ModItem(mod) { EnabledChanged = RecheckCompat };
-            Mods.Add(item);
-            if (mod.Icon is { } icon) _ = DecodeIconAsync(item, icon);
-        }
+            foreach (var mod in list)
+            {
+                var item = new ModItem(mod) { EnabledChanged = OnModEnabledChanged };
+                Mods.Add(item);
+                if (mod.Icon is { } icon) _ = DecodeIconAsync(item, icon);
+            }
+        });
         ModSummary = L.P("instance.mods.summary", list.Count, list.Count, list.Count(m => m.Enabled));
         _modsLoadedFor = c;
         RecheckCompat();
@@ -820,7 +853,10 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
         // Forgified Fabric API 提供 fabric-api。
         if (ids.Contains("fabric_api") || enabled.Any(m => m.Mod.FileName.Contains("forgified-fabric-api", StringComparison.OrdinalIgnoreCase))) ids.Add("fabric-api");
         var connector = ConnectorInstaller.IsInstalled(enabled.Select(m => m.Requirements));
-        foreach (var m in Mods) m.Compat = m.Enabled ? ModCompat.Check(m.Requirements, c.Loader, c.McVersion, ids, connector) : null;
+        BulkMods(() =>
+        {
+            foreach (var m in Mods) m.Compat = m.Enabled ? ModCompat.Check(m.Requirements, c.Loader, c.McVersion, ids, connector) : null;
+        });
         var problems = Mods.Count(m => m.HasCompatProblem);
         NeedsConnector = !connector && Mods.Any(m => m.Compat?.Level == CompatLevel.NeedsConnector);
         CompatSummary = problems == 0 ? (Mods.Count > 0 ? L.T("instance.mods.all_matching") : "") : L.P("instance.mods.mismatched", problems, problems);

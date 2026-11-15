@@ -63,12 +63,52 @@ public sealed partial class InstanceViewModel
             foreach (ModItem item in e.OldItems) item.PropertyChanged -= OnModItemChanged;
         if (e.Action == NotifyCollectionChangedAction.Reset) InspectedMod = null;
         else if (InspectedMod is { } inspected && !Mods.Contains(inspected)) InspectedMod = null;
+        if (_bulkMods > 0)
+        {
+            _bulkModsListChanged = true;
+            return;
+        }
         ApplyModQuery();
         UpdateModCounts();
     }
 
+    /// <summary>
+    /// Inside a bulk change (loading the list, enabling or disabling many, rechecking every mod) the per-item
+    /// filter, count and compatibility work waits and runs once at the end, instead of once per mod.
+    /// </summary>
+    private int _bulkMods;
+
+    /// <summary>Rows were added or removed during the bulk change, so the filtered view is built again at its end.</summary>
+    private bool _bulkModsListChanged;
+
+    private void BulkMods(Action change)
+    {
+        _bulkMods++;
+        try { change(); }
+        finally { _bulkMods--; }
+        if (_bulkMods > 0) return;
+        // Only a changed list re-filters: an enabled, disabled or rechecked row stays where it is until the filter
+        // changes (see OnModItemChanged), and the view under the pointer is not rebuilt.
+        if (_bulkModsListChanged)
+        {
+            _bulkModsListChanged = false;
+            ApplyModQuery();
+        }
+        UpdateModCounts();
+    }
+
+    /// <summary>One mod was enabled or disabled: check the others' requirements again (once, at the end of a bulk change).</summary>
+    private void OnModEnabledChanged()
+    {
+        if (_bulkMods == 0) RecheckCompat();
+    }
+
+    /// <summary>Tests: how often the counts under the mod list were worked out.</summary>
+    internal int ModCountUpdatesForTest { get; private set; }
+
     private void OnModItemChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (_bulkMods > 0) return;
         if (e.PropertyName is nameof(ModItem.Selected) or nameof(ModItem.Enabled) or nameof(ModItem.Update) or nameof(ModItem.Compat)) UpdateModCounts();
         // A row that stops matching its filter (disabled while "Disabled" is shown) stays until the filter changes, so it does not jump away under the pointer.
     }
@@ -94,6 +134,7 @@ public sealed partial class InstanceViewModel
 
     private void UpdateModCounts()
     {
+        ModCountUpdatesForTest++;
         HasMods = Mods.Count > 0;
         SelectedModCount = Mods.Count(m => m.Selected);
         HasModSelection = SelectedModCount > 0;
@@ -141,9 +182,11 @@ public sealed partial class InstanceViewModel
 
     private void SetSelectedEnabled(bool enabled)
     {
-        foreach (var m in SelectedMods) m.Enabled = enabled;
+        BulkMods(() =>
+        {
+            foreach (var m in SelectedMods) m.Enabled = enabled;
+        });
         RecheckCompat();
-        UpdateModCounts();
     }
 
     [RelayCommand]

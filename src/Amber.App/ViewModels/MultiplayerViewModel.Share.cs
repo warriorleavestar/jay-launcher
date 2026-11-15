@@ -82,9 +82,11 @@ public sealed partial class MultiplayerViewModel
     /// Turning it on asks first, with what it means: their game reaches the internet as my IP. It is a start-up
     /// setting of the multiplayer component, so the component restarts (a few seconds; chat reconnects).
     /// </summary>
-    internal async Task SetGameProxySharingAsync(bool on)
+    internal async Task SetGameProxySharingAsync(bool on, bool forChildMode = false)
     {
-        if (_currentOptions is not { } current || current.AllowProxy == on || !CanShareGameProxy)
+        // "For a child" hides the switch, but still turns forwarding off in the open room.
+        var allowed = forChildMode ? !on && !_componentRestarting && !IsRekeying : CanShareGameProxy;
+        if (_currentOptions is not { } current || current.AllowProxy == on || !allowed)
         {
             NotifyShare();
             return;

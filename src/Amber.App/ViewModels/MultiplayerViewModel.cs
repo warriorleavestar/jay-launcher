@@ -355,7 +355,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
             while (LanGames.Count(g => g.Source == source) > MaxLogLanGames) LanGames.Remove(LanGames.Last(g => g.Source == source));
             SelectedLanGame = item;
             if (IsIdle) SetStatus(StatusMessage.Success("multiplayer.lan.opened", versionId, port));
-            OnLanOpenedWhileWaiting();
+            OnLanOpenedWhileWaiting(versionId);
         });
     }
 
@@ -698,10 +698,21 @@ public sealed partial class MultiplayerViewModel : PageViewModel
     internal IReadOnlyList<string>? TestListeners { get; set; }
     internal IReadOnlyList<string>? TestPeers { get; set; }
 
+    /// <summary>
+    /// A knock of mine is still waiting for an answer: a room opened now would be replaced by that room once I am let
+    /// in, so opening one waits until the knock is answered or cancelled (said in the status line).
+    /// </summary>
+    private bool RefuseHostWhileKnocking()
+    {
+        if (!IsKnocking) return false;
+        SetStatus(StatusMessage.Warning("multiplayer.room.knock_pending"));
+        return true;
+    }
+
     [RelayCommand]
     private async Task CreateRoomAsync()
     {
-        if (!IsIdle) return;
+        if (!IsIdle || RefuseHostWhileKnocking()) return;
         if (!IsComponentReady)
         {
             SetStatus(StatusMessage.Warning("multiplayer.component.download_required"));
@@ -722,7 +733,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         }
         // No LAN world yet: the room opens on a relay and picks the game up when it's opened to LAN.
         if (await HostGamePortAsync(checkManual: true) is not (var gamePort, var relay)) return;
-        if (!IsIdle)
+        if (!IsIdle || RefuseHostWhileKnocking())
         {
             if (relay is not null) await relay.DisposeAsync();
             return;
@@ -736,7 +747,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         var room = WithMyRelayChoice(credentials.ToHostRoom(members, ChatName));
         if (!TryStartSession(new EasyTierOptions(room, true, TestPeers ?? _service.MultiplayerPeers, EasyTierArgs.FreeTcpPort(), null, TestListeners, Guid.NewGuid().ToString(), FullLanMode, null, FullLanMode && AllowExitNode)
             {
-                AllowProxy = AllowGameProxy,
+                AllowProxy = AllowGameProxy && !Child.HideNetworkExit,
             }))
         {
             if (relay is not null) await relay.DisposeAsync();
@@ -823,7 +834,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
                 // One local port per split leg (each forwarded over its own network); none when the room doesn't split.
                 LocalSplitPorts = wraps && !FullLanMode && room.FromInvite && room.Split.Enabled ? [.. Enumerable.Range(0, room.Split.Paths).Select(_ => EasyTierArgs.FreeTcpPort())] : null,
                 LocalRemotePort = remotePort,
-                AllowProxy = AllowGameProxy,
+                AllowProxy = AllowGameProxy && !Child.HideNetworkExit,
             })) return false;
         _room = room;
         _joinedRelayRule = relayRule;

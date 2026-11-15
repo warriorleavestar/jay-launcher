@@ -30,7 +30,8 @@ public sealed partial class LongInviteItem(LongLivedInvite invite, string code) 
 
 /// <summary>
 /// Long-lived invites for friends you play with regularly (official §6.15): 30 days, revoke any time, the host still
-/// approves each knock and checks the safety code. Managed in multiplayer settings › invites; every room I open accepts them.
+/// approves each knock and checks the safety code. Managed in multiplayer settings › invites. Every room I open through a
+/// server accepts them; a room with no server cannot (a guest finds it only through that room's own sealed code).
 /// </summary>
 public sealed partial class MultiplayerViewModel
 {

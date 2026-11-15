@@ -481,6 +481,42 @@ public sealed class RoomSceneTests : IDisposable
         vm.LeaveTestRoom();
     });
 
+    /// <summary>"For a child" (no going online through my computer or theirs) also covers forwarding members' game traffic.</summary>
+    [Fact]
+    public void ChildModeTurnsOffGameForwarding() => UiTestThread.Run(() =>
+    {
+        var (service, vm, room) = Create();
+        using var s = service;
+        vm.AllowGameProxy = true;
+        vm.Confirm = (_, _, _) => Task.FromResult(true);
+        vm.EnterTestRoom(room, host: true);
+        vm.UseTestOptions(new EasyTierOptions(room, true, [], 0) { AllowProxy = true });
+        EasyTierOptions? restarted = null;
+        vm.TestRestartForProxy = next =>
+        {
+            restarted = next;
+            return true;
+        };
+
+        service.Settings.ChildMode.SetEnabled(true, DateTimeOffset.UtcNow);
+        vm.ApplyChildMode();
+        Dispatcher.UIThread.RunJobs();
+        Assert.False(vm.AllowGameProxy);
+        // The open room restarts without forwarding.
+        Assert.True(restarted is { AllowProxy: false });
+        Assert.False(vm.SharingGameProxy);
+        // The room default cannot be turned back on while the mode is on.
+        vm.AllowGameProxy = true;
+        Assert.False(vm.AllowGameProxy);
+
+        service.Settings.ChildMode.SetEnabled(false, DateTimeOffset.UtcNow);
+        vm.ApplyChildMode();
+        vm.AllowGameProxy = true;
+        Assert.True(vm.AllowGameProxy);
+        vm.UseTestOptions(null);
+        vm.LeaveTestRoom();
+    });
+
     [Fact]
     public void ForwardingThatDoesNotTakeSaysSoAndFreesTheSwitches() => UiTestThread.Run(() =>
     {

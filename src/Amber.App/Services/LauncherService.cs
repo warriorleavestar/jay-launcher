@@ -302,11 +302,42 @@ public sealed class LauncherService : IDisposable
     {
         try { Settings.Save(); } catch (IOException) { } catch (UnauthorizedAccessException) { }
     }
-    public void NotifyInstalledChanged() => InstalledVersionsChanged?.Invoke();
+    public void NotifyInstalledChanged()
+    {
+        lock (_installedLock) _installedCache = null;
+        InstalledVersionsChanged?.Invoke();
+    }
     public void RequestLaunch(LaunchRequest request) => LaunchRequested?.Invoke(request);
     public void NotifyGameOutput(string versionId, string line) => GameOutput?.Invoke(versionId, line);
 
-    public List<string> InstalledVersions() => Directory.ListInstalled().OrderDescending().ToList();
+    private readonly object _installedLock = new();
+    private (GameDirectory Directory, DateTime Stamp, long At, List<string> Ids)? _installedCache;
+
+    /// <summary>How long a listing of the installed instances is reused at most.</summary>
+    internal static readonly TimeSpan InstalledCacheLife = TimeSpan.FromSeconds(2);
+
+    /// <summary>
+    /// The installed instances, newest first. Name boxes ask on every key press, so a listing is reused briefly: only
+    /// for the same game directory, while the versions folder has not changed, for at most <see cref="InstalledCacheLife"/>,
+    /// and never after Jay itself installs or removes an instance (<see cref="NotifyInstalledChanged"/>).
+    /// </summary>
+    public List<string> InstalledVersions()
+    {
+        var directory = Directory;
+        DateTime stamp;
+        try { stamp = System.IO.Directory.GetLastWriteTimeUtc(directory.VersionsDir); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { stamp = default; }
+        var now = Environment.TickCount64;
+        lock (_installedLock)
+        {
+            if (_installedCache is { } cache && ReferenceEquals(cache.Directory, directory) && cache.Stamp == stamp
+                && now - cache.At >= 0 && now - cache.At < (long)InstalledCacheLife.TotalMilliseconds)
+                return [.. cache.Ids];
+        }
+        var ids = directory.ListInstalled().OrderDescending().ToList();
+        lock (_installedLock) _installedCache = (directory, stamp, now, ids);
+        return [.. ids];
+    }
 
     /// <summary>
     /// 全局唯一的“当前实例”（改版规格 2.3）：启动、实例、联机页都绑定它，资源页默认装到它。

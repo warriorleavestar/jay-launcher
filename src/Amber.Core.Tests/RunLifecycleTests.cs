@@ -211,7 +211,7 @@ public sealed class RunLifecycleTests : IDisposable
         log.Flush();
         var second = log.BeginRun("B", DateTimeOffset.Now);
         Assert.Same(second, log.SelectedRun);
-        Assert.True(log.HasSeveralRuns);
+        Assert.Equal(2, log.Runs.Count);
         Assert.Empty(log.Lines);
 
         // 第一局的输出继续进第一局，不混进正在看的第二局。

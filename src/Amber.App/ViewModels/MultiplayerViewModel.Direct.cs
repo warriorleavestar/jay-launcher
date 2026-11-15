@@ -144,7 +144,7 @@ public sealed partial class MultiplayerViewModel
     [RelayCommand]
     private async Task CreateDirectRoomAsync()
     {
-        if (!IsIdle) return;
+        if (!IsIdle || RefuseHostWhileKnocking()) return;
         if (!IsComponentReady)
         {
             SetStatus(StatusMessage.Warning("multiplayer.component.download_required"));
@@ -152,7 +152,7 @@ public sealed partial class MultiplayerViewModel
         }
         // No LAN world yet: the room and its invite are made now, and the game is picked up when it's opened to LAN.
         if (await HostGamePortAsync(checkManual: false) is not (var gamePort, var relay)) return;
-        if (!IsIdle)
+        if (!IsIdle || RefuseHostWhileKnocking())
         {
             if (relay is not null) await relay.DisposeAsync();
             return;

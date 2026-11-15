@@ -9,7 +9,8 @@ public sealed record LibraryEntry(
     bool Pinned = false,
     DateTimeOffset? LastPlayed = null,
     bool HasProblem = false,
-    bool IsRunning = false);
+    bool IsRunning = false,
+    bool Unreadable = false);
 
 /// <summary>Filter chips: all, pinned, has a problem, running.</summary>
 public enum LibraryFilter { All, Pinned, Problems, Running }

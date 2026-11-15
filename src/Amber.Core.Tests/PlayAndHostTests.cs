@@ -51,6 +51,47 @@ public sealed class PlayAndHostTests
         Assert.Equal("multiplayer.lan.port_unavailable", vm.StatusInfo?.Key);
     });
 
+    /// <summary>Only the game started for the wait opens the room, and the wait ends when that game's session does.</summary>
+    [Fact]
+    public void OnlyTheStartedGameOpensTheRoomAndItsEndStopsTheWait() => UiTestThread.Run(() =>
+    {
+        using var service = new LauncherService(new AppSettings { GameDirectory = TestDataDir.Path, PlayerName = "" });
+        var vm = new MultiplayerViewModel(service);
+        vm.Instances.Clear();
+        vm.Instances.Add("fabric-1.20.1");
+        vm.IsComponentReady = true;
+        vm.StartInstance = _ => { };
+        vm.HostFromLobbyCommand.Execute(null);
+        Assert.True(vm.IsWaitingForLan);
+
+        // Another instance opening its world to LAN is listed, but opens no room and does not end the wait.
+        vm.GameOutputForTest("vanilla-1.21", "[Server thread/INFO]: Started serving on 51235");
+        Dispatcher.UIThread.RunJobs();
+        Assert.True(vm.IsWaitingForLan);
+        Assert.True(vm.IsIdle);
+        Assert.Equal(51235, vm.SelectedLanGame?.Game.Port);
+
+        // A session of another instance ending changes nothing; the waited game's session ending ends the wait.
+        var other = new Amber.Core.Launch.LaunchSession("vanilla-1.21", DateTimeOffset.Now);
+        vm.WatchGameSession(other);
+        other.Cancel(DateTimeOffset.Now);
+        Dispatcher.UIThread.RunJobs();
+        Assert.True(vm.IsWaitingForLan);
+        var game = new Amber.Core.Launch.LaunchSession("fabric-1.20.1", DateTimeOffset.Now);
+        vm.WatchGameSession(game);
+        game.ProcessUp(DateTimeOffset.Now);
+        Dispatcher.UIThread.RunJobs();
+        Assert.True(vm.IsWaitingForLan);
+        game.ProcessEnded(DateTimeOffset.Now, 0, crashed: false);
+        Dispatcher.UIThread.RunJobs();
+        Assert.False(vm.IsWaitingForLan);
+
+        // A later "Open to LAN" from that instance no longer opens a room by itself.
+        vm.GameOutputForTest("fabric-1.20.1", "[Server thread/INFO]: Started serving on 51236");
+        Dispatcher.UIThread.RunJobs();
+        Assert.True(vm.IsIdle);
+    });
+
     [Fact]
     public void NeedsTheComponentAndCanBeCancelled() => UiTestThread.Run(() =>
     {

@@ -235,13 +235,16 @@ public sealed class HelpLibrary
         return a.PlainText.Contains(q, c) ? 10 : 0;
     }
 
-    /// <summary>Language code of the help files to use for a UI language (classical Chinese reads the simplified ones).</summary>
+    /// <summary>
+    /// Language code of the help files to use for a UI language. Classical Chinese reads the traditional ones, the same
+    /// language its interface falls back to.
+    /// </summary>
     public static string HelpLanguage(string uiLanguage) => uiLanguage switch
     {
-        "zh-Hant" => "zh-Hant",
+        "zh-Hant" or "lzh" => "zh-Hant",
         "en" => "en",
         "ja" => "ja",
-        _ when uiLanguage.StartsWith("zh", StringComparison.OrdinalIgnoreCase) || uiLanguage == "lzh" => "zh-Hans",
+        _ when uiLanguage.StartsWith("zh", StringComparison.OrdinalIgnoreCase) => "zh-Hans",
         _ => "en",
     };
 

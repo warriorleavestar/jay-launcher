@@ -25,6 +25,25 @@ public sealed class LobbyOpenRoomTests
         return (service, vm, changed);
     }
 
+    /// <summary>While my knock waits for an answer, opening a room is refused (it would be replaced once I am let in).</summary>
+    [Fact]
+    public void NoRoomOpensWhileAKnockWaits() => UiTestThread.Run(() =>
+    {
+        var (service, vm, _) = Create();
+        using var s = service;
+        vm.TestPeers = ["tcp://127.0.0.1:1"];
+        vm.IsKnocking = true;
+        foreach (var command in new System.Windows.Input.ICommand[] { vm.HostFromLobbyCommand, vm.CreateRoomCommand, vm.CreateDirectRoomCommand, vm.RepeatLastRoomCommand })
+        {
+            vm.SetStatus(null);
+            command.Execute(null);
+            Dispatcher.UIThread.RunJobs();
+            Assert.True(vm.IsIdle);
+            if (command != vm.RepeatLastRoomCommand) Assert.Equal("multiplayer.room.knock_pending", vm.StatusInfo?.Key);
+        }
+        vm.IsKnocking = false;
+    });
+
     [Fact]
     public void DefaultsOpenARoomWithoutTouchingAnyChoice() => UiTestThread.Run(() =>
     {

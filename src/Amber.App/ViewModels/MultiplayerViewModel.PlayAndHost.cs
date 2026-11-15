@@ -1,4 +1,5 @@
 using Amber.Core.Localization;
+using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
@@ -44,16 +45,20 @@ public sealed partial class MultiplayerViewModel
     {
         if (!StartsGameToHost || HostGameInstance is not { } id) return false;
         _waitingInstance = id;
+        _waitingSince = DateTimeOffset.Now;
         IsWaitingForLan = true;
         OnPropertyChanged(nameof(WaitingForLanText));
         StartInstance!(id);
         return true;
     }
 
-    /// <summary>The game's log said "Open to LAN": open the room the player already asked for.</summary>
-    private void OnLanOpenedWhileWaiting()
+    /// <summary>
+    /// The game's log said "Open to LAN": open the room the player already asked for. Only the game Jay started for
+    /// it counts; another instance opening its world to LAN does not open a room.
+    /// </summary>
+    private void OnLanOpenedWhileWaiting(string versionId)
     {
-        if (!IsWaitingForLan) return;
+        if (!IsWaitingForLan || !string.Equals(_waitingInstance, versionId, StringComparison.OrdinalIgnoreCase)) return;
         IsWaitingForLan = false;
         _waitingInstance = null;
         if (IsIdle) HostFromLobbyCommand.Execute(null);
@@ -65,6 +70,23 @@ public sealed partial class MultiplayerViewModel
         IsWaitingForLan = false;
         _waitingInstance = null;
     }
+
+    /// <summary>
+    /// A game session started (set up by the main view model). When the session of the game started for the wait ends
+    /// (quit, crashed, failed or cancelled before "Open to LAN"), the wait ends with it.
+    /// </summary>
+    public void WatchGameSession(Amber.Core.Launch.LaunchSession session) => session.Changed += s =>
+    {
+        if (s.IsActive) return;
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (IsWaitingForLan && s.Started >= _waitingSince && string.Equals(_waitingInstance, s.InstanceId, StringComparison.OrdinalIgnoreCase))
+                CancelWaitForLan();
+        });
+    };
+
+    /// <summary>When the lobby started the game it waits on: only sessions from then on end the wait.</summary>
+    private DateTimeOffset _waitingSince;
 
     /// <summary>Tests: a line from a game's log, as if the game wrote it.</summary>
     internal void GameOutputForTest(string versionId, string line) => OnGameOutput(versionId, line);

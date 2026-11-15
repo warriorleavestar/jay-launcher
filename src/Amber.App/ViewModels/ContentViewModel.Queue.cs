@@ -130,8 +130,7 @@ public sealed partial class ContentViewModel
     {
         var items = Queue.Items.ToList();
         if (items.Count == 0) return;
-        IsBusy = true;
-        var cts = _workCts = new CancellationTokenSource();
+        var cts = BeginWork();
         var task = _service.Tasks.Track("content", L.P("content.queue.task", items.Count, items.Count),
             () => { try { cts.Cancel(); } catch (ObjectDisposedException) { } });
         try
@@ -214,8 +213,7 @@ public sealed partial class ContentViewModel
         finally
         {
             task.Cancelled();
-            IsBusy = false;
-            Progress = 0;
+            EndWork(cts);
         }
     }
 

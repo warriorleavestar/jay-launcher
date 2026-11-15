@@ -87,7 +87,7 @@
   <ScrollViewer x:Name="PageScroll" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Disabled">
   <Grid RowDefinitions="Auto,Auto,*,Auto">
     <!-- 英雄区：封面、名字、事实行、开始按钮（状态机）、旁边单独的取消 / 退出按钮（官方设计 §6.3） -->
-    <Border x:Name="Hero" Classes="hero" svc:ThemeRegion.Name="instances.header" IsVisible="{Binding HasInstance}" MinHeight="200"
+    <Border x:Name="Hero" Classes="hero" svc:ThemeRegion.Name="instances.header" IsVisible="{Binding ShowHero}" MinHeight="200"
             Background="{Binding CoverSlot, Converter={x:Static v:CoverBrush.Instance}}">
       <Panel>
         <Border IsHitTestVisible="False">
@@ -109,7 +109,7 @@
           <StackPanel Grid.Column="1" Spacing="6" VerticalAlignment="Bottom">
             <TextBlock x:Name="HeroName" Classes="on-cover headline" Text="{Binding HeroName}" TextTrimming="CharacterEllipsis" MaxLines="1" ToolTip.Tip="{Binding HeroName}" />
             <WrapPanel x:Name="HeroFacts" ItemSpacing="6" LineSpacing="4">
-              <Border Classes="fact-tag"><TextBlock Classes="on-cover px" Text="{Binding HeroVersion}" /></Border>
+              <Border Classes="fact-tag" IsVisible="{Binding !!HeroVersion.Length}"><TextBlock Classes="on-cover px" Text="{Binding HeroVersion}" /></Border>
               <Border Classes="fact-tag" IsVisible="{Binding !!HeroLoader.Length}"><TextBlock Classes="on-cover" Text="{Binding HeroLoader}" FontSize="12" /></Border>
               <TextBlock Classes="on-cover-dim" Text="{Binding HeroFacts}" FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
             </WrapPanel>

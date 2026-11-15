@@ -173,7 +173,8 @@ public sealed partial class NetworkStatusViewModel : ObservableObject
         }
         if (_multiplayer.NetworkChoices.FirstOrDefault(c => c.Id == row.Id) is not { } choice) return;
         if (!ReferenceEquals(_multiplayer.SelectedNetworkChoice, choice)) _multiplayer.SelectedNetworkChoice = choice;
-        _multiplayer.ConnectPublicCommand.Execute(null);
+        // Picking another network while one is still connecting cancels that connect: this one starts once it has stopped.
+        _ = _multiplayer.ConnectPublicWhenFreeAsync();
         Refresh();
         if (!_multiplayer.IsPublicConnecting && !_multiplayer.IsPublicConnected)
         {

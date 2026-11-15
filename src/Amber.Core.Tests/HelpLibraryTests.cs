@@ -132,7 +132,7 @@ public class HelpLibraryTests
     }
 
     [Theory]
-    [InlineData("lzh", "zh-Hans")]
+    [InlineData("lzh", "zh-Hant")]
     [InlineData("zh-Hans", "zh-Hans")]
     [InlineData("zh-Hant", "zh-Hant")]
     [InlineData("ja", "ja")]
