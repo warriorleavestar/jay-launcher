@@ -4,6 +4,10 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 COPY src/ src/
+# Amber.Core embeds these files from outside src/; without them the build fails (CS1566).
+COPY build/pins.json build/pins.json
+COPY docs/help/ docs/help/
+COPY themes/builtin/ themes/builtin/
 RUN dotnet publish src/Amber.Server -c Release -o /out -p:DebugType=none -p:UseAppHost=true
 
 FROM mcr.microsoft.com/dotnet/runtime:10.0
