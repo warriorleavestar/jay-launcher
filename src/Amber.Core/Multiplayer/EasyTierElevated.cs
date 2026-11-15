@@ -64,10 +64,10 @@ public sealed class EasyTierElevatedSession : IEasyTierSession, IHotspotSharingS
         return new EasyTierElevatedSession(options, installer.CliPath, guard);
     }
 
-    /// <summary>换参数重启 easytier-core（换出口、换路径、测试矩阵用），不用再弹权限确认：经命令管道发新参数。</summary>
-    public void Restart(EasyTierOptions options) => RestartAsync(options).GetAwaiter().GetResult();
-
-    /// <summary>等核心和出口网络真正就绪后才提交新配置；取消会停止整个会话，避免后台悄悄启用出口。</summary>
+    /// <summary>
+    /// 换参数重启 easytier-core（换出口、换路径、测试矩阵用），不用再弹权限确认：经命令管道发新参数。
+    /// 等核心和出口网络真正就绪后才提交新配置；取消会停止整个会话，避免后台悄悄启用出口。
+    /// </summary>
     public async Task RestartAsync(EasyTierOptions options, CancellationToken ct = default)
     {
         await _restartLock.WaitAsync(ct).ConfigureAwait(false);

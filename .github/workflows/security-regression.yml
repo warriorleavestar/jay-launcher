@@ -43,10 +43,12 @@ jobs:
             echo "AMBER_ADDED_TEST_LOOPBACK=true" >> "$GITHUB_ENV"
           fi
 
+      # EasyTierProcessGuardTests, UnixFullLanTests and PlatformPortingTests mostly run only on Mac/Linux (EasyTier process
+      # clean-up, the root guard and its signal handling); the full unit-test job runs on Windows only.
       - name: Security boundary regression tests
         run: >-
           dotnet test Amber.Core.Tests -c Release
-          --filter "FullyQualifiedName~ProcessBoundarySecurityTests|FullyQualifiedName~InputParsingSecurityTests|FullyQualifiedName~WorldImportTests|FullyQualifiedName~ServerStatusTests|FullyQualifiedName~SpeedTestServerTests|FullyQualifiedName~SpeedTestSecurityTests|FullyQualifiedName~NbtBudgetTests|FullyQualifiedName~TestMatrixTests"
+          --filter "FullyQualifiedName~ProcessBoundarySecurityTests|FullyQualifiedName~InputParsingSecurityTests|FullyQualifiedName~WorldImportTests|FullyQualifiedName~ServerStatusTests|FullyQualifiedName~SpeedTestServerTests|FullyQualifiedName~SpeedTestSecurityTests|FullyQualifiedName~NbtBudgetTests|FullyQualifiedName~TestMatrixTests|FullyQualifiedName~EasyTierProcessGuardTests|FullyQualifiedName~UnixFullLanTests|FullyQualifiedName~PlatformPortingTests"
           --logger "trx;LogFileName=security.trx" --results-directory ../out/security-tests
 
       - name: Upload security test results
