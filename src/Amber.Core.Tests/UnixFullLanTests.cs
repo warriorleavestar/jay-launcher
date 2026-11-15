@@ -410,7 +410,43 @@ public sealed class UnixFullLanTests
             // Once it lets go, a later start removes the folder.
             ElevatedCoreStore.RemoveOtherBuilds(root.FullName);
             Assert.False(Directory.Exists(other));
-            Assert.Empty(Directory.EnumerateFileSystemEntries(root.FullName));
+            Assert.Empty(Directory.EnumerateDirectories(root.FullName));
+        }
+        finally { root.Delete(true); }
+    }
+
+    /// <summary>
+    /// A guard of another build that has created its folder but not yet taken it up holds the builds lock meanwhile: a
+    /// removal waits for it, then sees the folder held and leaves it.
+    /// </summary>
+    [Fact]
+    public async Task AFolderBeingTakenUpIsNotRemovedInBetween()
+    {
+        var root = Directory.CreateTempSubdirectory("jay-core-builds-");
+        try
+        {
+            var other = Path.Combine(root.FullName, "2.4.5-jay-0123456789ab");
+            Task removal;
+            FileStream hold;
+            // The other guard: lock, create its folder, and (a moment later) take it up.
+            using (var builds = ElevatedCoreStore.LockBuilds(root.FullName))
+            {
+                Assert.NotNull(builds);
+                Directory.CreateDirectory(other);
+                File.WriteAllText(Path.Combine(other, "easytier-core"), "x");
+                removal = Task.Run(() => ElevatedCoreStore.RemoveOtherBuilds(root.FullName));
+                await Task.Delay(300);
+                Assert.True(Directory.Exists(other));
+                Assert.False(removal.IsCompleted);
+                hold = new FileStream(Path.Combine(other, ElevatedCoreStore.InUseFile), FileMode.Create, FileAccess.ReadWrite, FileShare.Read | FileShare.Write);
+            }
+            using (hold)
+            {
+                await removal.WaitAsync(TimeSpan.FromSeconds(10));
+                Assert.True(File.Exists(Path.Combine(other, "easytier-core")));
+            }
+            ElevatedCoreStore.RemoveOtherBuilds(root.FullName);
+            Assert.False(Directory.Exists(other));
         }
         finally { root.Delete(true); }
     }

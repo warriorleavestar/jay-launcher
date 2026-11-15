@@ -76,32 +76,34 @@ public sealed class UnixExitNetworkTests
             if (args.Contains("get")) return (0, "203.0.113.10 via 192.168.1.1 dev wlan0 src 192.168.1.20 uid 0");
             return (0, "");
         };
-        // Never touch the real resolver file, whether or not this machine has systemd-resolved.
-        var dir = Directory.CreateTempSubdirectory("jay-resolv-");
-        UnixExitNetwork.ResolvConf = Path.Combine(dir.FullName, "resolv.conf");
-        File.WriteAllText(UnixExitNetwork.ResolvConf, "nameserver 127.0.0.53\n");
+        // Never touch the real resolver file or the real runtime folder (the DNS lease), whether or not this machine has
+        // systemd-resolved, and whether or not the tests run as root.
         try
         {
-            var exit = new UnixExitNetwork(new ExitNetworkPlan("10.233.144.20", ["203.0.113.10"], "amberlan-10000"));
-            exit.EnterRoutes();
-            // 先清掉上次留下的，再查路由、加主机路由（带固定 proto 号）。
-            Assert.Equal("ip -4 route flush proto 201", calls[0]);
-            Assert.Equal("nft delete table inet jay_exit", calls[1]);
-            Assert.Equal("ip -4 route replace 203.0.113.10/32 via 192.168.1.1 dev wlan0 proto 201", calls[3]);
-            calls.Clear();
-            exit.EnterTunnel("amberlan-10000");
-            Assert.Equal("nft -f -", calls[0]);
-            calls.Clear();
-            exit.ExitDns();
-            exit.ExitRoutes();
-            Assert.Contains("ip -4 route del 203.0.113.10/32 proto 201", calls);
-            Assert.Equal("nft delete table inet jay_exit", calls[^1]);
+            WithResolvConf(_ =>
+            {
+                File.WriteAllText(UnixExitNetwork.ResolvConf, "nameserver 127.0.0.53\n");
+                var exit = new UnixExitNetwork(new ExitNetworkPlan("10.233.144.20", ["203.0.113.10"], "amberlan-10000"));
+                exit.EnterRoutes();
+                // 先清掉上次留下的，再查路由、加主机路由（带固定 proto 号）。
+                Assert.Equal("ip -4 route flush proto 201", calls[0]);
+                Assert.Equal("nft delete table inet jay_exit", calls[1]);
+                Assert.Equal("ip -4 route replace 203.0.113.10/32 via 192.168.1.1 dev wlan0 proto 201", calls[3]);
+                calls.Clear();
+                exit.EnterTunnel("amberlan-10000");
+                Assert.Equal("nft -f -", calls[0]);
+                Assert.True(File.Exists(UnixExitNetwork.DnsLease));
+                calls.Clear();
+                exit.ExitDns();
+                exit.ExitRoutes();
+                Assert.Contains("ip -4 route del 203.0.113.10/32 proto 201", calls);
+                Assert.Equal("nft delete table inet jay_exit", calls[^1]);
+                Assert.Equal("nameserver 127.0.0.53\n", File.ReadAllText(UnixExitNetwork.ResolvConf));
+            });
         }
         finally
         {
             UnixExitNetwork.RunForTest = null;
-            UnixExitNetwork.ResolvConf = "/etc/resolv.conf";
-            dir.Delete(true);
         }
     }
 
@@ -326,8 +328,12 @@ public sealed class UnixExitNetworkTests
         UnixExitNetwork.RunForTest = (_, args, _) => args.Contains("get") ? (2, "RTNETLINK answers: Network is unreachable") : (0, "");
         try
         {
-            var exit = new UnixExitNetwork(new ExitNetworkPlan("10.233.144.20", ["203.0.113.10"], "amberlan-10000"));
-            Assert.Throws<IOException>(exit.EnterRoutes);
+            // Entering routes first checks for leftovers, which looks at the resolver file and the runtime folder.
+            WithResolvConf(_ =>
+            {
+                var exit = new UnixExitNetwork(new ExitNetworkPlan("10.233.144.20", ["203.0.113.10"], "amberlan-10000"));
+                Assert.Throws<IOException>(exit.EnterRoutes);
+            });
         }
         finally { UnixExitNetwork.RunForTest = null; }
     }

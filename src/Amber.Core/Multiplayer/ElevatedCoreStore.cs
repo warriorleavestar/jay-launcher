@@ -55,7 +55,7 @@ internal static class ElevatedCoreStore
         EnsureRoot(root);
         // Before anything is written into it: a root that already existed must be one only administrators or root control.
         CheckRoot(root);
-        HoldBuild(Path.Combine(root, EasyTierRelease.InstallTag));
+        HoldBuild(root, Path.Combine(root, EasyTierRelease.InstallTag));
         if (!Directory.Exists(dir))
         {
             var package = ReadPackage(packagePath, asset);
@@ -122,17 +122,51 @@ internal static class ElevatedCoreStore
     /// <summary>A build's folder holds this file open while a guard uses that build (see <see cref="HoldBuild"/>).</summary>
     internal const string InUseFile = ".in-use";
 
+    /// <summary>
+    /// Taken (exclusively, briefly) by a guard while it takes up its build's folder and while it checks and renames other
+    /// builds' folders, so a guard of another build can't find a folder just created and not yet held, and remove it.
+    /// </summary>
+    internal const string BuildsLockFile = ".builds.lock";
+
     private static readonly object HoldGate = new();
     private static FileStream? _held;
+
+    /// <summary>
+    /// Takes <see cref="BuildsLockFile"/> in <paramref name="root"/>, waiting up to five seconds for another guard; null when
+    /// it can't be had. The file is readable by root or administrators only.
+    /// </summary>
+    internal static FileStream? LockBuilds(string root)
+    {
+        var deadline = Environment.TickCount64 + 5000;
+        while (true)
+        {
+            try
+            {
+                var options = new FileStreamOptions { Mode = FileMode.OpenOrCreate, Access = FileAccess.ReadWrite, Share = FileShare.None };
+                if (!OperatingSystem.IsWindows()) options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+                return new FileStream(Path.Combine(root, BuildsLockFile), options);
+            }
+            catch (IOException) when (Environment.TickCount64 < deadline)
+            {
+                Thread.Sleep(50);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                return null;
+            }
+        }
+    }
 
     /// <summary>
     /// Marks this build's folder as in use for as long as this guard runs: a shared hold on <see cref="InUseFile"/>, which
     /// guards of the same build share and which keeps a guard of another build from removing the folder (see
     /// <see cref="RemoveOtherBuilds"/>) between preparing the copy and starting it. The file is readable by root or
-    /// administrators only. When it can't be held within a few seconds the guard goes on without it.
+    /// administrators only. When it can't be held within a few seconds the guard goes on without it. Done under
+    /// <see cref="LockBuilds"/>, so the folder is never there unheld while another guard looks.
     /// </summary>
-    private static void HoldBuild(string folder)
+    private static void HoldBuild(string root, string folder)
     {
+        using var builds = LockBuilds(root);
         CreateProtectedDirectory(folder);
         var path = Path.Combine(folder, InUseFile);
         var deadline = Environment.TickCount64 + 5000;
@@ -204,13 +238,16 @@ internal static class ElevatedCoreStore
     /// Once the current build's copy checks out: removes the copies of earlier builds next to it. Each one is first renamed
     /// aside, which fails on Windows while its easytier-core still runs; such a folder is left for a later start, so a
     /// half-deleted copy never sits under a build's own name. A folder whose build a guard holds (see <see cref="HoldBuild"/>)
-    /// is left too. Only folders named like a build are touched, and failures
-    /// are ignored.
+    /// is left too, and so is everything while <see cref="BuildsLockFile"/> can't be taken. Only folders named like a build
+    /// are touched, and failures are ignored.
     /// </summary>
     internal static void RemoveOtherBuilds(string root)
     {
         try
         {
+            // Without the lock a guard of another build could be taking up its folder right now: leave everything.
+            using var builds = LockBuilds(root);
+            if (builds is null) return;
             foreach (var folder in Directory.EnumerateDirectories(root).ToList())
             {
                 var name = Path.GetFileName(folder);
