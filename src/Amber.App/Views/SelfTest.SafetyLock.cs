@@ -1,6 +1,7 @@
 using Amber.App.Controls.Safety;
 using Amber.App.Services;
 using Amber.App.ViewModels;
+using Amber.Core.Localization;
 using Amber.Core.Themes;
 using Avalonia;
 using Avalonia.Controls;
@@ -61,15 +62,36 @@ internal sealed class SafetyLockSelfTest(MainWindow window, MainViewModel main, 
                 Width = 460,
             };
             var row = new PrivacyRow();
-            var stage = new StackPanel { Margin = new Thickness(24), Spacing = 16, Children = { new Border { Classes = { "card" }, Child = panel }, row } };
+            // The friends page's two locked confirms, as the page builds them, with a long name and device name and as
+            // wide as a 600×420 window leaves them: a new device their account vouched for, and removing a friend.
+            var (newDevice, removeFriend) = FriendPanels();
+            var stage = new ScrollViewer
+            {
+                Content = new StackPanel
+                {
+                    Margin = new Thickness(24),
+                    Spacing = 16,
+                    Children = { new Border { Classes = { "card" }, Child = panel }, row, new Border { Classes = { "card" }, Child = newDevice }, new Border { Classes = { "card" }, Child = removeFriend } },
+                },
+            };
             window.Content = stage;
             Check("安全面板标题行写的是 Jay 安全提示", panel.BadgeText == Amber.Core.Localization.L.T("safety.title"), panel.BadgeText);
+            _locked = [("安全面板", panel), ("隐私行", row), ("朋友新设备", newDevice), ("移除朋友", removeFriend)];
+            await Task.Delay(300);
+            foreach (var (name, friendPanel) in new[] { ("朋友新设备", newDevice), ("移除朋友", removeFriend) })
+            {
+                var buttons = Dispatcher.UIThread.Invoke(() => friendPanel.GetVisualDescendants().OfType<SafetyButton>().ToList());
+                Check($"{name}的确认是安全面板，按钮是安全按钮，安全的那个排第一",
+                    buttons.Count == 2 && buttons[0].Kind == SafetyKind.Safe && buttons[1].Kind == SafetyKind.Confirm);
+                Check($"{name}在 600×420 窗口的宽度里放得下（长名字也不裁掉按钮）", Dispatcher.UIThread.Invoke(() => buttons.All(b =>
+                    b.TranslatePoint(new Point(b.Bounds.Width, b.Bounds.Height), friendPanel) is { } corner && corner.X <= friendPanel.Bounds.Width + 0.5 && corner.Y <= friendPanel.Bounds.Height + 0.5)));
+            }
 
             var baseline = new Dictionary<string, byte[]>();
             foreach (var variant in new[] { ThemeVariant.Dark, ThemeVariant.Light })
             {
                 Application.Current!.RequestedThemeVariant = variant;
-                foreach (var (name, bytes) in await CaptureAsync(panel, row, $"default-{variant}")) baseline[$"{variant}/{name}"] = bytes;
+                foreach (var (name, bytes) in await CaptureAsync($"default-{variant}")) baseline[$"{variant}/{name}"] = bytes;
             }
 
             foreach (var extreme in Extremes)
@@ -83,7 +105,7 @@ internal sealed class SafetyLockSelfTest(MainWindow window, MainViewModel main, 
                 foreach (var variant in new[] { ThemeVariant.Dark, ThemeVariant.Light })
                 {
                     Application.Current!.RequestedThemeVariant = variant;
-                    foreach (var (name, bytes) in await CaptureAsync(panel, row, $"{extreme}-{variant}"))
+                    foreach (var (name, bytes) in await CaptureAsync($"{extreme}-{variant}"))
                     {
                         var same = baseline.TryGetValue($"{variant}/{name}", out var b) && b.AsSpan().SequenceEqual(bytes);
                         Check($"极端主题 {extreme}（{variant}）下 {name} 和默认逐像素一致", same);
@@ -101,6 +123,17 @@ internal sealed class SafetyLockSelfTest(MainWindow window, MainViewModel main, 
 
             // 恢复默认，再看一次确认框的窗口是锁定的。
             settings.ResetThemePackCommand.Execute(null);
+            await Task.Delay(300);
+            // Compact density makes ordinary controls shorter; the locked ones stay exactly as they were.
+            settings.SelectedDensityIndex = 1;
+            await Task.Delay(300);
+            foreach (var variant in new[] { ThemeVariant.Dark, ThemeVariant.Light })
+            {
+                Application.Current!.RequestedThemeVariant = variant;
+                foreach (var (name, bytes) in await CaptureAsync($"compact-{variant}"))
+                    Check($"紧凑密度（{variant}）下 {name} 和标准密度逐像素一致", baseline.TryGetValue($"{variant}/{name}", out var b) && b.AsSpan().SequenceEqual(bytes));
+            }
+            settings.SelectedDensityIndex = 0;
             await Task.Delay(300);
             var dialog = SafetyDialog.CreateForSelfTest("删除实例“生存服”？", "这一步做完就找不回来了。", "永久删除", ["12 个世界", "3 张截图"]);
             dialog.Show(window);
@@ -135,13 +168,39 @@ internal sealed class SafetyLockSelfTest(MainWindow window, MainViewModel main, 
         }
     }
 
-    private async Task<List<(string Name, byte[] Pixels)>> CaptureAsync(Control panel, Control row, string tag)
+    private (string Name, Control Control)[] _locked = [];
+
+    /// <summary>The friends page's new-device and remove-friend panels, built the way PeoplePage.axaml builds them.</summary>
+    private static (SafetyPanel NewDevice, SafetyPanel RemoveFriend) FriendPanels()
+    {
+        const string name = "Robin the Very Long Named Friend From Far Away";
+        const string device = "Robin's second laptop with a long device name";
+        static SafetyPanel Locked(string title, Control? text, string safe, string confirm)
+        {
+            var body = new StackPanel { Spacing = 6 };
+            if (text is not null) body.Children.Add(text);
+            body.Children.Add(new WrapPanel
+            {
+                ItemSpacing = 8,
+                LineSpacing = 6,
+                Children = { new SafetyButton { Content = safe, Kind = SafetyKind.Safe }, new SafetyButton { Content = confirm, Kind = SafetyKind.Confirm } },
+            });
+            return new SafetyPanel { Title = title, Body = body, Width = 552 - 48 };
+        }
+        var newDevice = Locked(L.F("multiplayer.contacts.new_device", name),
+            new SelectableTextBlock { Text = L.F("multiplayer.contacts.new_device_body", device, "ABCD-EFGH-IJKL-MNOP"), TextWrapping = Avalonia.Media.TextWrapping.Wrap },
+            L.T("multiplayer.contacts.new_device_remove"), L.T("multiplayer.contacts.new_device_ok"));
+        var removeFriend = Locked(L.F("people.safety.remove_confirm", name), null, L.T("people.safety.remove_keep"), L.T("people.safety.remove_yes"));
+        return (newDevice, removeFriend);
+    }
+
+    private async Task<List<(string Name, byte[] Pixels)>> CaptureAsync(string tag)
     {
         await Task.Delay(300);
         return await Dispatcher.UIThread.InvokeAsync(() =>
         {
             var result = new List<(string, byte[])>();
-            foreach (var (name, control) in new[] { ("安全面板", panel), ("隐私行", row) })
+            foreach (var (name, control) in _locked)
             {
                 var size = new PixelSize((int)Math.Max(1, control.Bounds.Width), (int)Math.Max(1, control.Bounds.Height));
                 using var bmp = new RenderTargetBitmap(size);
@@ -150,7 +209,7 @@ internal sealed class SafetyLockSelfTest(MainWindow window, MainViewModel main, 
                 var handle = System.Runtime.InteropServices.GCHandle.Alloc(bytes, System.Runtime.InteropServices.GCHandleType.Pinned);
                 try { bmp.CopyPixels(new PixelRect(size), handle.AddrOfPinnedObject(), bytes.Length, size.Width * 4); }
                 finally { handle.Free(); }
-                bmp.Save(Path.Combine(reportDir, $"{tag}-{(name == "安全面板" ? "panel" : "privacy")}.png"));
+                bmp.Save(Path.Combine(reportDir, $"{tag}-{Array.FindIndex(_locked, l => l.Name == name)}.png"));
                 result.Add((name, bytes));
             }
             return result;

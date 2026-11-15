@@ -8,7 +8,8 @@ using Amber.Core.Multiplayer.Transport;
 namespace Amber.Core.Multiplayer;
 
 /// <summary>收到的一条私聊。</summary>
-public sealed record PrivateMessage(string FromFingerprint, string FromName, string Text, DateTimeOffset Time);
+/// <summary>A private message. FromPublicKey is the key the message was sealed with, so it is the sender for certain.</summary>
+public sealed record PrivateMessage(string FromFingerprint, byte[] FromPublicKey, string FromName, string Text, DateTimeOffset Time);
 
 /// <summary>别人要发给自己的文件（等自己点接收）。</summary>
 public sealed record FileOffer(string Id, string FromFingerprint, string FromName, string Name, long Size);
@@ -363,6 +364,8 @@ public sealed partial class PrivateMessenger : IAsyncDisposable
 
     private void OnFrame(PrivateFrame frame)
     {
+        // Replies and offers are keyed by the sender's fingerprint, so it must be the fingerprint of the key that sealed it.
+        if (MemberIdentity.FingerprintOf(frame.FromPublicKey) != frame.FromFingerprint) return;
         var plain = PrivateSeal.Open(_me, frame.FromPublicKey, frame.Sealed);
         if (plain is null) return;
         JsonObject? body;
@@ -381,7 +384,7 @@ public sealed partial class PrivateMessenger : IAsyncDisposable
             {
                 case "msg":
                     var text = RoomChat.Clean(body["text"]?.GetValue<string>(), MaxTextLength);
-                    if (text.Length > 0) MessageReceived?.Invoke(new PrivateMessage(frame.FromFingerprint, frame.FromName, text, DateTimeOffset.UtcNow));
+                    if (text.Length > 0) MessageReceived?.Invoke(new PrivateMessage(frame.FromFingerprint, frame.FromPublicKey, frame.FromName, text, DateTimeOffset.UtcNow));
                     break;
                 case "offer" when id is { Length: 16 } && !_incoming.ContainsKey(id):
                     var size = body["size"]?.GetValue<long>() ?? -1;

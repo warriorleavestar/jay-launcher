@@ -76,6 +76,41 @@ public sealed class PrivateMessengerTests : IDisposable
     }
 
     [Fact]
+    public async Task AFrameWhoseFingerprintIsNotItsKeysIsIgnored()
+    {
+        // Alice's link claims the host's fingerprint while sealing with her own key.
+        var a = new Link(Fp(_host), _alice.PublicKey, "Host");
+        var b = new Link(Fp(_bob), _bob.PublicKey, "Bob");
+        a.Peer = b;
+        b.Peer = a;
+        var keys = new Dictionary<string, byte[]> { [Fp(_alice)] = _alice.PublicKey, [Fp(_bob)] = _bob.PublicKey, [Fp(_host)] = _host.PublicKey };
+        await using var alice = new PrivateMessenger(a, _alice, f => keys.GetValueOrDefault(f), Path.Combine(_dir, "alice"));
+        await using var bob = new PrivateMessenger(b, _bob, f => keys.GetValueOrDefault(f), Path.Combine(_dir, "bob"));
+        var got = new TaskCompletionSource<PrivateMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+        bob.MessageReceived += m => got.TrySetResult(m);
+        Assert.True(await alice.SendTextAsync(Fp(_bob), "from the host, honest"));
+        await Task.Delay(300);
+        Assert.False(got.Task.IsCompleted);
+
+        // The same text with a matching fingerprint arrives, and names the key that sealed it.
+        var honest = new Link(Fp(_alice), _alice.PublicKey, "Alice") { Peer = b };
+        await using var alice2 = new PrivateMessenger(honest, _alice, f => keys.GetValueOrDefault(f), Path.Combine(_dir, "alice2"));
+        Assert.True(await alice2.SendTextAsync(Fp(_bob), "hi"));
+        var m = await got.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(Fp(_alice), m.FromFingerprint);
+        Assert.Equal(_alice.PublicKey.ToArray(), m.FromPublicKey);
+    }
+
+    [Fact]
+    public void AWireFrameThatPairsAKeyWithAnotherFingerprintIsDropped()
+    {
+        var sealedData = Convert.ToBase64String(PrivateSeal.Seal(_alice, _bob.PublicKey, "x"u8));
+        System.Text.Json.Nodes.JsonObject Frame(string from) => new() { ["from"] = from, ["pk"] = Convert.ToHexString(_alice.PublicKey), ["b"] = sealedData };
+        Assert.Null(ChatWire.ParsePrivateFrom(Frame(Fp(_host))));
+        Assert.Equal(Fp(_alice), ChatWire.ParsePrivateFrom(Frame(Fp(_alice)))!.FromFingerprint);
+    }
+
+    [Fact]
     public async Task UnansweredOfferExpiresAndFreesItsSlot()
     {
         var (alice, bob) = Pair();

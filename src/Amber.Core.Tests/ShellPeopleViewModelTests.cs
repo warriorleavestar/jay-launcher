@@ -24,6 +24,7 @@ public sealed class ShellPeopleViewModelTests
                 var main = new MainViewModel(service);
                 // Friends are kept under the data folder: this test keeps its own.
                 main.Multiplayer.ContactsDir = root;
+                main.Multiplayer.TrustedFile = Path.Combine(root, "trusted.json");
                 test(service, main, root);
             });
         }
@@ -115,13 +116,13 @@ public sealed class ShellPeopleViewModelTests
     }
 
     [Fact]
-    public void FriendsPageListsPeopleKeepsTheSelectionAndLinksToWhereTheyAreManaged()
+    public void FriendsPageListsPeopleKeepsTheSelectionAndOpensTheAddPanelByRoute()
     {
         WithMain((_, main, _) =>
         {
             var mp = main.Multiplayer;
             var people = main.Pages.OfType<PeopleViewModel>().Single();
-            Assert.True(people.IsEmpty);
+            Assert.True(people.ShowEmpty);
             Assert.False(people.HasFriends);
             Assert.False(people.CanDeliver);
             Assert.True(people.ShowConnect);
@@ -133,14 +134,15 @@ public sealed class ShellPeopleViewModelTests
             ]);
             mp.RefreshContacts();
             Assert.True(people.HasFriends);
-            Assert.False(people.IsEmpty);
+            Assert.False(people.ShowEmpty);
             Assert.True(people.ShowPickHint);
             Assert.Equal(2, people.Friends.Count);
 
             people.Selected = people.Friends.First(f => f.Name == "Sam");
             Assert.True(people.HasSelected);
             Assert.False(people.ShowPickHint);
-            Assert.True(people.SelectedHasNoJay);
+            Assert.True(people.Selected!.HasNoJay);
+            Assert.Equal(L.T("people.state.verified"), people.Selected.StateText);
             // The multiplayer page rebuilds its list from scratch: the same person stays selected.
             mp.RefreshContacts();
             Assert.Equal("Sam", people.Selected?.Name);
@@ -154,8 +156,20 @@ public sealed class ShellPeopleViewModelTests
             mp.Mode = "";
             Assert.False(people.CanInvite);
 
-            people.ManageCommand.Execute(null);
-            Assert.Equal("play/settings#ContactsCard", main.Shell.Router.Current.ToString());
+            // Adding a friend is a panel on this page with its own route (a pasted friend code lands on it).
+            Assert.False(people.IsAdding);
+            main.Shell.Navigate("people/add");
+            Assert.IsType<PeopleViewModel>(main.CurrentPage);
+            Assert.True(people.ShowAddPanel);
+            Assert.Equal(mp.MyContactCode, people.MyCode);
+            people.CloseAddCommand.Execute(null);
+            Assert.False(people.ShowAddPanel);
+            // Plain "people" leaves the panel as it is.
+            people.OpenAddCommand.Execute(null);
+            main.Shell.Navigate("library");
+            main.Shell.Navigate("people");
+            Assert.True(people.IsAdding);
+
             people.ConnectCommand.Execute(null);
             Assert.Equal("play/public", main.Shell.Router.Current.ToString());
         });

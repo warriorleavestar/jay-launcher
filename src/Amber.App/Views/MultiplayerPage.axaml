@@ -1476,7 +1476,7 @@
           <!-- 手机通过当前网络出口上网。共享状态由提权守护确认。 -->
           <c:HotspotSharingPanel DataContext="{Binding Hotspot}" />
 
-          <!-- Safety code and friends -->
+          <!-- This device's safety code -->
           <Border x:Name="IdentityCard" Classes="card" Margin="0">
             <StackPanel Spacing="8">
               <TextBlock Classes="h2" Text="{l:T multiplayer.settings.identity}" Margin="0" />
@@ -1484,119 +1484,8 @@
               <TextBlock Text="{l:T multiplayer.identity.title}" FontWeight="SemiBold" />
               <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.identity.reset_hint}" />
               <Button Content="{l:T multiplayer.identity.reset}" Command="{Binding ResetIdentityCommand}" IsEnabled="{Binding IsIdle}" HorizontalAlignment="Left" />
-              <TextBlock Text="{l:T multiplayer.trusted.title}" FontWeight="SemiBold" Margin="0,6,0,0" />
-              <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.trusted.hint}" />
-              <TextBlock Classes="hint" Text="{l:T multiplayer.trusted.empty}" IsVisible="{Binding !TrustedPeople.Count}" />
-              <ItemsControl ItemsSource="{Binding TrustedPeople}">
-                <ItemsControl.ItemTemplate>
-                  <DataTemplate DataType="vm:TrustedItem">
-                    <Grid ColumnDefinitions="*,Auto" Margin="0,2">
-                      <TextBlock Text="{Binding Label}" FontFamily="Consolas,monospace" VerticalAlignment="Center" TextWrapping="Wrap" />
-                      <Button Grid.Column="1" Content="{l:T multiplayer.trusted.remove}" Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).RemoveTrustedCommand}" CommandParameter="{Binding}" Margin="6,0,0,0" />
-                    </Grid>
-                  </DataTemplate>
-                </ItemsControl.ItemTemplate>
-              </ItemsControl>
-            </StackPanel>
-          </Border>
-
-          <!-- Contacts (zero-leak codes): add once, compare four emoji, then invite them with sealed mail. -->
-          <Border x:Name="ContactsCard" Classes="card" Margin="0" IsVisible="{Binding ShowPublicNetworks}">
-            <StackPanel Spacing="8">
-              <TextBlock Classes="h2" Text="{l:T multiplayer.contacts.title}" Margin="0" />
-              <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.contacts.hint}" />
-              <TextBlock Text="{l:T multiplayer.contacts.my_code}" FontWeight="SemiBold" />
-              <Grid ColumnDefinitions="*,Auto">
-                <SelectableTextBlock x:Name="MyContactCodeText" Text="{Binding MyContactCode}" FontFamily="Consolas,Menlo,monospace" FontSize="12" TextWrapping="Wrap" VerticalAlignment="Center" />
-                <Button x:Name="CopyContactCodeButton" Grid.Column="1" Classes="small" Margin="8,0,0,0" Content="{l:T common.copy}" Command="{Binding CopyContactCodeCommand}" VerticalAlignment="Center" />
-              </Grid>
-              <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.contacts.my_code_hint}" />
-              <Grid ColumnDefinitions="*,Auto" Margin="0,4,0,0">
-                <TextBox x:Name="ContactCodeBox" Text="{Binding ContactCodeInput}" PlaceholderText="{l:T multiplayer.contacts.add_placeholder}"
-                         c:EnterSubmit.Command="{Binding AddContactCommand}" />
-                <Button x:Name="AddContactButton" Grid.Column="1" Margin="6,0,0,0" Content="{l:T multiplayer.contacts.add}" Command="{Binding AddContactCommand}" />
-              </Grid>
-              <TextBlock x:Name="ContactsPublicHint" Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.contacts.public_hint}" IsVisible="{Binding !IsPublicConnected}" />
-
-              <TextBlock Text="{l:T multiplayer.contacts.requests}" FontWeight="SemiBold" Margin="0,6,0,0" IsVisible="{Binding HasContactRequests}" />
-              <ItemsControl x:Name="ContactRequestList" ItemsSource="{Binding ContactRequests}" IsVisible="{Binding HasContactRequests}">
-                <ItemsControl.ItemTemplate>
-                  <DataTemplate DataType="vm:ContactRequestItem">
-                    <Border Classes="callout" Padding="10,8" Margin="0,3">
-                      <StackPanel Spacing="6">
-                        <TextBlock Text="{Binding Title}" TextWrapping="Wrap" FontWeight="SemiBold" />
-                        <!-- The emoji check: big, each with its name under it (and read out for screen readers). -->
-                        <StackPanel Spacing="6" IsVisible="{Binding IsComparing}">
-                          <ItemsControl x:Name="ContactEmoji" ItemsSource="{Binding Emoji}" AutomationProperties.Name="{Binding EmojiSpoken}">
-                            <ItemsControl.ItemsPanel>
-                              <ItemsPanelTemplate><WrapPanel ItemSpacing="14" LineSpacing="6" /></ItemsPanelTemplate>
-                            </ItemsControl.ItemsPanel>
-                            <ItemsControl.ItemTemplate>
-                              <DataTemplate DataType="vm:EmojiItem">
-                                <StackPanel Spacing="2" MinWidth="56" AutomationProperties.Name="{Binding Name}">
-                                  <TextBlock Text="{Binding Emoji}" FontSize="34" HorizontalAlignment="Center" />
-                                  <TextBlock Text="{Binding Name}" FontSize="12" HorizontalAlignment="Center" TextWrapping="Wrap" MaxWidth="80" TextAlignment="Center" />
-                                </StackPanel>
-                              </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                          </ItemsControl>
-                          <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.contacts.compare.hint}" />
-                          <WrapPanel ItemSpacing="6" LineSpacing="6">
-                            <Button x:Name="ConfirmContactButton" Content="{l:T multiplayer.contacts.compare.match}" Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).ConfirmContactCommand}" CommandParameter="{Binding}" />
-                            <Button x:Name="RejectContactButton" Content="{l:T multiplayer.contacts.compare.no_match}" Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).RejectContactCommand}" CommandParameter="{Binding}" />
-                          </WrapPanel>
-                        </StackPanel>
-                        <WrapPanel ItemSpacing="6" LineSpacing="6" IsVisible="{Binding IsAskingMe}">
-                          <Button Content="{l:T multiplayer.contacts.accept}" Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).AcceptContactCommand}" CommandParameter="{Binding}" />
-                          <Button Content="{l:T multiplayer.contacts.ignore}" Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).DismissContactCommand}" CommandParameter="{Binding}" />
-                        </WrapPanel>
-                        <Button Classes="small" HorizontalAlignment="Left" Content="{l:T multiplayer.contacts.cancel}" IsVisible="{Binding CanCancel}"
-                                Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).DismissContactCommand}" CommandParameter="{Binding}" />
-                      </StackPanel>
-                    </Border>
-                  </DataTemplate>
-                </ItemsControl.ItemTemplate>
-              </ItemsControl>
-
-              <TextBlock Text="{l:T multiplayer.contacts.list}" FontWeight="SemiBold" Margin="0,6,0,0" />
-              <TextBlock x:Name="ContactsEmpty" Classes="hint" Text="{l:T multiplayer.contacts.empty}" IsVisible="{Binding !HasContacts}" />
-              <ItemsControl x:Name="ContactListView" ItemsSource="{Binding ContactList}">
-                <ItemsControl.ItemTemplate>
-                  <DataTemplate DataType="vm:ContactItem">
-                    <Grid ColumnDefinitions="Auto,*,Auto" Margin="0,2">
-                      <Border Classes="face large" Background="{Binding Name, Converter={x:Static v:FaceBrush.Instance}}" />
-                      <StackPanel Grid.Column="1" Margin="8,0" VerticalAlignment="Center" Spacing="1">
-                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                        <TextBlock x:Name="ContactJay" Text="{Binding JayText}" Classes="hint" FontSize="12" TextWrapping="Wrap" IsVisible="{Binding HasJay}" />
-                        <TextBlock Text="{Binding Fingerprint}" Classes="hint" FontSize="12" FontFamily="Consolas,Menlo,monospace" TextWrapping="Wrap" IsVisible="{Binding HasOneDevice}" />
-                        <!-- Person + devices: each device's safety code, and a lost one can be removed alone. -->
-                        <StackPanel x:Name="ContactDevices" Spacing="2" IsVisible="{Binding HasSeveralDevices}">
-                          <TextBlock Text="{Binding DevicesText}" Classes="hint" FontSize="12" />
-                          <ItemsControl ItemsSource="{Binding DeviceItems}">
-                            <ItemsControl.ItemTemplate>
-                              <DataTemplate DataType="vm:ContactDeviceItem">
-                                <Grid ColumnDefinitions="*,Auto" Margin="0,1">
-                                  <TextBlock Text="{Binding Fingerprint}" Classes="hint" FontSize="12" FontFamily="Consolas,Menlo,monospace" TextWrapping="Wrap" VerticalAlignment="Center" />
-                                  <Button Grid.Column="1" Classes="small" Margin="6,0,0,0" Content="{l:T multiplayer.contacts.remove_device}"
-                                          Command="{Binding $parent[ItemsControl;1].((vm:MultiplayerViewModel)DataContext).RemoveContactDeviceCommand}" CommandParameter="{Binding}" />
-                                </Grid>
-                              </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                          </ItemsControl>
-                        </StackPanel>
-                      </StackPanel>
-                      <Button Grid.Column="2" Classes="small" Content="{l:T multiplayer.contacts.remove}" VerticalAlignment="Center"
-                              Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).RemoveContactCommand}" CommandParameter="{Binding}" />
-                    </Grid>
-                  </DataTemplate>
-                </ItemsControl.ItemTemplate>
-              </ItemsControl>
-              <!-- Friend list backup, locked with the Jay account: restore it on a new computer and friends reconnect. -->
-              <WrapPanel ItemSpacing="6" LineSpacing="6" Margin="0,6,0,0">
-                <Button x:Name="BackupFriendsButton" Classes="small" Content="{l:T multiplayer.friends.backup}" Command="{Binding BackupFriendsCommand}" />
-                <Button x:Name="RestoreFriendsButton" Classes="small" Content="{l:T multiplayer.friends.restore}" Command="{Binding RestoreFriendsCommand}" />
-              </WrapPanel>
-              <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.friends.backup_hint}" />
+              <!-- Friends, the people let straight in and the friend list backup are on the Friends page. -->
+              <Button x:Name="OpenFriendsButton" Classes="small" Content="{l:T multiplayer.settings.open_friends}" Command="{Binding OpenFriendsCommand}" HorizontalAlignment="Left" />
             </StackPanel>
           </Border>
 

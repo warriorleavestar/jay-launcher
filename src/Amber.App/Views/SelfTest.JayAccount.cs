@@ -153,7 +153,7 @@ internal sealed partial class SelfTest
             vm.Members.Clear();
             vm.Mode = "";
         });
-        await JayFriendsAsync(vm, page);
+        await JayFriendsAsync(vm);
         Check("Jay 账户联机：取消信任时这个账户的设备一起移除", Dispatcher.UIThread.Invoke(() => vm.TrustedPeople.All(t => t.Member.JayAccount != address)));
         main.CurrentPage = Page<AccountsViewModel>();
         await Task.Delay(300);
@@ -163,9 +163,9 @@ internal sealed partial class SelfTest
     /// Contacts as people with devices (Jay accounts group devices), removing one device, and the friend list backup:
     /// saved locked with the bound Jay account, restored into an empty list, with a hello from this device queued for later.
     /// </summary>
-    private async Task JayFriendsAsync(MultiplayerViewModel vm, MultiplayerPage page)
+    private async Task JayFriendsAsync(MultiplayerViewModel vm)
     {
-        Control? Shown(string name) => page.GetVisualDescendants().OfType<Control>().FirstOrDefault(c => c.Name == name && c.IsEffectivelyVisible);
+        var people = Page<PeopleViewModel>();
         var dir = Path.Combine(reportDir, "jay-friends");
         if (Directory.Exists(dir)) Directory.Delete(dir, true);
         Directory.CreateDirectory(dir);
@@ -179,7 +179,6 @@ internal sealed partial class SelfTest
         Dispatcher.UIThread.Invoke(() =>
         {
             vm.ContactsDir = dir;
-            vm.Tab = MultiplayerTab.Settings;
             vm.Contacts.Import([
                 new Amber.Core.Multiplayer.Contacts.Contact(Key(1), "Bob", true, DateTimeOffset.UtcNow.AddDays(-3)) { JayAccount = bob.Address },
                 new Amber.Core.Multiplayer.Contacts.Contact(Key(2), "Bob", true, DateTimeOffset.UtcNow) { JayAccount = bob.Address },
@@ -190,8 +189,18 @@ internal sealed partial class SelfTest
         var bobItem = Dispatcher.UIThread.Invoke(() => vm.ContactList.FirstOrDefault(c => c.Name == "Bob"));
         Check("好友：同一个 Jay 账户的两台设备算一个人", Dispatcher.UIThread.Invoke(() => vm.ContactList.Count) == 2 && bobItem is { HasSeveralDevices: true }
             && bobItem.Devices.Count == 2 && bobItem.JayText.Contains(JayAddress.Short(bob.Address)), string.Join(", ", vm.ContactList.Select(c => c.Name)));
-        Dispatcher.UIThread.Invoke(() => Shown("ContactListView")?.BringIntoView());
-        Check("好友：这个人下面列出每台设备，名下写 Jay 账户", await WaitAsync(() => Shown("ContactDevices") is not null && Shown("ContactJay") is not null, 3));
+        // Friends are on their own page: the person, then "End-to-end encrypted · checked" opens their devices.
+        main.Shell.Navigate("people");
+        await Task.Delay(300);
+        var friends = await FindAsync<PeoplePage>(p => p.IsEffectivelyVisible);
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            people.Selected = people.Friends.FirstOrDefault(f => f.Name == "Bob");
+            people.ShowSafety = true;
+        });
+        Check("好友：朋友页上这个人下面列出每台设备，名下写 Jay 账户", friends is not null && await WaitAsync(() => Dispatcher.UIThread.Invoke(() =>
+            friends.FriendSafetyPanel.IsEffectivelyVisible && friends.FriendDevices.GetVisualDescendants().OfType<SelectableTextBlock>().Count() == 2
+            && friends.FriendSafetyPanel.GetVisualDescendants().OfType<TextBlock>().Any(t => t.IsEffectivelyVisible && t.Text == bobItem!.JayText)), 3));
         await ShotAsync("Jay账户-好友人和设备");
 
         Dispatcher.UIThread.Invoke(() => vm.RemoveContactDeviceCommand.Execute(bobItem!.DeviceItems.First(d => d.Device.PublicKey[0] == 1)));
@@ -284,7 +293,8 @@ internal sealed partial class SelfTest
         Dispatcher.UIThread.Invoke(() =>
         {
             foreach (var c in vm.ContactList.ToList()) vm.RemoveContactCommand.Execute(c);
-            vm.Tab = MultiplayerTab.Play;
         });
+        main.Shell.Navigate("play");
+        await Task.Delay(300);
     }
 }

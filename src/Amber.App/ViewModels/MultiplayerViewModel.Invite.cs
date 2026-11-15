@@ -69,9 +69,12 @@ public sealed record ApprovalCard(KnockRequest Request, string? Warning) : Local
             MultiplayerViewModel.JayLine(Request.JayAccount) }
         .Where(s => !string.IsNullOrEmpty(s)));
 
-    /// <summary>The guest showed a Jay account: trusting them covers their other devices too.</summary>
+    /// <summary>The Jay account is a friend's: their devices are trusted one by one, so trusting this one lets no other in.</summary>
+    public bool AccountIsFriend { get; init; }
+
+    /// <summary>The guest showed a Jay account: trusting them covers their other devices too (not for a friend).</summary>
     public bool HasJayAccount => Request.JayAccount is not null && CanTrustAfter;
-    public string JayHint => L.T("multiplayer.knock.jay_hint");
+    public string JayHint => L.T(AccountIsFriend ? "multiplayer.knock.jay_hint_friend" : "multiplayer.knock.jay_hint");
     public string VerifyHint => L.F("multiplayer.knock.verify", Who);
     public string TrustLabel => L.F("multiplayer.knock.trust_after", Who);
 
@@ -121,6 +124,7 @@ public sealed partial class MultiplayerViewModel
 {
     private MemberIdentity? _identity;
     private TrustedMembers? _trusted;
+    private readonly Lock _identityGate = new();
     private HostLobby? _lobby;
     private RoomCredentials? _credentials;
     private MemberTable? _members;
@@ -132,20 +136,31 @@ public sealed partial class MultiplayerViewModel
     {
         get
         {
-            if (_identity is not null) return _identity;
-            _identity = MemberIdentity.LoadOrCreate(AppSettings.DataDir);
-            if (_identity.Warning is { } warning) SetStatus(new StatusMessage("common.raw", [warning], StatusKind.Warning));
-            return _identity;
+            if (Volatile.Read(ref _identity) is { } known) return known;
+            MemberIdentity identity;
+            // Loading may create the key file the first time, so only one caller may do it.
+            lock (_identityGate)
+            {
+                if (_identity is { } loaded) return loaded;
+                identity = MemberIdentity.LoadOrCreate(AppSettings.DataDir);
+                Volatile.Write(ref _identity, identity);
+            }
+            if (identity.Warning is { } warning) Dispatcher.UIThread.Post(() => SetStatus(new StatusMessage("common.raw", [warning], StatusKind.Warning)));
+            return identity;
         }
     }
 
-    private TrustedMembers Trusted => _trusted ??= CreateTrusted();
-
-    private TrustedMembers CreateTrusted()
+    internal TrustedMembers Trusted
     {
-        var trusted = new TrustedMembers(Path.Combine(AppSettings.DataDir, "trusted.json"));
-        trusted.Changed += () => Dispatcher.UIThread.Post(RefreshTrusted);
-        return trusted;
+        get
+        {
+            if (Volatile.Read(ref _trusted) is { } list) return list;
+            var created = new TrustedMembers(TrustedFile);
+            // Two first callers on different threads: one list wins, and only it reports changes.
+            if (Interlocked.CompareExchange(ref _trusted, created, null) is { } other) return other;
+            created.Changed += () => Dispatcher.UIThread.Post(RefreshTrusted);
+            return created;
+        }
     }
 
     public string MyFingerprint => L.F("multiplayer.identity.mine", Identity.Fingerprint);
@@ -163,7 +178,7 @@ public sealed partial class MultiplayerViewModel
     internal int RoomEpoch => _room?.Epoch ?? 0;
 
     /// <summary>测试用：换一个联机身份（自检里同一个进程开好几个成员，要各自不同的身份）。</summary>
-    internal void UseTestIdentity(string directory) => _identity = MemberIdentity.LoadOrCreate(directory);
+    internal void UseTestIdentity(string directory) => Volatile.Write(ref _identity, MemberIdentity.LoadOrCreate(directory));
 
     [ObservableProperty] public partial bool InviteDialogOpen { get; set; }
     [ObservableProperty] public partial bool InviteAutoApprove { get; set; }
@@ -275,7 +290,7 @@ public sealed partial class MultiplayerViewModel
             Identity.KeyPair, () => _credentials ?? throw new InvalidOperationException(), pub => !Child.AlwaysAskKnock && Trusted.IsTrusted(pub), AskApprovalAsync, members,
             line => _diag.Add(L.T("multiplayer.invite.diagnostics_category"), line), book, listenUdpPort, () => HostDevicePolicy, () => HostAccountPolicy,
             () => RoomKnockWait.ToTimeSpan(), request => Dispatcher.UIThread.Post(() => OnKnockTimedOut(request)),
-            account => !Child.AlwaysAskKnock && Trusted.IsTrustedJayAccount(account), () => jayCertificate, () => Child.AlwaysAskKnock,
+            AccountMayAutoAdmit, () => jayCertificate, () => Child.AlwaysAskKnock,
             direct is null ? null : direct.Offer,
             name => Dispatcher.UIThread.Post(() => OnRelayOnlyRefused(name)));
         if (direct is not null)
@@ -519,6 +534,7 @@ public sealed partial class MultiplayerViewModel
         {
             Deadline = wait == Timeout.InfiniteTimeSpan ? null : DateTimeOffset.Now + wait,
             CanTrustAfter = !Child.AlwaysAskKnock,
+            AccountIsFriend = IsFriendAccount(request.JayAccount),
         };
         ct.Register(() => card.Decision.TrySetResult(false));
         Dispatcher.UIThread.Post(() =>
@@ -538,10 +554,7 @@ public sealed partial class MultiplayerViewModel
         if (card is null || card.Decision.Task.IsCompleted) return;
         // "Let them in automatically next time": add to friends before answering.
         if (card.TrustAfter && card.CanTrustAfter && !Trusted.IsTrusted(card.Request.PublicKey))
-        {
-            Trusted.Add(card.Request.PublicKey, card.Request.Name, card.Request.JayAccount);
-            RefreshTrusted();
-        }
+            TrustKnocker(card.Request.PublicKey, card.Request.Name, card.Request.JayAccount);
         card.Decision.TrySetResult(true);
     }
 
@@ -680,8 +693,7 @@ public sealed partial class MultiplayerViewModel
     private void TrustMember(MemberItem? member)
     {
         if (member is null || member.Trusted) return;
-        Trusted.Add(member.PublicKey, member.Name, member.JayAccount);
-        RefreshTrusted();
+        TrustKnocker(member.PublicKey, member.Name, member.JayAccount);
         var index = Members.IndexOf(member);
         if (index >= 0) Members[index] = member with { Trusted = true };
         SetStatus(StatusMessage.Success("multiplayer.invite.trusted", member.Name, member.Fingerprint));

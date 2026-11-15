@@ -48,23 +48,6 @@ public partial class MultiplayerPage : UserControl
                     var files = await storage.OpenFilePickerAsync(new FilePickerOpenOptions { Title = L.T("multiplayer.private.pick_title") });
                     return files.Count > 0 ? files[0].TryGetLocalPath() : null;
                 };
-                vm.PickFriendBackupSave = async () =>
-                {
-                    if (TopLevel.GetTopLevel(this)?.StorageProvider is not { } storage) return null;
-                    var file = await storage.SaveFilePickerAsync(new FilePickerSaveOptions
-                    {
-                        Title = L.T("multiplayer.friends.save_title"),
-                        SuggestedFileName = "jay-friends" + Amber.Core.Multiplayer.Contacts.FriendBackup.FileExtension,
-                        DefaultExtension = Amber.Core.Multiplayer.Contacts.FriendBackup.FileExtension,
-                    });
-                    return file?.TryGetLocalPath();
-                };
-                vm.PickFriendBackupOpen = async () =>
-                {
-                    if (TopLevel.GetTopLevel(this)?.StorageProvider is not { } storage) return null;
-                    var files = await storage.OpenFilePickerAsync(new FilePickerOpenOptions { Title = L.T("multiplayer.friends.open_title") });
-                    return files.Count > 0 ? files[0].TryGetLocalPath() : null;
-                };
                 vm.InviteFocusRequested = () => Dispatcher.UIThread.Post(() =>
                 {
                     ApplyRoomLayout(Bounds.Width);

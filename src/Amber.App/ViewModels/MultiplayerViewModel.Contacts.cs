@@ -45,8 +45,16 @@ public sealed class ContactDeviceItem(Contact device, ContactItem person)
 {
     public Contact Device { get; } = device;
     public ContactItem Person { get; } = person;
+
+    /// <summary>Their account vouched for this device and I have not looked at it yet.</summary>
+    public bool IsNew => Device.NewDevice;
     public string Fingerprint => (Device.DeviceName.Length > 0 ? Device.DeviceName + " · " : "") + Device.Fingerprint
         + (Device.NewDevice ? " · " + L.T("multiplayer.contacts.new_device_tag") : "");
+
+    /// <summary>The locked new-device panel: the same words as the request bar's notice.</summary>
+    public string NewDeviceTitle => L.F("multiplayer.contacts.new_device", Person.Name);
+    public string NewDeviceBody => L.F("multiplayer.contacts.new_device_body",
+        Device.DeviceName.Length > 0 ? Device.DeviceName : L.T("multiplayer.contacts.new_device_unnamed"), Device.Fingerprint);
 }
 
 /// <summary>An add-contact exchange under way: waiting, asking me, or the emoji to compare.</summary>
@@ -112,13 +120,17 @@ public sealed partial class MultiplayerViewModel
 
     private string _contactsDir = AppSettings.DataDir;
 
-    internal ContactBook Contacts => _contacts ??= CreateContacts();
-
-    private ContactBook CreateContacts()
+    /// <summary>The contact book, made on first use. A knock may be the first use, on its own thread, so only one book wins.</summary>
+    internal ContactBook Contacts
     {
-        var book = new ContactBook(Path.Combine(ContactsDir, ContactBook.FileName)) { Me = Identity.PublicKey };
-        book.Changed += () => Dispatcher.UIThread.Post(RefreshContacts);
-        return book;
+        get
+        {
+            if (Volatile.Read(ref _contacts) is { } book) return book;
+            var created = new ContactBook(Path.Combine(ContactsDir, ContactBook.FileName)) { Me = Identity.PublicKey };
+            if (Interlocked.CompareExchange(ref _contacts, created, null) is { } other) return other;
+            created.Changed += () => Dispatcher.UIThread.Post(RefreshContacts);
+            return created;
+        }
     }
 
     /// <summary>Directory keys seen first, for networks that pin none (trust on first use).</summary>
@@ -188,6 +200,29 @@ public sealed partial class MultiplayerViewModel
         RefreshContacts();
     }
 
+    // Jay accounts of my friends at the last rebuild.
+    private HashSet<string> _friendAccounts = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Someone who stopped being a friend, whichever way that happened, leaves nothing under their Jay account on the
+    /// "straight in" list: a friend's account lets nobody in, but the same entry would let in every device it signs once
+    /// they are not a friend any more.
+    /// </summary>
+    private void ForgetFormerFriends()
+    {
+        var now = ContactList.Where(c => c.JayAccount is not null).Select(c => c.JayAccount!).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var gone = _friendAccounts.Where(a => !now.Contains(a)).ToList();
+        _friendAccounts = now;
+        if (gone.Count == 0) return;
+        var removed = false;
+        foreach (var t in Trusted.All.Where(t => t.JayAccount is { } a && gone.Contains(a, StringComparer.OrdinalIgnoreCase)).ToList())
+        {
+            Trusted.Remove(t.PublicKey);
+            removed = true;
+        }
+        if (removed) RefreshTrusted();
+    }
+
     /// <summary>The contact list is being rebuilt: <see cref="RefreshOpenChoices"/> waits until it's done.</summary>
     private bool _rebuildingContacts;
 
@@ -210,6 +245,7 @@ public sealed partial class MultiplayerViewModel
         {
             _rebuildingContacts = false;
         }
+        ForgetFormerFriends();
         RefreshOpenChoices();
         DropRoomsOfRemovedFriends();
         RevokeInvitesOfRemovedFriends();
@@ -269,6 +305,9 @@ public sealed partial class MultiplayerViewModel
         foreach (var r in _service.Requests.Pending)
             if (r.Spec.Kind is "contact" or "contact-compare" or "contact-new-device" or "contact-account" && r.Spec.DedupeKey is { } key && !wanted.Contains(key))
                 _service.Requests.Withdraw(key);
+        // Both lists are whole again: the Friends page rebuilds its rows once, not once per row added.
+        FriendsRebuilt?.Invoke();
+        RefreshMetPeople();
     }
 
     [RelayCommand]
@@ -288,6 +327,12 @@ public sealed partial class MultiplayerViewModel
             SetStatus(StatusMessage.Warning("multiplayer.contacts.bad_code"));
             return;
         }
+        await AddContactKeyAsync(key, fromInput: true);
+    }
+
+    /// <summary>Mails a hello to this device key. <paramref name="fromInput"/>: the key came from the code box, which is emptied once sent.</summary>
+    private async Task AddContactKeyAsync(byte[] key, bool fromInput)
+    {
         if (key.AsSpan().SequenceEqual(Identity.PublicKey))
         {
             SetStatus(StatusMessage.Warning("multiplayer.contacts.is_me"));
@@ -307,7 +352,7 @@ public sealed partial class MultiplayerViewModel
         {
             if (await post.AddAsync(key, ChatName, default))
             {
-                ContactCodeInput = "";
+                if (fromInput) ContactCodeInput = "";
                 SetStatus(StatusMessage.Success("multiplayer.contacts.hello_sent"));
             }
         }
@@ -364,6 +409,8 @@ public sealed partial class MultiplayerViewModel
     {
         if (item is null) return;
         Contacts.RemovePerson(item.Contact.PublicKey);
+        // Nobody I removed is let straight in any more: none of their devices, nor anything trusted under their account.
+        SetAutoAdmit(item, false);
         SetStatus(StatusMessage.Info("multiplayer.contacts.removed", item.Name));
     }
 
@@ -371,9 +418,29 @@ public sealed partial class MultiplayerViewModel
     [RelayCommand]
     private void RemoveContactDevice(ContactDeviceItem? item)
     {
-        if (item is null) return;
+        // The last device is the person: that goes through removing the friend, which asks first.
+        if (item is null || item.Person.Devices.Count <= 1) return;
         Contacts.Remove(item.Device.PublicKey);
+        ForgetRemovedDevice(item.Device.PublicKey, item.Person);
         SetStatus(StatusMessage.Info("multiplayer.contacts.device_removed", item.Person.Name));
+    }
+
+    /// <summary>
+    /// A removed device is no longer let straight in. The person's other devices keep their place, unless this was the last
+    /// one: then everything trusted under their account goes too.
+    /// </summary>
+    private void ForgetRemovedDevice(byte[] device, ContactItem? person)
+    {
+        if (person is null) Trusted.Remove(device);
+        else if (person.Devices.Count <= 1)
+        {
+            // Their last device: they are no longer a friend, so nothing of theirs may stay on the list. That includes
+            // entries under their Jay account, which would otherwise let in any device the account signs.
+            Trusted.Remove(device);
+            SetAutoAdmit(person, false);
+        }
+        else Trusted.RemoveDevice(device);
+        RefreshTrusted();
     }
 
     // ---- mail pick-up ----
@@ -424,6 +491,7 @@ public sealed partial class MultiplayerViewModel
             // Listed (within the per-device and overall limits) or nothing is kept: no request without its row.
             if (!ListFriendRoom(key, m, who, room)) continue;
             _mailedInvites[key] = m;
+            NoteInvitedBy(m, key, room);
             var until = FriendRooms.First(r => r.Key == key).Until;
             _service.Requests.Post(new RequestSpec("contact-invite", L.F("multiplayer.contacts.invite.title", who, room),
                 L.F("multiplayer.contacts.invite.body", m.From.Fingerprint),
@@ -445,8 +513,8 @@ public sealed partial class MultiplayerViewModel
                 break;
             }
             case "contact-compare":
-                Tab = MultiplayerTab.Settings;
-                Navigate?.Invoke("play/settings");
+                // The emoji are on the Friends page, in the add panel.
+                OpenAddFriend();
                 break;
             case "contact-invite":
                 // "Not now" lets the room go with its invite, and the same invite doesn't come back. The request timing
@@ -470,10 +538,12 @@ public sealed partial class MultiplayerViewModel
                 var device = Convert.FromHexString(key["contact-new-device:".Length..]);
                 if (handle.Choice == "remove")
                 {
+                    var person = FriendOf(device, null);
                     Contacts.Remove(device);
+                    ForgetRemovedDevice(device, person);
                     SetStatus(StatusMessage.Info("multiplayer.contacts.new_device_removed"));
                 }
-                else if (handle.Choice == "ok") Contacts.AcknowledgeDevice(device);
+                else if (handle.Choice == "ok") AcknowledgeDevice(device);
                 break;
             }
         }
@@ -561,7 +631,9 @@ public sealed partial class MultiplayerViewModel
                 }
                 mailed++;
                 // Only the newest device's receipt counts: an older computer that's switched off shouldn't raise "held back".
-                if (!quiet && ReferenceEquals(device, devices[0])) _sentInvites[id] = item.Name;
+                if (!ReferenceEquals(device, devices[0])) continue;
+                if (!quiet) _sentInvites[id] = item.Name;
+                NoteInviteSent(item, id);
             }
             if (mailed == 0) return false;
             if (!quiet) SetStatus(StatusMessage.Success("multiplayer.contacts.invite.sent", item.Name));
@@ -599,6 +671,7 @@ public sealed partial class MultiplayerViewModel
 
     private void OnInviteReceipt(SentMail sent)
     {
+        NoteInviteDelivered(sent.Id);
         if (!_sentInvites.Remove(sent.Id, out var name)) return;
         if (_heldBackShown.Remove(sent.Id)) HeldBackText = "";
         SetStatus(StatusMessage.Success("multiplayer.contacts.invite.received", name));
@@ -608,12 +681,22 @@ public sealed partial class MultiplayerViewModel
     internal void ShowHeldBack(IEnumerable<SentMail> unconfirmed)
     {
         foreach (var sent in unconfirmed)
+        {
+            NoteInviteHeld(sent.Id);
             if (_sentInvites.TryGetValue(sent.Id, out var name) && _heldBackShown.Add(sent.Id))
                 HeldBackText = L.F("multiplayer.contacts.held_back", name);
+        }
     }
 
     /// <summary>Test seam: as if a contact invite with this id had been sent to <paramref name="name"/>.</summary>
     internal void SentInviteForTest(string id, string name) => _sentInvites[id] = name;
+
+    /// <summary>Test seam: as if an invite with this mail id had been mailed to a friend in the list.</summary>
+    internal void SentInviteForTest(string id, ContactItem friend)
+    {
+        _sentInvites[id] = friend.Name;
+        NoteInviteSent(friend, id);
+    }
 
     [RelayCommand]
     private void DismissHeldBack() => HeldBackText = "";

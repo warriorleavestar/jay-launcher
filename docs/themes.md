@@ -220,7 +220,7 @@ Pages and their regions (every region except a title is required):
 | 页面文件 | 区块 |
 |---|---|
 | `me.json` | `me.title` `me.accounts` (game accounts) `me.add` `me.jay` (Jay account) `me.code` (my friend code) `me.devices` `me.appearance` (light/dark, language) `me.status` |
-| `people.json` | `people.title` `people.list` (the friends) `people.detail` (the selected friend, or the empty state) `people.status` (which network delivers to friends) |
+| `people.json` | `people.title` `people.list` (friends, then people I've met) `people.detail` (the conversation with the selected friend, someone I've met, or the empty state) `people.status` (which network delivers to friends, **Add a friend**, backup; the add panel opens under it) |
 | `instances.json` | `instances.header` (the hero) `instances.lastrun` `instances.details` `instances.status` |
 | `downloads.json` | `downloads.title` `downloads.search` `downloads.filters` `downloads.body` `downloads.status` |
 | `content.json` | `content.header` `content.filters` `content.body` `content.status` |

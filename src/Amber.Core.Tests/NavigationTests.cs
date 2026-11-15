@@ -139,6 +139,8 @@ public class NavigationTests
     [InlineData("library/1.21.1/logs", "library/1.21.1/logs")]
     [InlineData("settings#Source", "settings#Source")]
     [InlineData("play/servers", "play/servers")]
+    [InlineData("play/settings#ContactsCard", "people/add")] // the friends card: the Friends page's add panel
+    [InlineData("play/settings#IdentityCard", "play/settings#IdentityCard")]
     public void RoutesOfRemovedPagesGoToWhatReplacedThem(string saved, string expected) =>
         Assert.Equal(expected, LegacyRoutes.Resolve(Route.Parse(saved)).ToString());
 

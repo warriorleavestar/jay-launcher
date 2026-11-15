@@ -17,6 +17,9 @@ public static class LegacyRoutes
     /// <summary>Logs of the instance in focus (the old log page).</summary>
     public const string Logs = "library/current/logs";
 
+    /// <summary>The Friends page with its add panel open (the old friends card in multiplayer settings).</summary>
+    public const string AddFriend = "people/add";
+
     /// <summary>Settings › Storage, where cleaning up lives (the old toolbox).</summary>
     public const string Tools = "settings#Junk";
 
@@ -37,7 +40,8 @@ public static class LegacyRoutes
 
     /// <summary>
     /// Routes that pointed at a removed page (saved in help links, tips or history) go to the place that replaced it:
-    /// library/start → library, library/logs → the focused instance's logs, settings/tools → Settings › Storage.
+    /// library/start → library, library/logs → the focused instance's logs, settings/tools → Settings › Storage, and
+    /// the friends card that used to sit in multiplayer settings (play/settings#ContactsCard) → the Friends page's add panel.
     /// Every other route comes back unchanged.
     /// </summary>
     public static Route Resolve(Route route)
@@ -48,6 +52,7 @@ public static class LegacyRoutes
             if (route[1] == "logs") return Route.Parse(Logs);
         }
         if (route.Section == Section.Settings && route[1] == "tools") return Route.Parse(Tools);
+        if (route.Section == Section.Play && route[1] == "settings" && route.Fragment == "ContactsCard") return Route.Parse(AddFriend);
         return route;
     }
 
