@@ -86,4 +86,67 @@ public sealed class InstanceSettingsPageTests : IDisposable
             try { Directory.Delete(_root + "-data", true); } catch (IOException) { }
         }
     });
+
+    [Fact]
+    public void AnUnreadableFileIsSaidSoAndNotSavedOver() => UiTestThread.Run(() =>
+    {
+        try
+        {
+            var (service, page) = Open();
+            new InstanceSettings { MaxMemoryMb = 3072, JvmArgs = "-Dsaved=1" }.Save(service.Directory, "a");
+            var file = Path.Combine(_root, "versions", "a", InstanceSettings.FileName);
+            using (new FileStream(file, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            {
+                page.SelectedId = "a";
+                page.TabIndex = (int)InstanceTab.Settings;
+                Assert.Equal("instance.settings.unreadable", page.StatusInfo?.Key);
+                Assert.Equal("", page.MemoryText);
+                // A change while the file can't be read is kept on the page, not saved.
+                page.JoinServer = "example.invalid";
+                Assert.Equal("instance.settings.unreadable", page.StatusInfo?.Key);
+                Assert.Equal("example.invalid", page.JoinServer);
+            }
+            // Once the file reads again, the next change saves only what the player changed over what the file held.
+            page.PostExit = "echo done";
+            var saved = InstanceSettings.Load(service.Directory, "a");
+            Assert.Equal(3072, saved.MaxMemoryMb);
+            Assert.Equal("-Dsaved=1", saved.JvmArgs);
+            Assert.Equal("example.invalid", saved.JoinServer);
+            Assert.Equal("echo done", saved.PostExitCommand);
+            Assert.Equal("3072", page.MemoryText);
+            Assert.Equal("-Dsaved=1", page.JvmArgs);
+        }
+        finally
+        {
+            try { Directory.Delete(_root + "-data", true); } catch (IOException) { }
+        }
+    });
+
+    [Fact]
+    public void TryAgainKeepsWhatThePlayerEnteredAndHasNotSaved() => UiTestThread.Run(() =>
+    {
+        try
+        {
+            var (service, page) = Open();
+            new InstanceSettings { MaxMemoryMb = 3072, JvmArgs = "-Dsaved=1" }.Save(service.Directory, "a");
+            var file = Path.Combine(_root, "versions", "a", InstanceSettings.FileName);
+            using (new FileStream(file, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            {
+                page.SelectedId = "a";
+                page.TabIndex = (int)InstanceTab.Settings;
+                page.GameArgs = "--typed";
+                page.MemoryText = "6144";
+            }
+            page.RetryLoadSettings("a");
+            Assert.Equal("-Dsaved=1", page.JvmArgs);
+            Assert.Equal("--typed", page.GameArgs);
+            Assert.Equal("6144", page.MemoryText);
+            // Nothing was saved by trying again.
+            Assert.Null(InstanceSettings.Load(service.Directory, "a").GameArgs);
+        }
+        finally
+        {
+            try { Directory.Delete(_root + "-data", true); } catch (IOException) { }
+        }
+    });
 }

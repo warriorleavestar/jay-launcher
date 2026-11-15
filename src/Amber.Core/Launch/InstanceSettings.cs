@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Amber.Core.Auth;
 using Amber.Core.Game;
+using Amber.Core.Localization;
 
 namespace Amber.Core.Launch;
 
@@ -19,6 +20,17 @@ public enum InstanceSettingsDrop
 
     /// <summary>Jay could not read its record just then, so it could not check them; trying again may load them.</summary>
     RecordUnavailable,
+}
+
+/// <summary>
+/// The instance's settings file is there but could not be read just then (see <see cref="InstanceSettings.ReadFailure"/>).
+/// The message says so in the player's language; trying again once the file is free reads it.
+/// </summary>
+public sealed class InstanceSettingsUnreadableException(string id, Exception reason)
+    : IOException(L.F("instance.settings.unreadable", id, ErrorText.Describe(reason)))
+{
+    // Not the inner exception: error texts look through inner exceptions and would show only "file in use".
+    public Exception Reason { get; } = reason;
 }
 
 /// <summary>全局和单个版本共用的启动设置。版本设置里为 null 的项沿用全局值。</summary>
@@ -60,6 +72,15 @@ public sealed class InstanceSettings
     public InstanceSettingsDrop DropReason { get; private set; }
 
     /// <summary>
+    /// Set when the settings file is there but could not be read just then (another program had it open, or access was
+    /// refused): why. Nothing from the file is in these settings, so they must not be launched with or saved over it;
+    /// <see cref="ThrowIfUnreadable"/>, <see cref="ToLaunchOptions"/> and <see cref="Save"/> refuse. Loading again may
+    /// read it. A missing file is not this: it simply has no settings.
+    /// </summary>
+    [JsonIgnore]
+    public Exception? ReadFailure { get; private set; }
+
+    /// <summary>
     /// True when the instance folder holds settings that a save replaced before Jay could confirm them (see
     /// <see cref="UnconfirmedCopies"/>). They are never used on their own; only the player can take them back.
     /// </summary>
@@ -84,7 +105,21 @@ public sealed class InstanceSettings
             try { InstanceSettingsTrust.EnsureAdopted(dir, InstanceSettingsTrust.QuickWait); } catch (IOException) { }
             return new InstanceSettings { HasUnconfirmedValues = UnconfirmedCopies(dir, id).Count > 0 };
         }
-        var settings = ReadFile(path) ?? new InstanceSettings();
+        string json;
+        try
+        {
+            json = File.ReadAllText(path);
+        }
+        catch (Exception e) when (e is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return new InstanceSettings { HasUnconfirmedValues = UnconfirmedCopies(dir, id).Count > 0 };
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            // Not "no settings": the file has values Jay could not see. Say so rather than fall back to the global ones.
+            return new InstanceSettings { ReadFailure = e, HasUnconfirmedValues = UnconfirmedCopies(dir, id).Count > 0 };
+        }
+        var settings = Parse(json) ?? new InstanceSettings();
         settings.HasUnconfirmedValues = UnconfirmedCopies(dir, id).Count > 0;
         var verdict = InstanceSettingsTrust.Check(dir, settings);
         if (verdict != InstanceSettingsTrust.Verdict.Trusted)
@@ -166,6 +201,8 @@ public sealed class InstanceSettings
     /// </summary>
     public void Save(GameDirectory dir, string id)
     {
+        // Settings from a file Jay could not read would replace values nobody has seen.
+        ThrowIfUnreadable(id);
         var folder = dir.VersionDir(id);
         Directory.CreateDirectory(folder);
         var path = Path.Combine(folder, FileName);
@@ -246,8 +283,18 @@ public sealed class InstanceSettings
     /// 按这份（已合并全局的）设置生成启动参数：内存（含自动内存）、工作目录（版本隔离）、JVM 和游戏参数、窗口。
     /// 启动器的正式启动、Connector 预处理、导出启动脚本和命令行都用它，各处的设置不会对不上。
     /// </summary>
+    /// <summary>
+    /// Throws <see cref="InstanceSettingsUnreadableException"/> when these settings come from a file Jay could not read
+    /// (see <see cref="ReadFailure"/>), so nothing launches with, or saves, the global values in their place.
+    /// </summary>
+    public void ThrowIfUnreadable(string id)
+    {
+        if (ReadFailure is { } e) throw new InstanceSettingsUnreadableException(id, e);
+    }
+
     public LaunchOptions ToLaunchOptions(GameDirectory dir, string id, string javaPath, GameSession session, IReadOnlyList<string> sessionJvmArgs)
     {
+        ThrowIfUnreadable(id);
         var workDir = Isolate == true ? dir.VersionDir(id) : dir.Root;
         var memory = AutoMemory == true
             ? MemoryPlanner.AutoMemoryMb(new Amber.Core.Content.ModManager(Path.Combine(workDir, "mods")).CountEnabled(), MemoryPlanner.FreePhysicalMb())
@@ -273,6 +320,7 @@ public sealed class InstanceSettings
     {
         // What Load left out stays known: the merged values below fall back to the global ones for those fields.
         DropReason = DropReason,
+        ReadFailure = ReadFailure,
         HasUnconfirmedValues = HasUnconfirmedValues,
         Isolate = Isolate ?? fallback.Isolate,
         JavaPath = Empty(JavaPath) ?? fallback.JavaPath,

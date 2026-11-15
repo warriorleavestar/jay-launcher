@@ -384,6 +384,7 @@
   "instance.settings.dropped_not_saved": "此實例之令、Java 之徑、諸參，非 Jay 所存（設檔為他物所改），故 Jay 不用。若為君所設，請於此重填。",
   "instance.settings.dropped_unchecked": "Jay 方才未能覈此實例之令、Java 之徑、諸參，故暫不用。",
   "instance.settings.retry": "再試",
+  "instance.settings.unreadable": "方才未能讀 {0} 之設：{1}。未讀之前，Jay 不啟之，亦不覆其設；請閉開此檔之程，再試。",
   "instance.settings.kept_copies": "Jay 留 {0} 之設副本一份，非 Jay 所存，不用。啟而觀之，所識者可抄回。",
   "instance.settings.open_kept": "啟副本",
   "home.launch.settings_dropped": "{0} 此番啟動不用其己之令、Java 之徑、諸參：非 Jay 所存，或未能覈。請察其設。",

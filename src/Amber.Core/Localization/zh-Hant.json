@@ -387,6 +387,7 @@
   "instance.settings.dropped_not_saved": "這個實例的命令、Java 路徑或參數不是 Jay 儲存的（設定檔被別的程式改過），所以 Jay 沒有使用它們。如果是你設的，請在這裡重新填一遍。",
   "instance.settings.dropped_unchecked": "Jay 剛才沒能核對這個實例的命令、Java 路徑和參數，所以暫時沒有使用它們。",
   "instance.settings.retry": "再試一次",
+  "instance.settings.unreadable": "剛才沒能讀取 {0} 的設定：{1}。讀到之前，Jay 不會啟動它，也不會覆蓋這些設定；請關掉開著這個檔案的程式，再試一次。",
   "instance.settings.kept_copies": "Jay 留了一份 {0} 的設定副本，裡面的內容不是 Jay 儲存的，不會被使用。打開看看，認得的內容可以抄回來。",
   "instance.settings.open_kept": "打開副本",
   "home.launch.settings_dropped": "{0} 這次啟動不使用它自己的命令、Java 路徑和參數：它們不是 Jay 儲存的，或者沒能核對。請檢查這個實例的設定。",

@@ -579,6 +579,8 @@ public sealed partial class HomeViewModel : PageViewModel
         try
         {
             var settings = _service.EffectiveSettings(ctx, id);
+            // The instance's settings file is there but could not be read: don't launch with the global settings in its place.
+            settings.ThrowIfUnreadable(id);
             // The instance's own commands, Java path and arguments were left out (Jay did not save them, or could not
             // check them): say so, rather than launch with the global ones unannounced.
             if (settings.DroppedUnknownValues)

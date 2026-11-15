@@ -395,6 +395,7 @@
   "instance.settings.dropped_not_saved": "Jay didn't save this instance's commands, Java path or arguments (something else changed its settings file), so it isn't using them. If you set them, enter them again here.",
   "instance.settings.dropped_unchecked": "Jay couldn't check this instance's commands, Java path and arguments just now, so it isn't using them yet.",
   "instance.settings.retry": "Try again",
+  "instance.settings.unreadable": "Couldn't read the settings for {0} just now: {1}. Jay won't launch it or save over them until it can; close the program that has the file open, then try again.",
   "instance.settings.kept_copies": "Jay kept a copy of settings for {0} that it didn't save. Nothing in it is used. Open it to copy back anything you recognise.",
   "instance.settings.open_kept": "Open copies",
   "home.launch.settings_dropped": "{0} starts without its own commands, Java path and arguments: Jay didn't save them, or couldn't check them. Check the instance's settings.",

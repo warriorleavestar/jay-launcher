@@ -687,4 +687,31 @@ public sealed class InstanceSettingsTrustTests : IDisposable
         Assert.Equal(ownerOnlyFolder, File.GetUnixFileMode(Path.GetDirectoryName(copy)!));
         Assert.Equal(ownerOnlyFolder, File.GetUnixFileMode(Path.GetDirectoryName(Path.GetDirectoryName(copy)!)!));
     }
+
+    [Fact]
+    public void AFileJayCannotReadIsNotTakenForNoSettings()
+    {
+        UsePrivateStore();
+        new InstanceSettings { MaxMemoryMb = 3072, JvmArgs = "-Dx=" + _marker }.Save(Dir, "a");
+        // Another program holds the file open with no sharing.
+        using (new FileStream(FileOf("a"), FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            var loaded = InstanceSettings.Load(Dir, "a");
+            Assert.NotNull(loaded.ReadFailure);
+            Assert.Null(loaded.MaxMemoryMb);
+            // Neither launched with in place of the file, nor saved over it.
+            var merged = loaded.Over(new InstanceSettings { MaxMemoryMb = 1024 });
+            Assert.Throws<InstanceSettingsUnreadableException>(() => merged.ThrowIfUnreadable("a"));
+            Assert.Throws<InstanceSettingsUnreadableException>(() => merged.ToLaunchOptions(Dir, "a", "java", OfflineAccount.Create("Player"), []));
+            loaded.MaxMemoryMb = 1024;
+            Assert.Throws<InstanceSettingsUnreadableException>(() => loaded.Save(Dir, "a"));
+        }
+        // Once the file is free it reads as saved.
+        var again = InstanceSettings.Load(Dir, "a");
+        Assert.Null(again.ReadFailure);
+        Assert.Equal(3072, again.MaxMemoryMb);
+        Assert.Equal("-Dx=" + _marker, again.JvmArgs);
+        // A missing file is no settings, not a failure.
+        Assert.Null(InstanceSettings.Load(Dir, "none").ReadFailure);
+    }
 }

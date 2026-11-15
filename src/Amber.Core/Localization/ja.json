@@ -387,6 +387,7 @@
   "instance.settings.dropped_not_saved": "このインスタンスのコマンド、Java のパス、引数は Jay が保存したものではないため（別のプログラムが設定ファイルを変更しました）、使っていません。自分で設定したものなら、ここでもう一度入力してください。",
   "instance.settings.dropped_unchecked": "Jay はこのインスタンスのコマンド、Java のパス、引数をいま確認できなかったため、まだ使っていません。",
   "instance.settings.retry": "もう一度試す",
+  "instance.settings.unreadable": "{0} の設定をいま読み込めませんでした：{1}。読み込めるまで、Jay は起動も設定の上書きもしません。ファイルを開いているプログラムを閉じてから、もう一度試してください。",
   "instance.settings.kept_copies": "Jay が保存していない {0} の設定のコピーを残しました。中身は使われません。開いて、見覚えのある内容は書き戻せます。",
   "instance.settings.open_kept": "コピーを開く",
   "home.launch.settings_dropped": "{0} は独自のコマンド、Java のパス、引数を使わずに起動します。Jay が保存したものではないか、確認できませんでした。インスタンスの設定を確認してください。",

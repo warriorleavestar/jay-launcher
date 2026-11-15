@@ -442,6 +442,7 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
     private async Task<LaunchOptions> OfflineLaunchOptionsAsync(GameInstance c, CancellationToken ct)
     {
         var settings = _service.EffectiveSettings(c.Id);
+        settings.ThrowIfUnreadable(c.Id);
         var version = _service.Directory.ResolveVersion(c.Id);
         var java = !string.IsNullOrEmpty(settings.JavaPath) && File.Exists(settings.JavaPath) ? settings.JavaPath : await _service.Java.ForVersionAsync(version, ct);
         var account = _service.Accounts.Store.Selected;
@@ -528,6 +529,7 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
             SetStatus(StatusMessage.Info("home.status.checking_game_files"));
             await ctx.Installer.CompleteAsync(c.Id, null, ct);
             var settings = _service.EffectiveSettings(ctx, c.Id);
+            settings.ThrowIfUnreadable(c.Id);
             var version = ctx.Directory.ResolveVersion(c.Id);
             var java = !string.IsNullOrEmpty(settings.JavaPath) && File.Exists(settings.JavaPath) ? settings.JavaPath : await ctx.Java.ForVersionAsync(version, ct);
             SetStatus(StatusMessage.Info("home.status.baking"));
@@ -639,22 +641,38 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
     public bool HasArgsError => ArgsError is not null;
 
     // 即改即存（改版规格 3.10）：下拉框改了就存，文本框失焦才写回，校验通过才存。
-    partial void OnIsolateIndexChanged(int value) => AutoSave();
-    partial void OnMemoryModeIndexChanged(int value) => AutoSave();
-    partial void OnMemoryTextChanged(string value) => AutoSave();
-    partial void OnSelectedJavaChanged(JavaChoice? value) => AutoSave();
-    partial void OnJvmArgsChanged(string value) => AutoSave();
-    partial void OnGameArgsChanged(string value) => AutoSave();
-    partial void OnWidthTextChanged(string value) => AutoSave();
-    partial void OnHeightTextChanged(string value) => AutoSave();
-    partial void OnFullscreenIndexChanged(int value) => AutoSave();
-    partial void OnPreLaunchChanged(string value) => AutoSave();
-    partial void OnPostExitChanged(string value) => AutoSave();
-    partial void OnJoinServerChanged(string value) => AutoSave();
+    partial void OnIsolateIndexChanged(int value) => Edited(SettingsField.Isolate);
+    partial void OnMemoryModeIndexChanged(int value) => Edited(SettingsField.MemoryMode);
+    partial void OnMemoryTextChanged(string value) => Edited(SettingsField.Memory);
+    partial void OnSelectedJavaChanged(JavaChoice? value) => Edited(SettingsField.Java);
+    partial void OnJvmArgsChanged(string value) => Edited(SettingsField.JvmArgs);
+    partial void OnGameArgsChanged(string value) => Edited(SettingsField.GameArgs);
+    partial void OnWidthTextChanged(string value) => Edited(SettingsField.Width);
+    partial void OnHeightTextChanged(string value) => Edited(SettingsField.Height);
+    partial void OnFullscreenIndexChanged(int value) => Edited(SettingsField.Fullscreen);
+    partial void OnPreLaunchChanged(string value) => Edited(SettingsField.PreLaunch);
+    partial void OnPostExitChanged(string value) => Edited(SettingsField.PostExit);
+    partial void OnJoinServerChanged(string value) => Edited(SettingsField.JoinServer);
 
-    private void AutoSave()
+    private enum SettingsField { Isolate, MemoryMode, Memory, Java, JvmArgs, GameArgs, Width, Height, Fullscreen, PreLaunch, PostExit, JoinServer }
+
+    /// <summary>
+    /// Fields the player changed whose value is not in the file yet: the save failed or was refused, or the value was
+    /// not valid (the file keeps the old one). "Try again" leaves them as they are.
+    /// </summary>
+    private readonly HashSet<SettingsField> _unsavedFields = [];
+
+    /// <summary>
+    /// The settings file could not be read at the last load, so the page shows no values from it. Nothing is saved over
+    /// it until it reads again; the next save tries that first.
+    /// </summary>
+    private bool _settingsUnreadable;
+
+    private void Edited(SettingsField field)
     {
-        if (!_loadingSettings && Current is not null) SaveSettings();
+        if (_loadingSettings || Current is null) return;
+        _unsavedFields.Add(field);
+        SaveSettings();
     }
 
     private void LoadSettings()
@@ -673,20 +691,68 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
     private void LoadSettingsCore()
     {
         MemoryError = SizeError = ArgsError = null;
+        _unsavedFields.Clear();
         var s = InstanceSettings.Load(_service.Directory, Current!.Id);
-        IsolateIndex = s.Isolate switch { true => 1, false => 2, _ => 0 };
-        MemoryModeIndex = s.AutoMemory switch { true => 1, false => 2, _ => 0 };
-        MemoryText = s.MaxMemoryMb?.ToString() ?? "";
-        JvmArgs = s.JvmArgs ?? "";
-        GameArgs = s.GameArgs ?? "";
-        WidthText = s.WindowWidth?.ToString() ?? "";
-        HeightText = s.WindowHeight?.ToString() ?? "";
-        FullscreenIndex = s.Fullscreen switch { true => 1, false => 2, _ => 0 };
-        PreLaunch = s.PreLaunchCommand ?? "";
-        PostExit = s.PostExitCommand ?? "";
-        JoinServer = s.JoinServer ?? "";
-        _ = LoadJavaChoicesAsync(s.JavaPath);
+        _settingsUnreadable = s.ReadFailure is not null;
+        ShowSettings(s, _ => true);
         ShowLeftOutSettings(s, Current!.Id);
+    }
+
+    /// <summary>Fills the page from <paramref name="s"/>, only the fields <paramref name="take"/> picks.</summary>
+    private void ShowSettings(InstanceSettings s, Func<SettingsField, bool> take)
+    {
+        if (take(SettingsField.Isolate)) IsolateIndex = s.Isolate switch { true => 1, false => 2, _ => 0 };
+        if (take(SettingsField.MemoryMode)) MemoryModeIndex = s.AutoMemory switch { true => 1, false => 2, _ => 0 };
+        if (take(SettingsField.Memory)) MemoryText = s.MaxMemoryMb?.ToString() ?? "";
+        if (take(SettingsField.JvmArgs)) JvmArgs = s.JvmArgs ?? "";
+        if (take(SettingsField.GameArgs)) GameArgs = s.GameArgs ?? "";
+        if (take(SettingsField.Width)) WidthText = s.WindowWidth?.ToString() ?? "";
+        if (take(SettingsField.Height)) HeightText = s.WindowHeight?.ToString() ?? "";
+        if (take(SettingsField.Fullscreen)) FullscreenIndex = s.Fullscreen switch { true => 1, false => 2, _ => 0 };
+        if (take(SettingsField.PreLaunch)) PreLaunch = s.PreLaunchCommand ?? "";
+        if (take(SettingsField.PostExit)) PostExit = s.PostExitCommand ?? "";
+        if (take(SettingsField.JoinServer)) JoinServer = s.JoinServer ?? "";
+        _ = LoadJavaChoicesAsync(take(SettingsField.Java) ? s.JavaPath : SelectedJava?.Path);
+    }
+
+    /// <summary>
+    /// "Try again" after Jay could not read the settings file or check its values: reads it again and shows what it
+    /// holds, except in fields the player changed that are not saved yet (see <see cref="_unsavedFields"/>), which keep
+    /// what the player entered.
+    /// </summary>
+    internal void RetryLoadSettings(string id)
+    {
+        if (Current?.Id != id) return;
+        var wasLoading = _loadingSettings;
+        _loadingSettings = true;
+        try
+        {
+            Reread(tell: true);
+        }
+        finally
+        {
+            _loadingSettings = wasLoading;
+        }
+    }
+
+    /// <summary>Reads the settings again into the fields the player has not changed. Returns false when the file still can't be read.</summary>
+    private bool Reread(bool tell)
+    {
+        var id = Current!.Id;
+        var s = InstanceSettings.Load(_service.Directory, id);
+        _settingsUnreadable = s.ReadFailure is not null;
+        if (!_settingsUnreadable)
+        {
+            bool Take(SettingsField f) => !_unsavedFields.Contains(f);
+            if (Take(SettingsField.Memory)) MemoryError = null;
+            if (Take(SettingsField.Width) && Take(SettingsField.Height)) SizeError = null;
+            if (Take(SettingsField.JvmArgs) && Take(SettingsField.GameArgs)) ArgsError = null;
+            ShowSettings(s, Take);
+            if (s.DropReason == InstanceSettingsDrop.None) SetStatus(null);
+        }
+        if (tell) ShowLeftOutSettings(s, id);
+        else if (s.ReadFailure is { } e) SetStatus(StatusMessage.Warning("instance.settings.unreadable", id, ErrorText.Of(e)));
+        return !_settingsUnreadable;
     }
 
     /// <summary>The instances whose kept copies the player has already been told about this session.</summary>
@@ -699,6 +765,13 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
     /// </summary>
     private void ShowLeftOutSettings(InstanceSettings s, string id)
     {
+        if (s.ReadFailure is { } failure)
+        {
+            // Nothing from the file is on the page: say so, and offer to read it again once it's free.
+            SetStatus(StatusMessage.Warning("instance.settings.unreadable", id, ErrorText.Of(failure)));
+            Toasts.WithAction(L.F("instance.settings.unreadable", id, ErrorText.Describe(failure)), L.T("instance.settings.retry"),
+                () => RetryLoadSettings(id), NotificationType.Warning);
+        }
         switch (s.DropReason)
         {
             case InstanceSettingsDrop.NotSavedByJay:
@@ -706,10 +779,8 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
                 break;
             case InstanceSettingsDrop.RecordUnavailable:
                 SetStatus(StatusMessage.Warning("instance.settings.dropped_unchecked"));
-                Toasts.WithAction(L.T("instance.settings.dropped_unchecked"), L.T("instance.settings.retry"), () =>
-                {
-                    if (Current?.Id == id) LoadSettings();
-                }, NotificationType.Warning);
+                Toasts.WithAction(L.T("instance.settings.dropped_unchecked"), L.T("instance.settings.retry"),
+                    () => RetryLoadSettings(id), NotificationType.Warning);
                 break;
         }
         if (s.HasUnconfirmedValues && _toldAboutKeptCopies.Add(id))
@@ -746,7 +817,28 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
     private void SaveSettings()
     {
         if (Current is not { } c) return;
+        if (_settingsUnreadable)
+        {
+            // The page shows no values from the file: read it first, so only what the player changed replaces them.
+            var wasLoading = _loadingSettings;
+            _loadingSettings = true;
+            try
+            {
+                if (!Reread(tell: false)) return;
+            }
+            finally
+            {
+                _loadingSettings = wasLoading;
+            }
+        }
         var old = InstanceSettings.Load(_service.Directory, c.Id);
+        if (old.ReadFailure is { } readFailure)
+        {
+            // Saving now would replace values nobody has seen with the ones on the page. Keep the page as it is.
+            _settingsUnreadable = true;
+            SetStatus(StatusMessage.Warning("instance.settings.unreadable", c.Id, ErrorText.Of(readFailure)));
+            return;
+        }
         int? mb = old.MaxMemoryMb, w = old.WindowWidth, h = old.WindowHeight;
         if (SettingInput.TryParseMemoryMb(MemoryText, out var parsedMb)) { mb = parsedMb; MemoryError = null; }
         else MemoryError = L.T("instance.settings.error.memory");
@@ -780,6 +872,14 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
             SetStatus(StatusMessage.Failure("instance.settings.save_failed", e, c.Id, ErrorText.Of(e)));
             return;
         }
+        // What is in the file now is no longer unsaved, except values that were not valid (the file kept the old ones).
+        _unsavedFields.RemoveWhere(f => f switch
+        {
+            SettingsField.Memory => HasMemoryError,
+            SettingsField.Width or SettingsField.Height => HasSizeError,
+            SettingsField.JvmArgs or SettingsField.GameArgs => HasArgsError,
+            _ => false,
+        } is false);
         var id = c.Id;
         if (s.Isolate != old.Isolate)
         {
