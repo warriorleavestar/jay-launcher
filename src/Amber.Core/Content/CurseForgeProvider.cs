@@ -72,14 +72,48 @@ public sealed class CurseForgeProvider(HttpClient http, Func<string?> apiKey, st
         return ParseProject(doc.RootElement.GetProperty("data"));
     }
 
-    public async Task<IReadOnlyList<ContentFile>> GetFilesAsync(string projectId, string? gameVersion, string? loader, CancellationToken ct = default)
+    public async Task<IReadOnlyList<ContentFile>> GetFilesAsync(string projectId, string? gameVersion, string? loader, CancellationToken ct = default) =>
+        await ApplyDistributionPolicyAsync(await GetFilesUncheckedAsync(projectId, gameVersion, loader, ct), ct);
+
+    /// <summary>
+    /// <see cref="GetFilesAsync"/> for many projects at once (an update check): at most four projects are asked at the
+    /// same time, and the authors' distribution settings are read once for all of them, fresh from this check.
+    /// Returns project id → its files, newest first.
+    /// </summary>
+    public async Task<Dictionary<string, IReadOnlyList<ContentFile>>> GetFilesForProjectsAsync(IReadOnlyCollection<string> projectIds,
+        string? gameVersion, string? loader, CancellationToken ct = default)
+    {
+        var ids = projectIds.Distinct().ToList();
+        var lists = new List<ContentFile>[ids.Count];
+        using var gate = new SemaphoreSlim(MaxParallelProjects);
+        await Task.WhenAll(ids.Select(async (id, index) =>
+        {
+            await gate.WaitAsync(ct);
+            try { lists[index] = await GetFilesUncheckedAsync(id, gameVersion, loader, ct); }
+            finally { gate.Release(); }
+        }));
+        var all = lists.SelectMany(l => l).ToList();
+        var checkedFiles = await ApplyDistributionPolicyAsync(all, ct);
+        var result = new Dictionary<string, IReadOnlyList<ContentFile>>();
+        var offset = 0;
+        for (var i = 0; i < ids.Count; i++)
+        {
+            result[ids[i]] = checkedFiles.Skip(offset).Take(lists[i].Count).ToList();
+            offset += lists[i].Count;
+        }
+        return result;
+    }
+
+    /// <summary>How many projects <see cref="GetFilesForProjectsAsync"/> asks about at the same time.</summary>
+    internal const int MaxParallelProjects = 4;
+
+    private async Task<List<ContentFile>> GetFilesUncheckedAsync(string projectId, string? gameVersion, string? loader, CancellationToken ct)
     {
         var path = $"/mods/{projectId}/files?pageSize=50";
         if (!string.IsNullOrEmpty(gameVersion)) path += "&gameVersion=" + Uri.EscapeDataString(gameVersion);
         if (LoaderCode(loader) is { } code) path += $"&modLoaderType={code}";
         using var doc = await GetAsync(path, ct);
-        var files = doc.RootElement.GetProperty("data").EnumerateArray().Select(ParseFile).OrderByDescending(f => f.Date).ToList();
-        return await ApplyDistributionPolicyAsync(files, ct);
+        return doc.RootElement.GetProperty("data").EnumerateArray().Select(ParseFile).OrderByDescending(f => f.Date).ToList();
     }
 
     public async Task<ContentFile> GetFileAsync(string projectId, string fileId, CancellationToken ct = default)
@@ -271,6 +305,63 @@ public sealed class CurseForgeProvider(HttpClient http, Func<string?> apiKey, st
         "neoforge" => 6,
         _ => null,
     };
+
+    /// <summary>
+    /// <see cref="Fingerprint(ReadOnlySpan{byte})"/> of a file, read in two streaming passes (the hash needs the filtered
+    /// length first) instead of holding the whole jar, twice, in memory.
+    /// </summary>
+    public static async Task<uint> FingerprintAsync(string path, CancellationToken ct = default)
+    {
+        await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true);
+        var buffer = new byte[81920];
+        long length = 0;
+        int read;
+        while ((read = await stream.ReadAsync(buffer, ct)) > 0)
+            foreach (var b in buffer.AsSpan(0, read))
+                if (b is not (9 or 10 or 13 or 32)) length++;
+        stream.Position = 0;
+
+        var state = new Murmur2(1u ^ (uint)length);
+        while ((read = await stream.ReadAsync(buffer, ct)) > 0)
+            foreach (var b in buffer.AsSpan(0, read))
+                if (b is not (9 or 10 or 13 or 32)) state.Add(b);
+        return state.Finish();
+    }
+
+    /// <summary>Murmur2 (32-bit) fed one byte at a time; the same steps as <see cref="Fingerprint(ReadOnlySpan{byte})"/>.</summary>
+    private struct Murmur2(uint seed)
+    {
+        private const uint M = 0x5bd1e995;
+        private uint _h = seed;
+        private uint _pending;
+        private int _count;
+
+        public void Add(byte b)
+        {
+            _pending |= (uint)b << (8 * _count);
+            if (++_count < 4) return;
+            var k = _pending * M;
+            k ^= k >> 24;
+            k *= M;
+            _h = _h * M ^ k;
+            _pending = 0;
+            _count = 0;
+        }
+
+        public uint Finish()
+        {
+            var h = _h;
+            if (_count > 0)
+            {
+                h ^= _pending;
+                h *= M;
+            }
+            h ^= h >> 13;
+            h *= M;
+            h ^= h >> 15;
+            return h;
+        }
+    }
 
     /// <summary>CurseForge 指纹：去掉空白字节后的 Murmur2（种子 1）。</summary>
     public static uint Fingerprint(ReadOnlySpan<byte> data)

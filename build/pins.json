@@ -127,11 +127,30 @@
       "sha1": "2ec0cc96c44e5a76b9c8b7c39df7210883d12871",
       "note": "Content-addressed by Mojang (the SHA-1 is part of the address); every runtime file it lists is checked against the SHA-1 the manifest gives.",
       "usedBy": ["src/Amber.Core/Java/JavaRuntimeInstaller.cs"]
+    },
+    {
+      "id": "authlib-injector",
+      "name": "authlib-injector (Java agent for external skin-site accounts)",
+      "version": "1.2.8",
+      "tag": "v1.2.8",
+      "file": "authlib-injector-1.2.8.jar",
+      "urls": [
+        "https://authlib-injector.yushi.moe/artifact/56/authlib-injector-1.2.8.jar",
+        "https://github.com/yushijinhun/authlib-injector/releases/download/v1.2.8/authlib-injector-1.2.8.jar",
+        "https://bmclapi2.bangbang93.com/mirrors/authlib-injector/artifact/56/authlib-injector-1.2.8.jar"
+      ],
+      "source": "https://github.com/yushijinhun/authlib-injector",
+      "license": "AGPL-3.0",
+      "sha256": "9c7f4343e6c82034958ffb48c14a2cb0c85928be7283103ce17da00c6d5a7b10",
+      "size": 349681,
+      "note": "Downloaded on the first launch with an external account, never bundled. Every source must serve exactly these bytes.",
+      "usedBy": ["src/Amber.Core/Auth/ExternalAuth.cs"]
     }
   ],
   "notPinned": [
     { "what": "Minecraft game files, libraries and assets", "checkedBy": "the SHA-1 in Mojang's version manifests" },
-    { "what": "NeoForge, Forge, Fabric and Quilt installers and libraries", "checkedBy": "the hashes the loader's own metadata gives, where it gives one" },
+    { "what": "NeoForge, Forge, Fabric and Quilt installers and libraries", "checkedBy": "the hashes the loader's own metadata gives, where it gives one; Forge installers also against the .sha1 on the official Maven when it is reachable" },
+    { "what": "OptiFine", "checkedBy": "nothing: only a third-party mirror (BMCLAPI) serves it, and the app labels it unverified" },
     { "what": "Temurin Java for ARM Linux (latest release)", "checkedBy": "the SHA-256 Adoptium's API returns with the package" },
     { "what": "Mods, resource packs, shaders and modpacks", "checkedBy": "the hashes Modrinth and CurseForge return; chosen by the player" }
   ]

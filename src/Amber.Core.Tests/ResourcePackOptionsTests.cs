@@ -75,6 +75,55 @@ public sealed class ResourcePackOptionsTests : IDisposable
         Assert.Null(PackFormat.Read(Path.Combine(_dir, "missing.zip")));
     }
 
+    private void PackZip(string name, string mcmeta)
+    {
+        var path = Path.Combine(Directory.CreateDirectory(Path.Combine(_dir, "resourcepacks")).FullName, name);
+        using var archive = ZipFile.Open(path, ZipArchiveMode.Create);
+        using var writer = new StreamWriter(archive.CreateEntry("pack.mcmeta").Open());
+        writer.Write(mcmeta);
+    }
+
+    [Fact]
+    public void PackForAnotherVersionIsAcceptedSoTheGameKeepsIt()
+    {
+        PackZip("Old.zip", """{"pack":{"pack_format":3}}""");
+        PackZip("Fits.zip", """{"pack":{"pack_format":34}}""");
+        PackZip("Range.zip", """{"pack":{"pack_format":15,"supported_formats":[15,34]}}""");
+        PackZip("RangeObject.zip", """{"pack":{"pack_format":15,"supported_formats":{"min_inclusive":15,"max_inclusive":40}}}""");
+        File.WriteAllLines(Options, ["version:3955", """incompatibleResourcePacks:["file/Gone.zip","file/Kept.zip"]""", """resourcePacks:["vanilla","file/Kept.zip"]"""]);
+
+        ResourcePackOptions.SetEnabled(_dir, ["Old.zip", "Fits.zip", "Range.zip", "RangeObject.zip", "Kept.zip"], "1.21.1");
+        // Old.zip is listed; packs that fit (also by their range) are not; an entry the game wrote stays while its pack is on.
+        Assert.Equal(["file/Kept.zip", "file/Old.zip"], ResourcePackOptions.Accepted(_dir));
+        Assert.Equal(["Old.zip", "Fits.zip", "Range.zip", "RangeObject.zip", "Kept.zip"], ResourcePackOptions.Enabled(_dir));
+
+        // Switched off: it leaves the list too.
+        ResourcePackOptions.SetEnabled(_dir, ["Fits.zip"], "1.21.1");
+        Assert.Empty(ResourcePackOptions.Accepted(_dir));
+        Assert.Contains("incompatibleResourcePacks:[]", File.ReadAllLines(Options));
+    }
+
+    [Fact]
+    public void WithoutAGameVersionOrAnythingToListNoLineIsAdded()
+    {
+        PackZip("Old.zip", """{"pack":{"pack_format":3}}""");
+        ResourcePackOptions.SetEnabled(_dir, ["Old.zip"]);
+        Assert.DoesNotContain(File.ReadAllLines(Options), l => l.StartsWith("incompatibleResourcePacks:", StringComparison.Ordinal));
+        ResourcePackOptions.SetEnabled(_dir, ["Old.zip"], "1.21.9"); // a version whose format Jay doesn't know
+        Assert.DoesNotContain(File.ReadAllLines(Options), l => l.StartsWith("incompatibleResourcePacks:", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void PackFormatReadsOddFilesSafely()
+    {
+        PackZip("Odd.zip", """{"pack":"not an object"}""");
+        Assert.Null(PackFormat.Read(Path.Combine(_dir, "resourcepacks", "Odd.zip")));
+        Assert.Equal(PackAge.Unknown, PackFormat.AgeOf(Path.Combine(_dir, "resourcepacks", "Odd.zip"), "1.21.1"));
+        // Before 1.20.2 the range is not read: only pack_format counts.
+        PackZip("Range.zip", """{"pack":{"pack_format":3,"supported_formats":[3,15]}}""");
+        Assert.Equal(PackAge.Older, PackFormat.AgeOf(Path.Combine(_dir, "resourcepacks", "Range.zip"), "1.20.1"));
+    }
+
     [Fact]
     public void ShaderSelectionWritesIrisConfig()
     {

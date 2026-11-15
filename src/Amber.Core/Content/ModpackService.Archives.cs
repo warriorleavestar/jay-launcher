@@ -34,10 +34,11 @@ public sealed partial class ModpackService
             try
             {
                 if (InnerPack(zip) is not { } inner) return new PackSource(zip, null);
+                CheckRoom([inner], Path.GetTempPath());
                 var tempDir = Path.Combine(Path.GetTempPath(), "amber-pack-" + Guid.NewGuid().ToString("N"));
                 Directory.CreateDirectory(tempDir);
                 var innerPath = Path.Combine(tempDir, inner.Name);
-                inner.ExtractToFile(innerPath);
+                ExtractLimited(inner, innerPath);
                 zip.Dispose();
                 try
                 {
@@ -65,6 +66,30 @@ public sealed partial class ModpackService
         private static void TryDelete(string dir)
         {
             try { Directory.Delete(dir, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    /// <summary>
+    /// Whether <see cref="Inspect(ZipArchive)"/> would take this zip as a pack of some format, judged from entry names and
+    /// small metadata files only: nothing is unpacked and nothing throws. Used to recognise a dropped file.
+    /// </summary>
+    internal static bool LooksLikePack(ZipArchive zip)
+    {
+        try
+        {
+            var root = PackRoot(zip);
+            if (zip.GetEntry(root + "modrinth.index.json") is not null || McbbsMeta(zip, root) is not null
+                || zip.GetEntry(root + "modpack.json") is not null)
+                return true;
+            if (zip.GetEntry(root + "manifest.json") is { } manifest && ReadJson(manifest)["manifestType"] is JsonValue type
+                && type.TryGetValue<string>(out var kind) && kind == "minecraftModpack")
+                return true;
+            if (FindEntry(zip, "mmc-pack.json") is not null || FindEntry(zip, "instance.cfg") is not null || InnerPack(zip) is not null) return true;
+            return zip.Entries.Any(e => !e.FullName.StartsWith("__MACOSX/", StringComparison.Ordinal) && VersionJsonEntry().IsMatch(e.FullName));
+        }
+        catch (Exception e) when (e is System.Text.Json.JsonException or InvalidDataException or InvalidOperationException or IOException)
+        {
+            return false;
         }
     }
 
