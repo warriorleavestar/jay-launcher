@@ -61,7 +61,7 @@ public sealed class ExitRoutingPlanTests
     [InlineData("255.255.255.255")]
     [InlineData("10.233.144.1")]
     [InlineData("example.com")]
-    [InlineData("1.2.3.4; whoami")]
+    [InlineData("198.51.100.4; whoami")]
     public void InvalidUnderlayIsRejected(string address) =>
         Assert.Throws<ArgumentException>(() => ExitNetworkPlan.Create(Guest with { DirectUnderlayAddresses = [address] }));
 

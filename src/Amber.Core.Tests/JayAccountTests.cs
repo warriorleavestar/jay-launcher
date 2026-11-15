@@ -336,7 +336,7 @@ public sealed class JayAccountTests : IDisposable
     /// Windows only: when the key protection can't be opened this logon (an SSH logon without a password), a version 0
     /// entry isn't moved and nothing throws; it is kept as it is for a later start.
     /// </summary>
-    [Fact]
+    [WindowsFact]
     public void LockedKeyProtectionLeavesVersion0EntriesForLater()
     {
         if (!OperatingSystem.IsWindows()) return;

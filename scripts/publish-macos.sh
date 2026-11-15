@@ -14,19 +14,28 @@ stage="$(mktemp -d)"
 trap 'rm -rf "$stage"' EXIT
 bundle="$stage/Jay.app"
 mkdir -p "$bundle/Contents/MacOS"
+# Same publish options as the release build in .github/workflows/build.yml.
 dotnet publish "$root/src/Amber.App/Amber.App.csproj" -c Release -r "$rid" \
     --self-contained -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true \
-    -p:DebugType=none -o "$bundle/Contents/MacOS"
+    -p:PublishReadyToRun=true -p:DebugType=none -o "$bundle/Contents/MacOS"
+# Info.plist versions are numbers only (0.7.0), so drop any pre-release suffix.
+version="$(dotnet msbuild "$root/src/Amber.App/Amber.App.csproj" -getProperty:Version)"
+version="${version%%-*}"
+[[ "$version" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]] || { echo "Unexpected version: $version" >&2; exit 1; }
+# Scale the icon down from the full-size brand artwork (1254 px), never up from the 512 px app asset.
+icon="$root/docs/brand/jay-feather-amber-v1.png"
 mkdir -p "$bundle/Contents/Resources" "$stage/Jay.iconset"
 for size in 16 32 128 256 512; do
-    sips -z "$size" "$size" "$root/src/Amber.App/Assets/jay.png" \
+    sips -z "$size" "$size" "$icon" \
         --out "$stage/Jay.iconset/icon_${size}x${size}.png" >/dev/null
     double=$((size * 2))
-    sips -z "$double" "$double" "$root/src/Amber.App/Assets/jay.png" \
+    sips -z "$double" "$double" "$icon" \
         --out "$stage/Jay.iconset/icon_${size}x${size}@2x.png" >/dev/null
 done
 iconutil -c icns "$stage/Jay.iconset" -o "$bundle/Contents/Resources/Jay.icns"
-cat > "$bundle/Contents/Info.plist" <<'PLIST'
+# The bundle id stays io.github.amber.launcher: macOS keeps screen recording, accessibility and keychain
+# grants per bundle id, so changing it would make every existing user grant them again.
+cat > "$bundle/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -35,6 +44,8 @@ cat > "$bundle/Contents/Info.plist" <<'PLIST'
     <key>CFBundleIdentifier</key><string>io.github.amber.launcher</string>
     <key>CFBundleName</key><string>Jay</string>
     <key>CFBundleIconFile</key><string>Jay.icns</string>
+    <key>CFBundleShortVersionString</key><string>$version</string>
+    <key>CFBundleVersion</key><string>$version</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>NSHighResolutionCapable</key><true/>
 </dict>

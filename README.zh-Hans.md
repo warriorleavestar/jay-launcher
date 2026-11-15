@@ -61,7 +61,7 @@ Fabric、Quilt、Forge、NeoForge、OptiFine 一键安装，内置 Modrinth 和 
 </table>
 
 > [!NOTE]
-> 本项目在 v0.7.0 之前叫 **Amber**，旧账号和设置可以直接沿用。一起联机的人都要用 v0.7.0 或更新的版本。
+> 本项目到 v0.5.9 为止叫 **Amber**，从 v0.7.0 起叫 Jay，旧账号和设置可以直接沿用。一起联机的人都要用 v0.7.0 或更新的版本。
 > 标了 *实验* 的功能已通过自动测试，但还没在真实环境里完整验证过，遇到问题欢迎[反馈](https://github.com/warriorleavestar/jay-launcher/issues/new/choose)。
 
 ## 下载
