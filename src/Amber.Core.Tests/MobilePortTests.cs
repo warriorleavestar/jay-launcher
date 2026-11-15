@@ -308,6 +308,26 @@ public sealed class MobilePortTests
         Assert.Equal((0.30, 0.40), (inventory.CenterX, inventory.CenterY));
     }
 
+    [Theory]
+    [InlineData(1, 1.0)]
+    [InlineData(1, 1.35)]
+    [InlineData(2, 1.35)]
+    public void InventoryKeyStaysOnScreenAtASmallGuiScale(int guiScale, double buttonScale)
+    {
+        const int width = 2400, height = 1080;
+        var profile = new TouchControlProfile
+        {
+            AspectRatio = (double)width / height,
+            Scale = buttonScale,
+            HotbarBounds = MinecraftHotbar.Bounds(width, height, guiScale)
+        };
+        var inventory = profile.Controls.Single(control => control.Action == TouchControlAction.Inventory);
+        var faceBottomPixels = inventory.CenterY * height +
+                               inventory.Radius * TouchControlLayout.UtilityFaceScale * Math.Min(width, height);
+        Assert.True(faceBottomPixels <= height + 1e-6, $"face bottom {faceBottomPixels} below {height}");
+        Assert.Equal(TouchControlAction.Inventory, profile.HitTest(inventory.CenterX, inventory.CenterY)!.Action);
+    }
+
     [Fact]
     public void TouchControlTextIsTranslatedInEveryLanguage()
     {

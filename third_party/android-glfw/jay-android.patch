@@ -28,6 +28,8 @@ index 4843a76..baa02ca 100644
 +    uint64_t        jayPointerGeneration;
 +    uint64_t        jayInputGeneration;
 +    uint64_t        jaySurfaceGeneration;
++    uint64_t        jaySurfaceRetryGeneration;
++    int             jaySurfaceRetries;
 +    GLFWbool        jaySurfaceLost;
 +#endif
  } _GLFWwindowNull;
@@ -285,6 +287,14 @@ index 1db0811..b84b668 100644
 +    _glfwInputFramebufferSize(window, width, height);
 +}
 +
++// Moving to a new surface failed. The next few polls try the same surface again (a driver can refuse it
++// while the activity is still coming back); after that, wait for the activity to hand over another one.
++static void jaySurfaceFailed(_GLFWwindow* window, uint64_t generation)
++{
++    if (++window->null.jaySurfaceRetries >= 3)
++        window->null.jaySurfaceGeneration = generation;
++}
++
 +// The activity replaces its surface when the app returns from the background. Move the EGL
 +// window surface to the current Android surface; the GL context and its objects stay as they are.
 +static void refreshJaySurface(_GLFWwindow* window)
@@ -298,18 +308,25 @@ index 1db0811..b84b668 100644
 +    const uint64_t generation = jaySurfaceGeneration();
 +    if (generation == window->null.jaySurfaceGeneration)
 +        return;
-+    window->null.jaySurfaceGeneration = generation;
++    if (generation != window->null.jaySurfaceRetryGeneration)
++    {
++        window->null.jaySurfaceRetryGeneration = generation;
++        window->null.jaySurfaceRetries = 0;
++    }
 +
 +    ANativeWindow* next = jaySurfaceAcquire();
 +    if (!next)
 +    {
-+        // Keep the old EGL surface until a new one arrives; presenting is skipped meanwhile.
++        // Keep the old EGL surface until a new one arrives (that changes the generation); presenting is
++        // skipped meanwhile.
++        window->null.jaySurfaceGeneration = generation;
 +        window->null.jaySurfaceLost = GLFW_TRUE;
 +        return;
 +    }
 +    if (next == window->null.nativeWindow && !window->null.jaySurfaceLost)
 +    {
 +        // Same surface, only its size may have changed.
++        window->null.jaySurfaceGeneration = generation;
 +        jaySurfaceRelease(next);
 +        updateJaySurfaceSize(window);
 +        return;
@@ -334,6 +351,7 @@ index 1db0811..b84b668 100644
 +    {
 +        _glfwInputError(GLFW_PLATFORM_ERROR, "Android: could not attach the new game surface");
 +        window->null.jaySurfaceLost = GLFW_TRUE;
++        jaySurfaceFailed(window, generation);
 +        if (current)
 +            eglMakeCurrent(_glfw.egl.display, EGL_NO_SURFACE, EGL_NO_SURFACE,
 +                           window->context.egl.handle);
@@ -345,8 +363,10 @@ index 1db0811..b84b668 100644
 +    {
 +        _glfwInputError(GLFW_PLATFORM_ERROR, "Android: could not use the new game surface");
 +        window->null.jaySurfaceLost = GLFW_TRUE;
++        jaySurfaceFailed(window, generation);
 +        return;
 +    }
++    window->null.jaySurfaceGeneration = generation;
 +    window->null.jaySurfaceLost = GLFW_FALSE;
 +    updateJaySurfaceSize(window);
 +}

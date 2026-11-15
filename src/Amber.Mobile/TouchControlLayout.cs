@@ -94,13 +94,15 @@ public sealed class TouchControlProfile
         positioned = positioned with { Radius = Math.Clamp(positioned.Radius * Scale, 0.018, 0.15) };
         if (!custom && control.Action == TouchControlAction.Inventory && HotbarBounds is { } hotbar)
         {
-            // The square face starts where the hotbar ends and shares its centre line.
+            // The square face starts where the hotbar ends and shares its centre line, but never reaches past the
+            // bottom of the screen (a small GUI scale puts the hotbar's centre closer to the edge than the face is tall).
             var faceHalfWidth = positioned.Radius * TouchControlLayout.UtilityFaceScale *
                                 Math.Min(AspectRatio, 1) / AspectRatio;
+            var faceHalfHeight = positioned.Radius * TouchControlLayout.UtilityFaceScale * Math.Min(AspectRatio, 1);
             positioned = positioned with
             {
                 CenterX = hotbar.Right + faceHalfWidth,
-                CenterY = (hotbar.Top + hotbar.Bottom) / 2
+                CenterY = Math.Min((hotbar.Top + hotbar.Bottom) / 2, 1 - faceHalfHeight)
             };
         }
         return positioned;
