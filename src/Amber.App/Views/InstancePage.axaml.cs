@@ -179,12 +179,20 @@ public partial class InstancePage : UserControl
         base.OnAttachedToVisualTree(e);
         _top = TopLevel.GetTopLevel(this);
         _top?.AddHandler(KeyDownEvent, OnKeyDown, RoutingStrategies.Tunnel);
+        WireLogs();
     }
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
         _top?.RemoveHandler(KeyDownEvent, OnKeyDown);
         _top = null;
+        // The view model lives for the whole session and a new page is built on every visit: let go of this one.
+        if (_logsWired is { } vm)
+        {
+            vm.LogJumpRequested -= OnLogJump;
+            vm.UniversalLoaderCardRequested -= OnUniversalLoaderCard;
+        }
+        _logsWired = null;
         base.OnDetachedFromVisualTree(e);
     }
 

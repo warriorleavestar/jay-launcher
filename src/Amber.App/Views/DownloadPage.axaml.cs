@@ -23,6 +23,13 @@ public partial class DownloadPage : UserControl
     /// <summary>主题包可以重新排这一页的区块（docs/themes.md 的“页面布局”）。</summary>
     internal Amber.App.Services.ThemeLayoutHost ThemeLayout { get; }
 
+    /// <summary>Another language changes the chip widths without changing the toolbar's size.</summary>
+    private void OnLanguageChanged() => Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+    {
+        _toolbarStacked = null;
+        ApplyToolbar(VersionToolbar.Bounds.Width);
+    }, Avalonia.Threading.DispatcherPriority.Loaded);
+
     public DownloadPage()
     {
         InitializeComponent();
@@ -40,8 +47,15 @@ public partial class DownloadPage : UserControl
             (_items = vm.Items).CollectionChanged += OnItemsChanged;
             (_vm = vm).PropertyChanged += OnVmChanged;
         };
+        // The language is static: listen only while shown, and re-measure on return in case it changed meanwhile.
+        AttachedToVisualTree += (_, _) =>
+        {
+            Amber.Core.Localization.L.Changed += OnLanguageChanged;
+            OnLanguageChanged();
+        };
         DetachedFromVisualTree += (_, _) =>
         {
+            Amber.Core.Localization.L.Changed -= OnLanguageChanged;
             if (_items is not null) _items.CollectionChanged -= OnItemsChanged;
             if (_vm is not null) _vm.PropertyChanged -= OnVmChanged;
             _items = null;
@@ -53,12 +67,6 @@ public partial class DownloadPage : UserControl
             e.Handled = true;
         };
         VersionToolbar.SizeChanged += (_, e) => Avalonia.Threading.Dispatcher.UIThread.Post(() => ApplyToolbar(e.NewSize.Width));
-        // Another language changes the chip widths without changing the toolbar's size.
-        Amber.Core.Localization.L.Changed += () => Avalonia.Threading.Dispatcher.UIThread.Post(() =>
-        {
-            _toolbarStacked = null;
-            ApplyToolbar(VersionToolbar.Bounds.Width);
-        }, Avalonia.Threading.DispatcherPriority.Loaded);
         SizeChanged += (_, e) =>
         {
             var size = e.NewSize;

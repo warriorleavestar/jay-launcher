@@ -387,7 +387,7 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
             {
                 var matrix = await new LayoutCheck(window, main, Path.Combine(reportDir, "layout")).RunAsync(Log);
                 var clipped = matrix.Where(p => p.Kind == LayoutCheck.Kind.Clipped).ToList();
-                Check($"界面尺寸：{main.Pages.Count} 个页面 × {LayoutCheck.Sizes.Length} 种窗口大小 × 5 种语言没有被切掉的内容", clipped.Count == 0,
+                Check($"界面尺寸：{main.Pages.Count(p => p.HasView)} 个页面 × {LayoutCheck.Sizes.Length} 种窗口大小 × 5 种语言没有被切掉的内容", clipped.Count == 0,
                     string.Join("；", clipped.Take(12).Select(p => $"{p.Page}@{p.Size} {p.What}")));
                 Log("DONE");
                 window.Close();
@@ -415,7 +415,7 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
             // 先检查每个页面在各种窗口大小下有没有被切掉的东西（截图放在报告目录的 layout 文件夹）。
             var all = await new LayoutCheck(window, main, Path.Combine(reportDir, "layout")).RunAsync(Log);
             var layout = all.Where(p => p.Kind == LayoutCheck.Kind.Clipped).ToList();
-            Check($"界面尺寸：{main.Pages.Count} 个页面 × {LayoutCheck.Sizes.Length} 种窗口大小 × 5 种语言没有被切掉的内容", layout.Count == 0,
+            Check($"界面尺寸：{main.Pages.Count(p => p.HasView)} 个页面 × {LayoutCheck.Sizes.Length} 种窗口大小 × 5 种语言没有被切掉的内容", layout.Count == 0,
                 layout.Count == 0 ? "" : string.Join("；", layout.Take(5).Select(p => $"{p.Page}@{p.Size} {p.What}")));
             // 自适应问题（横向滚动、主要按钮要滚动、宽屏空白）是改版要逐页解决的，先记数，不算失败；详见 layout/layout.txt。
             Log($"自适应问题 {all.Count - layout.Count} 处（见 layout/layout.txt）");

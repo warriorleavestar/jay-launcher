@@ -9,7 +9,7 @@ namespace Amber.App;
 /// </summary>
 internal static class DevCrashGuard
 {
-    private static readonly string[] Switches = ["AMBER_SELFTEST", "AMBER_LAYOUTCHECK", "AMBER_SPIKE", "AMBER_SNAPSHOT_DIR", "AMBER_MEASURE", "AMBER_STARTUP_LOG"];
+    private static readonly string[] Switches = ["AMBER_SELFTEST", "AMBER_LAYOUTCHECK", "AMBER_SNAPSHOT_DIR", "AMBER_MEASURE", "AMBER_STARTUP_LOG"];
 
     private const uint SemFailCriticalErrors = 0x0001;
     private const uint SemNoGpFaultErrorBox = 0x0002;

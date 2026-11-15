@@ -86,7 +86,7 @@ internal static class StartupTrace
     /// 单独记启动耗时的时候窗口打开就关掉。和自检、截图、布局检查这些一起用时不关，
     /// 不然它们会在窗口刚打开时就被这里结束（看起来像是“启动两秒后无声退出”）。
     /// </summary>
-    public static bool CloseWhenOpened => Enabled && !new[] { "AMBER_SELFTEST", "AMBER_LAYOUTCHECK", "AMBER_SPIKE", "AMBER_SNAPSHOT_DIR", "AMBER_MEASURE" }
+    public static bool CloseWhenOpened => Enabled && !new[] { "AMBER_SELFTEST", "AMBER_LAYOUTCHECK", "AMBER_SNAPSHOT_DIR", "AMBER_MEASURE" }
         .Any(name => Environment.GetEnvironmentVariable(name) is { Length: > 0 });
 
     public static void Mark(string name)

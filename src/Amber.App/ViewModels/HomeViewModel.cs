@@ -1007,8 +1007,6 @@ public sealed partial class HomeViewModel : PageViewModel
         return run;
     }
 
-    internal static LaunchSession SessionForTest(object run) => ((GameRun)run).Session;
-
     /// <summary>Self-check: put a session for an instance into a given state without a game process.</summary>
     internal LaunchSession SetSessionForTest(string id, LaunchSession session)
     {

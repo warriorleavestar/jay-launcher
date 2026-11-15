@@ -58,9 +58,6 @@ public sealed partial class DownloadViewModel
         if (Source == NewInstanceSource.Import && !_scanned) _ = ScanOtherLaunchersAsync();
     }
 
-    /// <summary>Opens the panel on a source (the library's "＋ New instance ▾" menu, the empty states).</summary>
-    public void OpenSource(NewInstanceSource source) => SourceIndex = (int)source;
-
     // ---- Modpack file ----
 
     /// <summary>Starts an import (MainViewModel: the import runs on the Discover page, which handles files that need a manual download).</summary>

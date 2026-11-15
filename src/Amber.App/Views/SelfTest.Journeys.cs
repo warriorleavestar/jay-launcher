@@ -516,9 +516,6 @@ internal sealed partial class SelfTest
         j.Steps.Add("page → " + key);
     }
 
-    /// <summary>The control can be clicked: visible and enabled once scrolled into view, its middle inside the window.</summary>
-    private async Task<bool> ReachableAsync(Control? c) => await UnreachableAsync(c) is null;
-
     /// <summary>Why the control can't be clicked, or null when it can.</summary>
     private async Task<string?> UnreachableAsync(Control? c)
     {
@@ -625,30 +622,6 @@ internal sealed partial class SelfTest
         if (await FindAsync<AccountsPage>(p => p.IsEffectivelyVisible) is { } page && main.CurrentPage is AccountsViewModel) return page;
         _journey!.Problems.Add("the Me page didn't open");
         return null;
-    }
-
-    /// <summary>Settings (sidebar footer) → a group: a list item when the list shows, else the drop-down.</summary>
-    private async Task<bool> OpenSettingsGroupAsync(string group)
-    {
-        _journey!.NextIsNavigation = true;
-        if (!await TapAsync(window.SettingsButton, "settings")) return false;
-        var page = await PageAsync<SettingsPage>();
-        if (page is null) return false;
-        await WaitAsync(() => Dispatcher.UIThread.Invoke(() => page.GroupList.IsEffectivelyVisible || page.GroupIndex.IsEffectivelyVisible || page.GroupPicker.IsEffectivelyVisible || page.GroupBackButton.IsEffectivelyVisible), 3);
-        // Compact settings reopen on the last group: back to the list first.
-        if (Dispatcher.UIThread.Invoke(() => page.GroupBackButton.IsEffectivelyVisible)) await TapAsync(page.GroupBackButton, "back to the groups");
-        var index = SettingsCatalog.Groups.Select((g, i) => (g, i)).First(p => p.g.Id == group).i;
-        if (Dispatcher.UIThread.Invoke(() => page.GroupList.IsEffectivelyVisible)) await TapItemAsync(page.GroupList, index, "group " + group);
-        else if (Dispatcher.UIThread.Invoke(() => page.GroupIndex.IsEffectivelyVisible))
-        {
-            // The compact index opens a group on tap (like a link), not on selection.
-            await TapItemAsync(page.GroupIndex, index, "group " + group);
-            Dispatcher.UIThread.Invoke(() => { if (page.GroupIndex.SelectedItem is { } item) Page<SettingsViewModel>().OpenGroupCommand.Execute(item); });
-            await Task.Delay(300);
-        }
-        else await PickAsync(page.GroupPicker, index, "group " + group);
-        await Task.Delay(300);
-        return true;
     }
 
     private async Task DropFileAsync(string path, string label)

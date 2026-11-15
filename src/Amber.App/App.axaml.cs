@@ -57,6 +57,8 @@ public sealed class App : Application
             StartupTrace.Mark("window");
             desktop.Exit += (_, e) =>
             {
+                // A clean exit (even within the 3 s above) proves the theme did not crash Jay; a crash never gets here.
+                ThemeService.StartupSucceeded();
                 Amber.Core.Diagnostics.ExitTrail.CleanExit($"app exit, code {e.ApplicationExitCode}");
                 // 开着的服务器先存盘停下，再清理别的。
                 ViewModels.HostServerViewModel.StopRunningServer();

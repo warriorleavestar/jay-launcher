@@ -66,9 +66,6 @@ public sealed class TermHint : Button
         set => SetValue(TermProperty, value);
     }
 
-    /// <summary>The sentence shown for this term (for the self-check).</summary>
-    public string HintText => Terms.Get(Term) is { } t ? L.T(t.HintKey) : "";
-
     /// <summary>Opens the click card, as a click would (for the self-check).</summary>
     public void OpenCard() => _flyout.ShowAt(this);
 

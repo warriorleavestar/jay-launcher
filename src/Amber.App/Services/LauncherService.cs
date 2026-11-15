@@ -190,6 +190,7 @@ public sealed class LauncherService : IDisposable
         try { Settings.Save(); }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { SettingsSaveFailed?.Invoke(e); }
         Reload();
+        SettingsChangedElsewhere?.Invoke();
     }
 
     public void Reload()
@@ -268,7 +269,7 @@ public sealed class LauncherService : IDisposable
 
     private InstanceMeta EnsureMeta(string id)
     {
-        Settings.Instances ??= [];
+        Settings.Instances ??= new(StringComparer.OrdinalIgnoreCase);
         if (!Settings.Instances.TryGetValue(id, out var meta)) Settings.Instances[id] = meta = new InstanceMeta();
         return meta;
     }

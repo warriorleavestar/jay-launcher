@@ -130,12 +130,6 @@ public sealed partial class OnboardingViewModel : ObservableObject
         Detected = found.FirstOrDefault();
     }
 
-    [RelayCommand]
-    private void UseDetected()
-    {
-        if (Detected is { } d) UseDirectory(d.Path);
-    }
-
     /// <summary>换到已有的游戏目录（有实例的话就不用再装了）。</summary>
     public void UseDirectory(string path)
     {
@@ -513,9 +507,6 @@ public sealed partial class OnboardingViewModel : ObservableObject
 
     /// <summary>让页面把焦点放到这一步（启动按钮在缺东西时点了）。</summary>
     public void RequestFocus(OnboardingStep step) => FocusRequested?.Invoke(step);
-
-    /// <summary>自检用：当作下载进度已经停了一阵。</summary>
-    internal void SimulateSlow() => _lastProgress = DateTime.UtcNow - SlowAfter - TimeSpan.FromSeconds(1);
 
     private sealed class LoaderUnavailableException(LoaderKind kind, string mcVersion) : Exception
     {

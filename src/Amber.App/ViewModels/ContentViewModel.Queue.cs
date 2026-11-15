@@ -114,12 +114,6 @@ public sealed partial class ContentViewModel
     }
 
     [RelayCommand]
-    private void RemoveQueued(QueuedContent? item)
-    {
-        if (item is not null) Queue.Remove(item.File.Source, item.File.ProjectId);
-    }
-
-    [RelayCommand]
     private void ClearQueue() => Queue.Clear();
 
     private bool CanInstallQueue() => Queue.Count > 0 && !IsBusy;

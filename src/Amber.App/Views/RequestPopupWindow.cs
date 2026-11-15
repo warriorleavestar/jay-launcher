@@ -33,6 +33,7 @@ internal sealed class RequestPopupWindow : Window
 
     public RequestPopupWindow(RequestCenter center, RequestHandle handle)
     {
+        Amber.App.Services.ThemeService.LockToDefault(this);
         _center = center;
         Handle = handle;
         _item = new RequestItem(center, handle);
@@ -80,9 +81,12 @@ internal sealed class RequestPopupWindow : Window
         Opened += (_, _) =>
         {
             _timer.Start();
-            PlaceInCorner();
             if (Screens.ScreenFromWindow(this) is { } screen) scroll.MaxHeight = Math.Max(120, screen.WorkingArea.Height / screen.Scaling - 200);
+            HasOpened = true;
+            RequestPopups.Relayout();
         };
+        // Sized to its content: a taller or shorter popup moves the ones stacked above it.
+        SizeChanged += (_, _) => { if (HasOpened) RequestPopups.Relayout(); };
         Activated += (_, _) => DefaultButton.Focus();
         Closing += (_, _) =>
         {
@@ -115,16 +119,8 @@ internal sealed class RequestPopupWindow : Window
         Close();
     }
 
-    /// <summary>Bottom-right corner of the screen Jay is on.</summary>
-    private void PlaceInCorner()
-    {
-        var screen = Screens.ScreenFromWindow(this) ?? Screens.Primary;
-        if (screen is null) return;
-        var area = screen.WorkingArea;
-        var size = PixelSize.FromSize(Bounds.Size, screen.Scaling);
-        var stack = RequestPopups.IndexOf(this);
-        Position = new PixelPoint(area.Right - size.Width - 16, Math.Max(area.Y, area.Bottom - (size.Height + 16) * (stack + 1)));
-    }
+    /// <summary>Shown and laid out once: from then on it takes part in stacking.</summary>
+    internal bool HasOpened { get; private set; }
 }
 
 /// <summary>Opens a popup for each safety request posted while Jay's window is not active; closes it when answered anywhere.</summary>
@@ -158,7 +154,25 @@ internal sealed class RequestPopups
 
     public static IReadOnlyList<RequestPopupWindow> Open => OpenWindows;
 
-    internal static int IndexOf(RequestPopupWindow window) => Math.Max(0, OpenWindows.IndexOf(window));
+    /// <summary>
+    /// Stacks the open popups up from the bottom-right corner of their screen, oldest at the bottom, each one above the
+    /// actual height of the ones below it. Runs again when one opens, closes or changes height, so none overlap.
+    /// </summary>
+    internal static void Relayout()
+    {
+        var used = new Dictionary<PixelRect, int>();
+        foreach (var w in OpenWindows)
+        {
+            if (!w.HasOpened) continue;
+            var screen = w.Screens.ScreenFromWindow(w) ?? w.Screens.Primary;
+            if (screen is null) continue;
+            var area = screen.WorkingArea;
+            var size = PixelSize.FromSize(w.Bounds.Size, screen.Scaling);
+            var below = used.GetValueOrDefault(area);
+            w.Position = new PixelPoint(area.Right - size.Width - 16, Math.Max(area.Y, area.Bottom - below - size.Height - 16));
+            used[area] = below + size.Height + 16;
+        }
+    }
 
     /// <summary>Show the popup for one request (also used by the self-check).</summary>
     internal RequestPopupWindow Show(RequestHandle handle)
@@ -166,7 +180,11 @@ internal sealed class RequestPopups
         if (OpenWindows.FirstOrDefault(w => w.Handle == handle) is { } existing) return existing;
         var window = new RequestPopupWindow(_center, handle);
         OpenWindows.Add(window);
-        window.Closed += (_, _) => OpenWindows.Remove(window);
+        window.Closed += (_, _) =>
+        {
+            OpenWindows.Remove(window);
+            Relayout();
+        };
         window.Show();
         return window;
     }
