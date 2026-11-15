@@ -96,7 +96,13 @@ public sealed partial class MultiplayerViewModel
             {
                 LongInvites.SeedInto(lobby.Book, _credentials?.Tunnel ?? TunnelSettings.Default);
                 accepted = lobby.Book.Pending.Any(p => p.Standing && p.Invite.Token.AsSpan().SequenceEqual(invite.Token));
-                if (accepted) await UpdateLobbyQuietlyAsync(lobby);
+                // The knock lobby has to (re)start for it: if it can't, the invite is kept for the next room and the
+                // lobby's error stays on screen instead of "created".
+                if (accepted && !await UpdateLobbyQuietlyAsync(lobby))
+                {
+                    ShowLongInvite(invite, worksNow: false);
+                    return;
+                }
             }
         }
         ShowLongInvite(invite, worksNow: accepted);
@@ -136,15 +142,21 @@ public sealed partial class MultiplayerViewModel
         if (LongInvites.SeedInto(lobby.Book, tunnel) > 0) _ = UpdateLobbyQuietlyAsync(lobby);
     }
 
-    private async Task UpdateLobbyQuietlyAsync(HostLobby lobby)
+    /// <summary>Tests: stands in for starting the knock lobby (to make it fail).</summary>
+    internal Func<Task>? LobbyUpdateForTest { get; set; }
+
+    /// <summary>False when the lobby couldn't start (the error is on screen).</summary>
+    private async Task<bool> UpdateLobbyQuietlyAsync(HostLobby lobby)
     {
         try
         {
-            await lobby.UpdateAsync();
+            await (LobbyUpdateForTest?.Invoke() ?? lobby.UpdateAsync());
+            return true;
         }
         catch (Exception e) when (e is System.Net.Sockets.SocketException or IOException or InvalidOperationException or System.ComponentModel.Win32Exception)
         {
             SetStatus(StatusMessage.Failure("multiplayer.invite.lobby_failed", e, KnockProtocol.Port, ErrorText.Of(e)));
+            return false;
         }
     }
 }
