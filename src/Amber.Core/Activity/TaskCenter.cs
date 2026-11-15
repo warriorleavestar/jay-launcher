@@ -148,11 +148,6 @@ public sealed class TaskCenter(Func<DateTimeOffset>? clock = null)
         get { lock (Gate) return _all.Where(t => t.IsRunning).ToList(); }
     }
 
-    public bool HasActive
-    {
-        get { lock (Gate) return _all.Any(t => t.IsRunning); }
-    }
-
     /// <summary>所有在跑的、知道进度的任务的平均进度（顶栏活动按钮外圈）。没有在跑的是 null。</summary>
     public double? OverallProgress
     {

@@ -208,7 +208,7 @@ public sealed class JayServerList
         public string ProtectedAccessKey { get; set; } = "";
         public string Username { get; set; } = "";
         public DateTimeOffset Added { get; set; }
-        /// <summary>隐私等级（basic / plus），网关每次进服都会回最新的。</summary>
+        /// <summary>隐私等级（basic / plus / plusplus），网关每次进服都会回最新的。</summary>
         public string Privacy { get; set; } = "basic";
         /// <summary>网关给的直连地址（隐私+ 下没有）。</summary>
         public string? Direct { get; set; }
