@@ -202,6 +202,8 @@ public static class DirectGatherer
 }
 
 /// <summary>一条打通的连接。</summary>
+internal readonly record struct PendingPing(long SentAt, byte[] Nonce);
+
 public sealed class DirectPeer
 {
     public required IPEndPoint Remote { get; init; }
@@ -209,7 +211,22 @@ public sealed class DirectPeer
     public long ConnectedMs { get; internal set; }
     internal Socket? Local { get; set; }
     internal IPEndPoint? LocalClient { get; set; }
-    internal readonly ConcurrentDictionary<uint, long> PendingPings = new();
+    /// <summary>Pings still waiting for their answer, by sequence number: when each was sent and its random part, kept
+    /// and removed together so neither outlives the other.</summary>
+    internal readonly ConcurrentDictionary<uint, PendingPing> PendingPings = new();
+    /// <summary>
+    /// This address answered a ping carrying a fresh random value sent to it on this bridge, so traffic really goes both
+    /// ways with whoever holds the bridge key there. A replayed probe or probe answer from a forged source address never
+    /// gets that far. Only such peers may get an exception from the member exit's traffic gate.
+    /// </summary>
+    public bool Verified => Volatile.Read(ref _verified);
+    internal bool _verified;
+    /// <summary>
+    /// This peer sends the older, shorter ping (no side), so it runs a Jay from before pings carried sides and its
+    /// answers can never verify the address. Pings are sealed with the bridge key, so only a key holder can set this.
+    /// </summary>
+    public bool Outdated => Volatile.Read(ref _outdated);
+    internal bool _outdated;
     /// <summary>房主：这条桥的数据转发到本机哪个 EasyTier（批准前是大厅，批准后是房间）。</summary>
     internal int TargetPort;
     /// <summary>Host: cached loopback endpoint for <see cref="TargetPort"/>, so forwarding doesn't allocate one per packet.</summary>
@@ -284,6 +301,28 @@ public sealed class DirectBridge : IAsyncDisposable
     /// 所以没有待用邀请时不再接新的桥——拿着旧码的人连大厅都到不了；已经连着的、证明过身份的照常。
     /// </summary>
     public Func<bool>? AcceptingNewPeers { get; set; }
+
+    /// <summary>
+    /// While set, IPv6 peers this bridge doesn't already have are taken only from these addresses (null: no limit).
+    /// A member exit sets it: its traffic gate lets IPv6 through only to the addresses fixed when the exit started, so a
+    /// peer outside them would connect and then be cut off. Turned away here instead, it joins through the room's other
+    /// paths like any player who can't connect directly. IPv4 peers are not affected.
+    /// </summary>
+    public IReadOnlySet<IPAddress>? Ipv6Allowed
+    {
+        get => Volatile.Read(ref _ipv6Allowed);
+        set => Volatile.Write(ref _ipv6Allowed, value);
+    }
+    private IReadOnlySet<IPAddress>? _ipv6Allowed;
+    private long _ipv6HeldLogged;
+
+    /// <summary>Whether <see cref="Ipv6Allowed"/> turns a new peer from <paramref name="from"/> away.</summary>
+    internal static bool Ipv6Held(IReadOnlySet<IPAddress>? allowed, IPAddress from)
+    {
+        if (allowed is null) return false;
+        var address = from.IsIPv4MappedToIPv6 ? from.MapToIPv4() : from;
+        return address.AddressFamily == AddressFamily.InterNetworkV6 && !allowed.Contains(address);
+    }
 
     /// <summary>喷洒时每轮往多少个端口发（对方对称 NAT 时用）。</summary>
     public int SprayPorts { get; set; } = 256;
@@ -606,17 +645,39 @@ public sealed class DirectBridge : IAsyncDisposable
                     && _punches.TryGetValue(BinaryPrimitives.ReadInt32BigEndian(payload.AsSpan(1)), out var round)
                     && _peers.TryGetValue(from, out var acknowledged)) round.TrySetResult(acknowledged);
                 break;
-            case Ping when _peers.TryGetValue(from, out var p1):
+            // A ping names the side that sent it. Our own pings sent back to us (a reflection by someone on the path who
+            // doesn't hold the key) are never answered, so they can't be turned into an answer for ourselves.
+            // Older versions send a shorter ping (no side) and expect it echoed: they still get their round-trip times.
+            // Such an answer is shorter than ours and can never verify an address, and none of our own pings is that short.
+            case Ping when _peers.TryGetValue(from, out var p1) && (payload.Length < PingLength || payload[PingLength - 1] != OwnRole):
                 p1.LastSeen = DateTime.UtcNow;
-                await SendRawAsync(Seal(Pong, payload), from, _cts.Token);
+                if (payload.Length < PingLength)
+                {
+                    Volatile.Write(ref p1._outdated, true);
+                    await SendRawAsync(Seal(Pong, payload), from, _cts.Token);
+                    break;
+                }
+                var pong = new byte[PingLength + 1];
+                payload.AsSpan(0, PingLength).CopyTo(pong);
+                pong[PingLength] = OwnRole;
+                await SendRawAsync(Seal(Pong, pong), from, _cts.Token);
                 break;
             case Pong when _peers.TryGetValue(from, out var p2) && payload.Length >= 4:
+                // An answer must be to our ping (our side in the echo) and come from the other side; anything else,
+                // such as one of our own answers sent back to us, is ignored whole.
+                if (payload.Length >= PingLength && payload[PingLength - 1] != OwnRole) break;
+                if (payload.Length > PingLength && payload[PingLength] == OwnRole) break;
                 p2.LastSeen = DateTime.UtcNow;
                 var seq = BinaryPrimitives.ReadUInt32BigEndian(payload);
-                if (p2.PendingPings.TryRemove(seq, out var sentAt))
+                if (p2.PendingPings.TryRemove(seq, out var pending))
                 {
+                    // The answer to this address's own fresh ping, from this address and from the other side: the path
+                    // works both ways.
+                    if (payload.Length == PingLength + 1
+                        && CryptographicOperations.FixedTimeEquals(pending.Nonce, payload.AsSpan(4, PingNonceLength)))
+                        Volatile.Write(ref p2._verified, true);
                     Interlocked.Increment(ref p2.PongsReceived);
-                    var rtt = _clock.Elapsed.TotalMilliseconds - sentAt / 1000.0;
+                    var rtt = _clock.Elapsed.TotalMilliseconds - pending.SentAt / 1000.0;
                     p2.RttMs = p2.RttMs is { } old ? old * 0.7 + rtt * 0.3 : rtt;
                 }
                 break;
@@ -626,6 +687,14 @@ public sealed class DirectBridge : IAsyncDisposable
                 break;
         }
     }
+
+    internal const int PingNonceLength = 16;
+
+    /// <summary>A ping: sequence number, random value, and the side that sent it (1 = host, 0 = guest). Its answer
+    /// echoes the ping and adds the answering side.</summary>
+    internal const int PingLength = 4 + PingNonceLength + 1;
+
+    private byte OwnRole => _isHost ? (byte)1 : (byte)0;
 
     /// <summary>房主最多同时接这么多个加入方（每个一个本机套接字和一个转发循环）。</summary>
     public const int MaxHostPeers = 32;
@@ -659,6 +728,11 @@ public sealed class DirectBridge : IAsyncDisposable
         }
         if (!_isHost && !_peers.IsEmpty) return false;
         if (_blocked.Contains(from)) return false;
+        if (Ipv6Held(Ipv6Allowed, from.Address))
+        {
+            if (Transport.TunnelServer.OncePerMinute(ref _ipv6HeldLogged)) _log(L.F("core.mp.direct.exit_holds_ipv6", from));
+            return false;
+        }
         var path = Classify(from);
         var allowed = _allowedPaths;
         if (!allowed.Contains(path) && !(path == PathKind.Punch && allowed.Contains(PathKind.PunchSpray)))
@@ -849,12 +923,15 @@ public sealed class DirectBridge : IAsyncDisposable
             {
                 seq++;
                 // 超过 5 秒没回的算丢包。
-                foreach (var (s, at) in peer.PendingPings)
-                    if (_clock.Elapsed.TotalMilliseconds - at / 1000.0 > 5000) peer.PendingPings.TryRemove(s, out _);
-                peer.PendingPings[seq] = (long)(_clock.Elapsed.TotalMilliseconds * 1000);
+                foreach (var (s, ping) in peer.PendingPings)
+                    if (_clock.Elapsed.TotalMilliseconds - ping.SentAt / 1000.0 > 5000) peer.PendingPings.TryRemove(s, out _);
                 Interlocked.Increment(ref peer.PingsSent);
-                var payload = new byte[4];
+                // Sequence number, a random value the answer must echo, and our side.
+                var payload = new byte[PingLength];
                 BinaryPrimitives.WriteUInt32BigEndian(payload, seq);
+                RandomNumberGenerator.Fill(payload.AsSpan(4, PingNonceLength));
+                payload[PingLength - 1] = OwnRole;
+                peer.PendingPings[seq] = new PendingPing((long)(_clock.Elapsed.TotalMilliseconds * 1000), payload[4..(4 + PingNonceLength)]);
                 await SendRawAsync(Seal(Ping, payload), peer.Remote, _cts.Token);
                 if (DateTime.UtcNow - peer.LastSeen > ReprobeAfter)
                     await SendRawAsync(Seal(Probe, BuildProbePayload(_probeRound)), peer.Remote, _cts.Token);

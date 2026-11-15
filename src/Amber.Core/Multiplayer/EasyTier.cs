@@ -425,10 +425,8 @@ public sealed record EasyTierOptions(
     public int? LocalExitPort { get; init; }
     /// <summary>直连房间的房主：对加入方提供测速端口。</summary>
     public bool ServesSpeedTest { get; init; }
-    /// <summary>直连桥实际使用或正在探测的 IPv4 承载地址；消费出口时须先保护它们的原路由。</summary>
+    /// <summary>直连桥实际使用或正在探测的承载地址（IPv4 和 IPv6）；消费出口时须先保护它们的原路由。</summary>
     public IReadOnlyList<string> DirectUnderlayAddresses { get; init; } = [];
-    /// <summary>当前有 IPv6 直连承载；现有全局出口门禁只支持明确识别的 IPv4 承载。</summary>
-    public bool DirectUnderlayUsesIpv6 { get; init; }
 
     /// <summary>
     /// The IPv4 addresses a relay named by a domain resolved to when the exit was chosen (see <see cref="ExitRelays"/>);
