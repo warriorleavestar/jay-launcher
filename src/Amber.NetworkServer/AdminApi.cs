@@ -205,6 +205,15 @@ public sealed class AdminApi : IAsyncDisposable
                         ["ok"] = true,
                         ["enabled"] = _server.Volunteers is not null,
                         ["nodes"] = new JsonArray([.. (_server.Volunteers?.Listed() ?? []).Select(n => (JsonNode)n)]),
+                        // Who runs each node, for operator bans; null when the volunteer didn't sign with a Jay account.
+                        // "disputed": another Jay account claimed the address with a signature ("claimedBy": those seen most
+                        // recently); "unsignedAttempts": unsigned registrations turned away while it was signed.
+                        ["operators"] = new JsonArray([.. (_server.Volunteers?.Operators() ?? []).Select(n => (JsonNode)new JsonObject
+                        {
+                            ["url"] = n.Url, ["operator"] = n.Operator, ["disputed"] = n.Disputed, ["claimedBy"] = n.ClaimedBy is { } claims ? new JsonArray([.. claims.Select(c => (JsonNode)c)]) : null,
+                            ["unsignedAttempts"] = n.UnsignedAttempts, ["lastUnsigned"] = n.LastUnsigned?.ToUnixTimeSeconds(),
+                            ["claims"] = n.Claims, ["claimants"] = n.Claimants,
+                        })]),
                     });
                 case ("GET", "/bans"):
                     return (200, new JsonObject
@@ -230,6 +239,19 @@ public sealed class AdminApi : IAsyncDisposable
                         _log($"admin: banned the host of room {value}, removed {hit.Removed} room(s)");
                         return (200, new JsonObject { ["ok"] = true, ["removed"] = hit.Removed, ["host"] = hit.Host, ["account"] = hit.Account });
                     }
+                    if (kind == "operator")
+                    {
+                        var result = _server.BanOperator(value, reason, duration);
+                        _log($"admin: banned operator {value}, removed {result.Removed} node(s)");
+                        return (200, new JsonObject
+                        {
+                            ["ok"] = true, ["removed"] = result.Removed,
+                            // Banned with the operator, so a wrongly banned address can be seen (and unbanned) at once.
+                            ["bannedNodes"] = new JsonArray([.. result.BannedNodes.Select(u => (JsonNode)JsonValue.Create(u))]),
+                            // Dropped but not banned: they may be someone else's (or the operator's second account's).
+                            ["disputedNotBanned"] = new JsonArray([.. result.DisputedNotBanned.Select(u => (JsonNode)JsonValue.Create(u))]),
+                        });
+                    }
                     var removed = _server.Ban(kind, value, reason, duration);
                     _log($"admin: banned {kind} {value}, removed {removed} room(s)");
                     return (200, new JsonObject { ["ok"] = true, ["removed"] = removed });
@@ -237,8 +259,8 @@ public sealed class AdminApi : IAsyncDisposable
                 case ("POST", "/unban"):
                 {
                     var o = Body();
-                    if (_server.Bans is not { } bans) return (400, Fail("no_bans"));
-                    var ok = bans.Remove(o["kind"]?.GetValue<string>() ?? "", o["value"]?.GetValue<string>() ?? "");
+                    if (_server.Bans is null) return (400, Fail("no_bans"));
+                    var ok = _server.Unban(o["kind"]?.GetValue<string>() ?? "", o["value"]?.GetValue<string>() ?? "");
                     return (ok ? 200 : 404, ok ? new JsonObject { ["ok"] = true } : Fail("not_found"));
                 }
                 case ("POST", "/remove"):

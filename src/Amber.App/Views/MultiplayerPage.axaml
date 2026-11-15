@@ -838,7 +838,7 @@
                     <TextBlock Text="{l:T multiplayer.room.who_find}" FontWeight="SemiBold" />
                     <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.room.who_find_body}" />
                     <Button x:Name="PublishRoomButton" Classes="ghost small" Content="{l:T multiplayer.room.publish}" Command="{Binding ShowTabCommand}" CommandParameter="public"
-                            IsVisible="{Binding ShowPublicNetworks}" HorizontalAlignment="Left" Padding="0,2" />
+                            IsVisible="{Binding ShowPublishRoom}" HorizontalAlignment="Left" Padding="0,2" />
                     <TextBlock Text="{l:T multiplayer.room.wait}" FontWeight="SemiBold" />
                     <ComboBox x:Name="RoomKnockWaitBox" ItemsSource="{Binding KnockWaitChoices}" SelectedItem="{Binding SelectedRoomKnockWait}" MinWidth="160">
                       <ComboBox.ItemTemplate>
@@ -907,16 +907,43 @@
                 <Border x:Name="InviteCard" Classes="card" Margin="0" IsVisible="{Binding IsHosting}">
                   <StackPanel Spacing="8">
                     <TextBlock Classes="h2" Text="{l:T multiplayer.room.invite}" Margin="0" />
-                    <!-- Room opened before the game: what it is waiting for, a port box for other games, and [Find]. -->
+                    <!-- Room opened before the game: what it waits for or uses, then the games in the room. Worlds this
+                         computer opens to LAN are listed as they are broadcast and drop off when closed; a click points
+                         the room at one, the one in use is marked. A typed port, for games that don't broadcast, sits
+                         under "Other port…". -->
                     <Border x:Name="GameLinkPanel" Background="{DynamicResource AccentTint}" CornerRadius="6" Padding="10" IsVisible="{Binding HasGameRelay}">
                       <StackPanel Spacing="6">
                         <TextBlock x:Name="GameLinkText" Text="{Binding GameLinkText}" TextWrapping="Wrap" />
-                        <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding IsWaitingForGame}">
-                          <TextBox x:Name="GameLinkPortBox" Text="{Binding ManualPort}" PlaceholderText="{l:T multiplayer.lan.port_placeholder}" />
-                          <Button x:Name="GameLinkFindButton" Grid.Column="1" Content="{l:T common.find}" Command="{Binding FindGameForRoomCommand}" Margin="6,0,0,0" ToolTip.Tip="{l:T multiplayer.lan.scan_tooltip}" />
-                        </Grid>
+                        <TextBlock Text="{l:T multiplayer.roomgames.title}" FontWeight="SemiBold" Margin="0,4,0,0" />
+                        <TextBlock x:Name="RoomGamesEmpty" Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.roomgames.empty}" IsVisible="{Binding !HasRoomGames}" />
+                        <ItemsControl x:Name="RoomGameList" ItemsSource="{Binding RoomGames}" IsVisible="{Binding HasRoomGames}">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="vm:RoomGameItem">
+                              <Grid ColumnDefinitions="*,Auto" Margin="0,2">
+                                <StackPanel Spacing="0" VerticalAlignment="Center">
+                                  <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                  <TextBlock Classes="hint" FontSize="12" Text="{Binding PortText}" />
+                                </StackPanel>
+                                <Border Grid.Column="1" Classes="tag accent" VerticalAlignment="Center" Margin="8,0,0,0" IsVisible="{Binding IsLinked}">
+                                  <TextBlock Text="{l:T multiplayer.roomgames.in_use}" />
+                                </Border>
+                                <Button Grid.Column="1" Classes="small" VerticalAlignment="Center" Margin="8,0,0,0" IsVisible="{Binding CanUse}"
+                                        Content="{l:T multiplayer.roomgames.use}"
+                                        Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).UseRoomGameItemCommand}" CommandParameter="{Binding}" />
+                              </Grid>
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <Button x:Name="RoomOtherPortButton" Classes="ghost small" Content="{l:T multiplayer.roomgames.other_port}" Command="{Binding ToggleRoomOtherPortCommand}" HorizontalAlignment="Left" Padding="0,2" />
+                        <StackPanel x:Name="RoomOtherPort" Spacing="4" IsVisible="{Binding RoomOtherPortOpen}">
+                          <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.roomgames.other_hint}" />
+                          <TextBox x:Name="GameLinkPortBox" Text="{Binding ManualPort}" PlaceholderText="{l:T multiplayer.lan.port_placeholder}" MaxWidth="220" HorizontalAlignment="Left" MinWidth="160" />
+                        </StackPanel>
                       </StackPanel>
                     </Border>
+
+                    <!-- "No server" room: no plain invite; guests come in with the sealed code in the direct room card. -->
+                    <TextBlock x:Name="DirectInviteHint" Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.direct.use_sealed}" IsVisible="{Binding IsDirectHost}" />
 
                     <!-- The invite itself: a card that says what it is, not a long string. The code shows only on [Show]. -->
                     <Border x:Name="InviteCodeCard" Classes="code-card" IsVisible="{Binding HasInvite}">
@@ -960,48 +987,51 @@
                       </ItemsControl>
                     </StackPanel>
 
-                    <!-- A new invite: how long it lasts, and once or without a limit. -->
-                    <Grid x:Name="InviteChoices" ColumnDefinitions="*,8,*" RowDefinitions="Auto,Auto">
-                      <TextBlock Classes="caption" Text="{l:T multiplayer.invite.expiry}" />
-                      <TextBlock Grid.Column="2" Classes="caption" Text="{l:T multiplayer.invite.uses}" />
-                      <ComboBox x:Name="InviteLifeBox" Grid.Row="1" ItemsSource="{Binding InviteLifeChoices}" SelectedItem="{Binding SelectedInviteLife}" HorizontalAlignment="Stretch"
-                                AutomationProperties.Name="{l:T multiplayer.invite.expiry}">
-                        <ComboBox.ItemTemplate>
-                          <DataTemplate DataType="vm:InviteLifeChoice"><TextBlock Text="{Binding Label}" TextTrimming="CharacterEllipsis" /></DataTemplate>
-                        </ComboBox.ItemTemplate>
-                      </ComboBox>
-                      <ComboBox x:Name="InviteUseBox" Grid.Row="1" Grid.Column="2" ItemsSource="{Binding InviteUseChoices}" SelectedItem="{Binding SelectedInviteUse}" HorizontalAlignment="Stretch"
-                                IsEnabled="{Binding InviteUsesEnabled}" AutomationProperties.Name="{l:T multiplayer.invite.uses}">
-                        <ComboBox.ItemTemplate>
-                          <DataTemplate DataType="vm:InviteUseChoice"><TextBlock Text="{Binding Label}" TextTrimming="CharacterEllipsis" /></DataTemplate>
-                        </ComboBox.ItemTemplate>
-                      </ComboBox>
-                    </Grid>
-                    <TextBlock x:Name="InviteMonthNote" Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.invite.month_note}" IsVisible="{Binding ShowInviteMonthNote}" />
-                    <TextBox x:Name="LongInviteLabelBox" Text="{Binding LongInviteLabel}" PlaceholderText="{l:T multiplayer.longinvite.label_placeholder}" MaxLength="40"
-                             IsVisible="{Binding ShowInviteMonthNote}" />
-                    <!-- Only an invite for one person can skip my yes; an unlimited one says so where the box would be. -->
-                    <CheckBox x:Name="InviteAutoBox" IsChecked="{Binding InviteAutoApprove}" IsVisible="{Binding CanInviteAutoApprove}">
-                      <TextBlock Text="{l:T multiplayer.invite.auto_approve}" TextWrapping="Wrap" />
-                    </CheckBox>
-                    <TextBlock x:Name="InviteAlwaysAsksNote" Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.invite.always_asks}" IsVisible="{Binding ShowInviteAlwaysAsksNote}" />
-                    <Button x:Name="CreateFirstInviteButton" Content="{l:T multiplayer.invite.create}" Command="{Binding CreateInviteCommand}" HorizontalAlignment="Left"
-                            Classes.primary="{Binding !HasInvite}" />
+                    <!-- A new invite (none in a "No server" room, whose guests use the sealed code). -->
+                    <StackPanel x:Name="InviteNewPanel" Spacing="8" IsVisible="{Binding !IsDirect}">
+                      <!-- A new invite: how long it lasts, and once or without a limit. -->
+                      <Grid x:Name="InviteChoices" ColumnDefinitions="*,8,*" RowDefinitions="Auto,Auto">
+                        <TextBlock Classes="caption" Text="{l:T multiplayer.invite.expiry}" />
+                        <TextBlock Grid.Column="2" Classes="caption" Text="{l:T multiplayer.invite.uses}" />
+                        <ComboBox x:Name="InviteLifeBox" Grid.Row="1" ItemsSource="{Binding InviteLifeChoices}" SelectedItem="{Binding SelectedInviteLife}" HorizontalAlignment="Stretch"
+                                  AutomationProperties.Name="{l:T multiplayer.invite.expiry}">
+                          <ComboBox.ItemTemplate>
+                            <DataTemplate DataType="vm:InviteLifeChoice"><TextBlock Text="{Binding Label}" TextTrimming="CharacterEllipsis" /></DataTemplate>
+                          </ComboBox.ItemTemplate>
+                        </ComboBox>
+                        <ComboBox x:Name="InviteUseBox" Grid.Row="1" Grid.Column="2" ItemsSource="{Binding InviteUseChoices}" SelectedItem="{Binding SelectedInviteUse}" HorizontalAlignment="Stretch"
+                                  IsEnabled="{Binding InviteUsesEnabled}" AutomationProperties.Name="{l:T multiplayer.invite.uses}">
+                          <ComboBox.ItemTemplate>
+                            <DataTemplate DataType="vm:InviteUseChoice"><TextBlock Text="{Binding Label}" TextTrimming="CharacterEllipsis" /></DataTemplate>
+                          </ComboBox.ItemTemplate>
+                        </ComboBox>
+                      </Grid>
+                      <TextBlock x:Name="InviteMonthNote" Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.invite.month_note}" IsVisible="{Binding ShowInviteMonthNote}" />
+                      <TextBox x:Name="LongInviteLabelBox" Text="{Binding LongInviteLabel}" PlaceholderText="{l:T multiplayer.longinvite.label_placeholder}" MaxLength="40"
+                               IsVisible="{Binding ShowInviteMonthNote}" />
+                      <!-- Only an invite for one person can skip my yes; an unlimited one says so where the box would be. -->
+                      <CheckBox x:Name="InviteAutoBox" IsChecked="{Binding InviteAutoApprove}" IsVisible="{Binding CanInviteAutoApprove}">
+                        <TextBlock Text="{l:T multiplayer.invite.auto_approve}" TextWrapping="Wrap" />
+                      </CheckBox>
+                      <TextBlock x:Name="InviteAlwaysAsksNote" Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.invite.always_asks}" IsVisible="{Binding ShowInviteAlwaysAsksNote}" />
+                      <Button x:Name="CreateFirstInviteButton" Content="{l:T multiplayer.invite.create}" Command="{Binding CreateInviteCommand}" HorizontalAlignment="Left"
+                              Classes.primary="{Binding !HasInvite}" />
 
-                    <!-- Always there: what an invite holds, what it lets its holder do, when it stops working. -->
-                    <StackPanel x:Name="InviteFacts" Spacing="4">
-                      <Grid ColumnDefinitions="Auto,*">
-                        <Path Classes="icon sm" Data="{StaticResource Icon.EyeOff}" Margin="0,2,8,0" VerticalAlignment="Top" />
-                        <TextBlock x:Name="InviteFactHolds" Grid.Column="1" Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.invite.fact.holds}" />
-                      </Grid>
-                      <Grid ColumnDefinitions="Auto,*">
-                        <Path Classes="icon sm" Data="{StaticResource Icon.Door}" Margin="0,2,8,0" VerticalAlignment="Top" />
-                        <TextBlock x:Name="InviteFactKnock" Grid.Column="1" Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{Binding InviteKnockFact}" />
-                      </Grid>
-                      <Grid ColumnDefinitions="Auto,*">
-                        <Path Classes="icon sm" Data="{StaticResource Icon.Clock}" Margin="0,2,8,0" VerticalAlignment="Top" />
-                        <TextBlock x:Name="InviteTermsText" Grid.Column="1" Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{Binding InviteTermsFact}" />
-                      </Grid>
+                      <!-- Always there: what an invite holds, what it lets its holder do, when it stops working. -->
+                      <StackPanel x:Name="InviteFacts" Spacing="4">
+                        <Grid ColumnDefinitions="Auto,*">
+                          <Path Classes="icon sm" Data="{StaticResource Icon.EyeOff}" Margin="0,2,8,0" VerticalAlignment="Top" />
+                          <TextBlock x:Name="InviteFactHolds" Grid.Column="1" Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.invite.fact.holds}" />
+                        </Grid>
+                        <Grid ColumnDefinitions="Auto,*">
+                          <Path Classes="icon sm" Data="{StaticResource Icon.Door}" Margin="0,2,8,0" VerticalAlignment="Top" />
+                          <TextBlock x:Name="InviteFactKnock" Grid.Column="1" Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{Binding InviteKnockFact}" />
+                        </Grid>
+                        <Grid ColumnDefinitions="Auto,*">
+                          <Path Classes="icon sm" Data="{StaticResource Icon.Clock}" Margin="0,2,8,0" VerticalAlignment="Top" />
+                          <TextBlock x:Name="InviteTermsText" Grid.Column="1" Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{Binding InviteTermsFact}" />
+                        </Grid>
+                      </StackPanel>
                     </StackPanel>
 
                     <!-- Invites not used up yet: can be revoked -->
@@ -1054,6 +1084,8 @@
                     <TextBlock Classes="h2" Text="{l:T multiplayer.join.active}" Margin="0" />
                     <TextBlock Text="{l:T multiplayer.join.address_label}" />
                     <TextBox Text="{Binding JoinAddress}" IsReadOnly="True" FontFamily="Consolas,monospace" FontSize="16" />
+                    <SelectableTextBlock Text="{Binding RoomHostAddressText}" TextWrapping="Wrap" FontSize="12"
+                                         IsVisible="{Binding RoomHostAddressText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
                     <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.join.address_hint}" />
                     <TextBlock Text="{Binding HostFingerprintText}" FontFamily="Consolas,monospace" IsVisible="{Binding HasHostFingerprint}" TextWrapping="Wrap" />
                     <ComboBox x:Name="RoomInstanceBox" ItemsSource="{Binding Instances}" SelectedItem="{Binding TargetInstance}" HorizontalAlignment="Stretch" ToolTip.Tip="{l:T multiplayer.join.version_label}" />
@@ -1081,7 +1113,7 @@
                   </StackPanel>
                 </Border>
 
-                <!-- 直连房间：路径、全条件测试（邀请就是普通的 JAY2 邀请，地址只在加密的敲门里交换） -->
+                <!-- 直连房间（不经服务器）：路径、加密直连码、全条件测试。没有普通邀请：它的敲门要经中转，这种房间的大厅不连任何中转。 -->
                 <Border Classes="card" Margin="0" IsVisible="{Binding IsDirect}">
                   <StackPanel Spacing="8">
                     <TextBlock Classes="h2" Text="{l:T multiplayer.direct.title}" Margin="0" />
@@ -1095,7 +1127,7 @@
                       <StackPanel Spacing="6" IsVisible="{Binding HasSealedOffer}">
                         <Grid ColumnDefinitions="*,Auto">
                           <TextBox x:Name="SealedCodeBox" Text="{Binding SealedOfferCode}" IsReadOnly="True" TextWrapping="Wrap" FontSize="12" />
-                          <Button Grid.Column="1" Content="{l:T multiplayer.sealed.copy_code}" Command="{Binding CopySealedCodeCommand}" Margin="6,0,0,0" VerticalAlignment="Top" />
+                          <Button x:Name="CopySealedCodeButton" Grid.Column="1" Content="{l:T multiplayer.sealed.copy_code}" Command="{Binding CopySealedCodeCommand}" Margin="6,0,0,0" VerticalAlignment="Top" />
                         </Grid>
                         <Grid ColumnDefinitions="Auto,*,Auto">
                           <TextBlock VerticalAlignment="Center" Margin="0,0,6,0" Text="{l:T multiplayer.sealed.passphrase_label}" />
@@ -1166,10 +1198,11 @@
                       </WrapPanel>
                     </Panel>
                     <Border IsVisible="{Binding UsingGameProxy}" BorderBrush="{DynamicResource Warning}" BorderThickness="1" CornerRadius="6" Padding="8">
-                      <Grid ColumnDefinitions="*,Auto">
-                        <TextBlock Text="{Binding GameProxyBanner}" TextWrapping="Wrap" VerticalAlignment="Center" />
-                        <Button Grid.Column="1" Content="{l:T multiplayer.proxy.stop}" Command="{Binding StopGameProxyCommand}" Margin="8,0,0,0" />
-                      </Grid>
+                      <!-- The details column can be narrow: the explanation gets the full width, the button goes under it. -->
+                      <StackPanel Spacing="8">
+                        <TextBlock Text="{Binding GameProxyBanner}" TextWrapping="Wrap" />
+                        <Button Content="{l:T multiplayer.proxy.stop}" Command="{Binding StopGameProxyCommand}" HorizontalAlignment="Right" />
+                      </StackPanel>
                     </Border>
                     <WrapPanel ItemSpacing="6" LineSpacing="6" IsVisible="{Binding CanUseExit}">
                       <TextBlock Text="{l:T multiplayer.exit.peer_label}" VerticalAlignment="Center" />

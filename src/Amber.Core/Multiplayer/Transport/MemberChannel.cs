@@ -17,21 +17,43 @@ public static class MemberChannel
     private const int MaxHandshakeMessage = 4096;
     public static readonly TimeSpan Timeout = TimeSpan.FromSeconds(15);
 
-    internal static byte[] Prologue(string purpose, TransportMode mode, bool disguise, ReadOnlySpan<byte> id) =>
-        [.. Encoding.ASCII.GetBytes($"jay-member-v2|{purpose}|{(int)mode}|{(disguise ? 1 : 0)}|"), .. id];
+    internal static byte[] Prologue(string purpose, TransportMode mode, bool disguise, ReadOnlySpan<byte> id, SplitLeg? leg = null) =>
+        leg is { } l
+            ? [.. Encoding.ASCII.GetBytes($"jay-member-split-v1|{purpose}|{(int)mode}|{(disguise ? 1 : 0)}|{l.Epoch}|{l.Count}|{l.Index}|"), .. id]
+            : [.. Encoding.ASCII.GetBytes($"jay-member-v2|{purpose}|{(int)mode}|{(disguise ? 1 : 0)}|"), .. id];
+
+    /// <summary>
+    /// The psk for one handshake. A leg of a split connection uses its own key derived from the member psk, so the same psk
+    /// is never used directly in two contexts. This separates uses; it doesn't make the legs' secrets independent.
+    /// The caller zeroes the result.
+    /// </summary>
+    internal static byte[] PskFor(MemberKey key, SplitLeg? leg)
+    {
+        var psk = key.CopyPsk();
+        if (leg is not { } l) return psk;
+        try
+        {
+            return HKDF.DeriveKey(HashAlgorithmName.SHA256, psk, MemberKey.PskLength, Encoding.ASCII.GetBytes("jay-split-v1"), Encoding.ASCII.GetBytes($"path|{l.Index}"));
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(psk);
+        }
+    }
 
     /// <summary>Chat channel parameters: the hybrid handshake like every channel, no bucket padding or cover traffic (chat is small).</summary>
     public static TransportProfile ChatProfile(TransportMode mode) => TransportProfile.For(TransportMode.High);
 
     /// <summary>成员这边：连上之后调用。</summary>
-    public static async Task<SecureStream> ConnectAsync(Stream stream, MemberKey key, TransportProfile profile, string purpose, byte[] payload, CancellationToken ct = default)
+    /// <param name="leg">Set when this connection is one leg of a split connection (<see cref="SplitLegs"/>).</param>
+    public static async Task<SecureStream> ConnectAsync(Stream stream, MemberKey key, TransportProfile profile, string purpose, byte[] payload, CancellationToken ct = default, SplitLeg? leg = null)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(Timeout);
-        var psk = key.CopyPsk();
+        var psk = PskFor(key, leg);
         try
         {
-            using var hs = new NoiseHandshake(profile.Pattern, initiator: true, Prologue(purpose, profile.Mode, false, key.Id), psk);
+            using var hs = new NoiseHandshake(profile.Pattern, initiator: true, Prologue(purpose, profile.Mode, false, key.Id, leg), psk);
             var message = hs.WriteMessage(payload);
             var first = new byte[MemberKey.IdLength + 2 + message.Length];
             key.Id.CopyTo(first, 0);
@@ -53,13 +75,14 @@ public static class MemberChannel
     }
 
     /// <summary>房主这边：接受连接后调用。编号不认识、psk 不对都抛 CryptographicException（调用方断开）。</summary>
+    /// <param name="leg">Set on a listener for one leg of split connections: the leg index comes from the port, the count and epoch from the room.</param>
     public static async Task<(SecureStream Stream, MemberEntry Member, byte[] Payload)> AcceptAsync(Stream stream, MemberTable members, TransportProfile profile, string purpose,
-        Func<byte[], bool>? acceptPayload = null, CancellationToken ct = default)
+        Func<byte[], bool>? acceptPayload = null, CancellationToken ct = default, SplitLeg? leg = null)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(Timeout);
         var member = await ReadMemberAsync(stream, members, timeout.Token);
-        return await AcceptMemberAsync(stream, member, profile, purpose, acceptPayload, timeout.Token);
+        return await AcceptMemberAsync(stream, member, profile, purpose, acceptPayload, timeout.Token, leg);
     }
 
     /// <summary>
@@ -67,15 +90,15 @@ public static class MemberChannel
     /// 不会拿一把全零的 psk 去握手。
     /// </summary>
     internal static async Task<(SecureStream Stream, MemberEntry Member, byte[] Payload)> AcceptMemberAsync(Stream stream, MemberEntry member, TransportProfile profile, string purpose,
-        Func<byte[], bool>? acceptPayload, CancellationToken ct)
+        Func<byte[], bool>? acceptPayload, CancellationToken ct, SplitLeg? leg = null)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(Timeout);
         if (member.Revoked) throw new CryptographicException(L.T("core.mp.member.unknown"));
-        var psk = member.Key.CopyPsk();
+        var psk = PskFor(member.Key, leg);
         try
         {
-            using var hs = new NoiseHandshake(profile.Pattern, initiator: false, Prologue(purpose, profile.Mode, false, member.Key.Id), psk);
+            using var hs = new NoiseHandshake(profile.Pattern, initiator: false, Prologue(purpose, profile.Mode, false, member.Key.Id, leg), psk);
             var payload = hs.ReadMessage(await ReadFramedAsync(stream, timeout.Token));
             // 载荷先认过（比如服务号），不认识就在分出会话密钥之前失败。
             if (acceptPayload is not null && !acceptPayload(payload)) throw new CryptographicException(L.T("core.mp.transport.tunnel.unknownservice"));

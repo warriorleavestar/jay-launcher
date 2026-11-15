@@ -235,15 +235,10 @@ internal sealed partial class SelfTest
         Check("同一个 Jay 账户的两台设备算一个人：一行，设备各有安全码，能单独移除", people.Friends.Count == 2 && people.Selected is { HasJay: true, DeviceItems.Count: 2 }
             && Named<ItemsControl>("FriendDevices") is { } two && Dispatcher.UIThread.Invoke(() => two.GetVisualDescendants().OfType<SelectableTextBlock>().Count()) == 2
             && Dispatcher.UIThread.Invoke(() => page.GetVisualDescendants().OfType<Button>().Count(b => b.Classes.Contains("device-remove") && b.IsEffectivelyVisible)) == 2);
-        using (var bobNew = X25519KeyPair.Generate())
+        using (var bobNew = DeviceKeys.Generate())
         {
-            var bobBook = new ContactBook(Path.Combine(dir, "bob-new.json"))
-                { Me = bobNew.PublicKey, MyCertificate = bob.CertifyDevice(bobNew.PublicKey, "Linux", 0, DateTimeOffset.UtcNow) };
-            Dispatcher.UIThread.Invoke(() =>
-            {
-                var reply = mp.Contacts.Receive(bobNew.PublicKey, bobBook.StartAdd(bobNew.PublicKey, me, "Bob")!, "Me");
-                if (reply is not null && bobBook.Receive(me, reply, "Bob") is { } nonce) mp.Contacts.Receive(bobNew.PublicKey, nonce, "Me");
-            });
+            // Bob's new laptop proves his Jay account in a live handshake (a knock or a room), which is how a new device arrives.
+            Dispatcher.UIThread.Invoke(() => mp.Contacts.SeenLive(bobNew.Dh.PublicKey, bob.CertifyDevice(bobNew, "Linux", 0, DateTimeOffset.UtcNow)));
             var waiting = await WaitAsync(() => people.Friends.FirstOrDefault(f => f.Name == "Bob") is { NeedsLook: true }, 3);
             await Task.Delay(300);
             Check("朋友多了一台没见过的设备：状态写“新设备待确认”，顶上那一行也换成它", waiting && people.Selected is { Name: "Bob", NeedsLook: true }
@@ -254,6 +249,12 @@ internal sealed partial class SelfTest
             var confirm = Classed<Button>("device-confirm");
             Check("设备列表里这台标着待确认，有【是 TA】", confirm is not null && (confirm.Content as string) == L.T("multiplayer.contacts.new_device_ok")
                 && people.Selected!.DeviceItems.Count(d => d.IsNew) == 1);
+            Check("新设备的确认是锁定的安全面板：写 TA 的名字和设备的安全码，两个都是安全按钮，焦点在【不是 TA？移除这台设备】",
+                confirm is Amber.App.Controls.Safety.SafetyButton { Kind: Amber.App.Controls.Safety.SafetyKind.Confirm }
+                && Dispatcher.UIThread.Invoke(() => confirm.FindAncestorOfType<Amber.App.Controls.Safety.SafetyPanel>() is { } locked
+                    && locked.Title == L.F("multiplayer.contacts.new_device", "Bob")
+                    && page.NewDeviceSafeButton() is { Kind: Amber.App.Controls.Safety.SafetyKind.Safe } safe
+                    && (safe.IsFocused || TopLevel.GetTopLevel(page)?.FocusManager?.GetFocusedElement() == safe)));
             await ShotAsync("friends-new-device");
             Press(confirm);
             Check("点【是 TA】：状态回到“已核对”，请求条里的提示也收起", await WaitAsync(() => people.Selected is { Name: "Bob", NeedsLook: false }
@@ -404,6 +405,7 @@ internal sealed partial class SelfTest
         Press(Named<Button>("RemoveFriendButton"));
         await Task.Delay(400);
         Check("【从朋友里移除】先问一句，写 TA 的名字，焦点在【留着】", people.IsConfirmingRemove && Shown("RemoveFriendConfirm") && !Shown("RemoveFriendButton")
+            && Named<Control>("RemoveFriendConfirm") is Amber.App.Controls.Safety.SafetyPanel && Named<Control>("ConfirmRemoveFriendButton") is Amber.App.Controls.Safety.SafetyButton
             && people.RemoveQuestion.Contains("Robin") && Named<Control>("KeepFriendButton") is { } keep && Dispatcher.UIThread.Invoke(() => keep.IsFocused)
             && people.Friends.Any(f => f.Name == "Robin"));
         Press(Named<Button>("KeepFriendButton"));

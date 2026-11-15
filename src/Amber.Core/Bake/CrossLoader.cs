@@ -125,7 +125,7 @@ public static class CrossLoader
     public static IReadOnlyList<string> Extras(Capabilities? caps, string? instanceLoader, string? mcVersion)
     {
         if (caps is null || instanceLoader is null || string.IsNullOrEmpty(mcVersion)) return [];
-        var platform = PlatformOf(instanceLoader);
+        var platform = PlatformOf(instanceLoader, mcVersion);
         if (platform is null || !caps.Platforms.TryGetValue(platform, out var versions) || !versions.Contains(mcVersion)) return [];
 
         var native = Native(instanceLoader);
@@ -147,8 +147,11 @@ public static class CrossLoader
         return Ecosystems.Where(e => accepted.Contains(e) && !native.Contains(e)).ToList();
     }
 
-    /// <summary>The loader platform that runs an instance with this loader (null: none).</summary>
-    public static string? PlatformOf(string? instanceLoader) => instanceLoader switch
+    /// <summary>
+    /// The loader platform that runs an instance with this loader and game version (null: none). It agrees with
+    /// <see cref="BakePlatform.KindOf"/>, which preparing and starting use, so what a card offers is what runs.
+    /// </summary>
+    public static string? PlatformOf(string? instanceLoader, string? mcVersion = null) => instanceLoader switch
     {
         "fabric" or "quilt" => BakePlatform.Vanilla,
         "neoforge" => BakePlatform.NeoForge,
@@ -161,7 +164,7 @@ public static class CrossLoader
     /// empty when nothing is missing or the package does not say.
     /// </summary>
     public static IReadOnlyList<string> MissingBridges(Capabilities? caps, string? instanceLoader, string? mcVersion) =>
-        caps?.Accepts is { } table && PlatformOf(instanceLoader) is { } platform && !string.IsNullOrEmpty(mcVersion) ? table.Missing(platform, mcVersion) : [];
+        caps?.Accepts is { } table && PlatformOf(instanceLoader, mcVersion) is { } platform && !string.IsNullOrEmpty(mcVersion) ? table.Missing(platform, mcVersion) : [];
 
     /// <summary>The ecosystem a file would run as here: a native one if it has one, else the first extra it ships for; null when neither.</summary>
     public static string? EcosystemOf(string? instanceLoader, IEnumerable<string> fileLoaders, IReadOnlyList<string> extras)

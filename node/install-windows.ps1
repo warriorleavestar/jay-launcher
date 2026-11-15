@@ -20,9 +20,9 @@ param(
 $ErrorActionPreference = "Stop"
 # Same pins as src/Amber.Core/Multiplayer/EasyTier.cs.
 $Version = "2.6.4"
-$Tag = "jay-v2.6.4-1"
-$Commit = "89e36e45d7e2"
-$Sha256 = "780be28da60a2c6c0cdb305998cceb57c79b8474f53812ef1212432709182f83"
+$Tag = "jay-v2.6.4-3"
+$Commit = "9407746b1ce1"
+$Sha256 = "cdb113651de1f37244f16d405447806a76cd9012780a4e519ed7eba062306888"
 $Dir = Join-Path $env:ProgramData "AmberNode"
 $Task = "Amber relay node"
 $Rule = "Amber relay node"

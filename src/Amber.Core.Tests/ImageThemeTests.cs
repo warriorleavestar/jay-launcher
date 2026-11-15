@@ -1,3 +1,4 @@
+using Amber.Core.Localization;
 using System.IO.Compression;
 using System.Text;
 using System.Text.Json;
@@ -193,6 +194,66 @@ public sealed class ImageThemeTests : IDisposable
     }
 
     [Fact]
+    public void AWriteThatFailsPartWayLeavesNoTemporaryFile()
+    {
+        var palette = ImageTheme.Extract([]);
+        var path = Path.Combine(_dir, "full-disk.jaytheme");
+        var slots = new Dictionary<string, ImageThemeSlot> { [ThemeSlots.Banner] = new(new ThemeSlot { Image = "" }, Png(1920, 400), ".png") };
+        var original = ImageTheme.CreateTempFile;
+        ImageTheme.CreateTempFile = temp => new FailingStream(File.Create(temp), 64);
+        try
+        {
+            Assert.Throws<IOException>(() => ImageTheme.Write(path, "full-1", "Full disk", palette, slots));
+        }
+        finally
+        {
+            ImageTheme.CreateTempFile = original;
+        }
+        Assert.Empty(Directory.GetFiles(_dir));
+    }
+
+    /// <summary>A file that takes so many bytes and then says the disk is full.</summary>
+    private sealed class FailingStream(Stream inner, long room) : Stream
+    {
+        public override bool CanRead => false;
+        public override bool CanSeek => inner.CanSeek;
+        public override bool CanWrite => true;
+        public override long Length => inner.Length;
+        public override long Position { get => inner.Position; set => inner.Position = value; }
+        public override void Flush() => inner.Flush();
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => inner.Seek(offset, origin);
+        public override void SetLength(long value) => inner.SetLength(value);
+
+        public override void Write(byte[] buffer, int offset, int count)
+        {
+            if (inner.Length + count > room) throw new IOException("There is not enough space on the disk.");
+            inner.Write(buffer, offset, count);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) inner.Dispose();
+            base.Dispose(disposing);
+        }
+    }
+
+    [Theory]
+    [InlineData("""["a", 0.5]""")]
+    [InlineData("""[0.5, "b"]""")]
+    [InlineData("[true, false]")]
+    [InlineData("[null, 1]")]
+    [InlineData("[[1], 2]")]
+    [InlineData("""[{"x": 1}, 0.5]""")]
+    public void AFocusThatIsNotTwoNumbersIsNotedAndIgnored(string focus)
+    {
+        var pack = Read($$"""{ "slots": { "banner": { "image": "assets/banner.png", "focus": {{focus}} } } }""", ("assets/banner.png", Png(1920, 400)));
+        var banner = pack.Slots[ThemeSlots.Banner];
+        Assert.Equal((0.5, 0.5), (banner.FocusX, banner.FocusY));
+        Assert.Contains(pack.Problems, p => p.Code == "bad_value" && p.Detail.EndsWith(".focus", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void SlotsWriteOnlyWhatEachSlotUses()
     {
         using var ms = new MemoryStream();
@@ -218,4 +279,36 @@ public sealed class ImageThemeTests : IDisposable
         // Written in the panel's order, whatever order they came in.
         Assert.Equal(["mascot", "banner"], slots.EnumerateObject().Select(p => p.Name));
     }
+}
+
+[Collection("GlobalLanguage")]
+public sealed class ImageThemeLanguageTests
+{
+    [Fact]
+    public void SlotTitlesAndHintsFollowALanguageSwitch() => UiTestThread.Run(() =>
+    {
+        var language = L.Language;
+        try
+        {
+            L.SetLanguage("zh-Hans");
+            var editor = new Amber.App.ViewModels.ImageThemeViewModel(_ => throw new InvalidOperationException());
+            var slot = editor.Background;
+            var chinese = (slot.Title, slot.Hint);
+            var raised = new List<string?>();
+            slot.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+
+            L.SetLanguage("en");
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            Assert.Contains(nameof(slot.Title), raised);
+            Assert.Contains(nameof(slot.Hint), raised);
+            Assert.Equal(L.T("theme.image.slot.background"), slot.Title);
+            Assert.Equal(L.T("theme.image.slot.background.hint"), slot.Hint);
+            Assert.NotEqual(chinese, (slot.Title, slot.Hint));
+            Assert.All(editor.Slots, s => Assert.Equal(s.Title, L.T("theme.image.slot." + s.Slot)));
+        }
+        finally
+        {
+            L.SetLanguage(language);
+        }
+    });
 }

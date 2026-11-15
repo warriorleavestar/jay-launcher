@@ -15,5 +15,5 @@ Search Modrinth and CurseForge and install content into your instances.
 - Click a result for details: a side column on wide windows, a drawer on narrow ones. Esc closes it.
 
 ## If something goes wrong
-- CurseForge finds nothing: it needs your own CurseForge key in [Settings › Downloads and services](jay:settings#CurseForgeKey).
+- CurseForge finds nothing: official desktop releases include a key. On other builds (your own build, Android), put your own CurseForge key in [Settings › Downloads and services](jay:settings#CurseForgeKey).
 - Jay contacts Modrinth and CurseForge only while you use this page or click "Check for updates", never in the background.

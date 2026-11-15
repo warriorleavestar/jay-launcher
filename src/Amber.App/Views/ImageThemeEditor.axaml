@@ -33,8 +33,9 @@
     </Style>
   </UserControl.Styles>
 
-  <Grid x:Name="EditorGrid" ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="16" RowSpacing="12">
-    <StackPanel x:Name="EditorColumn" Spacing="10">
+  <!-- The preview sits above the slots: the settings column is at most 720 wide, too narrow to put them side by side. -->
+  <Grid x:Name="EditorGrid" RowDefinitions="Auto,Auto" RowSpacing="12">
+    <StackPanel x:Name="EditorColumn" Grid.Row="1" Spacing="10">
       <ItemsControl x:Name="SlotList" ItemsSource="{Binding Slots}">
         <ItemsControl.ItemsPanel>
           <ItemsPanelTemplate><StackPanel Spacing="8" /></ItemsPanelTemplate>
@@ -125,8 +126,10 @@
     </StackPanel>
 
     <!-- Live preview: a small window with the pictures and the colours picked from them. -->
-    <StackPanel x:Name="PreviewColumn" Grid.Column="1" Spacing="6">
+    <StackPanel x:Name="PreviewColumn" Spacing="6">
       <TextBlock Classes="hint" Text="{l:T theme.image.preview}" />
+      <!-- Narrower than the preview, it is drawn smaller (same layout, scaled). -->
+      <LayoutTransformControl x:Name="PreviewScale" HorizontalAlignment="Left">
       <Border x:Name="ImageThemePreview" Width="360" Height="224" CornerRadius="{DynamicResource RadiusMd}" ClipToBounds="True"
               Background="{Binding PreviewPage}" BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="1">
         <Grid ColumnDefinitions="64,*">
@@ -174,6 +177,7 @@
           </Panel>
         </Grid>
       </Border>
+      </LayoutTransformControl>
     </StackPanel>
   </Grid>
 </UserControl>

@@ -142,7 +142,7 @@ public sealed class DeviceFingerprintTests : IAsyncDisposable
         // 别的电脑的码找不到。
         Assert.Null(await client.FindAsync(DeviceFingerprint.Enable(Dir("other")).NewCode(), default));
         // 不带指纹密钥续期（房主关了指纹查找）：再也找不到。
-        await client.AnnounceAsync(signer.Sign(Hidden(invite), DateTimeOffset.UtcNow.AddSeconds(1)), false, [RoomDirectoryProtocol.LookupKey(new byte[16])], default);
+        await client.AnnounceAsync(signer.Sign(Hidden(invite), DateTimeOffset.UtcNow.AddSeconds(1)), false, [new byte[16]], default);
         Assert.Null(await client.FindAsync(device.NewCode(), default));
     }
 

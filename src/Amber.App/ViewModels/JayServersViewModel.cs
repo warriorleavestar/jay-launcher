@@ -73,12 +73,19 @@ public sealed partial class JayServersViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private async Task JoinAsync()
+    private Task JoinAsync() => EnrollFromInviteAsync();
+
+    /// <summary>Tests: stands in for enrolling with the server named in an invite.</summary>
+    internal Func<GateInvite, MemberIdentity, Task<GateMembership>>? EnrollForTest { get; set; }
+
+    /// <summary>Joins the server in <see cref="InviteText"/> and saves it.</summary>
+    /// <returns>True when the server was saved (new, or the same server and name enrolled again).</returns>
+    internal async Task<bool> EnrollFromInviteAsync()
     {
         if (InviteIsSealed && SealedDirect.NormalizePassphrase(InvitePassphrase) is null)
         {
             Status = L.T("multiplayer.sealed.enter_passphrase");
-            return;
+            return false;
         }
         var text = InviteText;
         var passphrase = InvitePassphrase;
@@ -89,7 +96,7 @@ public sealed partial class JayServersViewModel : ObservableObject
         if (invite is null)
         {
             Status = error ?? "";
-            return;
+            return false;
         }
         if (invite.Locator is { } locator)
         {
@@ -100,7 +107,7 @@ public sealed partial class JayServersViewModel : ObservableObject
             if (profile is null)
             {
                 Status = L.F("core.gate.record.needs_network", locator.NetworkId);
-                return;
+                return false;
             }
             IsBusy = true;
             Status = L.F("core.gate.record.looking_up", profile.Name);
@@ -113,7 +120,7 @@ public sealed partial class JayServersViewModel : ObservableObject
                 or System.Net.Sockets.SocketException or System.Net.Http.HttpRequestException)
             {
                 Status = L.F("multiplayer.jayserver.enroll_failed", e.Message);
-                return;
+                return false;
             }
             finally
             {
@@ -124,16 +131,18 @@ public sealed partial class JayServersViewModel : ObservableObject
         Status = L.F("multiplayer.jayserver.enrolling", invite.Host);
         try
         {
-            var membership = await GateClient.EnrollAsync(invite, Identity());
+            var membership = await (EnrollForTest?.Invoke(invite, Identity()) ?? GateClient.EnrollAsync(invite, Identity()));
             var entry = _list.Add(membership);
             InviteText = "";
             InvitePassphrase = "";
             Load();
             Status = L.F("multiplayer.jayserver.enrolled", entry.DisplayName, membership.Username);
+            return true;
         }
         catch (Exception e) when (e is IOException or System.Net.Sockets.SocketException or System.Security.Cryptography.CryptographicException or GateRejectedException)
         {
             Status = L.F("multiplayer.jayserver.enroll_failed", e.Message);
+            return false;
         }
         finally
         {

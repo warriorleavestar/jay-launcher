@@ -24,6 +24,9 @@ public sealed partial class FriendRow : ObservableObject
     public string JayText => Friend.JayText;
     public IReadOnlyList<ContactDeviceItem> DeviceItems => Friend.DeviceItems;
 
+    /// <summary>Devices their account vouched for that I haven't looked at yet: each gets a locked safety panel.</summary>
+    public IReadOnlyList<ContactDeviceItem> NewDeviceItems => [.. Friend.DeviceItems.Where(d => d.IsNew)];
+
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(StateText), nameof(IsHere), nameof(IsInRoom), nameof(IsQuiet), nameof(NeedsLook), nameof(Summary))]
     public partial FriendState State { get; set; }
@@ -277,19 +280,31 @@ public sealed partial class PeopleViewModel : PageViewModel
     private void CloseAdd() => IsAdding = false;
 
     [RelayCommand]
-    private void CopyMyCode() => _multiplayer.CopyContactCodeCommand.Execute(null);
+    private void CopyMyCode() => ShowResult(() => { _multiplayer.CopyContactCodeCommand.Execute(null); return Task.CompletedTask; });
 
     [RelayCommand]
-    private Task AddAsync() => _multiplayer.AddContactCommand.ExecuteAsync(null);
+    private Task AddAsync() => ShowResult(() => _multiplayer.AddContactCommand.ExecuteAsync(null));
 
     [RelayCommand]
     private void Connect() => Navigate?.Invoke("play/public");
 
     [RelayCommand]
-    private Task BackupAsync() => _multiplayer.BackupFriendsCommand.ExecuteAsync(null);
+    private Task BackupAsync() => ShowResult(() => _multiplayer.BackupFriendsCommand.ExecuteAsync(null));
 
     [RelayCommand]
-    private Task RestoreAsync() => _multiplayer.RestoreFriendsCommand.ExecuteAsync(null);
+    private Task RestoreAsync() => ShowResult(() => _multiplayer.RestoreFriendsCommand.ExecuteAsync(null));
+
+    /// <summary>
+    /// Adding, backing up and restoring report on the multiplayer page's status; what they said shows here too, in the
+    /// page's own status bar (a wrong code, a send that failed, a backup that couldn't be written). Only what this
+    /// action said: the room's own statuses stay on the room page.
+    /// </summary>
+    private async Task ShowResult(Func<Task> action)
+    {
+        var before = _multiplayer.StatusInfo;
+        await action();
+        if (_multiplayer.StatusInfo is { } after && !ReferenceEquals(after, before)) SetStatus(after);
+    }
 
     // ---- the selected friend ----
 
@@ -385,8 +400,12 @@ public sealed partial class PeopleViewModel : PageViewModel
         if (Selected is not { } row || string.IsNullOrWhiteSpace(Draft)) return;
         var text = Draft;
         Draft = "";
-        if (!await _multiplayer.SendToFriendAsync(row.Friend, text) && Draft.Length == 0) Draft = text;
+        // Back in the box only if it is still this person's conversation that shows.
+        if (!await _multiplayer.SendToFriendAsync(row.Friend, text) && Draft.Length == 0 && IsSamePerson(Selected, row)) Draft = text;
     }
+
+    private static bool IsSamePerson(FriendRow? a, FriendRow b) =>
+        a is not null && (ReferenceEquals(a, b) || a.Friend.Devices.Any(d => b.Friend.Devices.Any(e => e.PublicKey.AsSpan().SequenceEqual(d.PublicKey))));
 
     [RelayCommand]
     private void ConfirmDevice(ContactDeviceItem? device)
@@ -466,7 +485,7 @@ public sealed partial class PeopleViewModel : PageViewModel
     private async Task AddMetAsync()
     {
         if (SelectedMet is not { } person || IsChildMode) return;
-        await _multiplayer.AddMetPersonAsync(person);
+        await ShowResult(() => _multiplayer.AddMetPersonAsync(person));
         // The request, and later the emoji, show in the add panel.
         if (_multiplayer.HasContactRequests) IsAdding = true;
     }

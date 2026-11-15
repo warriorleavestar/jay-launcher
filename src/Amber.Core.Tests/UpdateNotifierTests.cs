@@ -1,0 +1,275 @@
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json.Nodes;
+using Amber.App.Services;
+using Amber.Core.Activity;
+using Amber.Core.Launch;
+using Amber.Core.Localization;
+using Amber.Core.Multiplayer.Public;
+
+namespace Amber.Core.Tests;
+
+/// <summary>The once-a-day update notice: only a signed newer Jay is shown, never downloaded; off, not due and skipped stay quiet.</summary>
+public sealed class UpdateNotifierTests : IDisposable
+{
+    private static readonly TrustSigner[] T = [.. Enumerable.Range(0, 3).Select(_ => TrustSigner.FromSeed(Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))))];
+    private static readonly TrustList Own = new([T[0].PublicKey, T[1].PublicKey, T[2].PublicKey], 2);
+    private const string Feed = "https://releases.example.test/latest";
+    private const string Page = "https://releases.example.test/v99.0.0";
+
+    private readonly string _dir = Path.Combine(Path.GetTempPath(), "jay-updnotify-" + Guid.NewGuid().ToString("N"));
+    private readonly DateTimeOffset _now = new(2026, 11, 12, 10, 0, 0, TimeSpan.Zero);
+
+    public UpdateNotifierTests() => Directory.CreateDirectory(_dir);
+
+    /// <summary>Every notifier a test made: they listen to a static event, so each one is let go after its test.</summary>
+    private readonly List<UpdateNotifier> _notifiers = [];
+
+    public void Dispose()
+    {
+        foreach (var notifier in _notifiers) notifier.Dispose();
+        try { Directory.Delete(_dir, true); } catch (IOException) { }
+    }
+
+    /// <summary>A release feed for v99.0.0 with a package, its SHA-256 list and the list signed by <paramref name="signers"/>.</summary>
+    private static FakeHttp Release(TrustSigner[] signers, string page = Page, string tag = "v99.0.0", long seq = 5)
+    {
+        var http = new FakeHttp();
+        var sums = $"{Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes("package")))}  Jay-win-x64.zip\n";
+        var statement = new ReleaseStatement(tag, seq, new string('c', 40), Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(sums))), Own.Hash, ReleaseStatement.NoLog);
+        var sigs = signers.Aggregate(ReleaseSignature.Create(statement), (json, s) => ReleaseSignature.Cosign(json, s));
+        var assets = new JsonArray();
+        foreach (var (name, body) in new[] { ("Jay-win-x64.zip", "package"), (ReleaseSignature.SumsFileName, sums), (ReleaseSignature.SignatureFileName, sigs) })
+        {
+            var url = $"https://releases.example.test/download/{tag}/{name}";
+            http.On(url, body);
+            assets.Add(new JsonObject { ["name"] = name, ["browser_download_url"] = url });
+        }
+        http.On(Feed, new JsonObject { ["tag_name"] = tag, ["html_url"] = page, ["body"] = "notes", ["assets"] = assets }.ToJsonString());
+        return http;
+    }
+
+    private readonly List<string> _opened = [];
+
+    private (LauncherService Service, UpdateNotifier Notifier) Make(HttpMessageHandler http, Action<AppSettings>? setup = null)
+    {
+        // Settings.Save() goes to AppSettings.FilePath, which TestDataDir points at a temporary folder for the whole test run.
+        var settings = new AppSettings { GameDirectory = TestDataDir.Path, PlayerName = "", UpdateFeedUrl = Feed };
+        setup?.Invoke(settings);
+        var service = new LauncherService(settings);
+        var notifier = new UpdateNotifier(service, () => _now, new HttpClient(http), Path.Combine(_dir, "data"), Own, url =>
+        {
+            _opened.Add(url);
+            return null;
+        });
+        _notifiers.Add(notifier);
+        return (service, notifier);
+    }
+
+    private static RequestHandle? Notice(LauncherService service) => service.Requests.Pending.SingleOrDefault(r => r.Spec.Kind == UpdateNotifier.RequestKind);
+
+    [Fact]
+    public async Task ASignedNewerReleaseIsShownAndOnlyOpensThePage()
+    {
+        var http = Release([T[0], T[2]]);
+        var (service, notifier) = Make(http);
+        using var _ = service;
+        Assert.True(await notifier.CheckIfDueAsync());
+        var notice = Notice(service);
+        Assert.NotNull(notice);
+        Assert.Contains("99.0.0", notice!.Spec.Title);
+        Assert.Equal(_now, service.Settings.LastUpdateCheck);
+        // Only the feed and the signature files were fetched: the package itself is never downloaded.
+        Assert.DoesNotContain(http.Requests, r => r.Url.EndsWith("Jay-win-x64.zip", StringComparison.Ordinal));
+
+        service.Requests.Resolve(notice, "open", RequestSource.Bar);
+        Assert.Equal([Page], _opened);
+    }
+
+    [Theory]
+    [InlineData("https://phishing.example.test/jay-v99")]
+    [InlineData("http://releases.example.test/v99.0.0")]
+    public async Task APageTheSignaturesDontCoverIsNeverOpened(string page)
+    {
+        // The signatures cover the tag, not html_url: a swapped page on another host (or plain HTTP) gets no open button.
+        var (service, notifier) = Make(Release([T[0], T[2]], page));
+        using var _ = service;
+        Assert.True(await notifier.CheckIfDueAsync());
+        var notice = Notice(service)!;
+        Assert.DoesNotContain(notice.Spec.Choices, c => c.Id == "open");
+        Assert.Equal(L.F("update.notice.body_no_page", UpdateChecker.CurrentVersion), notice.Spec.Body);
+        Assert.Contains(notice.Spec.Choices, c => c.Id == "later" && c.IsDefault);
+        service.Requests.Resolve(notice, "later", RequestSource.Bar);
+        Assert.Empty(_opened);
+    }
+
+    [Fact]
+    public async Task AnUnsignedOrHalfSignedReleaseStaysQuiet()
+    {
+        var (service, notifier) = Make(Release([T[1]]));
+        using var _ = service;
+        Assert.False(await notifier.CheckIfDueAsync());
+        Assert.Null(Notice(service));
+        Assert.Equal(_now, service.Settings.LastUpdateCheck);
+    }
+
+    [Fact]
+    public async Task OffOrNotDueMakesNoRequest()
+    {
+        var off = new FakeHttp();
+        var (service, notifier) = Make(off, s => s.AutoUpdateCheck = false);
+        using (service) Assert.False(await notifier.CheckIfDueAsync());
+        Assert.Empty(off.Requests);
+
+        var recent = new FakeHttp();
+        var (service2, notifier2) = Make(recent, s => s.LastUpdateCheck = _now.AddHours(-2));
+        using (service2) Assert.False(await notifier2.CheckIfDueAsync());
+        Assert.Empty(recent.Requests);
+    }
+
+    [Fact]
+    public void OnForANewInstallKeptOffWhenUpgrading()
+    {
+        Assert.True(new AppSettings().AutoUpdateCheck);
+        Assert.True(AppSettings.Load(Path.Combine(_dir, "none.json"), File.ReadAllText).AutoUpdateCheck);
+
+        // A new install that saved anything (the first check's time, the first-run wizard) still has it on after a restart.
+        var fresh = AppSettings.Load(Path.Combine(_dir, "fresh.json"), File.ReadAllText);
+        fresh.SavePathForTest = Path.Combine(_dir, "fresh.json");
+        fresh.LastUpdateCheck = _now;
+        fresh.Save();
+        Assert.True(AppSettings.Load(fresh.SavePathForTest, File.ReadAllText).AutoUpdateCheck);
+
+        // A settings file written by a Jay without the switch stays off, with or without an update address (that Jay only checked on click).
+        var old = Path.Combine(_dir, "old.json");
+        File.WriteAllText(old, """{"GameDirectory":"x"}""");
+        Assert.False(AppSettings.Load(old, File.ReadAllText).AutoUpdateCheck);
+        var oldWithFeed = Path.Combine(_dir, "old-feed.json");
+        File.WriteAllText(oldWithFeed, """{"GameDirectory":"x","UpdateFeedUrl":"https://mirror.example.test/latest"}""");
+        Assert.False(AppSettings.Load(oldWithFeed, File.ReadAllText).AutoUpdateCheck);
+
+        // A settings file that exists but can't be read is not a new install either.
+        var broken = Path.Combine(_dir, "broken.json");
+        File.WriteAllText(broken, "{ not json");
+        Assert.False(AppSettings.Load(broken, File.ReadAllText).AutoUpdateCheck);
+
+        // Once the user sets it, it is kept either way.
+        foreach (var on in new[] { true, false })
+        {
+            var saved = new AppSettings { AutoUpdateCheck = on, SavePathForTest = Path.Combine(_dir, $"saved-{on}.json") };
+            saved.Save();
+            Assert.Contains("\"AutoUpdateCheck\"", File.ReadAllText(saved.SavePathForTest));
+            Assert.Equal(on, AppSettings.Load(saved.SavePathForTest, File.ReadAllText).AutoUpdateCheck);
+        }
+    }
+
+    [Fact]
+    public async Task ANewerVersionReplacesAnOlderWaitingNotice()
+    {
+        // One notifier, as in Jay: the feed has v99.0.0 today and v99.0.1 tomorrow; today's notice was never answered.
+        var now = _now;
+        var feed = new SwitchingHttp(Release([T[0], T[1]]));
+        var settings = new AppSettings { GameDirectory = TestDataDir.Path, PlayerName = "", UpdateFeedUrl = Feed };
+        using var service = new LauncherService(settings);
+        using var notifier = new UpdateNotifier(service, () => now, new HttpClient(feed), Path.Combine(_dir, "data"), Own, url =>
+        {
+            _opened.Add(url);
+            return null;
+        });
+        Assert.True(await notifier.CheckIfDueAsync());
+        var older = Notice(service)!;
+
+        feed.Current = Release([T[0], T[1]], "https://releases.example.test/v99.0.1", "v99.0.1", 6);
+        now = now.AddDays(1);
+        Assert.True(await notifier.CheckIfDueAsync());
+        Assert.True(older.IsResolved);
+        var newer = Notice(service)!;
+        Assert.Contains("99.0.1", newer.Spec.Title);
+        service.Requests.Resolve(newer, "open", RequestSource.Bar);
+        Assert.Equal(["https://releases.example.test/v99.0.1"], _opened);
+    }
+
+    /// <summary>A feed whose answers can be swapped between checks.</summary>
+    private sealed class SwitchingHttp(FakeHttp first) : HttpMessageHandler
+    {
+        public FakeHttp Current { get; set; } = first;
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct) =>
+            new HttpMessageInvoker(Current, disposeHandler: false).SendAsync(request, ct);
+    }
+
+    [Fact]
+    public async Task TurningTheCheckOffTakesDownAWaitingNotice()
+    {
+        var (service, notifier) = Make(Release([T[0], T[2]]));
+        using var _ = service;
+        Assert.True(await notifier.CheckIfDueAsync());
+        var notice = Notice(service)!;
+        UpdateNotifier.RaiseSwitched(false);
+        Assert.True(notice.IsResolved);
+        Assert.Null(Notice(service));
+    }
+
+    [Fact]
+    public async Task TurningTheCheckOffWhileTheFeedAnswersPostsNothing()
+    {
+        var gate = new TaskCompletionSource();
+        var (service, notifier) = Make(new SlowHttp(Release([T[0], T[2]]), gate.Task));
+        using var _ = service;
+        var check = notifier.CheckIfDueAsync();
+        service.Settings.AutoUpdateCheck = false;
+        UpdateNotifier.RaiseSwitched(false);
+        gate.SetResult();
+        Assert.False(await check);
+        Assert.Null(Notice(service));
+    }
+
+    /// <summary>A feed that holds every answer until <paramref name="gate"/> opens.</summary>
+    private sealed class SlowHttp(FakeHttp inner, Task gate) : HttpMessageHandler
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            await gate.WaitAsync(ct);
+            return await new HttpMessageInvoker(inner, disposeHandler: false).SendAsync(request, ct);
+        }
+    }
+
+    [Fact]
+    public async Task AFailedCheckWaitsADayToo()
+    {
+        var down = new FakeHttp(); // every address answers 404
+        var (service, notifier) = Make(down);
+        using var _ = service;
+        Assert.False(await notifier.CheckIfDueAsync());
+        Assert.Equal(_now, service.Settings.LastUpdateCheck);
+        Assert.False(await notifier.CheckIfDueAsync());
+        Assert.Single(down.Requests);
+    }
+
+    [Theory]
+    [InlineData("abc")]
+    [InlineData("ftp://releases.example.test/latest")]
+    [InlineData("https://")]
+    public async Task AWrongAddressIsQuietAndWaitsADay(string feed)
+    {
+        var (service, notifier) = Make(new FakeHttp(), s => s.UpdateFeedUrl = feed);
+        using var _ = service;
+        Assert.False(await notifier.CheckIfDueAsync());
+        Assert.Null(Notice(service));
+        Assert.Equal(_now, service.Settings.LastUpdateCheck);
+    }
+
+    [Fact]
+    public async Task ASkippedVersionIsNotShownAgain()
+    {
+        var (service, notifier) = Make(Release([T[0], T[1]]));
+        using var _ = service;
+        Assert.True(await notifier.CheckIfDueAsync());
+        service.Requests.Resolve(Notice(service)!, "skip", RequestSource.Bar);
+        Assert.Equal("99.0.0", service.Settings.SkippedUpdateVersion);
+
+        service.Settings.LastUpdateCheck = null;
+        Assert.False(await notifier.CheckIfDueAsync());
+        Assert.Null(Notice(service));
+    }
+}

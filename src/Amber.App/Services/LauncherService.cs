@@ -128,6 +128,20 @@ public sealed class LauncherService : IDisposable
         Accounts = new AccountService(_http, store, AppSettings.DataDir, () => Settings.MicrosoftClientId);
         JayAccounts = new Amber.Core.Identity.JayAccountStore(AppSettings.DataDir);
         JayAccounts.Load();
+        // Jay accounts saved before addresses covered both account keys got new addresses: move the bindings along.
+        // The old addresses stay in the Jay account file, so this runs on every start until the bindings are saved.
+        var moved = JayAccounts.Readdressed;
+        if (store.Accounts.Any(a => a.JayAddress is { } old && moved.ContainsKey(old)))
+        {
+            foreach (var account in store.Accounts)
+                if (account.JayAddress is { } old && moved.TryGetValue(old, out var renamed)) account.JayAddress = renamed;
+            try { store.Save(); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                // Bound correctly in memory for this run; the next start tries to save again.
+                System.Diagnostics.Trace.WriteLine("Jay: saving moved Jay account bindings failed: " + e.Message);
+            }
+        }
         MigrateBakeRuntime(settings);
         if (MigratesPlayerName(store.Accounts.Count, settings.PlayerName, settings.IsFresh,
                 Environment.GetEnvironmentVariable("AMBER_SELFTEST"), Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE")))
@@ -223,7 +237,7 @@ public sealed class LauncherService : IDisposable
     }
 
     private string? CurseForgeKey() =>
-        string.IsNullOrWhiteSpace(Settings.CurseForgeApiKey) ? Environment.GetEnvironmentVariable("AMBER_CF_KEY") : Settings.CurseForgeApiKey;
+        CurseForgeBuiltInKey.Resolve(Settings.CurseForgeApiKey, Environment.GetEnvironmentVariable("AMBER_CF_KEY"));
 
     /// <summary>有 Key 或自定义接口地址时才用 CurseForge 查更新。</summary>
     public CurseForgeProvider? CurseForgeIfConfigured =>
@@ -687,7 +701,10 @@ public sealed class LauncherService : IDisposable
         UniversalLoaderChanged?.Invoke(id);
     }
 
-    /// <summary>An instance's universal loader switch changed (the instance id).</summary>
+    /// <summary>An instance's mods were just prepared: the pages that show "Prepared" read it again.</summary>
+    internal void NoteUniversalLoaderPrepared(string id) => UniversalLoaderChanged?.Invoke(id);
+
+    /// <summary>An instance's universal loader switch changed, or its mods were just prepared (the instance id).</summary>
     public event Action<string>? UniversalLoaderChanged;
 
     /// <summary>The prompt next to a mod from another ecosystem: turns the universal loader on for that instance.</summary>
@@ -724,6 +741,8 @@ public sealed class LauncherService : IDisposable
             var major = bake.JavaMajorFor(instance, versionMajor);
             if (major != versionMajor) javaPath = await ctx.Java.ForMajorAsync(major, ct);
             var done = await bake.PrepareAsync(javaPath, major, ctx.Directory, instance, warm, progress, ct, quickPlay, maintenance);
+            // The instance's card and the chip by the start button say "Prepared" from now on.
+            if (done.Launch is not null) NoteUniversalLoaderPrepared(id);
             return (done.Launch, done.Reason, javaPath);
         }
         finally
@@ -843,11 +862,14 @@ public sealed class LauncherService : IDisposable
     }
 
     /// <summary>整合包的文件都在版本目录里，这个版本必须固定开启隔离。</summary>
-    public void ForceIsolated(string id)
+    public void ForceIsolated(string id) => ForceIsolated(Context, id);
+
+    /// <summary>The same in a given game directory (an import that started before the directory was switched).</summary>
+    public void ForceIsolated(GameContext ctx, string id)
     {
-        var settings = InstanceSettings.Load(Directory, id);
+        var settings = InstanceSettings.Load(ctx.Directory, id);
         settings.Isolate = true;
-        settings.Save(Directory, id);
+        settings.Save(ctx.Directory, id);
     }
 
     /// <summary>进行中的联机会话，退出时一起结束。</summary>

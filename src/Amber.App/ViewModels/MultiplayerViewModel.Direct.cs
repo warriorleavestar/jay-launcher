@@ -68,7 +68,7 @@ public sealed partial class MultiplayerViewModel
     }
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsDirectHost))]
+    [NotifyPropertyChangedFor(nameof(IsDirectHost), nameof(ShowCreateInvite), nameof(ShowPublishRoom))]
     public partial bool IsDirect { get; set; }
 
     public bool IsDirectHost => IsDirect && IsHosting;
@@ -139,7 +139,7 @@ public sealed partial class MultiplayerViewModel
 
     /// <summary>
     /// 房主：创建直连房间。和经节点的房间一样是邀请房间：随机的房间凭据、成员表、大厅和敲门；
-    /// 大厅密钥 L 在整个房间期间不换（直连桥的 HMAC 钥匙由它派生）。马上发第一张邀请（一次、要房主批准），生成直连邀请码。
+    /// 大厅密钥 L 在整个房间期间不换（直连桥的 HMAC 钥匙由它派生）。Invites are sealed codes only (see CreateSealedOfferAsync).
     /// </summary>
     [RelayCommand]
     private async Task CreateDirectRoomAsync()
@@ -176,18 +176,20 @@ public sealed partial class MultiplayerViewModel
         {
             var addresses = await direct.PrepareAsync();
             AttachDirect(direct, room);
-            AdoptGameRelay(relay);
+            // Direct rooms never wrap (their credentials use TunnelSettings.Default, General): in whole-LAN mode guests
+            // reach the virtual address.
+            AdoptGameRelay(relay, RelayOnAdapter(FullLanMode, credentials.Tunnel.Wraps));
             relay = null;
             Mode = "host";
             RoomCodeText = "";
             RestoreChatHistory(room);
             StartHub(room);
-            // Guests knock through the relays (or the LAN) like in any invite room; the host's addresses go only to approved
-            // guests, inside the encrypted knock reply, and never into the invite code.
+            // Guests knock over the direct bridge (no relays: see ServerlessLobbyPeers); the host's addresses go only to
+            // approved guests, inside the encrypted knock reply, and never into a readable code. The room isn't announced.
             StartHostLobby(credentials, members, book, direct.LobbyUdpPort, direct: direct);
-            StartAnnouncerIfHosting();
             DirectHint = L.F("multiplayer.direct.host_hint", DirectText.Nat(addresses.Nat));
-            if (await IssueInviteAsync(1, InviteOffer.Lifetime(InviteLife.TenMinutes), false) is null) return;
+            // No plain invite: its knock would go through a relay, and this room's lobby reaches none. Friends come in
+            // with a sealed code (CreateSealedOfferAsync), which carries its own one-use invite.
             SetStatus(HasGameRelay ? StatusMessage.Success("multiplayer.relay.created") : StatusMessage.Success("multiplayer.direct.created"));
         }
         catch (Exception e) when (e is OperationCanceledException or IOException or System.Net.Sockets.SocketException or InvalidOperationException or System.ComponentModel.Win32Exception or PlatformNotSupportedException)
@@ -219,7 +221,8 @@ public sealed partial class MultiplayerViewModel
     /// Guest, after the knock: the host approved us and both sides swapped addresses inside the encrypted knock. Punches,
     /// proves membership on the bridge and runs the room over it; falls back to the relays when punching fails.
     /// </summary>
-    private async Task CompleteDirectJoinAsync(DirectSession direct, RoomCode room, KnockOutcome outcome)
+    /// <returns>True when I am in the room; false when the connection failed and the room was left (the reason is shown).</returns>
+    internal async Task<bool> CompleteDirectJoinAsync(DirectSession direct, RoomCode room, KnockOutcome outcome)
     {
         SubscribeGuestDirect(direct);
         try
@@ -230,10 +233,12 @@ public sealed partial class MultiplayerViewModel
             RoomCodeText = "";
             HostFingerprint = outcome.HostFingerprint;
             HostJayAccount = outcome.HostJayAccount;
+            SeenJayDevice(outcome.HostPublicKey, outcome.HostJayDevice);
             DirectHint = L.T("multiplayer.direct.guest_hint");
             SetStatus(StatusMessage.Info("multiplayer.direct.punching"));
             await direct.CompleteJoinAsync(room);
             FinishDirectJoin(direct, room);
+            return true;
         }
         catch (TimeoutException e)
         {
@@ -246,6 +251,7 @@ public sealed partial class MultiplayerViewModel
             await LeaveFailedDirectAsync(direct);
             SetStatus(StatusMessage.Failure("multiplayer.direct.connect_failed", e, ErrorText.Of(e)));
         }
+        return false;
     }
 
     /// <summary>Guest: subscribe before punching, since the host may send a test request right after. Only this session's events count.</summary>

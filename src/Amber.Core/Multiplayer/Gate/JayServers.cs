@@ -140,7 +140,7 @@ public static class GateClient
             if (first is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(first);
             throw;
         }
-        return new SplitStream(legs[0].Result, legs[1].Result);
+        return new SplitStream(legs[0].Result, legs[1].Result) { Wording = SplitWording.Gate };
     }
 
     /// <summary>

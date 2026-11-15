@@ -184,11 +184,11 @@ Jay 的窗口需要桌面会话（X11，或带 XWayland 的 Wayland）和下面�
 
 ## 隐私
 
-Jay 只有一个承诺：**只为你要做的事联网。**
+Jay 只有一个承诺：**只为你要做的事联网**；唯一的例外是每天一次的更新检查，可以关掉。
 
 - **没有遥测。** 不收集使用数据，不生成设备识别码。
 - **没有远程控制。** 没有任何远程开关或云端配置能改变 Jay 的行为。
-- **更新由你决定。** 默认不检查更新；填了更新地址才检查，而且只提示。
+- **更新由你决定。** Jay 每天向官方发布页查一次新版本（新装的默认开；从旧版升级的保持关闭，需要时自己打开），只有 3 位信任人里有 2 位签过才提示；从不自己下载或安装，也可以在 设置 › 关于 关掉。
 - **中间没有 Jay 的服务器。** 房间码在你的电脑上生成。联机只连联机页里列出的中转节点（内置的可以关掉，也可以加自己的）和房间里的其他玩家。
 
 <details>
@@ -248,7 +248,7 @@ dotnet publish Amber.App -c Release -r osx-arm64 --self-contained -p:PublishSing
 | 项目 | 在哪里 | 环境变量 | 说明 |
 |---|---|---|---|
 | 微软 Client ID | 账号 | `AMBER_MS_CLIENT_ID` | 留空使用内置默认值 |
-| CurseForge API Key | 设置 | `AMBER_CF_KEY` | 到 [console.curseforge.com](https://console.curseforge.com) 免费申请。没有时不能用 CurseForge，其他功能不受影响 |
+| CurseForge API Key | 设置 | `AMBER_CF_KEY` | 官方桌面版已内置，可以不填。其他版本（自己编译的、Android 版）要用自己的 Key，到 [console.curseforge.com](https://console.curseforge.com) 免费申请；没有时不能用 CurseForge，其他功能不受影响 |
 
 设置保存在系统应用数据目录的 `Amber/settings.json`（`%APPDATA%\Amber`、`~/Library/Application Support/Amber` 或 `~/.config/Amber`）。
 
@@ -287,7 +287,7 @@ dotnet publish Amber.App -c Release -r osx-arm64 --self-contained -p:PublishSing
 <details>
 <summary><b>为什么搜不到 CurseForge 的内容？</b></summary>
 
-CurseForge 的接口需要 API Key，见上面的[配置](#配置)。Modrinth 不需要。
+CurseForge 的接口需要 API Key。官方桌面版已内置；其他版本见上面的[配置](#配置)。Modrinth 不需要。
 </details>
 
 <details>

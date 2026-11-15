@@ -344,18 +344,22 @@ public sealed class LobbyOpenRoomTests
         vm.ShowMailedInvites([row.Invite]);
         Assert.Single(vm.FriendRooms);
 
-        // "Not now" in the request bar closes the request only.
+        // "Not now" in the request bar lets the room go with its invite; the same invite arriving again stays away.
         var request = Assert.Single(service.Requests.Pending, r => r.Spec.Kind == "contact-invite");
         service.Requests.Resolve(request, "ignore", Amber.Core.Activity.RequestSource.Bar);
+        Dispatcher.UIThread.RunJobs();
+        Assert.Empty(vm.FriendRooms);
+        Assert.Equal(0, vm.HeldFriendInvites);
+        vm.ShowMailedInvites([row.Invite]);
+        Assert.Empty(vm.FriendRooms);
+        vm.ShowMailedInvites([Mail(TimeSpan.FromMinutes(30), "Robin's world")]);
         Assert.Single(vm.FriendRooms);
 
-        // An invite that has run out leaves the list the next time it is looked at.
+        // An invite that has already run out is not listed, and asks nothing.
         vm.ShowMailedInvites([Mail(TimeSpan.FromSeconds(-1), "Old room")]);
         vm.PruneFriendRooms();
         Assert.Equal(["Robin's world"], vm.FriendRooms.Select(r => r.Title));
-
-        // The request that offered to join the old room went with its row.
-        Assert.DoesNotContain(service.Requests.Pending, r => r.Spec.Kind == "contact-invite");
+        Assert.Contains("Robin's world", Assert.Single(service.Requests.Pending, r => r.Spec.Kind == "contact-invite").Spec.Title);
 
         // "For a child" has no networks: the friends and public filters fall back to "all".
         vm.Where = WhereFilter.Friends;
@@ -367,6 +371,72 @@ public sealed class LobbyOpenRoomTests
         vm.Where = WhereFilter.Public;
         Assert.Equal(WhereFilter.All, vm.Where);
         foreach (var pending in service.Requests.Pending.ToList()) service.Requests.Withdraw(pending.Spec.DedupeKey ?? "");
+    });
+
+    /// <summary>
+    /// A friend can mail any number of invites (new ids and tokens, no end date or a far one): the list, the invites held
+    /// and the requests stay within the per-device and overall limits, and every row leaves by itself at the latest
+    /// <see cref="MultiplayerViewModel.MaxFriendRoomAge"/> after it arrived.
+    /// </summary>
+    [Fact]
+    public void AFloodOfInvitesFromFriendsStaysBoundedAndLeavesByItself() => UiTestThread.Run(() =>
+    {
+        var (service, vm, _) = Create();
+        using var s = service;
+        var now = DateTimeOffset.UtcNow;
+        vm.FriendRoomClock = () => now;
+        using var host = X25519KeyPair.Generate();
+        var friends = Enumerable.Range(0, 8).Select(_ => X25519KeyPair.Generate()).ToList();
+        MailedInvite Mail(X25519KeyPair from, DateTimeOffset? expires, string room) => new(
+            new Contact(from.PublicKey, "Friend", true, now),
+            new InviteBook().Create(20, null, false, TunnelSettings.Default, boundTo: vm.Identity.PublicKey).Invite,
+            host.PublicKey, room, expires);
+        int Requests() => service.Requests.Pending.Count(r => r.Spec.Kind == "contact-invite");
+        void AssertBounded()
+        {
+            Assert.InRange(vm.FriendRooms.Count, 0, MultiplayerViewModel.MaxFriendRooms);
+            Assert.Equal(vm.FriendRooms.Count, vm.HeldFriendInvites);
+            Assert.Equal(vm.FriendRooms.Count, Requests());
+            foreach (var group in vm.FriendRooms.GroupBy(r => r.Sender))
+                Assert.InRange(group.Count(), 1, MultiplayerViewModel.MaxFriendRoomsPerDevice);
+        }
+
+        try
+        {
+            // One friend, 200 distinct invites with no end, one at a time and in batches: at most three rows, newest kept.
+            var robin = friends[0];
+            for (var i = 0; i < 100; i++) vm.ShowMailedInvites([Mail(robin, null, $"room {i}")]);
+            AssertBounded();
+            vm.ShowMailedInvites(Enumerable.Range(100, 100).Select(i => Mail(robin, now.AddYears(50), $"room {i}")).ToList());
+            AssertBounded();
+            Assert.Equal(["room 199", "room 198", "room 197"], vm.FriendRooms.Select(r => r.Title));
+
+            // The same invite again is still one row.
+            vm.ShowMailedInvites([vm.FriendRooms[0].Invite]);
+            AssertBounded();
+            Assert.Equal(3, vm.FriendRooms.Count);
+
+            // Eight friends flooding together: never more than the overall limit.
+            foreach (var friend in friends)
+                vm.ShowMailedInvites(Enumerable.Range(0, 10).Select(i => Mail(friend, null, $"{i}")).ToList());
+            AssertBounded();
+            Assert.Equal(MultiplayerViewModel.MaxFriendRooms, vm.FriendRooms.Count);
+            Assert.True(vm.WatchingFriendRoomExpiry);
+
+            // A far end date doesn't keep a row: it goes at the latest MaxFriendRoomAge after it arrived.
+            Assert.All(vm.FriendRooms, r => Assert.True(r.Until <= now + MultiplayerViewModel.MaxFriendRoomAge));
+            now += MultiplayerViewModel.MaxFriendRoomAge;
+            vm.PruneFriendRooms();
+            Assert.Empty(vm.FriendRooms);
+            Assert.Equal(0, vm.HeldFriendInvites);
+            Assert.Equal(0, Requests());
+            Assert.False(vm.WatchingFriendRoomExpiry);
+        }
+        finally
+        {
+            foreach (var friend in friends) friend.Dispose();
+            foreach (var pending in service.Requests.Pending.ToList()) service.Requests.Withdraw(pending.Spec.DedupeKey ?? "");
+        }
     });
 
     [Fact]
@@ -467,6 +537,7 @@ public sealed class LobbyOpenRoomTests
                     // 20 knocks in 12 hours, only from that device, and I still say yes to each.
                     Assert.Equal(20, invite.Uses);
                     Assert.False(invite.AutoApprove);
+                    Assert.True(invite.AskEachTime);
                     Assert.NotNull(invite.BoundTo);
                     Assert.Contains(mailed, m => m.To.PublicKey.AsSpan().SequenceEqual(invite.BoundTo) && m.Invite == invite.Invite);
                 });
@@ -502,6 +573,23 @@ public sealed class LobbyOpenRoomTests
                 Assert.True(vm.Contacts.Unreadable);
                 Assert.Contains(lobby.Book.Pending, i => i.BoundTo is [1, ..]);
                 Assert.Equal(2, lobby.Book.Pending.Count);
+
+                // The invites mailed for a room end with it: opening and closing rooms again and again keeps none.
+                Assert.True(vm.FriendInvitesHeld > 0);
+                vm.StopHostLobbyForTest();
+                Assert.Equal(0, vm.FriendInvitesHeld);
+                vm.ContactsDir = root;
+                vm.TestSendInvite = (_, _, _) => Task.FromResult(Guid.NewGuid().ToString("N"));
+                for (var round = 0; round < 5; round++)
+                {
+                    var again = new HostLobby(_ => new NoLobby(), () => [],
+                        book => new KnockServer(book, vm.Identity.KeyPair, () => credentials, _ => false, (_, _) => Task.FromResult(false), System.Net.IPAddress.Loopback, 0));
+                    vm.HostLobbyForTest(again, credentials);
+                    Wait(vm.InviteFriendsToKnockAsync());
+                    Assert.InRange(vm.FriendInvitesHeld, 1, 3);
+                    vm.StopHostLobbyForTest();
+                    Assert.Equal(0, vm.FriendInvitesHeld);
+                }
             }
             finally
             {
@@ -511,6 +599,317 @@ public sealed class LobbyOpenRoomTests
         finally
         {
             try { Directory.Delete(root, true); } catch (IOException) { }
+        }
+    });
+
+    [Fact]
+    public void FriendsCanKnockStaysPickedWhenTheContactListIsRebuilt() => UiTestThread.Run(() =>
+    {
+        var (service, vm, _) = Create();
+        using var s = service;
+        var root = Path.Combine(Path.GetTempPath(), "jay-lobby-keep-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            vm.ContactsDir = root;
+            byte[] Key(byte n) { var key = new byte[32]; key[0] = n; return key; }
+            vm.Contacts.Import([new Contact(Key(1), "Robin", true, DateTimeOffset.UtcNow)]);
+            vm.RefreshContacts();
+            vm.IsPublicConnected = true;
+            vm.SelectedWho = vm.WhoChoices[1];
+            Assert.Equal(RoomAccess.Friends, vm.OpenAccess);
+
+            // Adding a friend (or renaming one) rebuilds the list, which is empty for a moment: the choice stays.
+            vm.Contacts.Import([new Contact(Key(2), "Sam", true, DateTimeOffset.UtcNow)]);
+            vm.RefreshContacts();
+            Assert.Equal(RoomAccess.Friends, vm.OpenAccess);
+
+            // With no friends left it can't be kept.
+            vm.Contacts.RemovePerson(Key(1));
+            vm.Contacts.RemovePerson(Key(2));
+            vm.RefreshContacts();
+            Assert.Empty(vm.ContactList);
+            Assert.Equal(RoomAccess.Invited, vm.OpenAccess);
+        }
+        finally
+        {
+            try { Directory.Delete(root, true); } catch (IOException) { }
+        }
+    });
+
+    [Fact]
+    public void ADirectJoinThatCannotConnectIsNotAJoin() => UiTestThread.Run(() =>
+    {
+        var (service, vm, _) = Create();
+        using var s = service;
+        var dir = Path.Combine(Path.GetTempPath(), "jay-lobby-direct-" + Guid.NewGuid().ToString("N"));
+        // No relays to fall back to ("No server"), and nothing to punch towards: the connection fails.
+        var direct = new DirectSession(null!, dir, null, false, new DirectOptions([], false, [], false, false, false, true), new DiagnosticLog());
+        var room = new RoomCode("K7Q2M9XD", "4HZP8RW2N6TC", 25565);
+        var joined = vm.CompleteDirectJoinAsync(direct, room, new KnockOutcome(null, null, new byte[32]));
+        Wait(joined);
+        Assert.False(joined.Result);
+        Assert.False(vm.IsDirect);
+        Assert.Equal("", vm.Mode);
+        Assert.Equal("multiplayer.direct.connect_failed", vm.StatusInfo?.Key);
+    });
+
+    [Fact]
+    public void ANoServerRoomsKnockLobbyReachesNoRelay() => UiTestThread.Run(() =>
+    {
+        var (service, vm, _) = Create();
+        using var s = service;
+        vm.TestPeers = ["tcp://relay.example.org:11010"];
+        var credentials = RoomCredentials.Create(vm.Identity.PublicKey, 25565, TunnelSettings.Default);
+        var members = new MemberTable();
+
+        // An ordinary invite room: guests knock through the relays.
+        vm.StartHostLobbyForTest(credentials, members);
+        Assert.Equal(["tcp://relay.example.org:11010"], vm.HostLobbyPeersForTest);
+        vm.StopHostLobbyForTest();
+        Assert.Null(vm.HostLobbyPeersForTest);
+
+        // "No server": the knock lobby takes no relay at all, only what the direct bridge hands it on loopback.
+        var dir = Path.Combine(Path.GetTempPath(), "jay-lobby-serverless-" + Guid.NewGuid().ToString("N"));
+        var direct = new DirectSession(null!, dir, credentials.ToHostRoom(members, "Host"), true,
+            new DirectOptions([], false, [], false, false, false, true), new DiagnosticLog());
+        try
+        {
+            vm.StartHostLobbyForTest(credentials, members, new InviteBook { KeepLobbyKey = true }, direct);
+            Assert.Empty(vm.HostLobbyPeersForTest!);
+            Assert.Empty(vm.MakeDirectOptions().FallbackNodes);
+            // Nor is it registered with a public network, while an ordinary hosted room may be.
+            vm.Mode = "host";
+            Assert.True(vm.MayAnnounce);
+            Assert.True(vm.ShowPublishRoom);
+            vm.IsDirect = true;
+            Assert.False(vm.MayAnnounce);
+            // [Publish…] is not offered, and publishing anyway says why instead of "published".
+            Assert.False(vm.ShowPublishRoom);
+            Wait(vm.PublishRoomCommand.ExecuteAsync(null));
+            Assert.Equal("multiplayer.direct.use_sealed", vm.StatusInfo?.Key);
+            vm.IsDirect = false;
+            vm.Mode = "";
+        }
+        finally
+        {
+            vm.StopHostLobbyForTest();
+            Wait(direct.DisposeAsync().AsTask());
+        }
+    });
+
+    [Fact]
+    public void AFriendRemovedWhileInvitesGoOutGetsNone() => UiTestThread.Run(() =>
+    {
+        var (service, vm, _) = Create();
+        using var s = service;
+        var root = Path.Combine(Path.GetTempPath(), "jay-lobby-removed-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            vm.ContactsDir = root;
+            byte[] Key(byte n) { var key = new byte[32]; key[0] = n; return key; }
+            var now = DateTimeOffset.UtcNow;
+            vm.Contacts.Import([
+                new Contact(Key(1), "Robin", true, now),
+                new Contact(Key(2), "Sam", true, now),
+            ]);
+            vm.RefreshContacts();
+            var credentials = RoomCredentials.Create(vm.Identity.PublicKey, 25565, TunnelSettings.Default);
+            var lobby = new HostLobby(_ => new NoLobby(), () => [],
+                book => new KnockServer(book, vm.Identity.KeyPair, () => credentials, _ => false, (_, _) => Task.FromResult(false), System.Net.IPAddress.Loopback, 0));
+            try
+            {
+                vm.HostLobbyForTest(lobby, credentials);
+                var mailed = new List<string>();
+                // Sam is taken off the list while the first invite (Robin's, the lists are sorted by name) is on its way.
+                vm.TestSendInvite = (to, _, _) =>
+                {
+                    mailed.Add(to.Name);
+                    if (to.Name == "Robin")
+                    {
+                        vm.Contacts.RemovePerson(Key(2));
+                        vm.RefreshContacts();
+                    }
+                    return Task.FromResult(Guid.NewGuid().ToString("N"));
+                };
+                var told = vm.InviteFriendsToKnockAsync();
+                Wait(told);
+                Assert.Equal(1, told.Result);
+                Assert.Equal(["Robin"], mailed);
+                Assert.Equal(1, Assert.Single(lobby.Book.Pending).BoundTo![0]);
+
+                // Removed right after the mail went: the invite it carried is taken back.
+                vm.TestSendInvite = (to, _, _) =>
+                {
+                    vm.Contacts.RemovePerson(Key(1));
+                    return Task.FromResult(Guid.NewGuid().ToString("N"));
+                };
+                told = vm.InviteFriendsToKnockAsync();
+                Wait(told);
+                Assert.Equal(0, told.Result);
+                // Robin is no longer a friend: neither invite is left.
+                Assert.Empty(lobby.Book.Pending);
+            }
+            finally
+            {
+                Wait(lobby.DisposeAsync().AsTask());
+            }
+        }
+        finally
+        {
+            try { Directory.Delete(root, true); } catch (IOException) { }
+        }
+    });
+
+    [Fact]
+    public void ANoServerRoomHandsOutNoPlainInvite() => UiTestThread.Run(() =>
+    {
+        var (service, vm, _) = Create();
+        using var s = service;
+        var root = Path.Combine(Path.GetTempPath(), "jay-lobby-noserver-invite-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            vm.ContactsDir = root;
+            var key = new byte[32];
+            key[0] = 1;
+            vm.Contacts.Import([new Contact(key, "Robin", true, DateTimeOffset.UtcNow)]);
+            vm.RefreshContacts();
+            var credentials = RoomCredentials.Create(vm.Identity.PublicKey, 25565, TunnelSettings.Default);
+            var lobby = new HostLobby(_ => new NoLobby(), () => [],
+                book => new KnockServer(book, vm.Identity.KeyPair, () => credentials, _ => false, (_, _) => Task.FromResult(false), System.Net.IPAddress.Loopback, 0));
+            try
+            {
+                vm.HostLobbyForTest(lobby, credentials);
+                vm.Mode = "host";
+                var mailed = 0;
+                vm.TestSendInvite = (_, _, _) =>
+                {
+                    mailed++;
+                    return Task.FromResult(Guid.NewGuid().ToString("N"));
+                };
+
+                // An ordinary room offers a new invite on its card.
+                Assert.True(vm.ShowCreateInvite);
+
+                // "No server": a plain invite would knock through a relay this room's lobby never reaches.
+                vm.IsDirect = true;
+                Assert.False(vm.ShowCreateInvite);
+                Wait(vm.CreateInviteCommand.ExecuteAsync(null));
+                Assert.False(vm.HasInvite);
+                Assert.Empty(lobby.Book.Pending);
+                Assert.Equal("multiplayer.direct.use_sealed", vm.StatusInfo?.Key);
+
+                // "Invite friends" and Ctrl+Shift+I go to the sealed code instead (none can be made here: no addresses).
+                Wait(vm.InviteFriendsCommand.ExecuteAsync(null));
+                Assert.False(vm.HasInvite);
+                Assert.Empty(lobby.Book.Pending);
+
+                // Nor is a friend mailed a plain invite.
+                var told = vm.InviteFriendsToKnockAsync();
+                Wait(told);
+                Assert.Equal(0, told.Result);
+                Assert.Equal(0, mailed);
+                Assert.Empty(lobby.Book.Pending);
+
+                // Back in an ordinary room, the same friend is mailed one.
+                vm.IsDirect = false;
+                told = vm.InviteFriendsToKnockAsync();
+                Wait(told);
+                Assert.Equal(1, told.Result);
+                Assert.Equal(1, mailed);
+                vm.Mode = "";
+            }
+            finally
+            {
+                Wait(lobby.DisposeAsync().AsTask());
+            }
+        }
+        finally
+        {
+            try { Directory.Delete(root, true); } catch (IOException) { }
+        }
+    });
+
+    [Fact]
+    public void RelaysOnlyWithAStrictSplitDoesNotOpen() => UiTestThread.Run(() =>
+    {
+        var (service, vm, _) = Create();
+        using var s = service;
+        // A strict split needs a direct main path; "Relays only" turns direct connections off.
+        Assert.True(MultiplayerViewModel.SplitNeedsDirect(SplitSettings.Create(SplitPolicy.Strict, SplitPolicy.Off)));
+        Assert.True(MultiplayerViewModel.SplitNeedsDirect(SplitSettings.Create(SplitPolicy.Auto, SplitPolicy.Strict)));
+        Assert.False(MultiplayerViewModel.SplitNeedsDirect(SplitSettings.Create(SplitPolicy.Auto, SplitPolicy.Auto)));
+        Assert.False(MultiplayerViewModel.SplitNeedsDirect(SplitSettings.None));
+
+        vm.TestPeers = ["tcp://relay.example.org:11010"];
+        vm.TestSplit = SplitSettings.Create(SplitPolicy.Strict, SplitPolicy.Strict);
+        vm.SelectedRoute = vm.RouteChoices.First(c => c.Id == nameof(RoomRoute.RelayOnly));
+        Wait(vm.CreateRoomCommand.ExecuteAsync(null));
+        Assert.True(vm.IsIdle);
+        Assert.Equal("multiplayer.split.relay_only_strict", vm.StatusInfo?.Key);
+    });
+
+    [Fact]
+    public void AFriendsRoomLeavesTheListWhenItRunsOut() => UiTestThread.Run(() =>
+    {
+        var (service, vm, _) = Create();
+        using var s = service;
+        using var friend = X25519KeyPair.Generate();
+        using var host = X25519KeyPair.Generate();
+        MailedInvite Mail(TimeSpan lifetime, string room) => new(new Contact(friend.PublicKey, "Robin", true, DateTimeOffset.UtcNow),
+            new InviteBook().Create(1, TimeSpan.FromHours(12), false, TunnelSettings.Default, boundTo: vm.Identity.PublicKey).Invite,
+            host.PublicKey, room, DateTimeOffset.UtcNow + lifetime);
+
+        // Listed rooms are checked on a timer (every one runs out), so nobody has to touch the list.
+        Assert.False(vm.WatchingFriendRoomExpiry);
+        vm.ShowMailedInvites([Mail(TimeSpan.FromHours(12), "Robin's world")]);
+        Assert.True(vm.WatchingFriendRoomExpiry);
+
+        // The request timing out takes the room away, and so does the user's own "Not now".
+        vm.ShowMailedInvites([Mail(TimeSpan.FromHours(12), "Second world")]);
+        var request = service.Requests.Pending.Single(r => r.Spec.Kind == "contact-invite" && r.Spec.Title.Contains("Second world"));
+        service.Requests.Resolve(request, "ignore", Amber.Core.Activity.RequestSource.Timeout);
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal(["Robin's world"], vm.FriendRooms.Select(r => r.Title));
+        request = Assert.Single(service.Requests.Pending, r => r.Spec.Kind == "contact-invite");
+        service.Requests.Resolve(request, "ignore", Amber.Core.Activity.RequestSource.Bar);
+        Dispatcher.UIThread.RunJobs();
+        Assert.Empty(vm.FriendRooms);
+
+        // Once nothing is listed, the timer stops.
+        Assert.False(vm.WatchingFriendRoomExpiry);
+    });
+
+    [Fact]
+    public void JoiningTheSameServerAgainCountsAsJoined() => UiTestThread.Run(() =>
+    {
+        var (service, vm, _) = Create();
+        using var s = service;
+        var serverKey = System.Security.Cryptography.RandomNumberGenerator.GetBytes(32);
+        vm.JayServers.EnrollForTest = (invite, _) => Task.FromResult(
+            new Amber.Core.Multiplayer.Gate.GateMembership(invite.Host, invite.Port, serverKey, System.Security.Cryptography.RandomNumberGenerator.GetBytes(32), "Steve"));
+        string NewInvite() => new Amber.Core.Multiplayer.Gate.GateInvite("mc.example.com", 47670,
+            System.Security.Cryptography.RandomNumberGenerator.GetBytes(16), System.Security.Cryptography.RandomNumberGenerator.GetBytes(16)).Encode();
+        try
+        {
+            foreach (var round in new[] { 1, 2 })
+            {
+                vm.Where = WhereFilter.All;
+                Assert.True(vm.PasteCode(NewInvite()));
+                var joined = vm.JoinCommand.ExecuteAsync(null);
+                Wait(joined);
+                // The second time the saved server is replaced (same server, same name), and that is still a join.
+                Assert.Equal("", vm.JoinCode);
+                Assert.Equal(WhereFilter.Servers, vm.Where);
+                Assert.Single(vm.JayServers.Servers, server => server.Entry.Host == "mc.example.com");
+            }
+        }
+        finally
+        {
+            foreach (var server in vm.JayServers.Servers.Where(server => server.Entry.Host == "mc.example.com").ToList())
+                Wait(vm.JayServers.RemoveCommand.ExecuteAsync(server));
         }
     });
 

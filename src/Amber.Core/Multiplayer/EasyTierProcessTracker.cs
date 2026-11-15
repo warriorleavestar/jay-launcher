@@ -48,7 +48,8 @@ internal static class EasyTierProcessTracker
                 if (runningPath is null) continue;
                 if (expected.Contains(Path.GetFullPath(runningPath)))
                 {
-                    process.Kill(entireProcessTree: true);
+                    var watcher = Path.GetFullPath(runningPath) == Path.GetFullPath(EasyTierProcessGuard.WatcherExecutable);
+                    EasyTierProcessGuard.Stop(process, watcher);
                     process.WaitForExit(5000);
                 }
                 File.Delete(record);

@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using Amber.App.Services;
 using Amber.Core.Activity;
 using Amber.Core.Localization;
+using Amber.Core.Identity;
 using Amber.Core.Multiplayer;
 using Amber.Core.Multiplayer.Contacts;
 using Amber.Core.Multiplayer.Public;
@@ -49,6 +50,11 @@ public sealed class ContactDeviceItem(Contact device, ContactItem person)
     public bool IsNew => Device.NewDevice;
     public string Fingerprint => (Device.DeviceName.Length > 0 ? Device.DeviceName + " · " : "") + Device.Fingerprint
         + (Device.NewDevice ? " · " + L.T("multiplayer.contacts.new_device_tag") : "");
+
+    /// <summary>The locked new-device panel: the same words as the request bar's notice.</summary>
+    public string NewDeviceTitle => L.F("multiplayer.contacts.new_device", Person.Name);
+    public string NewDeviceBody => L.F("multiplayer.contacts.new_device_body",
+        Device.DeviceName.Length > 0 ? Device.DeviceName : L.T("multiplayer.contacts.new_device_unnamed"), Device.Fingerprint);
 }
 
 /// <summary>An add-contact exchange under way: waiting, asking me, or the emoji to compare.</summary>
@@ -56,10 +62,9 @@ public sealed class ContactRequestItem(PendingContact pending)
 {
     public PendingContact Pending { get; } = pending;
     public ContactStep Step { get; } = pending.Step;
-    public string Who => (Pending.Name.Length > 0 ? Pending.Name + " · " + Pending.Fingerprint : Pending.Fingerprint)
-        + (MultiplayerViewModel.JayLine(Pending.JayAccount) is { } jay ? " · " + jay : "");
+    public string Who => Pending.Name.Length > 0 ? Pending.Name + " · " + Pending.Fingerprint : Pending.Fingerprint;
 
-    public string Title => Pending.KnownFriend ? L.F("multiplayer.contacts.step.known", Who) : Step switch
+    public string Title => Step switch
     {
         ContactStep.WaitingForThem => L.F("multiplayer.contacts.step.waiting_them", Who),
         ContactStep.AskingMe => L.F("multiplayer.contacts.step.asking_me", Who),
@@ -140,8 +145,6 @@ public sealed partial class MultiplayerViewModel
         get
         {
             if (_public is not { } network) return null;
-            // Add-contact mail carries this device's Jay account certificate, so friends recognize me on my other devices.
-            Contacts.MyCertificate = JayCertificate;
             if (_post is null || !ReferenceEquals(_postNetwork, network))
             {
                 _postNetwork = network;
@@ -186,7 +189,7 @@ public sealed partial class MultiplayerViewModel
         ContactRequests.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasContactRequests));
         _service.Requests.Resolved += handle =>
         {
-            if (handle.ResolvedBy == RequestSource.Program || handle.Spec.Kind is not ("contact" or "contact-compare" or "contact-invite" or "contact-new-device")) return;
+            if (handle.ResolvedBy == RequestSource.Program || handle.Spec.Kind is not ("contact" or "contact-compare" or "contact-invite" or "contact-new-device" or "contact-account")) return;
             Dispatcher.UIThread.Post(() => AnswerContactRequest(handle));
         };
         PropertyChanged += (_, e) =>
@@ -220,18 +223,30 @@ public sealed partial class MultiplayerViewModel
         if (removed) RefreshTrusted();
     }
 
+    /// <summary>The contact list is being rebuilt: <see cref="RefreshOpenChoices"/> waits until it's done.</summary>
+    private bool _rebuildingContacts;
+
     /// <summary>Rebuilds both lists from the book and keeps the activity centre's requests in step with it.</summary>
     internal void RefreshContacts()
     {
         var book = Contacts;
-        ContactList.Clear();
-        // One row per person: devices sharing a Jay account are grouped, the newest one names the person.
-        var people = book.All.Where(c => c.Verified)
-            .GroupBy(c => c.JayAccount ?? Convert.ToHexStringLower(c.PublicKey))
-            .Select(g => g.OrderByDescending(c => c.Added).ToList())
-            .Select(devices => new ContactItem(devices[0]) { Devices = devices });
-        foreach (var person in people.OrderBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase)) ContactList.Add(person);
+        _rebuildingContacts = true;
+        try
+        {
+            ContactList.Clear();
+            // One row per person: devices sharing a Jay account are grouped, the newest one names the person.
+            var people = book.All.Where(c => c.Verified)
+                .GroupBy(c => c.JayAccount ?? Convert.ToHexStringLower(c.PublicKey))
+                .Select(g => g.OrderByDescending(c => c.Added).ToList())
+                .Select(devices => new ContactItem(devices[0]) { Devices = devices });
+            foreach (var person in people.OrderBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase)) ContactList.Add(person);
+        }
+        finally
+        {
+            _rebuildingContacts = false;
+        }
         ForgetFormerFriends();
+        RefreshOpenChoices();
         DropRoomsOfRemovedFriends();
         RevokeInvitesOfRemovedFriends();
         ContactRequests.Clear();
@@ -274,8 +289,21 @@ public sealed partial class MultiplayerViewModel
                 [new("ok", L.T("multiplayer.contacts.new_device_ok"), IsDefault: true), new("remove", L.T("multiplayer.contacts.new_device_remove"), IsDanger: true)],
                 IsSafety: true, DedupeKey: dedupe));
         }
+        // A knock linked a friend's device to a Jay account. The link rests only on that device's key, so it vouches for
+        // their other devices only after I confirm it.
+        foreach (var d in book.All.Where(c => c.Verified && c.AccountPending && c.JayAccount is not null))
+        {
+            // The key names the account too, so an answer always applies to the account the question showed.
+            var dedupe = "contact-account:" + Convert.ToHexStringLower(d.PublicKey) + ":" + d.JayAccount;
+            wanted.Add(dedupe);
+            var who = new ContactItem(d).Name;
+            _service.Requests.Post(new RequestSpec("contact-account", L.F("multiplayer.contacts.account_link", who),
+                L.F("multiplayer.contacts.account_link_body", d.Fingerprint, JayAddress.Short(d.JayAccount!), JayAddress.CheckWordsText(d.JayAccount, L.Language)),
+                [new("ok", L.T("multiplayer.contacts.account_link_ok")), new("no", L.T("multiplayer.contacts.account_link_no"), IsDefault: true)],
+                IsSafety: true, DedupeKey: dedupe));
+        }
         foreach (var r in _service.Requests.Pending)
-            if (r.Spec.Kind is "contact" or "contact-compare" or "contact-new-device" && r.Spec.DedupeKey is { } key && !wanted.Contains(key))
+            if (r.Spec.Kind is "contact" or "contact-compare" or "contact-new-device" or "contact-account" && r.Spec.DedupeKey is { } key && !wanted.Contains(key))
                 _service.Requests.Withdraw(key);
         // Both lists are whole again: the Friends page rebuilds its rows once, not once per row added.
         FriendsRebuilt?.Invoke();
@@ -458,15 +486,17 @@ public sealed partial class MultiplayerViewModel
         foreach (var m in invites)
         {
             var key = "contact-invite:" + Convert.ToHexStringLower(m.Invite.Token);
-            _mailedInvites[key] = m;
             var who = new ContactItem(m.From).Name;
             var room = m.Room.Length > 0 ? m.Room : L.T("multiplayer.room.friend_room");
-            ListFriendRoom(key, m, who, room);
+            // Listed (within the per-device and overall limits) or nothing is kept: no request without its row.
+            if (!ListFriendRoom(key, m, who, room)) continue;
+            _mailedInvites[key] = m;
             NoteInvitedBy(m, key, room);
+            var until = FriendRooms.First(r => r.Key == key).Until;
             _service.Requests.Post(new RequestSpec("contact-invite", L.F("multiplayer.contacts.invite.title", who, room),
                 L.F("multiplayer.contacts.invite.body", m.From.Fingerprint),
                 [new("ignore", L.T("multiplayer.contacts.ignore"), IsDefault: true), new("join", L.T("multiplayer.contacts.invite.join"))],
-                Timeout: m.Expires is { } e ? e - DateTimeOffset.Now : null, DedupeKey: key, TimeoutChoice: "ignore"));
+                Timeout: until - FriendRoomClock(), DedupeKey: key, TimeoutChoice: "ignore"));
         }
     }
 
@@ -487,11 +517,21 @@ public sealed partial class MultiplayerViewModel
                 OpenAddFriend();
                 break;
             case "contact-invite":
-                // "Ignore" only closes the request: the room stays under "where to play" until the invite runs out.
-                if (handle.Choice != "join") break;
+                // "Not now" lets the room go with its invite, and the same invite doesn't come back. The request timing
+                // out means it ran out, so the room goes with it too.
+                if (handle.Choice != "join")
+                {
+                    if (handle.ResolvedBy == RequestSource.Timeout) DropFriendRoom(key);
+                    else IgnoreFriendRoom(key);
+                    break;
+                }
                 PruneFriendRooms();
                 if (FriendRooms.FirstOrDefault(r => r.Key == key) is { } listed) _ = JoinFriendRoomAsync(listed);
                 else SetStatus(StatusMessage.Warning("multiplayer.where.friend_room.expired"));
+                break;
+            case "contact-account" when key.StartsWith("contact-account:", StringComparison.Ordinal):
+                if (handle.Choice is "ok" or "no" && key["contact-account:".Length..].Split(':') is [var deviceHex, var account])
+                    Contacts.ConfirmAccount(Convert.FromHexString(deviceHex), handle.Choice == "ok", account);
                 break;
             case "contact-new-device" when key.StartsWith("contact-new-device:", StringComparison.Ordinal):
             {
@@ -543,6 +583,12 @@ public sealed partial class MultiplayerViewModel
     private async Task<bool> MailInviteAsync(ContactItem? item, int uses, TimeSpan lifetime, bool askFirst, bool quiet)
     {
         if (item is null || _lobby is not { } lobby || _credentials is not { } credentials) return false;
+        // A mailed invite knocks through a relay; a "No server" room's lobby reaches none.
+        if (IsDirect)
+        {
+            if (!quiet) SetStatus(StatusMessage.Warning("multiplayer.direct.use_sealed"));
+            return false;
+        }
         var send = TestSendInvite;
         if (send is null)
         {
@@ -557,22 +603,39 @@ public sealed partial class MultiplayerViewModel
         }
         lobby.Book.Game = await HostGameAsync();
         if (_lobby != lobby) return false;
-        IReadOnlyList<Contact> devices = askFirst ? [.. item.Devices.Where(d => d.Verified)] : item.Devices;
+        // The contact list may have changed while waiting: only devices that are still there (and still verified, for
+        // "friends can knock") get an invite, and each is checked again around its send.
+        bool StillWanted(Contact device) => Contacts.Find(device.PublicKey) is { } now && (!askFirst || now.Verified);
+        IReadOnlyList<Contact> devices = [.. item.Devices.Where(StillWanted)];
         if (devices.Count == 0) return false;
-        var pendings = devices.Select(d => (Device: d, Invite: lobby.Book.Create(uses, lifetime, !askFirst && Child.MayAutoAdmit(d.MayBeAutoAdmitted), credentials.Tunnel, boundTo: d.PublicKey))).ToList();
+        var pendings = devices.Select(d => (Device: d, Invite: lobby.Book.Create(uses, lifetime, !askFirst && Child.MayAutoAdmit(d.MayBeAutoAdmitted), credentials.Tunnel,
+            boundTo: d.PublicKey, askEachTime: askFirst))).ToList();
         foreach (var (_, pending) in pendings) _friendInvites.Add(pending);
         RefreshInvites();
         try
         {
             await lobby.UpdateAsync();
+            var mailed = 0;
             foreach (var (device, pending) in pendings)
             {
+                if (pending.Revoked || !StillWanted(device))
+                {
+                    DropFriendInvite(lobby, pending);
+                    continue;
+                }
                 var id = await send(device, pending.Invite, DateTimeOffset.UtcNow + lifetime);
+                if (!StillWanted(device))
+                {
+                    DropFriendInvite(lobby, pending);
+                    continue;
+                }
+                mailed++;
                 // Only the newest device's receipt counts: an older computer that's switched off shouldn't raise "held back".
                 if (!ReferenceEquals(device, devices[0])) continue;
                 if (!quiet) _sentInvites[id] = item.Name;
                 NoteInviteSent(item, id);
             }
+            if (mailed == 0) return false;
             if (!quiet) SetStatus(StatusMessage.Success("multiplayer.contacts.invite.sent", item.Name));
             return true;
         }
@@ -587,6 +650,13 @@ public sealed partial class MultiplayerViewModel
             if (!quiet) SetStatus(StatusMessage.Failure("multiplayer.contacts.mail_failed", e, ErrorText.Of(e)));
             return false;
         }
+    }
+
+    private void DropFriendInvite(HostLobby lobby, PendingInvite invite)
+    {
+        lobby.Book.Revoke(invite);
+        _friendInvites.Remove(invite);
+        RefreshInvites();
     }
 
     /// <summary>Tests: stands in for mailing an invite over the connected network (device, invite, expiry; returns the mail id).</summary>
