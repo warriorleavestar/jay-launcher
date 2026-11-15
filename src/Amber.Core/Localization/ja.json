@@ -2009,6 +2009,7 @@
   "core.mp.network.bad_easytier": "ネットワークの EasyTier 名またはシークレットが正しくありません",
   "core.mp.network.bad_nodes": "ネットワークには有効な中継アドレス（tcp:// か udp://）が 1~16 個必要です",
   "core.mp.network.ip_node": "中継はドメイン名で指定してください。ネットワークアドレスに公開 IP アドレスは入れられません",
+  "core.mp.network.no_usable_nodes": "このネットワークには Jay が接続できる中継がありません。ws:// と wss:// の中継は使えないため、tcp://、udp://、quic://、wg:// の中継が少なくとも 1 つ必要です",
   "core.mp.network.bad_link": "ネットワークのホームページは https アドレスにしてください",
   "core.mp.network.bad_config": "ネットワーク設定ファイルには https アドレスと SHA-256 が必要です",
   "core.mp.network.bad_dir_keys": "ネットワークのディレクトリ鍵は 32 バイトの鍵を 1〜8 個にしてください",

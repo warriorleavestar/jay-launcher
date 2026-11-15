@@ -2041,6 +2041,7 @@
   "core.mp.network.bad_easytier": "The network's EasyTier name or secret is invalid",
   "core.mp.network.bad_nodes": "The network needs 1-16 valid relay addresses (tcp:// or udp://)",
   "core.mp.network.ip_node": "Relays must go by a domain name: a network address never carries a public IP address",
+  "core.mp.network.no_usable_nodes": "The network has no relay Jay can connect to: ws:// and wss:// relays can't be used, so it needs at least one tcp://, udp://, quic:// or wg:// relay",
   "core.mp.network.bad_link": "The network home page must be an https address",
   "core.mp.network.bad_config": "The network config needs an https address and a SHA-256",
   "core.mp.network.bad_dir_keys": "The network's directory keys must be 1 to 8 keys of 32 bytes",

@@ -412,6 +412,14 @@ public sealed class NetworkServerFrameworkTests : IAsyncDisposable
         Assert.Equal("seed", server.Health()["role"]!.GetValue<string>());
     }
 
+    [Fact]
+    public async Task WebSocketSeedsAreAcceptedButNotConnectedTo()
+    {
+        var server = await StartAsync(b => b.UseSeeds(["tcp://seed.example.net:11010", "wss://ws.example.net:443"]));
+        Assert.Equal(["tcp://seed.example.net:11010"], server.Profile.Nodes);
+        Assert.Throws<ArgumentException>(() => new JayNetworkServerBuilder().UseSeeds(["http://seed.example.net:80"]));
+    }
+
     /// <summary>Public IPs are refused in a network string; LAN and loopback ones (test networks) say nothing about anyone.</summary>
     [Theory]
     [InlineData("tcp://node.example.net:11010", false)]

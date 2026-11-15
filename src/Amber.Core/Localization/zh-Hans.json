@@ -2009,6 +2009,7 @@
   "core.mp.network.bad_easytier": "网络的 EasyTier 名字或密钥不对",
   "core.mp.network.bad_nodes": "网络要有 1~16 个有效的中转地址（tcp:// 或 udp://）",
   "core.mp.network.ip_node": "中转要用域名：网络地址里不能写公网 IP 地址",
+  "core.mp.network.no_usable_nodes": "这个网络没有 Jay 能连的中转：ws:// 和 wss:// 中转用不了，至少要有一个 tcp://、udp://、quic:// 或 wg:// 中转",
   "core.mp.network.bad_link": "网络主页要是 https 地址",
   "core.mp.network.bad_config": "网络配置文件要有 https 地址和 SHA-256",
   "core.mp.network.bad_dir_keys": "网络的目录钥匙要有 1 到 8 把，每把 32 字节",

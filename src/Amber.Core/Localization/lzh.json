@@ -1942,6 +1942,7 @@
   "core.mp.network.bad_easytier": "網之 EasyTier 名或鑰不對",
   "core.mp.network.bad_nodes": "網須有一至十六可用之網之服器（tcp:// 或 udp:// 址）",
   "core.mp.network.ip_node": "網之服器須以域名稱之：網之連串不得書公網 IP",
+  "core.mp.network.no_usable_nodes": "此網無 Jay 可連之服器：ws:// 與 wss:// 不可用，須有一 tcp://、udp://、quic:// 或 wg:// 之址",
   "core.mp.network.bad_link": "網之首頁須為 https 址",
   "core.mp.network.bad_config": "網之設檔須有 https 址與 SHA-256",
   "core.mp.network.bad_dir_keys": "網之目錄鑰須一至八把，每把三十二字節",
