@@ -1539,7 +1539,7 @@
   "multiplayer.direct.invite_created": "Invite created. Copy it to your friend (your addresses are not in it)",
   "multiplayer.kick.you_were_kicked": "You were removed from the room",
   "core.mp.direct.closed_to_new": "{0} tried to connect directly, but there are no open invites, so new direct connections are refused",
-  "core.mp.direct.exit_holds_ipv6": "{0} tried to connect directly over IPv6 while you go online through a member; it joins through the room's other paths instead",
+  "core.mp.direct.exit_holds_ipv6": "a new direct connection over IPv6 was turned away while you go online through a member; that player joins through the room's other paths",
   "multiplayer.clipboard.autoclear_hint": "Cleared from the clipboard after 5 minutes",
   "multiplayer.clipboard.copied_autoclear": "Copied. It will be cleared from the clipboard in 5 minutes",
   "multiplayer.transport.privacy.general": "Fastest. Game traffic between members is protected only by the room network key, which everyone in the room has.",

@@ -757,7 +757,9 @@ public sealed class DirectBridge : IAsyncDisposable
         if (_blocked.Contains(from)) return false;
         if (Ipv6Held(Ipv6Allowed, from.Address))
         {
-            if (Transport.TunnelServer.OncePerMinute(ref _ipv6HeldLogged)) _log(L.F("core.mp.direct.exit_holds_ipv6", from));
+            // Only that it happened: the caller's address isn't written anywhere (it is a public address, and anyone
+            // holding the bridge key could otherwise fill the live diagnostics with addresses of their choosing).
+            if (Transport.TunnelServer.OncePerMinute(ref _ipv6HeldLogged)) _log(L.T("core.mp.direct.exit_holds_ipv6"));
             return false;
         }
         var path = Classify(from);

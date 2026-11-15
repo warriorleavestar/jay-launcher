@@ -1508,7 +1508,7 @@
   "multiplayer.direct.invite_created": "招待を作成しました。フレンドにコピーして送ってください（招待にあなたのアドレスは入っていません）",
   "multiplayer.kick.you_were_kicked": "ルームから外されました",
   "core.mp.direct.closed_to_new": "{0} から直接接続がありましたが、未使用の招待がないため新しい直接接続は受け付けません",
-  "core.mp.direct.exit_holds_ipv6": "{0} から IPv6 で直接接続がありましたが、メンバー経由でインターネットに接続中のため、ルームの別の経路でつながります",
+  "core.mp.direct.exit_holds_ipv6": "メンバー経由でインターネットに接続中のため、IPv6 の新しい直接接続は受け付けませんでした。そのプレイヤーはルームの別の経路でつながります",
   "multiplayer.clipboard.autoclear_hint": "5 分後にクリップボードから自動で消去します",
   "multiplayer.clipboard.copied_autoclear": "コピーしました。5 分後にクリップボードから消去します",
   "multiplayer.transport.privacy.general": "最速です。メンバー間のゲーム通信はルームのネットワーク鍵だけで保護され、その鍵はルームの全員が持っています。",

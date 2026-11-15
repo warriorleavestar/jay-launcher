@@ -1508,7 +1508,7 @@
   "multiplayer.direct.invite_created": "已產生邀請，複製給朋友即可（邀請裡沒有你的位址）",
   "multiplayer.kick.you_were_kicked": "你已被移出房間",
   "core.mp.direct.closed_to_new": "{0} 想直連進來，但目前沒有待用的邀請，不接受新的直連",
-  "core.mp.direct.exit_holds_ipv6": "{0} 想經 IPv6 直連進來，但你正在經成員上網，對方會改走房間的其他路",
+  "core.mp.direct.exit_holds_ipv6": "正在經成員上網，新的 IPv6 直連沒有接受，那位玩家會改走房間的其他路",
   "multiplayer.clipboard.autoclear_hint": "5 分鐘後自動從剪貼簿清除",
   "multiplayer.clipboard.copied_autoclear": "已複製，5 分鐘後自動從剪貼簿清除",
   "multiplayer.transport.privacy.general": "最快。成員之間的遊戲流量只靠房間網路金鑰保護，房間裡每個人都有這把金鑰。",

@@ -1,3 +1,4 @@
+using Amber.Core.Localization;
 using System.Buffers.Binary;
 using System.Net;
 using System.Net.Sockets;
@@ -199,6 +200,15 @@ public sealed class ExitPeerTrustTests
         Assert.False(DirectBridge.Ipv6Held(new HashSet<IPAddress>(), IPAddress.Parse("203.0.113.5").MapToIPv6()));
     }
 
+    [Theory]
+    [InlineData("en"), InlineData("zh-Hans"), InlineData("zh-Hant"), InlineData("ja"), InlineData("lzh")]
+    public void TheTurnedAwayIpv6LineHasNoPlaceForAnAddress(string language)
+    {
+        var path = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "Amber.Core", "Localization", language + ".json");
+        var text = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!["core.mp.direct.exit_holds_ipv6"]!.GetValue<string>();
+        Assert.DoesNotContain("{", text, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task APeerBeingRegisteredIsEitherInTheHoldSnapshotOrHeld()
     {
@@ -232,7 +242,8 @@ public sealed class ExitPeerTrustTests
     public async Task WithAnIpv6LimitNewIpv6PeersOutsideItAreTurnedAwayAndIpv4IsNot()
     {
         if (!Socket.OSSupportsIPv6) return;
-        await using var host = new DirectBridge(DirectBridge.CreateSocket(), DirectTestKeys.Bridge, true, 1, _ => { });
+        var lines = new List<string>();
+        await using var host = new DirectBridge(DirectBridge.CreateSocket(), DirectTestKeys.Bridge, true, 1, line => { lock (lines) lines.Add(line); });
         if (host.SocketEndPoint.AddressFamily != AddressFamily.InterNetworkV6) return;
         using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var v6Target = new IPEndPoint(IPAddress.IPv6Loopback, host.SocketEndPoint.Port);
@@ -247,6 +258,13 @@ public sealed class ExitPeerTrustTests
         }
         await Task.Delay(200, limit.Token);
         Assert.Empty(host.Peers);
+        // Said once, without the caller's address or port.
+        var port = ((IPEndPoint)v6.Client.LocalEndPoint!).Port.ToString();
+        lock (lines)
+        {
+            Assert.Single(lines, l => l == L.T("core.mp.direct.exit_holds_ipv6"));
+            Assert.DoesNotContain(lines, l => l.Contains("::1", StringComparison.Ordinal) || l.Contains(port, StringComparison.Ordinal));
+        }
 
         using var v4 = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
         await v4.SendAsync(host.Seal(Probe, [Guest]), v4Target, limit.Token);
