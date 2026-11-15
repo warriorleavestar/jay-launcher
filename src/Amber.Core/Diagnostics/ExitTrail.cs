@@ -33,8 +33,6 @@ public static class ExitTrail
 
     public static string? PreviousRunPath => _dir is null ? null : Path.Combine(_dir, PreviousName);
 
-    public static string? TrailPath => _dir is null ? null : Path.Combine(_dir, TrailName);
-
     /// <summary>Starts the trail for this run. Keeps the previous trail when that run never reached a clean exit.</summary>
     public static void Start(string dataDir, bool hookProcess = true)
     {
