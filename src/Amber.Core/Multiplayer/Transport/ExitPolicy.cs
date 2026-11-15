@@ -75,10 +75,15 @@ public sealed partial class ExitPolicy : IDisposable
     /// <summary>查不到公网地址时的说明（这时不当出口）；正常时为 null。</summary>
     public string? Failure => _failure;
 
+    /// <summary>
+    /// Doesn't read the network interfaces here: the caller may be the UI thread, and the routing table can take seconds
+    /// (macOS runs netstat). The first round of <see cref="Start"/>'s background loop collects them before it looks up the
+    /// public address, and nothing is forwarded until both are done.
+    /// </summary>
     public ExitPolicy(int ipv6SitePrefix = 56)
     {
         IPv6SitePrefix = ipv6SitePrefix;
-        RefreshLocal();
+        _localStale = true;
         NetworkChange.NetworkAddressChanged += OnAddressChanged;
     }
 
@@ -197,6 +202,8 @@ public sealed partial class ExitPolicy : IDisposable
     /// <summary>测试用：模拟还没查到公网地址的状态。</summary>
     internal void SetReady(bool ready)
     {
+        // Ready never comes without the local networks: collect them first when they haven't been yet.
+        if (ready && _localStale) RecollectLocal();
         if (ready) _lastSuccessTicks = System.Diagnostics.Stopwatch.GetTimestamp();
         _ready = ready;
     }

@@ -1342,6 +1342,7 @@
   "multiplayer.trusted.remove": "去",
   "core.mp.identity.unreadable": "暫不能讀聯機之身檔（或為他程所占，或權不合），此番姑用臨時之身，原檔未改，次啟復讀之。",
   "core.mp.identity.locked": "Windows 今未能啟此機之身（如無密碼而登，若經 SSH 者），此番姑用臨時之身，原檔未改，次啟復讀之。",
+  "core.identity.accounts_unreadable": "今未能讀所存 Jay 賬戶之檔（或他程式方開之）。一無所改。閉彼程式，復試之。",
   "core.mp.identity.unsaved": "聯機之符不能存（書庫不可書，或系統不予密封）。今權用暫符；舊識之房主將以新客視汝。",
   "instance.launch": "▶ 啟",
   "instance.more": "⋯ 更多",
