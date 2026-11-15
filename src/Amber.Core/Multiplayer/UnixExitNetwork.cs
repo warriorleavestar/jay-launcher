@@ -37,6 +37,7 @@ internal sealed class UnixExitNetwork
     private string? _pfToken;
     private bool _resolved;
     private bool _resolvConfReplaced;
+    private FileStream? _dnsLease;
     private MacDnsBackup? _macDns;
 
     public UnixExitNetwork(ExitNetworkPlan plan) => _plan = plan;
@@ -51,7 +52,7 @@ internal sealed class UnixExitNetwork
         {
             Run("ip", ["-4", "route", "flush", "proto", RouteProto.ToString(System.Globalization.CultureInfo.InvariantCulture)]);
             Run("nft", ["delete", "table", "inet", NftTable]);
-            RestoreResolvConf();
+            RestoreLeftoverResolvConf();
         }
         else if (OperatingSystem.IsMacOS())
         {
@@ -192,6 +193,8 @@ internal sealed class UnixExitNetwork
             return;
         }
         // 没有 systemd-resolved：临时换掉 /etc/resolv.conf，结束时原样换回。
+        // Held for as long as Jay's file is in place, so no other guard takes it for a leftover and restores it early.
+        _dnsLease = TakeDnsLease() ?? throw new IOException("Another Jay session is using exit mode's DNS");
         // Marked first: if the swap fails halfway (original already moved aside), ending the session still puts it back.
         _resolvConfReplaced = true;
         ReplaceResolvConf();
@@ -202,6 +205,45 @@ internal sealed class UnixExitNetwork
 
     /// <summary>The runtime folder (a tmpfs emptied at every boot); tests point it at a temporary folder.</summary>
     internal static string RuntimeDir = "/run";
+
+    /// <summary>
+    /// Held (exclusively, as a lock) by the session whose resolver file is in place. A guard that was killed lets go of it
+    /// with its process, so what it left counts as left over only when nobody holds this. Root-only, under
+    /// <see cref="RuntimeDir"/>.
+    /// </summary>
+    internal static string DnsLease => Path.Combine(RuntimeDir, "jay", "exit-dns.lease");
+
+    /// <summary>Takes <see cref="DnsLease"/>; null while another session holds it.</summary>
+    internal static FileStream? TakeDnsLease()
+    {
+        var folder = Path.GetDirectoryName(DnsLease)!;
+        if (new FileInfo(folder).LinkTarget is not null) File.Delete(folder);
+        if (!Directory.Exists(folder)) Directory.CreateDirectory(folder, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        File.SetUnixFileMode(folder, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        try
+        {
+            return new FileStream(DnsLease, new FileStreamOptions
+            {
+                Mode = FileMode.OpenOrCreate, Access = FileAccess.ReadWrite, Share = FileShare.None,
+                UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite,
+            });
+        }
+        catch (IOException) when (File.Exists(DnsLease))
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Puts back what a killed guard left: only when no session holds <see cref="DnsLease"/>. A session that is still
+    /// routing through a room member keeps its servers.
+    /// </summary>
+    internal static void RestoreLeftoverResolvConf()
+    {
+        using var lease = TakeDnsLease();
+        if (lease is null) return;
+        RestoreResolvConf();
+    }
 
     /// <summary>The original resolv.conf (a plain file or a link, moved as it is) while Jay's temporary file is in place.</summary>
     internal static string ResolvConfBackup => ResolvConf + ".jay-backup";
@@ -408,10 +450,18 @@ internal sealed class UnixExitNetwork
         {
             if (_resolved && _tun is { } tun) Run("resolvectl", ["revert", tun]);
             _resolved = false;
-            if (_resolvConfReplaced)
+            try
             {
-                _resolvConfReplaced = false;
-                RestoreResolvConf();
+                if (_resolvConfReplaced)
+                {
+                    _resolvConfReplaced = false;
+                    RestoreResolvConf();
+                }
+            }
+            finally
+            {
+                _dnsLease?.Dispose();
+                _dnsLease = null;
             }
         }
         else ExitMacDns();

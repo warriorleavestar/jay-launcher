@@ -32,10 +32,13 @@ public static class UnixElevatedGuardHost
     /// </summary>
     internal static int RunForTest(string[] args, Action? restoreLeftovers = null) => Run(args, requireRoot: false, restoreLeftovers ?? (() => { }));
 
-    /// <summary>A guard killed during an exit session may have left Jay's temporary resolv.conf in place: put the original back.</summary>
+    /// <summary>
+    /// A guard killed during an exit session may have left Jay's temporary resolv.conf in place: put the original back,
+    /// unless another Jay's exit session is using it right now.
+    /// </summary>
     private static void RestoreSystemLeftovers()
     {
-        if (OperatingSystem.IsLinux() && UnixIds.EffectiveUserId() == 0) UnixExitNetwork.RestoreResolvConf();
+        if (OperatingSystem.IsLinux() && UnixIds.EffectiveUserId() == 0) UnixExitNetwork.RestoreLeftoverResolvConf();
     }
 
     private static int Run(string[] args, bool requireRoot, Action restoreLeftovers)

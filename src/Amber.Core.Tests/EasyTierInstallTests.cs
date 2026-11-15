@@ -209,6 +209,65 @@ public sealed class EasyTierInstallTests : IDisposable
     }
 
     [Fact]
+    public async Task AKeptPackageCutShortIsNotTakenForInstalled()
+    {
+        var (installer, handler) = Create(_ => Bytes(_good));
+        await installer.EnsureAsync().WaitAsync(Bound);
+        Assert.Equal(installer.KeptPackagePath, installer.PackagePath);
+        // A copy cut short by a crash, as an older Jay that copied straight to the kept name could leave it.
+        File.WriteAllBytes(installer.KeptPackagePath, _good[..(_good.Length / 2)]);
+        Assert.False(installer.IsInstalled);
+        await installer.EnsureAsync().WaitAsync(Bound);
+        Assert.True(installer.IsInstalled);
+        Assert.Equal(_good, File.ReadAllBytes(installer.KeptPackagePath));
+        Assert.Equal(2, handler.Requests.Count);
+        // No temporary copy is left beside it.
+        Assert.Equal([installer.KeptPackagePath], Directory.EnumerateFiles(Path.GetDirectoryName(installer.KeptPackagePath)!));
+    }
+
+    [Fact]
+    public async Task AKeptPackageOfTheRightSizeButOtherContentDoesNotShadowTheBundledOne()
+    {
+        var bundle = Bundle("bundle-shadow");
+        var (installer, _) = Create(NoNetwork, bundle);
+        await installer.EnsureAsync().WaitAsync(Bound);
+        File.WriteAllBytes(installer.KeptPackagePath, Tampered());
+        Assert.Equal(installer.BundledPath, installer.PackagePath);
+        Assert.True(installer.IsInstalled);
+        // Installing from the bundle again drops the damaged copy.
+        Directory.Delete(installer.InstallDir, recursive: true);
+        await installer.EnsureAsync().WaitAsync(Bound);
+        Assert.False(File.Exists(installer.KeptPackagePath));
+        Assert.Equal(installer.BundledPath, installer.PackagePath);
+    }
+
+    [Fact]
+    public async Task AKeptPackageChangedAfterItWasCheckedIsCheckedAgain()
+    {
+        var (installer, _) = Create(_ => Bytes(_good));
+        await installer.EnsureAsync().WaitAsync(Bound);
+        Assert.True(installer.IsInstalled);
+        File.WriteAllBytes(installer.KeptPackagePath, Tampered());
+        File.SetLastWriteTimeUtc(installer.KeptPackagePath, DateTime.UtcNow.AddMinutes(1));
+        Assert.False(installer.IsInstalled);
+    }
+
+    [Fact]
+    public async Task StaleTemporaryCopiesOfTheKeptPackageAreRemoved()
+    {
+        var (installer, _) = Create(_ => Bytes(_good));
+        await installer.EnsureAsync().WaitAsync(Bound);
+        var stale = installer.KeptPackagePath + ".tmp-0123";
+        var fresh = installer.KeptPackagePath + ".tmp-4567";
+        File.WriteAllBytes(stale, [1]);
+        File.WriteAllBytes(fresh, [2]);
+        File.SetLastWriteTimeUtc(stale, DateTime.UtcNow - EasyTierInstaller.StaleDownloadAge - TimeSpan.FromHours(1));
+        installer.RemoveOldInstalls();
+        Assert.False(File.Exists(stale));
+        Assert.True(File.Exists(fresh));
+    }
+
+    [Fact]
     public async Task ConcurrentFirstInstallsDoNotCollide()
     {
         var bundle = Path.Combine(_root, "bundle");
@@ -452,6 +511,7 @@ public sealed class EasyTierInstallTests : IDisposable
         var installer = new EasyTierInstaller(downloader, data, bundle, _asset, [])
         {
             RunningForTest = () => [Path.Combine(inUse, "easytier-core.exe")],
+            OtherJayRunningForTest = () => false,
         };
 
         await installer.EnsureAsync();
@@ -475,12 +535,38 @@ public sealed class EasyTierInstallTests : IDisposable
         Directory.CreateDirectory(bundle);
         File.WriteAllBytes(Path.Combine(bundle, _asset.Name), _good);
         var downloader = new Downloader(new HttpClient(new Handler(_ => throw new InvalidOperationException())), new SourceChain([new OfficialSource()]));
-        var installer = new EasyTierInstaller(downloader, data, bundle, _asset, []) { RunningForTest = () => null };
+        var installer = new EasyTierInstaller(downloader, data, bundle, _asset, []) { RunningForTest = () => null, OtherJayRunningForTest = () => false };
 
         await installer.EnsureAsync();
         await installer.EnsureAsync();
 
         Assert.True(installer.IsInstalled);
         Assert.True(Directory.Exists(oldBuild));
+    }
+
+    /// <summary>
+    /// Another Jay is open (an older one may have just installed its build and be waiting to start it): old builds stay,
+    /// even though no EasyTier program runs from them.
+    /// </summary>
+    [Fact]
+    public async Task OldBuildsStayWhileAnotherJayRuns()
+    {
+        var data = Path.Combine(_root, "data");
+        var oldBuild = Path.Combine(data, "easytier", "2.6.4-jay-0123456789ab", "test-x64");
+        Directory.CreateDirectory(oldBuild);
+        var bundle = Path.Combine(_root, "bundle");
+        Directory.CreateDirectory(bundle);
+        File.WriteAllBytes(Path.Combine(bundle, _asset.Name), _good);
+        var downloader = new Downloader(new HttpClient(new Handler(_ => throw new InvalidOperationException())), new SourceChain([new OfficialSource()]));
+        var otherJay = true;
+        var installer = new EasyTierInstaller(downloader, data, bundle, _asset, []) { RunningForTest = () => [], OtherJayRunningForTest = () => otherJay };
+
+        await installer.EnsureAsync();
+        Assert.True(installer.IsInstalled);
+        Assert.True(Directory.Exists(oldBuild));
+        // Once it has closed, a later start removes them.
+        otherJay = false;
+        await installer.EnsureAsync();
+        Assert.False(Directory.Exists(Path.GetDirectoryName(oldBuild)));
     }
 }

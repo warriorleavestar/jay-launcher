@@ -222,8 +222,47 @@ public sealed class EasyTierInstaller
     /// <summary>A copy of the checked package, kept for the elevated guard when it didn't come from the bundled one.</summary>
     public string KeptPackagePath => Path.Combine(_dataDir, "easytier", EasyTierRelease.InstallTag, Asset.Name);
 
-    /// <summary>The package the elevated guard checks and runs easytier-core from: the kept copy, otherwise the bundled one.</summary>
-    public string PackagePath => File.Exists(KeptPackagePath) ? KeptPackagePath : BundledPath;
+    /// <summary>
+    /// The package the elevated guard checks and runs easytier-core from: the kept copy when it is intact, otherwise the
+    /// bundled one. A kept copy that is not the pinned package (cut short by a crash, or changed since) is passed over, so
+    /// it can't shadow a good bundled package, and without one the component counts as missing and is installed again.
+    /// </summary>
+    public string PackagePath => KeptPackageIsIntact() ? KeptPackagePath : BundledPath;
+
+    /// <summary>Kept packages already found intact, by path, with the size and write time they had then.</summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (long Length, DateTime Written)> IntactKept = new(PathComparer);
+
+    /// <summary>Whether the kept package is the pinned one; hashed once per change of the file, not on every look.</summary>
+    private bool KeptPackageIsIntact()
+    {
+        try
+        {
+            var info = new FileInfo(KeptPackagePath);
+            if (!info.Exists || info.Length != Asset.Size) return false;
+            var stamp = (info.Length, info.LastWriteTimeUtc);
+            if (IntactKept.TryGetValue(info.FullName, out var known) && known == stamp) return true;
+            using (var stream = File.OpenRead(info.FullName))
+                if (Convert.ToHexStringLower(SHA256.HashData(stream)) != Asset.Sha256) return false;
+            IntactKept[info.FullName] = stamp;
+            return true;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return false; }
+    }
+
+    /// <summary>
+    /// Copies the checked package to <see cref="KeptPackagePath"/> through a temporary file in the same folder and then
+    /// replaces it in one step, so an interrupted copy never leaves a partial package under the kept name.
+    /// </summary>
+    private void KeepPackage(string checkedZip)
+    {
+        var temp = KeptPackagePath + ".tmp-" + Guid.NewGuid().ToString("N");
+        try
+        {
+            File.Copy(checkedZip, temp, overwrite: true);
+            File.Move(temp, KeptPackagePath, overwrite: true);
+        }
+        finally { TryDelete(temp); }
+    }
 
     /// <summary>下载来源，按尝试顺序排列。</summary>
     public IReadOnlyList<(string Name, string Url)> Sources => _sources ?? EasyTierRelease.Sources(Asset, SourceChain.PrefersMirrors());
@@ -348,7 +387,9 @@ public sealed class EasyTierInstaller
         MakeExecutable(CliPath);
         // Keep the checked package for the elevated guard, unless it is the bundled one (which stays where it is).
         var full = Path.GetFullPath(zip);
-        if (full != Path.GetFullPath(BundledPath) && full != Path.GetFullPath(KeptPackagePath)) File.Copy(full, KeptPackagePath, overwrite: true);
+        if (full != Path.GetFullPath(BundledPath) && full != Path.GetFullPath(KeptPackagePath)) KeepPackage(full);
+        // A kept copy that is no longer intact would only shadow the bundled package once it is fixed; drop it.
+        else if (full == Path.GetFullPath(BundledPath) && File.Exists(KeptPackagePath) && !KeptPackageIsIntact()) TryDelete(KeptPackagePath);
         if (!IsInstalled) throw new InvalidDataException(L.T("core.mp.component.missingexecutable"));
         RemoveOldInstalls();
     }
@@ -363,11 +404,15 @@ public sealed class EasyTierInstaller
     /// <summary>Tests: the full paths of the running EasyTier programs, or null when one could not be read.</summary>
     internal Func<IReadOnlyList<string>?>? RunningForTest { get; init; }
 
+    /// <summary>Tests: whether another Jay process runs on this computer.</summary>
+    internal Func<bool>? OtherJayRunningForTest { get; init; }
+
     /// <summary>
     /// Once this build is installed: removes the install folders of earlier builds and their downloads, which nothing uses
-    /// any more. Skipped while any EasyTier program runs from an old folder, or when a running one can't be checked (an
-    /// elevated guard's core, for example), since an older Jay open at the same time may be using it. Work folders under
-    /// <c>easytier/</c> are never touched: only folders named like a version are.
+    /// any more. Skipped while another Jay runs at all: an older Jay may be about to start a build it has just installed
+    /// (no EasyTier program runs from it yet, or its core runs from the guard's protected copy), and nothing here can tell.
+    /// Also skipped while any EasyTier program runs from an old folder, or when a running one can't be checked. Work
+    /// folders under <c>easytier/</c> are never touched: only folders named like a version are.
     /// </summary>
     internal void RemoveOldInstalls()
     {
@@ -379,7 +424,7 @@ public sealed class EasyTierInstaller
                 .Where(d => Path.GetFileName(d) is var name && name != EasyTierRelease.InstallTag && OldInstallName.IsMatch(name)
                     && (File.GetAttributes(d) & FileAttributes.ReparsePoint) == 0)
                 .Select(Path.GetFullPath).ToList();
-            if (old.Count > 0)
+            if (old.Count > 0 && !(OtherJayRunningForTest ?? OtherJayRunning)())
             {
                 var running = (RunningForTest ?? RunningEasyTier)();
                 if (running is null) return;
@@ -391,6 +436,11 @@ public sealed class EasyTierInstaller
                     catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
                 }
             }
+            // Temporary copies of the kept package that a crash left behind.
+            var current = Path.Combine(root, EasyTierRelease.InstallTag);
+            if (Directory.Exists(current))
+                foreach (var file in Directory.EnumerateFiles(current, Asset.Name + ".tmp-*"))
+                    if (DateTime.UtcNow - File.GetLastWriteTimeUtc(file) >= StaleDownloadAge) TryDelete(file);
             var downloads = Path.Combine(root, "download");
             if (!Directory.Exists(downloads)) return;
             foreach (var file in Directory.EnumerateFiles(downloads, "easytier-*"))
@@ -402,6 +452,29 @@ public sealed class EasyTierInstaller
             }
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+    }
+
+    /// <summary>
+    /// Whether another process runs the same program as this one (another Jay window, an older Jay, or an elevated guard).
+    /// Errors count as yes, so the cleanup waits for a later start.
+    /// </summary>
+    private static bool OtherJayRunning()
+    {
+        try
+        {
+            if (Environment.ProcessPath is not { } self) return true;
+            var others = Process.GetProcessesByName(Path.GetFileNameWithoutExtension(self));
+            var found = false;
+            foreach (var process in others)
+            {
+                using (process) found |= process.Id != Environment.ProcessId;
+            }
+            return found;
+        }
+        catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException)
+        {
+            return true;
+        }
     }
 
     /// <summary>Paths of the running easytier-core and easytier-cli programs; null when any of them can't be read.</summary>

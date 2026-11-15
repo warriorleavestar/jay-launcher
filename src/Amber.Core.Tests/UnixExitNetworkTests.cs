@@ -121,6 +121,36 @@ public sealed class UnixExitNetworkTests
         }
     }
 
+    /// <summary>
+    /// A second guard starting (say, a plain full-LAN session) while another Jay routes through a room member treats only
+    /// an unheld swap as left over: the active session keeps its servers until it ends or its guard dies.
+    /// </summary>
+    [Fact]
+    public void ALeftoverCheckLeavesAnActiveSessionsResolverAlone()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        WithResolvConf(_ =>
+        {
+            var path = UnixExitNetwork.ResolvConf;
+            File.WriteAllText(path, "nameserver 192.168.1.1\n");
+            using (var active = UnixExitNetwork.TakeDnsLease())
+            {
+                Assert.NotNull(active);
+                UnixExitNetwork.ReplaceResolvConf();
+                // The other guard's start: it finds the swap held, so it is not a leftover.
+                Assert.Null(UnixExitNetwork.TakeDnsLease());
+                UnixExitNetwork.RestoreLeftoverResolvConf();
+                Assert.Contains("nameserver " + ExitDnsServers.Primary, File.ReadAllText(path));
+                Assert.True(File.Exists(UnixExitNetwork.ResolvConfBackup));
+            }
+            // The session's guard is gone without restoring (its hold went with it): now it is a leftover.
+            UnixExitNetwork.RestoreLeftoverResolvConf();
+            Assert.Equal("nameserver 192.168.1.1\n", File.ReadAllText(path));
+            Assert.False(File.Exists(UnixExitNetwork.ResolvConfBackup));
+            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(UnixExitNetwork.DnsLease));
+        });
+    }
+
     [Fact]
     public void ResolvConfOriginalIsKeptOnDiskAndRestored()
     {
