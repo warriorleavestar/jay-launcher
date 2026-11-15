@@ -311,7 +311,6 @@ public sealed class NoiseXxTests
             Assert.Contains("hfs", pattern.ToString(), StringComparison.Ordinal);
             Assert.Contains("hfspsk0_25519+MLKEM768_ChaChaPoly_SHA256", NoiseHandshake.ProtocolName(pattern), StringComparison.Ordinal);
         }
-        Assert.True(NoiseHandshake.HybridSupported);
     }
 
     /// <summary>XX needs a long-term key; NN must not get one.</summary>

@@ -49,7 +49,8 @@ public partial class MainWindow
                 main.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(MainViewModel.LogDocked)) ApplyLogDock(); };
                 main.LogPopOutRequested += PopOutLog;
                 // Knocks and incoming files while Jay is in the background: a small topmost window (on by default).
-                Popups = new RequestPopups(this, main.Service.Requests, () => main.Service.Settings.MultiplayerRequestPopup);
+                Popups = new RequestPopups(this, main.Service.Requests, () => main.Service.Settings.MultiplayerRequestPopup,
+                    () => main.Service.Settings.ChildMode?.Effects.QuietNotifications == true);
                 UpdateMovedNotice();
                 main.Shell.Network.Done += () => NetworkFlyout.Hide();
                 main.Multiplayer.SendPanel.Pick = async folder =>

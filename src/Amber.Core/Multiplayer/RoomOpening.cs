@@ -44,7 +44,7 @@ public enum RoomScope
 }
 
 /// <summary>What the lobby knows when it decides which choices can be picked.</summary>
-public sealed record RoomOpeningContext(bool ChildMode, bool NetworkConnected, int VerifiedFriends, bool FullLanAvailable, bool HybridSupported);
+public sealed record RoomOpeningContext(bool ChildMode, bool NetworkConnected, int VerifiedFriends, bool FullLanAvailable);
 
 /// <summary>
 /// "Opening a room asks four things" (UI restructure: people, rooms, networks): who can come in, how people connect,
@@ -90,7 +90,6 @@ public static class RoomOpening
     {
         // A serverless room is protected by its own direct link, not by the room transport.
         _ when route == RoomRoute.Serverless => "multiplayer.open.blocked.protection_serverless",
-        RoomProtection.Highest when !context.HybridSupported => "multiplayer.open.blocked.highest",
         _ => null,
     };
 

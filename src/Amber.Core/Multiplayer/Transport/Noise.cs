@@ -344,9 +344,6 @@ public sealed class NoiseHandshake : IDisposable
     public byte[] HandshakeHash => _ss.HandshakeHash;
     public bool IsComplete => _step == MessageCount;
 
-    /// <summary>ML-KEM is always available: the system's when it has one, BouncyCastle's otherwise (see <see cref="MlKem768"/>).</summary>
-    public static bool HybridSupported => true;
-
     private void WriteE(List<byte> message)
     {
         _e = FixedEphemeral ?? X25519KeyPair.Generate();

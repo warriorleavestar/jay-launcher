@@ -85,6 +85,19 @@ internal sealed partial class SelfTest
             Check("儿童模式默认关，联机里什么都不藏", !settings.ChildMode && mp.ShowPublicNetworks && mp.ShowRemoteControl && mp.ShowNetworkExit && mp.ShowInviteAutoApprove);
             settings.ChildMode = true;
             Check("打开“给孩子用”：六项都打开", settings.ChildNoRemote && settings.ChildNoPublic && settings.ChildNoExit && settings.ChildFriendsFiles && settings.ChildAlwaysAsk && settings.ChildQuietNotify);
+            // "No names or content in notifications": the topmost popup for a knock says only what happened.
+            var quietKnock = main.Service.Requests.Post(new Amber.Core.Activity.RequestSpec("knock", L.F("multiplayer.knock.wants_in", "Alex"), "12345 67890",
+                [new("deny", L.T("multiplayer.invite.deny"), IsDefault: true), new("approve", L.T("multiplayer.invite.approve"))], IsSafety: true));
+            var quietPopup = Dispatcher.UIThread.Invoke(() => window.Popups!.Show(quietKnock));
+            await Task.Delay(400);
+            Check("给孩子用：置顶小窗不写名字和内容，只给【拒绝】和【打开 Jay】", Dispatcher.UIThread.Invoke(() =>
+                quietPopup.Content is SafetyPanel { Title: var quietTitle } && quietTitle == L.T("activity.quiet.knock")
+                && !quietPopup.GetVisualDescendants().OfType<TextBlock>().Any(t => t.Text is { } x && (x.Contains("Alex", StringComparison.Ordinal) || x.Contains("12345", StringComparison.Ordinal)))
+                && quietPopup.Buttons.Select(btn => btn.Content as string).SequenceEqual([L.T("multiplayer.invite.deny"), L.T("activity.quiet.open")])
+                && quietPopup.DefaultButton.Content as string == L.T("multiplayer.invite.deny")));
+            await ShotWindowAsync(quietPopup, "置顶小窗-给孩子用");
+            Dispatcher.UIThread.Invoke(() => quietPopup.DefaultButton.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent)));
+            Check("给孩子用：小窗里点【拒绝】就是拒绝", await WaitAsync(() => quietKnock.Choice == "deny" && RequestPopups.Open.Count == 0, 3));
             Check("联机：远程控制、公共网络、经我/经 TA、免确认邀请都藏起来", !mp.ShowPublicNetworks && !mp.ShowRemoteControl && !mp.ShowNetworkExit && !mp.ShowInviteAutoApprove && !mp.CanRemoteControl);
             Check("写着上次改动的时间，存进设置", settings.ChildModeStatusText.Contains(L.T("settings.child.on"), StringComparison.Ordinal)
                 && File.ReadAllText(AppSettings.FilePath).Contains("\"ChildMode\"", StringComparison.Ordinal)

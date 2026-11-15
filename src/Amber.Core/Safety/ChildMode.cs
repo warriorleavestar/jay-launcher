@@ -19,7 +19,10 @@ public sealed class ChildModeSettings
     public bool FriendsFilesOnly { get; set; } = true;
     /// <summary>Every knock needs a yes, even from friends or an auto-approve invite.</summary>
     public bool AlwaysAskKnock { get; set; } = true;
-    /// <summary>System notifications say only that something happened, without names or content.</summary>
+    /// <summary>
+    /// Notices outside Jay's window (the topmost popup while Jay is in the background) say only what kind of thing
+    /// happened, without names or content, and offer only the safe answer or opening Jay (see <see cref="Activity.RequestNotice"/>).
+    /// </summary>
     public bool QuietNotifications { get; set; } = true;
     /// <summary>When any of the above was last changed.</summary>
     public DateTimeOffset? ChangedAt { get; set; }

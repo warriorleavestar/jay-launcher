@@ -785,12 +785,6 @@ public sealed partial class MultiplayerViewModel
                 SetStatus(StatusMessage.Warning(KnockReasonKey(outcome.Reason)));
                 return outcome.Reason is "expired" or "invalid" or "removed" or "closed" ? KnockEnd.InviteSpent : KnockEnd.NotAnswered;
             }
-            if (credentials.Tunnel.Mode == TransportMode.Extreme && !NoiseHandshake.HybridSupported)
-            {
-                if (guestDirect is not null) await guestDirect.DisposeAsync();
-                SetStatus(StatusMessage.Warning("multiplayer.room.extreme_unsupported"));
-                return KnockEnd.NotAnswered;
-            }
             IsKnocking = false;
             if (guestDirect is not null)
             {

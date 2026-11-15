@@ -134,14 +134,10 @@ public sealed class LobbyOpenRoomTests
         Assert.Equal(nameof(RoomProtection.Standard), vm.SelectedProtection?.Id);
         Assert.Equal(TransportMode.Minecraft, vm.SelectedTransport.Mode);
 
-        if (NoiseHandshake.HybridSupported)
-        {
-            vm.SelectedProtection = vm.ProtectionChoices[2];
-            Assert.Equal(TransportMode.Extreme, vm.SelectedTransport.Mode);
-            Assert.True(vm.DisguiseAsMinecraft);
-            Assert.Equal(nameof(RoomProtection.Highest), vm.SelectedProtection?.Id);
-        }
-        else Assert.Equal(L.T("multiplayer.open.blocked.highest"), vm.ProtectionChoices[2].Line);
+        vm.SelectedProtection = vm.ProtectionChoices[2];
+        Assert.Equal(TransportMode.Extreme, vm.SelectedTransport.Mode);
+        Assert.True(vm.DisguiseAsMinecraft);
+        Assert.Equal(nameof(RoomProtection.Highest), vm.SelectedProtection?.Id);
     });
 
     [Fact]

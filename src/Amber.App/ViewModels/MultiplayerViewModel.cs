@@ -163,13 +163,13 @@ public sealed partial class MultiplayerViewModel : PageViewModel
     // ---- 数据封装和“仅游戏”转发 ----
 
 
-    /// <summary>极端加密要系统支持 ML-KEM（较新的 Windows 11）；不支持时不列出来。</summary>
+    /// <summary>Every transport mode; ML-KEM for Extreme is always available (the system's or BouncyCastle's).</summary>
     public IReadOnlyList<TransportChoice> TransportChoices { get; } =
     [
         new(TransportMode.General),
         new(TransportMode.Minecraft),
         new(TransportMode.High),
-        .. NoiseHandshake.HybridSupported ? [new TransportChoice(TransportMode.Extreme)] : Array.Empty<TransportChoice>(),
+        new(TransportMode.Extreme),
     ];
 
     /// <summary>
@@ -777,11 +777,6 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         if (!JayInvite.TryParse(JoinCode, out var invite))
         {
             SetStatus(JayInvite.LooksLikeOldCode(JoinCode) ? StatusMessage.Warning("multiplayer.invite.old_code") : StatusMessage.Error("multiplayer.room.invalid_code"));
-            return;
-        }
-        if (invite.Tunnel.Mode == TransportMode.Extreme && !NoiseHandshake.HybridSupported)
-        {
-            SetStatus(StatusMessage.Warning("multiplayer.room.extreme_unsupported"));
             return;
         }
         if (!IsComponentReady)

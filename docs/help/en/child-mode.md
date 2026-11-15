@@ -16,7 +16,7 @@ With "For a child" on, multiplayer in Jay is more careful, so a child can play o
 - No going online through my computer or theirs.
 - Accept files only from friends: files from anyone else are declined.
 - Always ask me when someone knocks: even friends need a yes.
-- No names or content in notifications.
+- No names or content in notifications: the small window that pops up while Jay is in the background only says things like “Someone wants to join your room”, with just the safe answer and [Open Jay]. Open Jay to see who it is before deciding.
 
 ## Good to know
 - There is no parent password: it would not stop a child who edits the settings file, and would give a false sense of safety. Settings shows when it was last changed, so you can tell whether it was changed.
