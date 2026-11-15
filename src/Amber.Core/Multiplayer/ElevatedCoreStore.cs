@@ -60,7 +60,7 @@ internal static class ElevatedCoreStore
             var package = ReadPackage(packagePath, asset);
             var parent = Path.GetDirectoryName(dir)!;
             CreateProtectedDirectory(parent);
-            foreach (var leftover in Directory.EnumerateDirectories(parent, asset.Platform + ".tmp-*")) Directory.Delete(leftover, true);
+            RemoveStaleTemps(parent, asset.Platform);
             var temp = dir + ".tmp-" + Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(8));
             CreateProtectedDirectory(temp);
             try
@@ -87,6 +87,29 @@ internal static class ElevatedCoreStore
         CheckTree(root, dir, core);
         RemoveOtherBuilds(root);
         return core;
+    }
+
+    /// <summary>How long an extraction folder may go unchanged before it counts as left over from a guard that stopped.</summary>
+    internal static readonly TimeSpan StaleTempAge = TimeSpan.FromHours(1);
+
+    /// <summary>
+    /// Removes extraction folders a guard left behind when it stopped half-way. Another guard (a second Jay starting full
+    /// LAN at the same time) may be extracting into its own folder right now, so only folders unchanged for
+    /// <see cref="StaleTempAge"/> are removed; an extraction takes seconds. Failures are ignored: the folder is tried
+    /// again on a later start.
+    /// </summary>
+    internal static void RemoveStaleTemps(string parent, string platform, DateTime? now = null)
+    {
+        var cutoff = (now ?? DateTime.UtcNow) - StaleTempAge;
+        foreach (var leftover in Directory.EnumerateDirectories(parent, platform + ".tmp-*"))
+        {
+            try
+            {
+                if ((File.GetAttributes(leftover) & FileAttributes.ReparsePoint) != 0 || Directory.GetLastWriteTimeUtc(leftover) > cutoff) continue;
+                Directory.Delete(leftover, true);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+        }
     }
 
     private static readonly System.Text.RegularExpressions.Regex BuildFolder =
