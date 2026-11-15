@@ -61,6 +61,10 @@ public sealed partial class InstanceViewModel
             else if (e.PropertyName is nameof(HomeViewModel.Progress) or nameof(HomeViewModel.ProgressIndeterminate) or nameof(HomeViewModel.ShowProgress)
                      or nameof(Status) or nameof(StatusInfo) or null) UpdateLaunchLine();
         };
+        home.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName is nameof(HomeViewModel.IsBusy) or null) Dispatcher.UIThread.Post(RefreshMaintenanceState);
+        };
         _service.LibraryChanged += () => Dispatcher.UIThread.Post(UpdateHero);
         _service.InstanceStateChanged += id => Dispatcher.UIThread.Post(() => { if (Current?.Id == id) UpdateHero(); });
         _heroClock.Tick += (_, _) => UpdateHero();
@@ -72,7 +76,7 @@ public sealed partial class InstanceViewModel
         });
         PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName == nameof(Current)) { UpdateHero(); UpdateLastRun(); UpdateLaunchFailure(); }
+            if (e.PropertyName == nameof(Current)) { UpdateHero(); UpdateLastRun(); UpdateLaunchFailure(); RefreshMaintenanceState(); }
         };
         UpdateHero();
         UpdateLastRun();

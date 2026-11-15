@@ -89,6 +89,9 @@ public sealed record BakeLoaderInfo(string LoaderVersion, int Protocol, Version 
 
     public bool CanQuickPlay => Interface >= QuickPlayInterface;
 
+    /// <summary>Interface 1.3.3 also brought maintenance mode (upgrade and pre-generate one world, then quit).</summary>
+    public bool CanMaintainWorlds => Interface >= QuickPlayInterface;
+
     internal static BakeLoaderInfo Parse(JsonObject result)
     {
         var platforms = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
@@ -141,6 +144,9 @@ public sealed record BakedLaunch(string MainClass, IReadOnlyList<string> Classpa
     /// quick play arguments of its own: the loader's are already in <see cref="GameArgsPrefix"/> / <see cref="JvmArgs"/>.
     /// </summary>
     public Amber.Core.Launch.QuickPlay? QuickPlay { get; init; }
+
+    /// <summary>A maintenance run (interface 1.3.3): the game prepares this world and quits. Null for a normal launch.</summary>
+    public MaintenanceLaunch? Maintenance { get; init; }
 }
 
 /// <summary>
@@ -275,7 +281,7 @@ public sealed class BakeService(BakeToolkit toolkit, string cacheRoot, string da
     /// loader has it. Launch is null when the instance cannot be baked (Reason says why).
     /// </summary>
     public async Task<BakePreparation> PrepareAsync(string javaPath, int javaMajor, GameDirectory dir, GameInstance instance, bool warm,
-        IProgress<BakeEvent>? progress, CancellationToken ct, Amber.Core.Launch.QuickPlay? quickPlay = null)
+        IProgress<BakeEvent>? progress, CancellationToken ct, Amber.Core.Launch.QuickPlay? quickPlay = null, WorldMaintenance? maintenance = null)
     {
         // A package is checked file by file before any of it runs, and its Java minimum before the first process:
         // a JVM older than the loader cannot even print an error line.
@@ -290,8 +296,12 @@ public sealed class BakeService(BakeToolkit toolkit, string cacheRoot, string da
         // Quick play goes only to a loader that knows it (else the launch passes the game's own arguments). It is not
         // part of the state key, so a previous bake is reused only when it was for the same target: otherwise
         // bake-instance runs again, which reuses every cached file and just writes the new arguments.
-        var sent = loader.CanQuickPlay ? quickPlay : null;
-        if (Current(dir, instance, javaMajor) is { } current && SameQuickPlay(current.QuickPlay, sent))
+        var sent = loader.CanQuickPlay && maintenance is null ? quickPlay : null;
+        // Maintenance needs a loader that has it; it always runs bake-instance (cheap: not part of the state key), and a
+        // bake left over from maintenance is never reused for a normal launch.
+        if (maintenance is not null && !loader.CanMaintainWorlds)
+            return new BakePreparation(null, L.T("core.bake.maintenance_unsupported"), false, null);
+        if (maintenance is null && Current(dir, instance, javaMajor) is { Maintenance: null } current && SameQuickPlay(current.QuickPlay, sent))
             return new BakePreparation(current, L.T("core.bake.reused"), true, null);
         await EnsureRequirementsAsync(javaPath, dir, instance, progress, ct);
         var installDir = await BakePlatform.PrepareAsync(dir, instance, dataRoot, download, progress, ct);
@@ -300,7 +310,7 @@ public sealed class BakeService(BakeToolkit toolkit, string cacheRoot, string da
         BakeCacheInfo? cache;
         try
         {
-            (launch, cache) = await BakeInstanceAsync(javaPath, javaMajor, dir, instance, installDir, progress, ct, sent);
+            (launch, cache) = await BakeInstanceAsync(javaPath, javaMajor, dir, instance, installDir, progress, ct, sent, maintenance);
         }
         catch (BakeException e) when (e.Code == "java_too_old")
         {
@@ -407,9 +417,9 @@ public sealed class BakeService(BakeToolkit toolkit, string cacheRoot, string da
     /// <c>&lt;instance&gt;/.amber-ul/state.json</c>. <paramref name="installDir"/> is the prepared NeoForge/Forge install (null for vanilla).
     /// </summary>
     public async Task<(BakedLaunch Launch, BakeCacheInfo? Cache)> BakeInstanceAsync(string javaPath, int javaMajor, GameDirectory dir, GameInstance instance, string? installDir,
-        IProgress<BakeEvent>? progress, CancellationToken ct, Amber.Core.Launch.QuickPlay? quickPlay = null)
+        IProgress<BakeEvent>? progress, CancellationToken ct, Amber.Core.Launch.QuickPlay? quickPlay = null, WorldMaintenance? maintenance = null)
     {
-        var request = InstanceRequest(dir, instance, javaMajor, installDir, quickPlay);
+        var request = InstanceRequest(dir, instance, javaMajor, installDir, quickPlay, maintenance);
         var result = await RunAsync(javaPath, "bake-instance", request, progress, ct);
         var launch = ParseLaunch(result);
         BakeRecord.Write(instance.WorkDir, new BakeRecord(InputKey(dir, instance, javaMajor), launch));
@@ -420,7 +430,8 @@ public sealed class BakeService(BakeToolkit toolkit, string cacheRoot, string da
     /// <summary>Same quick play target (both none counts as the same).</summary>
     internal static bool SameQuickPlay(Amber.Core.Launch.QuickPlay? a, Amber.Core.Launch.QuickPlay? b) => a is null ? b is null : a.SameTarget(b);
 
-    internal JsonObject InstanceRequest(GameDirectory dir, GameInstance instance, int javaMajor, string? installDir, Amber.Core.Launch.QuickPlay? quickPlay = null)
+    internal JsonObject InstanceRequest(GameDirectory dir, GameInstance instance, int javaMajor, string? installDir, Amber.Core.Launch.QuickPlay? quickPlay = null,
+        WorldMaintenance? maintenance = null)
     {
         var (gameJar, libraries) = GameInputs(dir, instance);
         var kind = BakePlatform.KindOf(instance) ?? BakePlatform.Vanilla;
@@ -445,7 +456,8 @@ public sealed class BakeService(BakeToolkit toolkit, string cacheRoot, string da
             if (installDir is null) throw new ArgumentNullException(nameof(installDir));
             request["platform"] = new JsonObject { ["kind"] = kind, ["installDir"] = installDir };
         }
-        if (quickPlay is not null) request["quickPlay"] = quickPlay.ToRequest();
+        if (maintenance is not null) request["maintenance"] = maintenance.ToRequest();
+        else if (quickPlay is not null) request["quickPlay"] = quickPlay.ToRequest();
         return request;
     }
 
@@ -556,6 +568,7 @@ public sealed class BakeService(BakeToolkit toolkit, string cacheRoot, string da
             launch["problemsFile"] is JsonValue pf && pf.TryGetValue<string>(out var problems) && problems.Length > 0 ? problems : null)
         {
             QuickPlay = Amber.Core.Launch.QuickPlay.FromLaunch(launch["quickPlay"]),
+            Maintenance = MaintenanceLaunch.FromLaunch(launch["maintenance"]),
         };
     }
 
@@ -799,6 +812,7 @@ public sealed record BakeRecord(string Key, BakedLaunch Launch)
             if (quickPlay.Via is { } via) echo["via"] = via;
             json["quickPlay"] = echo;
         }
+        if (record.Launch.Maintenance is { } maintenance) json["maintenance"] = maintenance.ToJson();
         var temp = path + ".tmp";
         File.WriteAllText(temp, json.ToJsonString(), new UTF8Encoding(false));
         File.Move(temp, path, true);
@@ -817,6 +831,7 @@ public sealed record BakeRecord(string Key, BakedLaunch Launch)
                 o["problemsFile"]?.GetValue<string>())
             {
                 QuickPlay = Amber.Core.Launch.QuickPlay.FromLaunch(o["quickPlay"]),
+                Maintenance = MaintenanceLaunch.FromLaunch(o["maintenance"]),
             };
             return launch.MainClass.Length == 0 ? null : new BakeRecord(o["key"]?.GetValue<string>() ?? "", launch);
         }

@@ -611,11 +611,18 @@
                   <DataTemplate DataType="vm:WorldItem">
                     <Grid ColumnDefinitions="*,Auto" Margin="2">
                       <StackPanel>
-                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" ToolTip.Tip="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                          <TextBlock Text="{Binding Name}" FontWeight="SemiBold" ToolTip.Tip="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                          <!-- A maintenance run on this world (upgrade, pre-generate): its state until it ends. -->
+                          <Border x:Name="WorldBusyPill" Classes="pill accent" IsVisible="{Binding IsBusy}" VerticalAlignment="Center">
+                            <TextBlock Text="{Binding Busy}" />
+                          </Border>
+                        </StackPanel>
                         <TextBlock Text="{Binding Meta}" Classes="caption" ToolTip.Tip="{Binding Meta}" TextTrimming="CharacterEllipsis" />
                       </StackPanel>
                       <!-- 主操作“进入”固定显示；删除世界保留两步确认按钮（待确认状态要一直看得见，放不进菜单），其余放进 ⋯ 菜单。 -->
-                      <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                      <!-- While a maintenance run has the world, nothing else touches it. -->
+                      <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center" IsEnabled="{Binding IsIdle}">
                         <Button Content="{l:T common.play}" IsVisible="{Binding $parent[ListBox].((vm:InstanceViewModel)DataContext).SupportsQuickPlay}"
                                 Command="{Binding $parent[ListBox].((vm:InstanceViewModel)DataContext).JoinWorldCommand}" CommandParameter="{Binding}" />
                         <Button Classes="secondary" Content="{l:T files.send_world}" Command="{Binding $parent[ListBox].((vm:InstanceViewModel)DataContext).SendWorldToFriendCommand}" CommandParameter="{Binding}" />
@@ -625,6 +632,9 @@
                               <MenuItem Header="{l:T instance.worlds.details}" Command="{Binding $parent[ListBox].((vm:InstanceViewModel)DataContext).ShowDatapacksCommand}" CommandParameter="{Binding}" />
                               <MenuItem Header="{l:T common.backup}" Command="{Binding $parent[ListBox].((vm:InstanceViewModel)DataContext).BackupWorldCommand}" CommandParameter="{Binding}" />
                               <MenuItem Header="{l:T common.open}" Command="{Binding $parent[ListBox].((vm:InstanceViewModel)DataContext).OpenWorldCommand}" CommandParameter="{Binding}" />
+                              <Separator />
+                              <MenuItem Header="{l:T maintenance.menu.upgrade}" Command="{Binding $parent[ListBox].((vm:InstanceViewModel)DataContext).UpgradeWorldCommand}" CommandParameter="{Binding}" />
+                              <MenuItem Header="{l:T maintenance.menu.pregen}" Command="{Binding $parent[ListBox].((vm:InstanceViewModel)DataContext).OpenPregenCommand}" CommandParameter="{Binding}" />
                             </MenuFlyout>
                           </Button.Flyout>
                         </Button>
@@ -1139,6 +1149,38 @@
           <c:StatusBar x:Name="PageStatus" Message="{Binding StatusInfo}" />
         </Panel>
         <Button Content="{l:T content.curseforge.open_manual}" Command="{Binding OpenManualDownloadCommand}" IsVisible="{Binding HasManualDownload}" />
+      </StackPanel>
+    </Border>
+
+    <!-- Pre-generate a world (universal loader): the radius, what it costs, then an Activity task. -->
+    <Border x:Name="PregenDrawer" Grid.Row="0" Grid.RowSpan="4" Width="560" HorizontalAlignment="Right" VerticalAlignment="Top" ZIndex="10"
+            Classes="card" Margin="0" Padding="16" BoxShadow="0 4 24 0 #40000000" IsVisible="{Binding PregenOpen}">
+      <StackPanel Spacing="12">
+        <Grid ColumnDefinitions="*,Auto">
+          <TextBlock Classes="h2" Text="{Binding PregenTitle}" Margin="0" VerticalAlignment="Center" TextWrapping="Wrap" />
+          <Button x:Name="ClosePregenButton" Grid.Column="1" Classes="ghost small" Content="✕" Command="{Binding ClosePregenCommand}"
+                  ToolTip.Tip="{l:T common.close}" AutomationProperties.Name="{l:T common.close}" />
+        </Grid>
+        <TextBlock Classes="hint" FontSize="12" Text="{l:T maintenance.pregen.intro}" TextWrapping="Wrap" />
+        <StackPanel Spacing="6">
+          <TextBlock Classes="label" Text="{l:T maintenance.pregen.radius}" />
+          <ListBox x:Name="PregenRadiusChips" Classes="subtabs" ItemsSource="{Binding PregenRadiusChoices}" SelectedIndex="{Binding PregenRadiusIndex}"
+                   Background="Transparent" AutomationProperties.Name="{l:T maintenance.pregen.radius}">
+            <ListBox.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" Spacing="4" /></ItemsPanelTemplate></ListBox.ItemsPanel>
+            <ListBox.ItemTemplate>
+              <DataTemplate DataType="l:OptionItem"><TextBlock Text="{Binding Label}" /></DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+          <TextBlock x:Name="PregenEstimateText" Text="{Binding PregenEstimate}" Classes.warn="{Binding PregenDiskShort}" TextWrapping="Wrap" />
+          <TextBlock x:Name="PregenResumeText" Classes="hint" FontSize="12" Text="{Binding PregenResumeNote}" IsVisible="{Binding HasPregenResume}" TextWrapping="Wrap" />
+        </StackPanel>
+        <TextBlock x:Name="PregenBackupText" Classes="hint" FontSize="12" Text="{l:T maintenance.pregen.backup}" TextWrapping="Wrap" />
+        <TextBlock Classes="hint" FontSize="12" Text="{l:T maintenance.pregen.how}" TextWrapping="Wrap" />
+        <TextBlock x:Name="PregenBlockerText" Classes="warn" FontSize="12" Text="{Binding PregenBlocker}" IsVisible="{Binding !CanStartPregen}" TextWrapping="Wrap" />
+        <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+          <Button Content="{l:T common.cancel}" Command="{Binding ClosePregenCommand}" />
+          <Button x:Name="StartPregenButton" Classes="primary" Content="{l:T maintenance.pregen.start}" Command="{Binding StartPregenCommand}" IsEnabled="{Binding CanStartPregen}" />
+        </StackPanel>
       </StackPanel>
     </Border>
   </Grid>

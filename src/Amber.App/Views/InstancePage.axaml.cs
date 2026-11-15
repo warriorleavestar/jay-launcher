@@ -1,3 +1,4 @@
+using Avalonia.VisualTree;
 using Amber.Core.Navigation;
 using Amber.Core.Layout;
 using Amber.Core.Localization;
@@ -31,6 +32,7 @@ public partial class InstancePage : UserControl
         EnabledPackList.AddHandler(KeyDownEvent, OnPacksKeyDown, RoutingStrategies.Tunnel);
         WorldsList.AddHandler(KeyDownEvent, OnWorldsKeyDown, RoutingStrategies.Tunnel);
         DataContextChanged += (_, _) => WireLogs();
+        DataContextChanged += (_, _) => WirePregen();
         // The world panel opens under the list: scroll to it so it is seen even in a short window.
         WorldPanel.PropertyChanged += (_, e) =>
         {
@@ -39,6 +41,38 @@ public partial class InstancePage : UserControl
         };
         DisabledPackList.AddHandler(KeyDownEvent, OnPacksKeyDown, RoutingStrategies.Tunnel);
     }
+
+    private InstanceViewModel? _pregenVm;
+    private WorldItem? _pregenFrom;
+
+    private void WirePregen()
+    {
+        if (_pregenVm is not null) _pregenVm.PropertyChanged -= OnPregenChanged;
+        _pregenVm = Vm;
+        if (_pregenVm is not null) _pregenVm.PropertyChanged += OnPregenChanged;
+    }
+
+    /// <summary>The pre-generate drawer: focus its chosen radius when it opens, and the world's ⋯ when it closes.</summary>
+    private void OnPregenChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(InstanceViewModel.PregenOpen) || _pregenVm is not { } vm) return;
+        if (vm.PregenOpen)
+        {
+            _pregenFrom = vm.PregenWorld;
+            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                (PregenRadiusChips.ContainerFromIndex(Math.Max(0, PregenRadiusChips.SelectedIndex)) as Control)?.Focus(NavigationMethod.Tab),
+                Avalonia.Threading.DispatcherPriority.Background);
+        }
+        else if (_pregenFrom is { } from)
+        {
+            Avalonia.Threading.Dispatcher.UIThread.Post(() => WorldMoreButton(from.World.FolderName)?.Focus(NavigationMethod.Tab),
+                Avalonia.Threading.DispatcherPriority.Background);
+        }
+    }
+
+    /// <summary>A world row's ⋯ button.</summary>
+    internal Button? WorldMoreButton(string folder) => WorldsList.GetVisualDescendants().OfType<Button>()
+        .FirstOrDefault(b => b.Content as string == "⋯" && b.DataContext is WorldItem w && w.World.FolderName == folder);
 
     /// <summary>§6.6 world list: Enter opens the world panel (data packs, backups), B backs the world up.</summary>
     private void OnWorldsKeyDown(object? sender, KeyEventArgs e)
@@ -116,6 +150,9 @@ public partial class InstancePage : UserControl
         Grid.SetColumnSpan(ModInspector, wide ? 1 : 2);
         ModInspector.HorizontalAlignment = wide ? Avalonia.Layout.HorizontalAlignment.Stretch : Avalonia.Layout.HorizontalAlignment.Right;
         ModInspector.Width = compact ? double.NaN : 320;
+        // The pre-generate drawer covers the page in compact windows, as the other drawers do.
+        PregenDrawer.Width = compact ? double.NaN : 560;
+        PregenDrawer.HorizontalAlignment = compact ? Avalonia.Layout.HorizontalAlignment.Stretch : Avalonia.Layout.HorizontalAlignment.Right;
         ModInspector.Margin = wide ? new Thickness(10, 0, 0, 0) : new Thickness(0);
         ModInspector.BoxShadow = wide ? default : Avalonia.Media.BoxShadows.Parse("0 6 24 0 #40000000");
         CheckUpdatesButton.IsVisible = !compact;
@@ -192,6 +229,13 @@ public partial class InstancePage : UserControl
     private void OnKeyDown(object? sender, KeyEventArgs e)
     {
         if (!IsEffectivelyVisible || Vm is not { HasInstance: true } vm) return;
+        // Esc closes the pre-generate drawer first (focus goes back to that world's ⋯).
+        if (e.Key == Key.Escape && e.KeyModifiers == KeyModifiers.None && vm.PregenOpen)
+        {
+            vm.ClosePregenCommand.Execute(null);
+            e.Handled = true;
+            return;
+        }
         var count = Enum.GetValues<InstanceTab>().Length;
         if (e.Key == Key.F && e.KeyModifiers == KeyModifiers.Control && vm.TabIndex == (int)InstanceTab.Mods)
         {
