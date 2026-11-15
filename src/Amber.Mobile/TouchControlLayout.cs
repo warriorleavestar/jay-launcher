@@ -81,7 +81,7 @@ public static class TouchControlLayout
         new(TouchControlAction.Sneak, 0.840, 0.885, 0.046, "潜行"),
         // The inventory key sits on the hotbar centre line. Keeping the centre above the screen
         // edge prevents gesture navigation and rounded tablet corners from clipping its face.
-        new(TouchControlAction.Inventory, 0.608, 0.950, 0.032, "背包"),
+        new(TouchControlAction.Inventory, 0.625, 0.950, 0.032, "背包"),
         new(TouchControlAction.SecondaryAction, 0.940, 0.455, 0.044, "拆分",
             GameplayVisible: false, MenuVisible: true)
     ];
