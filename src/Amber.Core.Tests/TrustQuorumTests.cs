@@ -171,6 +171,36 @@ public sealed class TrustQuorumTests
     }
 
     [Fact]
+    public void BuiltInTrustKeysAreTwoOfThree()
+    {
+        // The built-in trust keys: three distinct keys, any two of which are enough. Only signer ids are checked here
+        // (the signatures themselves are verified before the quorum counts them; see the tests above).
+        var quorum = JayTrust.Quorum;
+        Assert.Equal(3, quorum.Keys.Count);
+        Assert.Equal(2, quorum.Need);
+        var ids = quorum.Keys;
+        // Any pair passes, in either order, and with an outsider or a repeat alongside.
+        for (var i = 0; i < ids.Count; i++)
+            for (var j = 0; j < ids.Count; j++)
+                if (i != j)
+                {
+                    Assert.True(quorum.IsMet([ids[i], ids[j]]));
+                    Assert.True(quorum.IsMet([Outsider.Id, ids[i], ids[i], ids[j]]));
+                }
+        Assert.True(quorum.IsMet(ids));
+        // One key alone, even listed twice or with outsiders, is never enough.
+        foreach (var id in ids)
+        {
+            Assert.False(quorum.IsMet([id]));
+            Assert.False(quorum.IsMet([id, id]));
+            Assert.False(quorum.IsMet([id, Outsider.Id, Owner.Id]));
+        }
+        // Unknown keys count for nothing.
+        Assert.False(quorum.IsMet([Outsider.Id, Owner.Id]));
+        Assert.Equal(0, quorum.Count([Outsider.Id, Owner.Id, A.Id]));
+    }
+
+    [Fact]
     public void BuiltInNetworkDirectoryNeedsATrusteeCertificate()
     {
         // With trust keys built in, the built-in network's directory is no longer trusted on first use: it needs a
