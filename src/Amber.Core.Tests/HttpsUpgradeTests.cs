@@ -17,6 +17,11 @@ public sealed class HttpsUpgradeTests : IDisposable
     [InlineData("http://files.minecraftforge.net/maven/net/minecraftforge/forge/1.7.10/forge.jar", "https://maven.minecraftforge.net/net/minecraftforge/forge/1.7.10/forge.jar")]
     [InlineData("HTTP://repo.example.test/maven2/a/b/1/b-1.jar", "https://repo.example.test/maven2/a/b/1/b-1.jar")]
     [InlineData("http://repo.example.test:8080/a.jar", "https://repo.example.test:8080/a.jar")]
+    [InlineData("http://repo.example.test:80/a.jar", "https://repo.example.test/a.jar")]
+    [InlineData("http://repo.example.test:80", "https://repo.example.test")]
+    [InlineData("http://repo.example.test:8080?x=:80", "https://repo.example.test:8080?x=:80")]
+    [InlineData("http://[2001:db8::80]/a.jar", "https://[2001:db8::80]/a.jar")]
+    [InlineData("http://[2001:db8::1]:80/a.jar", "https://[2001:db8::1]/a.jar")]
     public void PlainHttpBecomesHttps(string url, string expected) => Assert.Equal(expected, HttpsUpgrade.Upgrade(url));
 
     [Theory]

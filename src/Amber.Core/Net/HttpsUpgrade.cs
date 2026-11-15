@@ -22,6 +22,12 @@ internal static class HttpsUpgrade
         if (Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.IsLoopback) return null;
         foreach (var (from, to) in Moved)
             if (url.StartsWith(from, StringComparison.OrdinalIgnoreCase)) return to + url[from.Length..];
-        return "https://" + url[plain.Length..];
+        var rest = url[plain.Length..];
+        var end = rest.IndexOfAny(['/', '?', '#']);
+        if (end < 0) end = rest.Length;
+        var authority = rest[..end];
+        // Port 80 written out is plain http's default: https goes to its own default port instead. Other ports stay.
+        if (authority.EndsWith(":80", StringComparison.Ordinal)) authority = authority[..^3];
+        return "https://" + authority + rest[end..];
     }
 }
