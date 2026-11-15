@@ -471,6 +471,9 @@ public sealed class NetworkServerFrameworkTests : IAsyncDisposable
 
         Assert.Throws<ArgumentException>(() => Program.DirectoryBuilder(_dir, Options.Parse(["directory", "--seed-only", "--accounts"]), output, _ => { }));
         Assert.Throws<ArgumentException>(() => Program.DirectoryBuilder(_dir, Options.Parse(["directory", "--rate-limit", "3,x"]), output, _ => { }));
+        // --rate-limit is read (and checked) whatever other switches are given.
+        Assert.Throws<ArgumentException>(() => Program.DirectoryBuilder(_dir, Options.Parse(["directory", "--no-volunteers", "--rate-limit", "3,x"]), output, _ => { }));
+        Assert.Equal((1, 2, 100), Program.DirectoryBuilder(_dir, Options.Parse(["directory", "--no-volunteers", "--no-admin", "--rate-limit", "1,2,100"]), output, _ => { }).RateLimit!.Limits);
 
         var words = Path.Combine(_dir, "words.txt");
         File.WriteAllText(words, "# 屏蔽词\n广告\n");
@@ -640,6 +643,18 @@ public sealed class NetworkServerFrameworkTests : IAsyncDisposable
         File.WriteAllText(path, "{ not json");
         _now += TimeSpan.FromSeconds(6);
         Assert.True(a.IsAccountBanned("eve"));
+        // So does one whose fields have the wrong types or a time outside the calendar.
+        foreach (var bad in new[]
+                 {
+                     """{"bans":[{"kind":5,"value":"x"}]}""",
+                     """{"bans":[{"kind":"account","value":"x","at":"soon"}]}""",
+                     """{"bans":[{"kind":"account","value":"x","at":99999999999999999}]}""",
+                 })
+        {
+            File.WriteAllText(path, bad);
+            _now += TimeSpan.FromSeconds(6);
+            Assert.True(a.IsAccountBanned("eve"));
+        }
     }
 
     [Fact]

@@ -8,7 +8,7 @@ public enum TouchControlAction
     Sneak, Sprint, Drop, PreviousSlot, NextSlot, Settings
 }
 
-public enum TouchControlMode { JoystickAndTap, DPadAndTap, JoystickAndCrosshair }
+public enum TouchControlMode { JoystickAndTap, DPadAndTap, JoystickAndCrosshair, ExternalKeyboardMouse }
 
 /// <summary>
 /// One on-screen control. Centres are fractions of the view width and height; <see cref="Radius"/> is a
@@ -118,11 +118,13 @@ public static class TouchControlLayout
         new(TouchControlAction.Keyboard, 0.475, 0.050, 0.026, "mobile.touch.keyboard", MenuVisible: true),
         new(TouchControlAction.Menu, 0.525, 0.050, 0.026, "mobile.touch.menu", MenuVisible: true),
         new(TouchControlAction.Settings, 0.575, 0.050, 0.026, "mobile.touch.settings", MenuVisible: true),
-        // Keep both actions in the landscape right-thumb arc instead of the unreachable top edge.
-        new(TouchControlAction.Jump, 0.940, 0.780, 0.036, "mobile.touch.jump"),
-        new(TouchControlAction.Sneak, 0.860, 0.860, 0.036, "mobile.touch.sneak"),
-        // Fallback position next to the vanilla hotbar until the game surface size is known.
-        new(TouchControlAction.Inventory, 0.608, 0.975, 0.025, "mobile.touch.inventory"),
+        // Keep both actions low in the landscape right-thumb arc, using the same reach as the
+        // familiar mobile Minecraft layouts instead of floating them near the top edge.
+        new(TouchControlAction.Jump, 0.928, 0.790, 0.042, "mobile.touch.jump"),
+        new(TouchControlAction.Sneak, 0.848, 0.875, 0.040, "mobile.touch.sneak"),
+        // Fallback position on the vanilla hotbar's centre line until the game surface size is known. Keeping the
+        // centre above the screen edge prevents gesture navigation and rounded tablet corners from clipping its face.
+        new(TouchControlAction.Inventory, 0.608, 0.952, 0.027, "mobile.touch.inventory"),
         new(TouchControlAction.SecondaryAction, 0.940, 0.455, 0.044, "mobile.touch.split",
             GameplayVisible: false, MenuVisible: true)
     ];
@@ -131,14 +133,18 @@ public static class TouchControlLayout
         new Dictionary<TouchControlMode, IReadOnlyList<TouchControlDefinition>>
         {
             [TouchControlMode.JoystickAndTap] = [.. Shared,
-                new(TouchControlAction.Move, 0.145, 0.735, 0.105, "mobile.touch.move")],
+                new(TouchControlAction.Move, 0.135, 0.785, 0.095, "mobile.touch.move")],
             [TouchControlMode.DPadAndTap] = [.. Shared.Where(control => control.Action != TouchControlAction.Sneak),
-                new(TouchControlAction.Move, 0.145, 0.735, 0.105, "mobile.touch.dpad"),
-                new(TouchControlAction.Sneak, 0.145, 0.735, 0.032, "mobile.touch.sneak")],
+                new(TouchControlAction.Move, 0.135, 0.785, 0.095, "mobile.touch.dpad"),
+                new(TouchControlAction.Sneak, 0.135, 0.785, 0.031, "mobile.touch.sneak")],
             [TouchControlMode.JoystickAndCrosshair] = [.. Shared,
-                new(TouchControlAction.Move, 0.145, 0.735, 0.105, "mobile.touch.move"),
+                new(TouchControlAction.Move, 0.135, 0.785, 0.095, "mobile.touch.move"),
                 new(TouchControlAction.PrimaryAction, 0.845, 0.710, 0.048, "mobile.touch.attack"),
-                new(TouchControlAction.SecondaryAction, 0.925, 0.610, 0.048, "mobile.touch.use")]
+                new(TouchControlAction.SecondaryAction, 0.925, 0.610, 0.048, "mobile.touch.use")],
+            // External keyboard/mouse mode intentionally keeps only the settings key visible.
+            // The player can switch back without disconnecting their peripherals.
+            [TouchControlMode.ExternalKeyboardMouse] = [.. Shared.Where(control =>
+                control.Action == TouchControlAction.Settings)]
         };
 
     public static IReadOnlyList<TouchControlDefinition> Default => For(TouchControlMode.JoystickAndTap);
