@@ -8,7 +8,7 @@ namespace Amber.Core.Multiplayer;
 /// <summary>
 /// Mac/Linux 的“经别人上网”（root 守护里运行），对应 Windows 的 ExitRoutingScript / ExitDnsScript / ExitTrafficPolicyScript：
 /// 1. 启动 easytier-core 之前，给每个承载地址（节点、直连对端）加一条经物理网关的主机路由，免得 EasyTier 的两条 /1 路由把承载本身也吸进隧道；
-/// 2. 虚拟网卡就绪后把 DNS 换成 1.1.1.1 / 8.8.8.8（经隧道）：Linux 用 systemd-resolved，没有的话临时覆盖 /etc/resolv.conf；macOS 改主服务的 DNS；
+/// 2. 虚拟网卡就绪后把 DNS 换成 ExitDnsServers 里的公共解析服务器（经隧道）：Linux 用 systemd-resolved，没有的话临时覆盖 /etc/resolv.conf；macOS 改主服务的 DNS；
 /// 3. 防漏：只放行回环、虚拟网卡、发往承载地址的包和 DHCP，其他出站一律丢弃（Linux 用单独的 nftables 表，macOS 用 pf 锚点），
 ///    隧道断了也不会退回直接上网。
 /// 结束时按相反顺序恢复。
@@ -364,7 +364,7 @@ internal sealed class UnixExitNetwork
         return null;
     }
 
-    /// <summary>scutil 显示的数组（ServerAddresses : &lt;array&gt; { 0 : 1.1.1.1 … }）还原成 d.add 用的值列表。</summary>
+    /// <summary>scutil 显示的数组（ServerAddresses : &lt;array&gt; { 0 : 地址 … }）还原成 d.add 用的值列表。</summary>
     internal static List<string> ParseScutilArray(string output, string name)
     {
         var values = new List<string>();

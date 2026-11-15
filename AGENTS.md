@@ -14,7 +14,7 @@ The coding rules for this repository are in [CLAUDE.md](CLAUDE.md) and [CONTRIBU
 
 - No telemetry, analytics or remote kill switches. Network access only for user-initiated downloads, Microsoft login, the Modrinth and CurseForge APIs, the update check and multiplayer. A new network destination must fit one of these.
 - A new feature that connects to the network or makes something public is off for users who upgrade from an older version; only new installs may have it on.
-- No public IP addresses, personal data or machine-specific paths in code strings, tests, comments or docs (see the privacy section below).
+- No public IP addresses, personal data or machine-specific paths in code strings, tests, comments or docs (see the privacy section below). One exception: the two public DNS resolvers that exit mode uses through the tunnel may appear in `src/Amber.Core/Multiplayer/ExitDnsServers.cs`, and only there. Everything else refers to them through that class or by name.
 - Tests and self-checks use a separate test game directory and `AMBER_DATA_DIR`. Nothing may write to a real `.minecraft`.
 - Established cryptographic primitives and libraries only.
 - `Amber.Core` stays free of UI dependencies. Platform-specific code is behind `OperatingSystem.IsWindows()` (or the matching check) or in a platform-only type.
@@ -57,6 +57,6 @@ This repository is public. Maintainers run a separate, private security review f
 
 Flag as blocking anything in the diff, the commit messages or the pull request text that contains:
 
-- a public IP address (use `example.org`, `192.0.2.x`, `198.51.100.x`, `203.0.113.x` or `2001:db8::` in tests and docs),
+- a public IP address (use `example.org`, `192.0.2.x`, `198.51.100.x`, `203.0.113.x` or `2001:db8::` in tests and docs; the only exception is the exit DNS resolvers in `ExitDnsServers.cs`, see above),
 - an email address (no-reply addresses in commit attribution trailers, such as `noreply@anthropic.com` or `…@users.noreply.github.com`, are fine), a real name, a computer user name or host name, or a machine-specific absolute path,
 - a key, token, password or other secret.
