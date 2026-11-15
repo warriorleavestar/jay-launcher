@@ -143,7 +143,7 @@ Linux 可以补的：SDKMAN（`~/.sdkman/candidates/java`）、`/usr/lib64/jvm`�
   - 其他平台：`accounts.json.key` 里放一把随机 32 字节密钥（创建时就是 0600，不留先建后改权限的窗口），令牌用 AES-256-GCM 加密，带 `v2:` 前缀。v0.5.x 在非 Windows 上只是 Base64，读到旧格式还能读，下次保存自动迁移。
   - 这只防“别的系统用户读文件”，防不了同一用户下的程序。
   - **钥匙串 / Secret Service 暂不做（2026-11-09 评估）**：
-    - macOS：现在是临时签名，每次更新签名都变，钥匙串会在每次更新后弹框要密码，拒绝了就得重新登录；等正式签名（SignPath / Apple 开发者账号）后再做，存进钥匙串的只是那把 32 字节包裹密钥，数据格式不变。
+    - macOS：现在是临时签名，每次更新签名都变，钥匙串会在每次更新后弹框要密码，拒绝了就得重新登录；等正式签名（Apple 开发者账号）后再做，存进钥匙串的只是那把 32 字节包裹密钥，数据格式不变。
     - Linux：Secret Service 没有按程序隔离，同一用户的任何程序都能读已解锁的条目，安全上只比 0600 文件多了“不在数据目录里”；而迁移后钥匙环没解锁或没装（无界面登录、KDE 没开 KWallet）时会读不到身份和登录，代价大于收益。
 - CurseForge API Key：用户自己的存在 `settings.json`（或 `AMBER_CF_KEY`），是明文；官方桌面版另有构建时由 CI secret 注入的第三方 Key（`CurseForgeBuiltInKey.cs`），Android 还没有接入。仓库里不放任何 Key。
 
