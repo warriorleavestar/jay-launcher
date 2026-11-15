@@ -136,14 +136,92 @@ public class SecurityReviewFixTests
         var plain = new RoomCode("K7Q2M9XD", "4HZP8RW2N6TC", 25565);
         var high = plain with { Tunnel = new TunnelSettings(TransportMode.High, false) };
         var highDisguised = plain with { Tunnel = new TunnelSettings(TransportMode.High, true) };
-        Assert.Equal(plain.NetworkName, plain.EasyTierNetworkName);
-        Assert.Equal(plain.Secret, plain.EasyTierSecret);
+        Assert.NotEqual(plain.NetworkName, plain.EasyTierNetworkName);
+        Assert.NotEqual(plain.Secret, plain.EasyTierSecret);
         Assert.NotEqual(plain.EasyTierNetworkName, high.EasyTierNetworkName);
         Assert.NotEqual(plain.EasyTierSecret, high.EasyTierSecret);
         Assert.NotEqual(high.EasyTierSecret, highDisguised.EasyTierSecret);
         Assert.Contains(high.EasyTierSecret, high.Secrets);
         Assert.True(RoomCode.TryParse(highDisguised + " 快来", out var parsed));
         Assert.Equal(highDisguised, parsed);
+    }
+
+    [Theory]
+    [InlineData(TransportMode.General, false)]
+    [InlineData(TransportMode.Minecraft, false)]
+    [InlineData(TransportMode.High, true)]
+    [InlineData(TransportMode.Extreme, false)]
+    public void RoomCode_NeverHandsItsOwnValuesToEasyTier(TransportMode mode, bool disguise)
+    {
+        var room = RoomCode.Create(25565) with { Tunnel = new TunnelSettings(mode, disguise) };
+        foreach (var value in new[] { room.EasyTierSecret, room.EasyTierNetworkName })
+        {
+            Assert.DoesNotContain(room.Secret, value, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain(room.Network, value, StringComparison.OrdinalIgnoreCase);
+        }
+        Assert.Contains(room.EasyTierSecret, room.Secrets);
+    }
+
+    [Fact]
+    public void NewRoomCodesCarryAtLeast128Bits()
+    {
+        var room = RoomCode.Create(25565);
+        // 32-letter alphabet: 5 bits a character.
+        Assert.True(room.Secret.Length * 5 >= 128);
+        Assert.True(RoomCode.TryParse(room.ToString(), out var parsed));
+        Assert.Equal(room, parsed);
+    }
+
+    [Theory]
+    [InlineData("AMB-K7Q2M9XD-4HZP8RW2N6TC-25565", true, true)]
+    [InlineData("AMB-T2-K7Q2M9XD-4HZP8RW2N6TC-25565", true, false)]
+    [InlineData("AMB-K7Q2M9XD-4HZP8RW2N6TC7MQ6KQ4M12KXE9-25565", false, false)]
+    public void OldUnwrappedCodesAreRecognisedButNotJoined(string code, bool legacy, bool unjoinable)
+    {
+        Assert.True(RoomCode.TryParse(code, out var room));
+        Assert.Equal(legacy, room.IsLegacy);
+        Assert.Equal(unjoinable, room.IsUnjoinableLegacy);
+    }
+
+    [Fact]
+    public void AGeneralCodeAskedToDisguiseStillReachesTheSameNetwork()
+    {
+        // A general code has no D mark, so the guest parses it without disguise: the host must derive the same way.
+        var host = RoomCode.Create(25565) with { Tunnel = new TunnelSettings(TransportMode.General, true) };
+        Assert.True(RoomCode.TryParse(host.ToString(), out var guest));
+        Assert.Equal(host.EasyTierNetworkName, guest.EasyTierNetworkName);
+        Assert.Equal(host.EasyTierSecret, guest.EasyTierSecret);
+    }
+
+    [Theory]
+    // Values from the derivation as it was before general codes were derived too: old wrapped codes must still land on
+    // the same EasyTier network.
+    [InlineData("AMB-T2-K7Q2M9XD-4HZP8RW2N6TC-25565", "amber-a5ef62513487863f", "415d030516a5acd3cdf0e452630eecbe27f968f794985ab09ce0443fa3fde4f5")]
+    [InlineData("AMB-T2D-K7Q2M9XD-4HZP8RW2N6TC-25565", "amber-88f5aecec625c3bd", "1e9b2c02a75cda255a07f4f85e2e7c7a85b515a932cb357832320725c2d55fe0")]
+    public void OldWrappedCodesDeriveAsBefore(string code, string name, string secret)
+    {
+        Assert.True(RoomCode.TryParse(code, out var room));
+        Assert.Equal(name, room.EasyTierNetworkName);
+        Assert.Equal(secret, room.EasyTierSecret);
+    }
+
+    [Fact]
+    public void NewRoomCodesAreRedactedFromLogsToo()
+    {
+        // Even when nobody passes the secret along, a code pasted into a log line loses its secret.
+        var room = RoomCode.Create(25565);
+        var wrapped = room with { Tunnel = new TunnelSettings(TransportMode.High, true) };
+        var redacted = NetDiagnostics.Redact($"room {room} and {wrapped}", [], includePublicIps: false);
+        Assert.DoesNotContain(room.Secret, redacted);
+        Assert.Contains(room.Network, redacted);
+    }
+
+    [Fact]
+    public void InviteRoomSecretsAre256Bits()
+    {
+        var credentials = RoomCredentials.Create(new byte[32], 25565, TunnelSettings.Default);
+        Assert.Equal(32, Convert.FromBase64String(credentials.Secret).Length);
+        Assert.Equal(credentials.Secret, credentials.ToHostRoom(new MemberTable(), "Host").EasyTierSecret);
     }
 
     // 6. 游戏也拿到 Minecraft 自己的代理参数。

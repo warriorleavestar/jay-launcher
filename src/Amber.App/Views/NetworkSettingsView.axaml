@@ -45,7 +45,7 @@
         <Expander x:Name="PublicNodes" Header="{l:T multiplayer.public.nodes_title}" IsExpanded="{Binding !HasPublicNodes, Mode=OneTime}" HorizontalAlignment="Stretch">
           <StackPanel Spacing="6">
             <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.public.nodes_hint}" />
-            <TextBox Text="{Binding PublicNodesText}" AcceptsReturn="True" MinHeight="56" FontFamily="Consolas,monospace" PlaceholderText="tcp://1.2.3.4:11010" />
+            <TextBox Text="{Binding PublicNodesText}" AcceptsReturn="True" MinHeight="56" FontFamily="Consolas,monospace" PlaceholderText="tcp://relay.example.org:11010" />
             <Button Content="{l:T multiplayer.public.save_nodes}" Command="{Binding SavePublicNodesCommand}" HorizontalAlignment="Left" />
           </StackPanel>
         </Expander>
@@ -55,6 +55,11 @@
             <TextBlock FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.volunteer.privacy}" />
             <CheckBox IsChecked="{Binding VolunteerEnabled}" Content="{l:T multiplayer.volunteer.enable}" />
             <StackPanel Spacing="6" IsEnabled="{Binding VolunteerEnabled}">
+              <CheckBox IsChecked="{Binding VolunteerSigned}">
+                <TextBlock TextWrapping="Wrap" Text="{l:T multiplayer.volunteer.sign}" />
+              </CheckBox>
+              <!-- What signing tells the network's operator: shown once the person turns it on, before they save. -->
+              <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Margin="28,0,0,0" Text="{l:T multiplayer.volunteer.sign_privacy}" IsVisible="{Binding VolunteerSigned}" />
               <TextBlock FontSize="12" Text="{l:T multiplayer.volunteer.address}" />
               <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
                 <TextBox Text="{Binding VolunteerAddress}" FontFamily="Consolas,monospace" MaxLength="253" PlaceholderText="203.0.113.5 / jay.example.org" />

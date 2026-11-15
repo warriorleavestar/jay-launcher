@@ -247,10 +247,6 @@ public static partial class CrashAnalyzer
             foreach (var line in launcherLog) writer.WriteLine(RedactForExport(line));
     }
 
-    /// <summary>
-    /// What goes into anything the player exports: launch secrets (--accessToken and friends, session tokens, JWTs,
-    /// bearer tokens), e-mail addresses and the computer user name are removed. Same rules as the error report.
-    /// </summary>
-    public static string RedactForExport(string text) =>
-        Launch.ErrorReport.Redact(text, Environment.UserName, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+    /// <summary>What goes into anything the player exports: the shared masking (<see cref="Redaction.ForSharing"/>).</summary>
+    public static string RedactForExport(string text) => Redaction.ForSharing(text);
 }

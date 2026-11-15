@@ -44,7 +44,8 @@ public class SafetyPanel : SafetySurface
                 _body,
             },
         };
-        L.Changed += () => Avalonia.Threading.Dispatcher.UIThread.Post(() => _badge.Text = L.T("safety.title"));
+        // Held weakly: a panel in a list that is rebuilt (requests, knocks) is let go with it.
+        Amber.App.Localization.LanguageListeners.Add(this, static o => ((SafetyPanel)o)._badge.Text = L.T("safety.title"));
     }
 
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)

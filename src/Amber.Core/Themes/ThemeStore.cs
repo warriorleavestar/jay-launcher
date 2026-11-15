@@ -21,9 +21,17 @@ public sealed class ThemeStore(string root)
         ThemePack pack;
         using (var stream = info.OpenRead())
         {
-            files = ThemePackReader.ReadEntries(stream);
-            stream.Position = 0;
-            pack = ThemePackReader.Read(stream);
+            try
+            {
+                files = ThemePackReader.ReadEntries(stream);
+                stream.Position = 0;
+                pack = ThemePackReader.Read(stream);
+            }
+            catch (Exception e) when (IsUnexpectedReadError(e))
+            {
+                // A value the reader didn't expect is a broken pack, never a crash.
+                throw new ThemePackException("invalid", e.GetType().Name);
+            }
         }
         // Jay's own themes can't be replaced by an import that claims their id.
         if (BuiltInThemes.IsBuiltIn(pack.Id)) throw new ThemePackException("builtin_id", pack.Id);
@@ -79,8 +87,16 @@ public sealed class ThemeStore(string root)
             var pack = ThemePackReader.ReadDirectory(dir);
             return pack.Id == id ? pack : null;
         }
-        catch (Exception e) when (e is ThemePackException or IOException or UnauthorizedAccessException) { return null; }
+        catch (Exception e) when (e is ThemePackException or IOException or UnauthorizedAccessException || IsUnexpectedReadError(e)) { return null; }
     }
+
+    /// <summary>
+    /// Errors from reading values of an unexpected shape. One installed pack that trips the reader is skipped (the
+    /// list, settings and start-up carry on with the rest); an import of it is refused.
+    /// </summary>
+    private static bool IsUnexpectedReadError(Exception e) =>
+        e is InvalidOperationException or FormatException or ArgumentException or KeyNotFoundException or OverflowException
+            or IndexOutOfRangeException or InvalidDataException or System.Text.Json.JsonException or NotSupportedException;
 
     public bool Remove(string id)
     {

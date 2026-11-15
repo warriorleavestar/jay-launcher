@@ -65,11 +65,23 @@ index 1db0811..b84b668 100644
 +} JayInputSnapshot;
 +typedef void (*JayInputRead)(JayInputSnapshot*);
 +typedef void (*JayGameplayModeSet)(int);
++typedef int (*JayJavaPointer)(float, float, uint32_t);
++typedef int (*JayJavaMouseButton)(int, int);
++typedef int (*JayJavaKey)(int, int);
++typedef int (*JayJavaScroll)(double, double);
++typedef int (*JayJavaChar)(uint32_t);
++typedef int (*JayJavaLook)(float, float);
 +
 +static JaySurfaceAcquire jaySurfaceAcquire;
 +static JaySurfaceRelease jaySurfaceRelease;
 +static JayInputRead jayInputRead;
 +static JayGameplayModeSet jayGameplayModeSet;
++static JayJavaPointer jayJavaPointer;
++static JayJavaMouseButton jayJavaMouseButton;
++static JayJavaKey jayJavaKey;
++static JayJavaScroll jayJavaScroll;
++static JayJavaChar jayJavaChar;
++static JayJavaLook jayJavaLook;
 +static void* jayBridge;
 +
 +static GLFWbool connectJayBridge(void)
@@ -86,7 +98,21 @@ index 1db0811..b84b668 100644
 +        jayInputRead = (JayInputRead) dlsym(jayBridge, "jay_input_read");
 +    if (!jayGameplayModeSet)
 +        jayGameplayModeSet = (JayGameplayModeSet) dlsym(jayBridge, "jay_gameplay_mode_set");
-+    return jaySurfaceAcquire && jaySurfaceRelease && jayInputRead && jayGameplayModeSet;
++    if (!jayJavaPointer)
++        jayJavaPointer = (JayJavaPointer) dlsym(jayBridge, "jay_java_pointer");
++    if (!jayJavaMouseButton)
++        jayJavaMouseButton = (JayJavaMouseButton) dlsym(jayBridge, "jay_java_mouse_button");
++    if (!jayJavaKey)
++        jayJavaKey = (JayJavaKey) dlsym(jayBridge, "jay_java_key");
++    if (!jayJavaScroll)
++        jayJavaScroll = (JayJavaScroll) dlsym(jayBridge, "jay_java_scroll");
++    if (!jayJavaChar)
++        jayJavaChar = (JayJavaChar) dlsym(jayBridge, "jay_java_char");
++    if (!jayJavaLook)
++        jayJavaLook = (JayJavaLook) dlsym(jayBridge, "jay_java_look");
++    return jaySurfaceAcquire && jaySurfaceRelease && jayInputRead && jayGameplayModeSet &&
++           jayJavaPointer && jayJavaMouseButton && jayJavaKey && jayJavaScroll &&
++           jayJavaChar && jayJavaLook;
 +}
 +#endif
 +
@@ -180,6 +206,48 @@ index 1db0811..b84b668 100644
  void _glfwSetWindowTitleNull(_GLFWwindow* window, const char* title)
 @@ -486,6 +544,61 @@ GLFWbool _glfwWindowVisibleNull(_GLFWwindow* window)
  
++#if defined(__ANDROID__)
++static void inputMouseButton(_GLFWwindow* window, int button, int action)
++{
++    GLFWmousebuttonfun callback = window->callbacks.mouseButton;
++    const int delivered = jayJavaMouseButton(button, action);
++    if (delivered)
++        window->callbacks.mouseButton = NULL;
++    _glfwInputMouseClick(window, button, action, 0);
++    window->callbacks.mouseButton = callback;
++}
++
++static void inputKey(_GLFWwindow* window, int key, int action)
++{
++    GLFWkeyfun callback = window->callbacks.key;
++    const int delivered = jayJavaKey(key, action);
++    if (delivered)
++        window->callbacks.key = NULL;
++    _glfwInputKey(window, key, key, action, 0);
++    window->callbacks.key = callback;
++}
++
++static void inputScroll(_GLFWwindow* window, double x, double y)
++{
++    GLFWscrollfun callback = window->callbacks.scroll;
++    const int delivered = jayJavaScroll(x, y);
++    if (delivered)
++        window->callbacks.scroll = NULL;
++    _glfwInputScroll(window, x, y);
++    window->callbacks.scroll = callback;
++}
++
++static void inputChar(_GLFWwindow* window, uint32_t codepoint)
++{
++    GLFWcharfun callback = window->callbacks.character;
++    const int delivered = jayJavaChar(codepoint);
++    if (delivered)
++        window->callbacks.character = NULL;
++    _glfwInputChar(window, codepoint, 0, GLFW_TRUE);
++    window->callbacks.character = callback;
++}
++#endif
++
  void _glfwPollEventsNull(void)
  {
 +#if defined(__ANDROID__)
@@ -196,14 +264,27 @@ index 1db0811..b84b668 100644
 +        input.pointerGeneration != window->null.jayPointerGeneration)
 +    {
 +        window->null.jayPointerGeneration = input.pointerGeneration;
++        _glfwInputWindowFocus(window, GLFW_TRUE);
++        _glfwInputCursorEnter(window, GLFW_TRUE);
 +        _glfw.null.xcursor = input.pointerX * window->null.width;
 +        _glfw.null.ycursor = input.pointerY * window->null.height;
++        GLFWcursorposfun cursorCallback = window->callbacks.cursorPos;
++        GLFWmousebuttonfun mouseCallback = window->callbacks.mouseButton;
++        const int delivered = jayJavaPointer(input.pointerX, input.pointerY,
++                                             input.pointerClicks);
++        if (delivered)
++        {
++            window->callbacks.cursorPos = NULL;
++            window->callbacks.mouseButton = NULL;
++        }
 +        _glfwInputCursorPos(window, _glfw.null.xcursor, _glfw.null.ycursor);
 +        for (uint32_t click = 0; click < input.pointerClicks; click++)
 +        {
 +            _glfwInputMouseClick(window, GLFW_MOUSE_BUTTON_LEFT, GLFW_PRESS, 0);
 +            _glfwInputMouseClick(window, GLFW_MOUSE_BUTTON_LEFT, GLFW_RELEASE, 0);
 +        }
++        window->callbacks.cursorPos = cursorCallback;
++        window->callbacks.mouseButton = mouseCallback;
 +    }
 +    const uint32_t previous = window->null.jayActions;
 +    window->null.jayActions = input.actions;
@@ -219,27 +300,27 @@ index 1db0811..b84b668 100644
 +            const GLFWbool pressed = !(previous & bit) && (input.actions & bit);
 +            const GLFWbool tapped = (input.actionTaps & bit) && !(input.actions & bit);
 +            if (pressed || tapped)
-+                _glfwInputScroll(window, 0.0, action == 10 ? 1.0 : -1.0);
++                inputScroll(window, 0.0, action == 10 ? 1.0 : -1.0);
 +            continue;
 +        }
 +        if ((previous & bit) != (input.actions & bit))
 +        {
 +            if (action <= 2)
-+                _glfwInputMouseClick(window, keys[action], (input.actions & bit) ? GLFW_PRESS : GLFW_RELEASE, 0);
++                inputMouseButton(window, keys[action], (input.actions & bit) ? GLFW_PRESS : GLFW_RELEASE);
 +            else
-+                _glfwInputKey(window, keys[action], keys[action], (input.actions & bit) ? GLFW_PRESS : GLFW_RELEASE, 0);
++                inputKey(window, keys[action], (input.actions & bit) ? GLFW_PRESS : GLFW_RELEASE);
 +        }
 +        else if ((input.actionTaps & bit) && !(input.actions & bit))
 +        {
 +            if (action <= 2)
 +            {
-+                _glfwInputMouseClick(window, keys[action], GLFW_PRESS, 0);
-+                _glfwInputMouseClick(window, keys[action], GLFW_RELEASE, 0);
++                inputMouseButton(window, keys[action], GLFW_PRESS);
++                inputMouseButton(window, keys[action], GLFW_RELEASE);
 +            }
 +            else
 +            {
-+                _glfwInputKey(window, keys[action], keys[action], GLFW_PRESS, 0);
-+                _glfwInputKey(window, keys[action], keys[action], GLFW_RELEASE, 0);
++                inputKey(window, keys[action], GLFW_PRESS);
++                inputKey(window, keys[action], GLFW_RELEASE);
 +            }
 +        }
 +    }
@@ -253,23 +334,28 @@ index 1db0811..b84b668 100644
 +    {
 +        const uint32_t bit = 1u << index;
 +        if ((window->null.jayMovementKeys & bit) != (movement & bit))
-+            _glfwInputKey(window, movementKeys[index], movementKeys[index],
-+                          (movement & bit) ? GLFW_PRESS : GLFW_RELEASE, 0);
++            inputKey(window, movementKeys[index],
++                     (movement & bit) ? GLFW_PRESS : GLFW_RELEASE);
 +    }
 +    window->null.jayMovementKeys = movement;
 +    for (uint32_t index = 0; index < input.textCount && index < 64; index++)
-+        _glfwInputChar(window, input.text[index], 0, GLFW_TRUE);
++        inputChar(window, input.text[index]);
 +    for (uint32_t index = 0; index < input.keyCount && index < 16; index++)
 +    {
-+        _glfwInputKey(window, input.keys[index], input.keys[index], GLFW_PRESS, 0);
-+        _glfwInputKey(window, input.keys[index], input.keys[index], GLFW_RELEASE, 0);
++        inputKey(window, input.keys[index], GLFW_PRESS);
++        inputKey(window, input.keys[index], GLFW_RELEASE);
 +    }
 +    if (window->cursorMode == GLFW_CURSOR_DISABLED &&
 +        (input.lookX != 0.f || input.lookY != 0.f))
 +    {
 +        _glfw.null.xcursor += (int) (input.lookX * window->null.width);
 +        _glfw.null.ycursor += (int) (input.lookY * window->null.height);
++        GLFWcursorposfun callback = window->callbacks.cursorPos;
++        const int delivered = jayJavaLook(input.lookX, input.lookY);
++        if (delivered)
++            window->callbacks.cursorPos = NULL;
 +        _glfwInputCursorPos(window, _glfw.null.xcursor, _glfw.null.ycursor);
++        window->callbacks.cursorPos = callback;
 +    }
 +#endif
  }

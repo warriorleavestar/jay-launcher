@@ -12,10 +12,19 @@ public sealed record Contact(byte[] PublicKey, string Name, bool Verified, DateT
     public string Code => ContactCode.Format(PublicKey);
 
     /// <summary>
-    /// Their Jay account (jay1…), when they sent a certificate the account signed for this device key while adding.
-    /// A later add-contact request from another device of the same account is recognized as the same person.
+    /// Their Jay account (jay1…), proven live for this device key in a knock (<see cref="ContactBook.SeenLive"/>).
+    /// Other devices of the same account are recognized as the same person once I've confirmed the account.
     /// </summary>
     public string? JayAccount { get; init; }
+
+    /// <summary>
+    /// <see cref="JayAccount"/> was linked to this (emoji-verified) device in a knock and I haven't confirmed it yet. Until
+    /// then the account vouches for no other device: the link itself rests only on this device's X25519 key.
+    /// </summary>
+    public bool AccountPending { get; init; }
+
+    /// <summary>An account I said isn't theirs for this device; a knock proving it again doesn't ask again.</summary>
+    public string? RefusedAccount { get; init; }
 
     /// <summary>The device name and epoch from the certificate this device sent (empty and 0 without one).</summary>
     public string DeviceName { get; init; } = "";
@@ -32,6 +41,9 @@ public sealed record Contact(byte[] PublicKey, string Name, bool Verified, DateT
     /// until then the host is asked when it knocks, like for anyone else.
     /// </summary>
     public bool MayBeAutoAdmitted => Verified && !NewDevice;
+
+    /// <summary>This device stands for its account: verified, not a new device awaiting my OK, and the account confirmed.</summary>
+    internal bool VouchesForAccount => Verified && !NewDevice && !AccountPending && JayAccount is not null;
 }
 
 /// <summary>A device I removed from someone's devices. It has to go through the emoji again to come back.</summary>
@@ -68,17 +80,6 @@ public sealed class PendingContact
     public int[]? Sas { get; internal set; }
     public string Fingerprint => MemberIdentity.FingerprintOf(PublicKey);
 
-    /// <summary>Their Jay account, from a certificate that checked out for <see cref="PublicKey"/>.</summary>
-    public string? JayAccount { get; internal set; }
-
-    /// <summary>
-    /// The Jay account belongs to someone already verified in the list: this is a friend on another device. Their request is
-    /// accepted without asking, and the emoji can be skipped because the account itself vouches for the device.
-    /// </summary>
-    public bool KnownFriend { get; internal set; }
-
-    internal string DeviceName { get; set; } = "";
-    internal int Epoch { get; set; }
 
     internal byte[]? MyNonce;
     internal byte[]? TheirCommit;
@@ -154,37 +155,77 @@ public sealed class ContactBook(string path, Func<DateTimeOffset>? clock = null)
     public Contact? FindVerifiedByJayAccount(string? account)
     {
         if (account is null) return null;
-        lock (_gate) return Load().FirstOrDefault(c => c.Verified && c.JayAccount is not null && string.Equals(c.JayAccount, account, StringComparison.OrdinalIgnoreCase));
+        lock (_gate) return Load().FirstOrDefault(c => c.VouchesForAccount && string.Equals(c.JayAccount, account, StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>
-    /// This device's Jay account certificate, sent in add-contact mail so the other person can recognize me on my other devices.
-    /// Null when no Jay account is bound. Set by the owner, like <see cref="Me"/>.
+    /// A live handshake (a knock either way) proved <paramref name="certificate"/> for <paramref name="deviceKey"/>: both
+    /// account signatures and a fresh device signature checked out (privacy plan item 7). Add-contact mail never carries
+    /// the certificate (it is about 7 KB and mail is 4 KiB), so this is where devices learn which person they belong to.
+    /// <list type="bullet">
+    /// <item>A verified contact without an account gets this one, waiting for my OK (<see cref="Contact.AccountPending"/>):
+    /// the link rests only on the device's X25519 key, so it vouches for nothing until I confirm it. One with this account
+    /// keeps the newest epoch and device name. A contact under another account, or one I refused, is left alone.</item>
+    /// <item>A device I don't have, certified by a confirmed account of someone verified in the list, joins them as a new device
+    /// waiting for my OK (<see cref="Contact.NewDevice"/>, <see cref="DeviceAdded"/>), unless I removed that device or the
+    /// certificate is older (lower epoch) than one I've seen from that account.</item>
+    /// </list>
+    /// Returns the new device, or null.
+    /// <para>Precondition: <paramref name="certificate"/> comes from <see cref="Identity.JayProof.Verified"/> for this
+    /// handshake. A certificate alone isn't tied to a session and can be replayed, so never pass one from mail, a backup or
+    /// any other stored copy.</para>
     /// </summary>
-    public Identity.DeviceCertificate? MyCertificate { get; set; }
-
-    private void AddMyCertificate(JsonObject body)
+    public Contact? SeenLive(ReadOnlySpan<byte> deviceKey, Identity.DeviceCertificate certificate)
     {
-        if (MyCertificate is { } cert && cert.DeviceKey.AsSpan().SequenceEqual(Me)) body["jay"] = cert.ToJson();
-    }
-
-    /// <summary>
-    /// Reads the certificate in add-contact mail. <paramref name="knownFriend"/>: the account is already a verified friend,
-    /// this device key wasn't removed by me, and the certificate isn't older (lower epoch) than one I've seen from that account.
-    /// </summary>
-    private string? KnownAccountLocked(MailMessage message, ReadOnlySpan<byte> sender, PendingContact pending, out bool knownFriend)
-    {
-        knownFriend = false;
-        if (Identity.DeviceCertificate.FromJson(message.Body["jay"]) is not { } cert || !cert.Verify(sender)
-            || !Identity.JayAddress.TryDecode(cert.Account, out var accountKey)) return null;
-        var account = Identity.JayAddress.Encode(accountKey);
-        pending.DeviceName = cert.DeviceName;
-        pending.Epoch = cert.Epoch;
-        var devices = Load().Where(c => c.Verified && c.JayAccount == account).ToList();
-        knownFriend = devices.Count > 0
-            && !_removed.ContainsKey(Convert.ToHexStringLower(sender))
-            && cert.Epoch >= devices.Max(c => c.Epoch);
-        return account;
+        if (deviceKey.Length != X25519KeyPair.Length || deviceKey.SequenceEqual(Me) || !certificate.Verify(deviceKey)) return null;
+        var account = certificate.Account;
+        var key = deviceKey.ToArray();
+        Contact? added = null;
+        var changed = false;
+        lock (_gate)
+        {
+            var list = Load();
+            var i = list.FindIndex(c => c.PublicKey.AsSpan().SequenceEqual(key));
+            if (i >= 0)
+            {
+                var known = list[i];
+                // Nothing older than the newest certificate seen from this account changes anything, the name included.
+                var newest = list.Where(c => c.Verified && c.JayAccount == account).Select(c => c.Epoch).DefaultIfEmpty(0).Max();
+                if (!known.Verified || (known.JayAccount is not null && known.JayAccount != account) || certificate.Epoch < newest
+                    || known.RefusedAccount == account
+                    || (known.JayAccount == account && known.Epoch == certificate.Epoch && known.DeviceName == certificate.DeviceName)) return null;
+                list[i] = known with
+                {
+                    JayAccount = account,
+                    AccountPending = known.JayAccount is null || known.AccountPending,
+                    DeviceName = certificate.DeviceName,
+                    Epoch = certificate.Epoch,
+                };
+                changed = true;
+            }
+            else
+            {
+                var devices = list.Where(c => c.VouchesForAccount && c.JayAccount == account).ToList();
+                // The epoch floor counts every certificate seen from this account, including devices still waiting for my OK.
+                var newest = list.Where(c => c.Verified && c.JayAccount == account).Max(c => (int?)c.Epoch) ?? 0;
+                if (devices.Count == 0 || _removed.ContainsKey(Convert.ToHexStringLower(deviceKey)) || certificate.Epoch < newest) return null;
+                // The person keeps the name I gave them, wherever the device came from.
+                added = new Contact(key, devices[0].Name, Verified: true, _now())
+                {
+                    JayAccount = account,
+                    DeviceName = certificate.DeviceName,
+                    Epoch = certificate.Epoch,
+                    NewDevice = true,
+                };
+                list.Add(added);
+                _pending.Remove(Convert.ToHexStringLower(deviceKey));
+                changed = true;
+            }
+            if (changed) Save(list);
+        }
+        if (changed) Changed?.Invoke();
+        if (added is not null) DeviceAdded?.Invoke(added);
+        return added;
     }
 
     /// <summary>
@@ -195,11 +236,12 @@ public sealed class ContactBook(string path, Func<DateTimeOffset>? clock = null)
 
     /// <summary>
     /// After restoring a friend list backup on a new device: says hello again to a verified friend's device so they learn
-    /// this device's key. Needs my Jay account certificate: the friend's side recognizes the account and accepts without
-    /// asking, and both sides confirm without the emoji. Returns null without a certificate or for someone not in the list.
+    /// this device's key. It is an ordinary add-contact request with the emoji on both sides: mail can't carry the
+    /// post-quantum account certificate, so the friend checks this device like any other (privacy plan item 7). Returns
+    /// null for someone not in the list.
     /// </summary>
     public MailMessage? StartRelink(ReadOnlySpan<byte> me, ReadOnlySpan<byte> theirs, string myName) =>
-        MyCertificate is not null && IsVerified(theirs) ? Start(me, theirs, myName, relink: true) : null;
+        IsVerified(theirs) ? Start(me, theirs, myName, relink: true) : null;
 
     private MailMessage? Start(ReadOnlySpan<byte> me, ReadOnlySpan<byte> theirs, string myName, bool relink)
     {
@@ -214,7 +256,6 @@ public sealed class ContactBook(string path, Func<DateTimeOffset>? clock = null)
             ["name"] = KnockProtocol.SanitizeName(myName),
             ["c"] = Convert.ToHexStringLower(ContactHandshake.Commit(pending.MyNonce)),
         };
-        AddMyCertificate(body);
         return MailMessage.Create(MailKind.Hello, theirs, body, _now());
     }
 
@@ -227,7 +268,6 @@ public sealed class ContactBook(string path, Func<DateTimeOffset>? clock = null)
         if (Me.Length != X25519KeyPair.Length || sender.Length != X25519KeyPair.Length) return null;
         var key = Convert.ToHexStringLower(sender);
         MailMessage? reply = null;
-        Contact? newDevice = null;
         lock (_gate)
         {
             PruneLocked();
@@ -247,27 +287,19 @@ public sealed class ContactBook(string path, Func<DateTimeOffset>? clock = null)
                         Step = ContactStep.AskingMe,
                         TheirCommit = commit,
                     };
-                    var account = KnownAccountLocked(message, sender, asking, out var knownFriend);
-                    // Known-friend hellos skip the cap: only the friend's own account can sign one.
-                    if (pending is null && !knownFriend && _pending.Values.Count(p => !p.Initiator) >= MaxRequests) return null;
-                    asking.JayAccount = account;
-                    asking.KnownFriend = knownFriend;
+                    if (pending is null && _pending.Values.Count(p => !p.Initiator) >= MaxRequests) return null;
                     _pending[key] = asking;
-                    // A friend on another device (their account vouches for it): no need to ask me first.
-                    if (crossed || knownFriend) reply = AcceptLocked(asking, myName);
+                    if (crossed) reply = AcceptLocked(asking, myName);
                     break;
                 }
                 case MailKind.HelloReply when pending is { Initiator: true, Step: ContactStep.WaitingForThem }:
                 {
                     if (MailMessage.Hex(message.Body["n"], ContactHandshake.NonceLength) is not { } nonce) return null;
                     pending.Name = Name(message);
-                    pending.JayAccount = KnownAccountLocked(message, sender, pending, out var knownFriend);
-                    pending.KnownFriend = knownFriend;
                     pending.TheirNonce = nonce;
                     pending.Sas = ContactHandshake.Sas(Me, sender, pending.MyNonce!, nonce);
                     pending.Step = ContactStep.Compare;
                     reply = MailMessage.Create(MailKind.HelloNonce, sender, new JsonObject { ["n"] = Convert.ToHexStringLower(pending.MyNonce!) }, _now());
-                    if (pending.KnownFriend) newDevice = ConfirmKnownLocked(pending);
                     break;
                 }
                 case MailKind.HelloNonce when pending is { Initiator: false, Step: ContactStep.WaitingForNonce }:
@@ -282,7 +314,6 @@ public sealed class ContactBook(string path, Func<DateTimeOffset>? clock = null)
                     pending.TheirNonce = nonce;
                     pending.Sas = ContactHandshake.Sas(sender, Me, nonce, pending.MyNonce!);
                     pending.Step = ContactStep.Compare;
-                    if (pending.KnownFriend) newDevice = ConfirmKnownLocked(pending);
                     break;
                 }
                 default:
@@ -290,15 +321,7 @@ public sealed class ContactBook(string path, Func<DateTimeOffset>? clock = null)
             }
         }
         Changed?.Invoke();
-        if (newDevice is not null) DeviceAdded?.Invoke(newDevice);
         return reply;
-    }
-
-    /// <summary>Confirms a known friend's device; returns it only when this device key is new to me.</summary>
-    private Contact? ConfirmKnownLocked(PendingContact pending)
-    {
-        var contact = ConfirmLocked(pending);
-        return contact.NewDevice ? contact : null;
     }
 
     /// <summary>My public key, for working out the emoji. Set once by the owner (the identity can be reset).</summary>
@@ -326,7 +349,6 @@ public sealed class ContactBook(string path, Func<DateTimeOffset>? clock = null)
             ["name"] = KnockProtocol.SanitizeName(myName),
             ["n"] = Convert.ToHexStringLower(pending.MyNonce),
         };
-        AddMyCertificate(body);
         return MailMessage.Create(MailKind.HelloReply, pending.PublicKey, body, _now());
     }
 
@@ -343,30 +365,29 @@ public sealed class ContactBook(string path, Func<DateTimeOffset>? clock = null)
         return contact;
     }
 
-    /// <summary>
-    /// Saves a finished exchange as a verified contact. A known friend's new device is confirmed this way without the emoji:
-    /// the Jay account (verified earlier) signed the device key, which says more than four emoji would.
-    /// </summary>
+    /// <summary>Saves a finished exchange (the emoji matched) as a verified contact.</summary>
     private Contact ConfirmLocked(PendingContact pending)
     {
         _pending.Remove(Convert.ToHexStringLower(pending.PublicKey));
         var list = Load();
         var old = list.FirstOrDefault(c => c.PublicKey.AsSpan().SequenceEqual(pending.PublicKey));
         list.RemoveAll(c => c.PublicKey.AsSpan().SequenceEqual(pending.PublicKey));
-        // A known friend keeps the name I gave them, wherever the device came from.
-        var name = pending.KnownFriend && list.FirstOrDefault(c => c.Verified && c.JayAccount == pending.JayAccount) is { } friend ? friend.Name
-            : old?.Name is { Length: > 0 } kept && pending.KnownFriend ? kept : pending.Name;
+        // A friend I already had (a relink after restoring a backup) keeps the name I gave them.
+        var name = old is { Verified: true, Name.Length: > 0 } ? old.Name : pending.Name;
+        // The emoji checks this device, not the Jay account it once claimed: an account link still waiting for my OK keeps
+        // waiting, one I refused stays refused, and nothing is carried over from a contact that wasn't verified.
+        var kept = old is { Verified: true } ? old : null;
         var contact = new Contact(pending.PublicKey, name, Verified: true, old?.Added ?? _now())
         {
-            JayAccount = pending.JayAccount ?? old?.JayAccount,
-            DeviceName = pending.DeviceName.Length > 0 ? pending.DeviceName : old?.DeviceName ?? "",
-            Epoch = Math.Max(pending.Epoch, old?.Epoch ?? 0),
-            // A known friend's device I hadn't verified before waits for my OK; one that went through the emoji doesn't.
-            NewDevice = pending.KnownFriend && old is not { Verified: true },
+            JayAccount = kept?.JayAccount,
+            AccountPending = kept is { JayAccount: not null, AccountPending: true },
+            RefusedAccount = old?.RefusedAccount,
+            DeviceName = kept?.DeviceName ?? "",
+            Epoch = kept?.Epoch ?? 0,
         };
         list.Add(contact);
         // Through the emoji again: a device I once removed is back because I checked it myself.
-        if (!pending.KnownFriend) _removed.Remove(Convert.ToHexStringLower(pending.PublicKey));
+        _removed.Remove(Convert.ToHexStringLower(pending.PublicKey));
         Save(list);
         return contact;
     }
@@ -392,7 +413,14 @@ public sealed class ContactBook(string path, Func<DateTimeOffset>? clock = null)
             {
                 if (c.PublicKey.Length != X25519KeyPair.Length || c.PublicKey.AsSpan().SequenceEqual(Me) || list.Any(x => x.PublicKey.AsSpan().SequenceEqual(c.PublicKey))
                     || _removed.ContainsKey(Convert.ToHexStringLower(c.PublicKey))) continue;
-                list.Add(c with { Name = KnockProtocol.SanitizeName(c.Name), DeviceName = Identity.DeviceCertificate.CleanName(c.DeviceName), NewDevice = false });
+                // An account link I hadn't confirmed, or a new device I hadn't acknowledged, comes back still waiting for me.
+                list.Add(c with
+                {
+                    Name = KnockProtocol.SanitizeName(c.Name),
+                    DeviceName = Identity.DeviceCertificate.CleanName(c.DeviceName),
+                    AccountPending = c.JayAccount is not null && c.AccountPending,
+                    NewDevice = c.Verified && c.JayAccount is not null && c.NewDevice,
+                });
                 added++;
             }
             if (added > 0 || removedAny) Save(list);
@@ -478,6 +506,27 @@ public sealed class ContactBook(string path, Func<DateTimeOffset>? clock = null)
         }
     }
 
+    /// <summary>
+    /// My answer about the Jay account a knock linked to this device: yes, it's theirs (from now on it vouches for their
+    /// other devices), or no (the link is dropped, and the same account doesn't ask again for this device).
+    /// </summary>
+    /// <param name="account">The account the question showed. When given, an answer about a different account does nothing.</param>
+    public void ConfirmAccount(ReadOnlySpan<byte> theirs, bool isTheirs, string? account = null)
+    {
+        lock (_gate)
+        {
+            var list = Load();
+            var key = theirs.ToArray();
+            var i = list.FindIndex(c => c.PublicKey.AsSpan().SequenceEqual(key));
+            if (i < 0 || !list[i].AccountPending || (account is not null && list[i].JayAccount != account)) return;
+            list[i] = isTheirs
+                ? list[i] with { AccountPending = false }
+                : list[i] with { AccountPending = false, RefusedAccount = list[i].JayAccount, JayAccount = null, DeviceName = "", Epoch = 0 };
+            Save(list);
+        }
+        Changed?.Invoke();
+    }
+
     /// <summary>I've seen the notice about a friend's new device and it's fine: stop asking.</summary>
     public void AcknowledgeDevice(ReadOnlySpan<byte> theirs)
     {
@@ -532,6 +581,8 @@ public sealed class ContactBook(string path, Func<DateTimeOffset>? clock = null)
                     DeviceName = Identity.DeviceCertificate.CleanName(item["device"]?.GetValue<string>()),
                     Epoch = Math.Max(0, item["epoch"]?.GetValue<int>() ?? 0),
                     NewDevice = item["new"]?.GetValue<bool>() == true,
+                    AccountPending = account is not null && item["acctPending"]?.GetValue<bool>() == true,
+                    RefusedAccount = Identity.JayAddress.Canonical(item["refused"]?.GetValue<string>()),
                 });
             }
         }
@@ -561,6 +612,8 @@ public sealed class ContactBook(string path, Func<DateTimeOffset>? clock = null)
             if (c.DeviceName.Length > 0) item["device"] = c.DeviceName;
             if (c.Epoch > 0) item["epoch"] = c.Epoch;
             if (c.NewDevice) item["new"] = true;
+            if (c.AccountPending) item["acctPending"] = true;
+            if (c.RefusedAccount is not null) item["refused"] = c.RefusedAccount;
             array.Add((JsonNode)item);
         }
         foreach (var (pub, account) in _removed)

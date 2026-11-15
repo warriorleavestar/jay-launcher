@@ -11,6 +11,16 @@ internal static partial class NativeJvmHost
 
     public static bool GameplayControlsActive => IsAvailable && GetNativeGameplayMode() != 0;
 
+    public static bool HasBlockTarget
+    {
+        get
+        {
+            if (!IsAvailable) return false;
+            try { return GetNativeBlockTarget() != 0; }
+            catch (EntryPointNotFoundException) { return false; }
+        }
+    }
+
     public static bool IsAvailable
     {
         get
@@ -129,6 +139,9 @@ internal static partial class NativeJvmHost
 
     [LibraryImport("jayjvm", EntryPoint = "jay_gameplay_mode_get")]
     private static partial int GetNativeGameplayMode();
+
+    [LibraryImport("jayjvm", EntryPoint = "jay_block_target_get")]
+    private static partial int GetNativeBlockTarget();
 
     [LibraryImport("jayjvm", EntryPoint = "jay_jvm_load", StringMarshalling = StringMarshalling.Utf8)]
     private static partial nint LoadJvm(string path);

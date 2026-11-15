@@ -6,8 +6,11 @@ It adds to, and does not limit, the PolyForm Noncommercial License.
 
 The licensor is the Jay development team: the people who hold the
 copyright in Jay, currently warriorleavestar and Frison-Krison.
-warriorleavestar acts for the team in giving or refusing consent and in
-every decision under this permission.
+The licensor makes every decision under this permission jointly,
+including giving or refusing consent. A decision, consent or refusal is
+made only when every person then in the team (today, both
+warriorleavestar and Frison-Krison) agrees to it in writing. No one
+person may decide alone for the team.
 
 1. **Who may apply.** An individual, or a small team, may apply for
    permission to use Jay for a commercial purpose. Whether a team counts as

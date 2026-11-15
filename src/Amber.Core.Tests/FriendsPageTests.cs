@@ -268,28 +268,26 @@ public sealed class FriendsPageTests
         // we were friends), the account doesn't let the phone in: only the devices I confirmed are on the list.
         mp.Trusted.Add(Key(8), "Bob", bob.Address);
         Assert.False(mp.AccountMayAutoAdmit(bob.Address));
-        using var phone = X25519KeyPair.Generate();
-        var phoneBook = new ContactBook(Path.Combine(root, "bob-phone.json"))
-            { Me = phone.PublicKey, MyCertificate = bob.CertifyDevice(phone.PublicKey, "Phone", 0, DateTimeOffset.UtcNow) };
-        var reply = mp.Contacts.Receive(phone.PublicKey, phoneBook.StartAdd(phone.PublicKey, me, "Bob")!, "Me");
-        if (reply is not null && phoneBook.Receive(me, reply, "Bob") is { } nonce) mp.Contacts.Receive(phone.PublicKey, nonce, "Me");
+        // It proves his account in a live handshake (a knock or a room), which is how a new device arrives.
+        using var phone = DeviceKeys.Generate();
+        mp.Contacts.SeenLive(phone.Dh.PublicKey, bob.CertifyDevice(phone, "Phone", 0, DateTimeOffset.UtcNow));
         Dispatcher.UIThread.RunJobs();
         var row = people.Selected!;
-        Assert.True(row.DeviceItems.Single(d => d.Device.PublicKey.AsSpan().SequenceEqual(phone.PublicKey)).IsNew);
-        Assert.False(mp.Trusted.IsTrusted(phone.PublicKey));
+        Assert.True(row.DeviceItems.Single(d => d.Device.PublicKey.AsSpan().SequenceEqual(phone.Dh.PublicKey)).IsNew);
+        Assert.False(mp.Trusted.IsTrusted(phone.Dh.PublicKey));
         Assert.False(mp.AccountMayAutoAdmit(bob.Address));
 
         // I look at it and it is his: the switch is on, so it joins his other computer.
         people.ConfirmDeviceCommand.Execute(row.DeviceItems.Single(d => d.IsNew));
         Dispatcher.UIThread.RunJobs();
-        Assert.True(mp.Trusted.IsTrusted(phone.PublicKey));
+        Assert.True(mp.Trusted.IsTrusted(phone.Dh.PublicKey));
         Assert.True(mp.Trusted.IsTrusted(Key(1)));
 
         // Removing the phone takes only the phone off.
         row = people.Selected!;
-        mp.RemoveContactDeviceCommand.Execute(row.DeviceItems.Single(d => d.Device.PublicKey.AsSpan().SequenceEqual(phone.PublicKey)));
+        mp.RemoveContactDeviceCommand.Execute(row.DeviceItems.Single(d => d.Device.PublicKey.AsSpan().SequenceEqual(phone.Dh.PublicKey)));
         Dispatcher.UIThread.RunJobs();
-        Assert.False(mp.Trusted.IsTrusted(phone.PublicKey));
+        Assert.False(mp.Trusted.IsTrusted(phone.Dh.PublicKey));
         Assert.True(mp.Trusted.IsTrusted(Key(1)));
         // The newest device gave the row its name; Bob stays open all the same.
         Assert.Equal("Bob", people.Selected?.Name);
@@ -405,11 +403,9 @@ public sealed class FriendsPageTests
         Assert.True(people.CanInvite);
 
         // A new computer signed by their account: that is what the row says until I have looked at it.
-        using var phone = X25519KeyPair.Generate();
-        var phoneBook = new ContactBook(Path.Combine(root, "bob-phone.json"))
-            { Me = phone.PublicKey, MyCertificate = bob.CertifyDevice(phone.PublicKey, "Phone", 0, DateTimeOffset.UtcNow) };
-        var reply = mp.Contacts.Receive(phone.PublicKey, phoneBook.StartAdd(phone.PublicKey, me, "Bob")!, "Me");
-        if (reply is not null && phoneBook.Receive(me, reply, "Bob") is { } nonce) mp.Contacts.Receive(phone.PublicKey, nonce, "Me");
+        // It proves his account in a live handshake (a knock or a room), which is how a new device arrives.
+        using var phone = DeviceKeys.Generate();
+        mp.Contacts.SeenLive(phone.Dh.PublicKey, bob.CertifyDevice(phone, "Phone", 0, DateTimeOffset.UtcNow));
         Dispatcher.UIThread.RunJobs();
         row = people.Selected!;
         Assert.Equal("Bob", row.Name);
@@ -505,6 +501,86 @@ public sealed class FriendsPageTests
     });
 
     [Fact]
+    public void AFailedSendGoesBackOnlyIntoTheSamePersonsBox() => WithMain((_, main, people, _) =>
+    {
+        var mp = main.Multiplayer;
+        AddFriends(mp, Friend(1, "Robin"), Friend(2, "Sam"));
+        var pending = new TaskCompletionSource<bool>();
+        mp.SendToFriendForTest = (_, _) => pending.Task;
+
+        // Sent to Robin, then Sam picked while it goes: the failure doesn't put Robin's words in Sam's box.
+        people.Selected = people.Friends.First(f => f.Name == "Robin");
+        people.Draft = "for robin only";
+        var send = people.SendCommand.ExecuteAsync(null);
+        people.Selected = people.Friends.First(f => f.Name == "Sam");
+        pending.SetResult(false);
+        Wait(send);
+        Assert.Equal("", people.Draft);
+
+        // Still on the same person (the list rebuilt in between): the words come back.
+        pending = new TaskCompletionSource<bool>();
+        people.Draft = "for sam";
+        send = people.SendCommand.ExecuteAsync(null);
+        mp.RefreshContacts();
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal("Sam", people.Selected?.Name);
+        pending.SetResult(false);
+        Wait(send);
+        Assert.Equal("for sam", people.Draft);
+    });
+
+    [Fact]
+    public void TheConversationStaysWhenAFriendsJayAccountIsLinked() => WithMain((_, main, people, _) =>
+    {
+        var mp = main.Multiplayer;
+        using var bob = JayAccount.FromMnemonic(Bip39.Generate(MnemonicLanguage.English), null);
+        using var laptop = DeviceKeys.Generate();
+        AddFriends(mp, new Contact(laptop.Dh.PublicKey, "Bob", true, DateTimeOffset.UtcNow));
+        people.Selected = people.Friends.Single();
+        mp.FriendMessageForTest(laptop.Dh.PublicKey, "before the link", mine: false);
+        var lines = people.Lines!;
+        Assert.Single(lines);
+
+        // A live handshake ties the device to Bob's Jay account: the person's key changes, the conversation doesn't.
+        mp.Contacts.SeenLive(laptop.Dh.PublicKey, bob.CertifyDevice(laptop, "Laptop", 0, DateTimeOffset.UtcNow));
+        mp.RefreshContacts();
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal(bob.Address, mp.ContactList.Single().JayAccount);
+        people.Selected = people.Friends.Single();
+        Assert.Same(lines, people.Lines);
+        mp.FriendMessageForTest(laptop.Dh.PublicKey, "after the link", mine: false);
+        Assert.Equal(["before the link", "after the link"], people.Lines!.Select(l => l.Text));
+    });
+
+    [Fact]
+    public void WhatAddingOrBackingUpSaysShowsOnTheFriendsPage() => WithMain((_, main, people, _) =>
+    {
+        var mp = main.Multiplayer;
+        mp.ContactCodeInput = "not a friend code";
+        Wait(people.AddCommand.ExecuteAsync(null));
+        Assert.Equal("multiplayer.contacts.bad_code", people.StatusInfo?.Key);
+
+        // A status the room sets on its own doesn't show up here.
+        people.SetStatus(null);
+        mp.SetStatus(StatusMessage.Info("multiplayer.room.waiting"));
+        Assert.Null(people.StatusInfo);
+    });
+
+    [Fact]
+    public void ASafetyPanelThatIsDroppedIsLetGo() => UiTestThread.Run(() =>
+    {
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        static WeakReference Make() => new(new Amber.App.Controls.Safety.SafetyPanel { Title = "x" });
+        var weak = Make();
+        for (var i = 0; i < 5 && weak.IsAlive; i++)
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+        }
+        Assert.False(weak.IsAlive);
+    });
+
+    [Fact]
     public void AMessageNeedsTheFriendInTheSameRoomAndSaysSo() => WithMain((_, main, people, _) =>
     {
         var mp = main.Multiplayer;
@@ -584,11 +660,9 @@ public sealed class FriendsPageTests
         Assert.False(mp.AccountMayAutoAdmit(bob.Address));
 
         // A phone signed by his account, waiting for me to look at it.
-        using var phone = X25519KeyPair.Generate();
-        var phoneBook = new ContactBook(Path.Combine(root, "bob-phone.json"))
-            { Me = phone.PublicKey, MyCertificate = bob.CertifyDevice(phone.PublicKey, "Phone", 0, DateTimeOffset.UtcNow) };
-        var reply = mp.Contacts.Receive(phone.PublicKey, phoneBook.StartAdd(phone.PublicKey, me, "Bob")!, "Me");
-        if (reply is not null && phoneBook.Receive(me, reply, "Bob") is { } nonce) mp.Contacts.Receive(phone.PublicKey, nonce, "Me");
+        // It proves his account in a live handshake (a knock or a room), which is how a new device arrives.
+        using var phone = DeviceKeys.Generate();
+        mp.Contacts.SeenLive(phone.Dh.PublicKey, bob.CertifyDevice(phone, "Phone", 0, DateTimeOffset.UtcNow));
         Dispatcher.UIThread.RunJobs();
         var row = people.Selected!;
         Assert.Equal(2, row.DeviceItems.Count);
@@ -607,7 +681,7 @@ public sealed class FriendsPageTests
         // Nothing under his account lets anyone in, the rejected phone least of all.
         Assert.False(mp.AccountMayAutoAdmit(bob.Address));
         Assert.DoesNotContain(StraightIn(root), m => string.Equals(m.JayAccount, bob.Address, StringComparison.OrdinalIgnoreCase));
-        Assert.False(mp.Trusted.IsTrusted(phone.PublicKey));
+        Assert.False(mp.Trusted.IsTrusted(phone.Dh.PublicKey));
     });
 
     [Fact]

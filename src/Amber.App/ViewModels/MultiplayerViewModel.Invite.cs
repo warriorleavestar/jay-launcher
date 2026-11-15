@@ -184,13 +184,16 @@ public sealed partial class MultiplayerViewModel
     [ObservableProperty] public partial bool InviteAutoApprove { get; set; }
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(InviteDisplay), nameof(HasInvite))]
+    [NotifyPropertyChangedFor(nameof(InviteDisplay), nameof(HasInvite), nameof(ShowCreateInvite))]
     public partial bool InviteShown { get; set; }
 
     public bool HasInvite => _lastInvite is not null;
+
+    /// <summary>The invite card offers a new invite: not in a "No server" room, whose guests use a sealed code.</summary>
+    public bool ShowCreateInvite => !HasInvite && !IsDirect;
     /// <summary>
-    /// Every room, direct or not, shares the same plain invite (JAY2-): it holds no address. A direct room's addresses go
-    /// only to approved guests, inside the encrypted knock. Masked by default.
+    /// The plain invite (JAY2-): it holds no address. A "No server" room makes none (its guests use a sealed code).
+    /// Masked by default.
     /// </summary>
     public string InviteDisplay => _lastInvite is not { } invite ? "" : InviteShown ? invite.ToString() : invite.Masked;
 
@@ -226,15 +229,50 @@ public sealed partial class MultiplayerViewModel
     // ---- 房主 ----
 
     /// <summary>开房间时调用：生成这个房间的随机凭据。</summary>
-    private RoomCredentials NewCredentials(int port, TunnelSettings tunnel) => RoomCredentials.Create(Identity.PublicKey, port, tunnel);
+    /// <remarks>The whole-LAN scope doesn't split in this version, so a room opened with it carries no split settings.</remarks>
+    private RoomCredentials NewCredentials(int port, TunnelSettings tunnel) =>
+        RoomCredentials.Create(Identity.PublicKey, port, tunnel) with { Split = NewRoomSplit(tunnel) };
+
+    private SplitSettings NewRoomSplit(TunnelSettings tunnel) =>
+        SplitSettings.ForNewRoom(tunnel.Wraps, FullLanMode, (TestSplit ?? SplitSettings.Requested).FitTo(TestPeers ?? _service.MultiplayerPeers));
+
+    /// <summary>Tests: stands in for the AMBER_SPLIT developer switch.</summary>
+    internal SplitSettings? TestSplit { get; set; }
+
+    /// <summary>
+    /// A strict split needs a direct main path to the host (see SplitPaths), and "Relays only" turns direct connections
+    /// off for everyone: such a room would never connect its game or chat, so it isn't opened.
+    /// </summary>
+    internal static bool SplitNeedsDirect(SplitSettings split) =>
+        split.For(TunnelService.Game) == SplitPolicy.Strict || split.For(TunnelService.Chat) == SplitPolicy.Strict;
 
     private IReadOnlyList<string> LobbyPeers(bool host) =>
         [.. (host ? TestListeners ?? [] : []), .. TestPeers ?? _service.MultiplayerPeers];
 
+    /// <summary>
+    /// A "No server" room reaches no relay, its knock lobby included: guests knock over the direct bridge, which hands
+    /// them to the lobby on loopback. Only the tests' local listeners are kept.
+    /// </summary>
+    private IReadOnlyList<string> ServerlessLobbyPeers() => [.. TestListeners ?? []];
+
+    /// <summary>Tests: prepares the host's knock lobby as opening a room does (it starts nothing until an invite exists).</summary>
+    internal void StartHostLobbyForTest(RoomCredentials credentials, MemberTable members, InviteBook? book = null, DirectSession? direct = null) =>
+        StartHostLobby(credentials, members, book, direct?.LobbyUdpPort, direct: direct);
+
+    /// <summary>Tests: closes the host's knock lobby.</summary>
+    internal void StopHostLobbyForTest() => StopHostLobby();
+
+    /// <summary>Tests: invites mailed to friends for the room that is open.</summary>
+    internal int FriendInvitesHeld => _friendInvites.Count;
+
+    /// <summary>Tests: the nodes the host's knock lobby would connect to.</summary>
+    internal IReadOnlyList<string>? HostLobbyPeersForTest => _hostLobbyPeers?.Invoke();
+    private Func<IReadOnlyList<string>>? _hostLobbyPeers;
+
     /// <summary>房间开好之后：准备大厅（有邀请时才真的启动）。</summary>
     /// <param name="book">直连房间：大厅密钥不换的邀请簿。</param>
     /// <param name="listenUdpPort">直连房间：大厅 EasyTier 在本机回环上监听的 UDP 端口（直连桥把没批准的加入方转发到这里）。</param>
-    /// <param name="peers">大厅连哪些节点；默认是房间的节点（直连房间也一样：加入方经中继或局域网敲门）。</param>
+    /// <param name="peers">The nodes the lobby connects to; the room's nodes by default. A direct room ("No server") never takes any, whatever is passed.</param>
     /// <param name="direct">
     /// Direct rooms: approved guests get this session's addresses inside the encrypted knock reply, and the addresses they
     /// send back in the encrypted ack start the host's side of the punch.
@@ -246,7 +284,9 @@ public sealed partial class MultiplayerViewModel
         _members = members;
         ConfigureSecurity(members);
         var jayCertificate = JayCertificate;
-        var lobby = HostLobby.Create(_service.EasyTier, Path.Combine(EasyTierWorkRoot, "lobby"), peers ?? (() => LobbyPeers(host: true)),
+        var lobbyPeers = direct is not null ? ServerlessLobbyPeers : peers ?? (() => LobbyPeers(host: true));
+        _hostLobbyPeers = lobbyPeers;
+        var lobby = HostLobby.Create(_service.EasyTier, Path.Combine(EasyTierWorkRoot, "lobby"), lobbyPeers,
             Identity.KeyPair, () => _credentials ?? throw new InvalidOperationException(), pub => !Child.AlwaysAskKnock && Trusted.IsTrusted(pub), AskApprovalAsync, members,
             line => _diag.Add(L.T("multiplayer.invite.diagnostics_category"), line), book, listenUdpPort, () => HostDevicePolicy, () => HostAccountPolicy,
             () => RoomKnockWait.ToTimeSpan(), request => Dispatcher.UIThread.Post(() => OnKnockTimedOut(request)),
@@ -265,6 +305,7 @@ public sealed partial class MultiplayerViewModel
             for (var i = Members.Count - 1; i >= 0; i--)
                 if (Members[i].PublicKey.AsSpan().SequenceEqual(request.PublicKey)) Members.RemoveAt(i);
             Members.Insert(0, new MemberItem(request.Name, request.PublicKey, request.Trusted) { JayAccount = request.JayAccount });
+            SeenJayDevice(request.PublicKey, request.JayDevice);
             // A trusted friend on a new device: remember this device too, so the list shows it.
             if (request.TrustedByAccount)
             {
@@ -316,6 +357,7 @@ public sealed partial class MultiplayerViewModel
     {
         var lobby = _lobby;
         _lobby = null;
+        _hostLobbyPeers = null;
         _credentials = null;
         _members?.Clear();
         _members = null;
@@ -326,6 +368,8 @@ public sealed partial class MultiplayerViewModel
         PendingInvites.Clear();
         Members.Clear();
         BannedPeople.Clear();
+        // The invites mailed to friends belonged to this room's book: they end with it.
+        _friendInvites.Clear();
         if (lobby is not null) _ = lobby.DisposeAsync().AsTask();
     }
 
@@ -408,7 +452,7 @@ public sealed partial class MultiplayerViewModel
             return true;
         }
         if (_session is not { } old) return false;
-        var options = old.Options with { Room = next };
+        var options = (CurrentSessionOptions ?? old.Options) with { Room = next };
         StopTransport();
         old.Dispose();
         _session = null;
@@ -427,7 +471,7 @@ public sealed partial class MultiplayerViewModel
             return false;
         }
         _service.ActiveMultiplayer = _session;
-        if (!TryStartTransport(options))
+        if (!TryStartTransport(_session?.Options ?? options))
         {
             StopSession();
             return false;
@@ -521,6 +565,11 @@ public sealed partial class MultiplayerViewModel
     private void OpenInviteDialog()
     {
         if (!IsHosting || _lobby is null) return;
+        if (IsDirect)
+        {
+            _ = InviteFriendsAsync();
+            return;
+        }
         InviteDialogOpen = true;
     }
 
@@ -534,6 +583,11 @@ public sealed partial class MultiplayerViewModel
     [RelayCommand]
     private async Task CreateInviteAsync()
     {
+        if (IsDirect)
+        {
+            SetStatus(StatusMessage.Warning("multiplayer.direct.use_sealed"));
+            return;
+        }
         var life = SelectedInviteLife.Life;
         if (InviteOffer.IsLongLived(life))
         {
@@ -542,7 +596,7 @@ public sealed partial class MultiplayerViewModel
         }
         var uses = InviteOffer.Uses(InviteOffer.Normalize(life, SelectedInviteUse.Use));
         if (await IssueInviteAsync(uses, InviteOffer.Lifetime(life), InviteAutoApproveNow) is not null)
-            SetStatus(StatusMessage.Success(IsDirect ? "multiplayer.direct.invite_created" : "multiplayer.invite.created"));
+            SetStatus(StatusMessage.Success("multiplayer.invite.created"));
     }
 
     /// <summary>Self-checks: an invite with exact terms, as the panel's button would make it.</summary>
@@ -550,12 +604,17 @@ public sealed partial class MultiplayerViewModel
         await IssueInviteAsync(uses, lifetime, autoApprove) is not null;
 
     /// <summary>
-    /// 发一张邀请、确保大厅开着。直连房间也发同样的邀请：码里没有地址。
-    /// 大厅开不起来时撤掉这张邀请、显示原因，返回 null。
+    /// 发一张邀请、确保大厅开着。大厅开不起来时撤掉这张邀请、显示原因，返回 null。
+    /// A "No server" room makes none: a plain invite knocks through a relay, and that room's lobby reaches no relay.
     /// </summary>
     private async Task<PendingInvite?> IssueInviteAsync(int uses, TimeSpan? lifetime, bool autoApprove)
     {
         if (_lobby is not { } lobby || _credentials is not { } credentials) return null;
+        if (IsDirect)
+        {
+            SetStatus(StatusMessage.Warning("multiplayer.direct.use_sealed"));
+            return null;
+        }
         // An invite without a use limit always asks me first, whatever the caller remembered.
         autoApprove = Child.MayAutoAdmit(autoApprove) && uses != InviteBook.UnlimitedUses;
         lobby.Book.Game = await HostGameAsync();
@@ -569,6 +628,7 @@ public sealed partial class MultiplayerViewModel
         InviteShown = false;
         OnPropertyChanged(nameof(InviteDisplay));
         OnPropertyChanged(nameof(HasInvite));
+        OnPropertyChanged(nameof(ShowCreateInvite));
         RefreshInvites();
         NotifyInvitePanel();
         try
@@ -683,21 +743,37 @@ public sealed partial class MultiplayerViewModel
             Func<DirectAddresses, CancellationToken, Task<DirectAddresses?>> answerDirect =
                 (host, ct) => AnswerDirectOfferAsync(invite, host, made => guestDirect = made, ct);
             KnockOutcome? viaPublic = null;
+            var lookedAt = DateTimeOffset.UtcNow;
             if (knock is not null || _public is not null)
             {
                 SetStatus(StatusMessage.Info("multiplayer.invite.waiting_approval"));
                 viaPublic = knock is not null ? await knock(me, name, answerDirect, cts.Token) : await TryPublicKnockAsync(invite, me, name, cts.Token, expectedHost, answerDirect);
                 if (viaPublic is null && _knockCts == cts) SetStatus(StatusMessage.Info(peers.Count > 0 ? "multiplayer.invite.connecting_relay" : "multiplayer.invite.entering_lobby"));
             }
-            var outcome = viaPublic ?? await Task.Run(() => LobbyJoin.KnockAsync(_service.EasyTier, Path.Combine(EasyTierWorkRoot, "lobby-join"), peers, invite,
-                me, name, Amber.Core.Launch.UpdateChecker.CurrentVersion, line => _diag.Add(L.T("multiplayer.invite.diagnostics_category"), line),
-                () => Dispatcher.UIThread.Post(() =>
-                {
-                    if (_knockCts == cts) SetStatus(StatusMessage.Info("multiplayer.invite.waiting_approval"));
-                }), cts.Token, () => Dispatcher.UIThread.Post(() =>
-                {
-                    if (_knockCts == cts) SetStatus(StatusMessage.Info("multiplayer.invite.entering_lobby"));
-                }), device, AccountToken, jay, expectedHost, answerDirect));
+            KnockOutcome outcome;
+            try
+            {
+                outcome = viaPublic ?? await Task.Run(() => LobbyJoin.KnockAsync(_service.EasyTier, Path.Combine(EasyTierWorkRoot, "lobby-join"), peers, invite,
+                    me, name, Amber.Core.Launch.UpdateChecker.CurrentVersion, line => _diag.Add(L.T("multiplayer.invite.diagnostics_category"), line),
+                    () => Dispatcher.UIThread.Post(() =>
+                    {
+                        if (_knockCts == cts) SetStatus(StatusMessage.Info("multiplayer.invite.waiting_approval"));
+                    }), cts.Token, () => Dispatcher.UIThread.Post(() =>
+                    {
+                        if (_knockCts == cts) SetStatus(StatusMessage.Info("multiplayer.invite.entering_lobby"));
+                    }), device, AccountToken, jay, expectedHost, answerDirect));
+            }
+            // Only "the lobby was reached but no host was there" looks again: not "no relay reachable", and never a timeout
+            // after the knock was sent (such as waiting for approval).
+            catch (LobbyNoHostException e) when (knock is null && viaPublic is null && _public is not null && !cts.IsCancellationRequested)
+            {
+                // No host in the invite's lobby. A room opened after our copy of the directory was taken isn't in it yet:
+                // look once more in a copy refreshed since (by then there usually is one, so this rarely waits).
+                if (_knockCts == cts) SetStatus(StatusMessage.Info("multiplayer.invite.finding_host"));
+                var again = await TryPublicKnockAsync(invite, me, name, cts.Token, expectedHost, answerDirect, lookedAt);
+                if (again is null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(e);
+                outcome = again;
+            }
             if (_knockCts != cts)
             {
                 if (guestDirect is not null) await guestDirect.DisposeAsync();
@@ -718,12 +794,13 @@ public sealed partial class MultiplayerViewModel
             IsKnocking = false;
             if (guestDirect is not null)
             {
-                await CompleteDirectJoinAsync(guestDirect, credentials.ToRoom(), outcome);
-                return KnockEnd.Joined;
+                // A failed punch leaves the room: the invite may still work (a friend's has more uses), so it stays.
+                return await CompleteDirectJoinAsync(guestDirect, credentials.ToRoom(), outcome) ? KnockEnd.Joined : KnockEnd.NotAnswered;
             }
             if (!StartJoin(credentials.ToRoom())) return KnockEnd.NotAnswered;
             HostFingerprint = outcome.HostFingerprint;
             HostJayAccount = outcome.HostJayAccount;
+            SeenJayDevice(outcome.HostPublicKey, outcome.HostJayDevice);
             return KnockEnd.Joined;
         }
         catch (OperationCanceledException) when (cts.IsCancellationRequested)

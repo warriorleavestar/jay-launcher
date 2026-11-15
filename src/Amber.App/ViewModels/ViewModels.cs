@@ -40,7 +40,8 @@ public abstract class PageViewModel : ObservableObject
     public abstract string Icon { get; }
 
     private Geometry? _iconGeometry;
-    public Geometry IconGeometry => _iconGeometry ??= Geometry.Parse(Icon);
+    /// <summary>The icon with its full 24×24 box kept (see Themes/Icons.axaml), so a stretched icon stays centred.</summary>
+    public Geometry IconGeometry => _iconGeometry ??= Geometry.Parse("M0 0 M24 24 " + Icon);
 
     private bool _activated;
     private int _badge;
@@ -373,9 +374,9 @@ public sealed partial class MainViewModel : ObservableObject
         };
         content.DownloadBakeLoader = home.DownloadBakeLoader;
         // The instance card downloads in place (no trip to Settings); Settings keeps the one copy of the loader path.
-        Pages.OfType<InstanceViewModel>().Single().DownloadLoader = async report =>
+        Pages.OfType<InstanceViewModel>().Single().DownloadLoader = async (report, ct) =>
         {
-            await settingsPage.DownloadBakeLoaderAsync(report);
+            await settingsPage.DownloadBakeLoaderAsync(report, ct);
             return settingsPage.BakeLoaderStatus;
         };
         Help.Navigate = r => shell.Navigate(r);
@@ -390,10 +391,11 @@ public sealed partial class MainViewModel : ObservableObject
         Call = call;
         multiplayer.Call = call;
         Pages.OfType<PeopleViewModel>().Single().Call = call;
-        // Leaving the room (or the room closing) ends room voice and anything shared in it.
+        // Leaving the room (or the room closing) ends every call: room voice, sharing, and a friend's call too, which
+        // rides on the same room link as messages do.
         multiplayer.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName == nameof(MultiplayerViewModel.IsIdle) && multiplayer.IsIdle && call.IsRoomCall) call.End("call.ended_room");
+            if (e.PropertyName == nameof(MultiplayerViewModel.IsIdle) && multiplayer.IsIdle) call.RoomClosed();
         };
         settingsPage.ChildModeChanged = () => { multiplayer.ApplyChildMode(); call.ApplyChildMode(); about.Refresh(); };
         Drop = new DropViewModel(service)
@@ -502,7 +504,7 @@ public sealed partial class MainViewModel : ObservableObject
             JoinJayServer = code =>
             {
                 shell.Navigate("play");
-                multiplayer.JayServers.InviteText = code;
+                multiplayer.FillServerInvite(code, join: false);
             },
         };
         multiplayer.Navigate = r => shell.Navigate(r);
@@ -602,11 +604,12 @@ public sealed partial class SettingsViewModel : PageViewModel
     /// accepted only with the pinned SHA-256, then installed like a zip the player picked. Cancel keeps the partial
     /// file so the next try resumes.
     /// </summary>
-    public async Task DownloadBakeLoaderAsync(IProgress<(double Percent, long Bytes)>? report = null)
+    public async Task DownloadBakeLoaderAsync(IProgress<(double Percent, long Bytes)>? report = null, CancellationToken ct = default)
     {
         if (IsDownloadingBakeLoader || IsInstallingBakeLoader) return;
         if (!BakeLoaderPublished) { BakeLoaderStatus = L.T("core.bake.download_unpublished"); return; }
-        using var cts = new CancellationTokenSource();
+        // Cancelled from here ([Cancel] in Settings) or by the caller (the progress row on the instance page).
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         _bakeLoaderDownload = cts;
         IsDownloadingBakeLoader = true;
         IsInstallingBakeLoader = true;
@@ -739,6 +742,11 @@ public sealed partial class SettingsViewModel : PageViewModel
     [ObservableProperty] public partial string CurseForgeKey { get; set; }
     [ObservableProperty] public partial string CurseForgeRoot { get; set; }
     [ObservableProperty] public partial string UpdateFeed { get; set; }
+    /// <summary>Check for a signed newer Jay once a day (only a notice; never a download).</summary>
+    [ObservableProperty] public partial bool AutoUpdate { get; set; }
+
+    /// <summary>The daily check exists only on desktops; phones and tablets hide the switch.</summary>
+    public bool AutoUpdateSupported => AutoUpdateCheck.IsSupported;
 
     public string SettingsPath => AppSettings.FilePath;
     public string SettingsPathLabel => L.F("settings.file_path", SettingsPath);
@@ -805,6 +813,7 @@ public sealed partial class SettingsViewModel : PageViewModel
         CurseForgeKey = s.CurseForgeApiKey ?? "";
         CurseForgeRoot = s.CurseForgeApiRoot ?? "";
         UpdateFeed = s.UpdateFeedUrl ?? "";
+        AutoUpdate = s.AutoUpdateCheck;
         SelectedThemeIndex = Math.Max(0, Array.IndexOf(ThemeKeys, s.Theme));
         SelectedMotionIndex = Math.Max(0, Array.IndexOf(Amber.Core.Layout.MotionPreference.Modes, Amber.Core.Layout.MotionPreference.Normalize(s.ReduceMotionMode)));
         SelectedSidebarIndex = (int)Amber.Core.Layout.ShellRules.ParseMode(s.SidebarMode ?? (s.SidebarCollapsed ? "collapsed" : null));
@@ -841,7 +850,13 @@ public sealed partial class SettingsViewModel : PageViewModel
         try { _service.Settings.Save(); } catch (IOException) { }
     }
 
-    protected override void OnFirstActivated() => _ = LoadJavaAsync(false);
+    protected override void OnFirstActivated()
+    {
+        // Settings › Multiplayer and › Network edit the multiplayer page's lists (relay nodes, trusted people): load them
+        // first, or saving from here would write an empty list over what was saved.
+        Multiplayer?.Activate();
+        _ = LoadJavaAsync(false);
+    }
 
     protected override void OnBecameCurrent() { Recycle.Refresh(); RefreshPrivacy(); RefreshUniversalLoader(); }
 
@@ -1165,6 +1180,11 @@ public sealed partial class SettingsViewModel : PageViewModel
     partial void OnCurseForgeKeyChanged(string value) => Persist();
     partial void OnCurseForgeRootChanged(string value) => Persist();
     partial void OnUpdateFeedChanged(string value) => Persist();
+    partial void OnAutoUpdateChanged(bool value)
+    {
+        Persist();
+        if (!_loading) Amber.App.Services.UpdateNotifier.RaiseSwitched(value);
+    }
 
     /// <summary>主题选了立即生效。</summary>
     partial void OnSelectedThemeIndexChanged(int value)
@@ -1259,6 +1279,7 @@ public sealed partial class SettingsViewModel : PageViewModel
         s.CurseForgeApiKey = Blank(CurseForgeKey);
         s.CurseForgeApiRoot = Blank(CurseForgeRoot);
         s.UpdateFeedUrl = Blank(UpdateFeed);
+        s.AutoUpdateCheck = AutoUpdate;
         try
         {
             s.Save();

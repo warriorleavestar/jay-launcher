@@ -19,6 +19,14 @@ public sealed partial class ImageSlotItem : ObservableObject
         _owner = owner;
         Slot = slot;
         Dim = ThemeSlots.DefaultDim(slot);
+        // The slot's title and hint follow a language switch while the editor is open.
+        Amber.App.Localization.LanguageListeners.Add(this, static o => ((ImageSlotItem)o).OnLanguageChanged());
+    }
+
+    private void OnLanguageChanged()
+    {
+        OnPropertyChanged(nameof(Title));
+        OnPropertyChanged(nameof(Hint));
     }
 
     public string Slot { get; }

@@ -98,6 +98,7 @@ public sealed partial class MultiplayerViewModel
         NotifyRemoteAvailability();
         OnPropertyChanged(nameof(ShowModCheck));
         PublishRoomGameAddress();
+        RunAfterRoom();
     }
 
     partial void OnJoinAddressChanged(string value) => PublishRoomGameAddress();
