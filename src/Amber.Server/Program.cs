@@ -130,7 +130,7 @@ public static class Program
           jay-server release prepare --tag <v0.9.0> --seq <序号> --commit <40 位提交号> [--sums SHA256SUMS.txt] [--out SHA256SUMS.txt.sigs]
               写出还没人签的发布签名文件（序号每次发布加 1）
           jay-server release cosign --key <发版钥匙文件> [--sums SHA256SUMS.txt] [--sigs SHA256SUMS.txt.sigs]
-              信任人在离线电脑上看清要签的版本、提交号和文件清单，手打版本号后签；3 人里要 2 人
+              信任人在离线电脑上看清要签的版本、提交号和文件清单，手打版本号后签；发版钥匙要签够数（JayTrust.ReleaseNeed，现在是 2 把要 2 把）
           jay-server release trust-change --key <发版钥匙文件> --to <新名单文件> --need <几人> --seq <序号> [--from <旧名单文件>] [--chain trust-chain.json]
               换信任人：旧名单里够数的人签了，旧版 Jay 才认新名单（名单文件每行一把完整公钥）
           jay-server release verify <安装包> [--tag <v0.9.0>]   核对安装包、清单、签名和 trust-chain.json（放在安装包旁边）
@@ -407,14 +407,14 @@ public static class Program
 
     internal static string DescribeVerdict(ReleaseCheck check, string package) => check.Verdict switch
     {
-        ReleaseVerdict.Valid => $"通过：{package} 是 {check.Tag}（第 {check.Seq} 版）的正式发布包，够数的 Jay 信任人签过。",
+        ReleaseVerdict.Valid => $"通过：{package} 是 {check.Tag}（第 {check.Seq} 版）的正式发布包，Jay 发版钥匙签够了数。",
         ReleaseVerdict.Unsigned => "没有签名：安装包旁边找不到 SHA256SUMS.txt 和 SHA256SUMS.txt.sigs。",
         ReleaseVerdict.NoTrustedKey => "这个版本的程序里还没有信任人公钥，没法核对。",
         ReleaseVerdict.Malformed => "签名文件格式不对。",
         ReleaseVerdict.SumsMismatch => "签名文件和 SHA256SUMS.txt 对不上（清单被改过）。不要安装。",
         ReleaseVerdict.Rollback => $"{check.Tag} 比已经装过的版本旧。不要安装。",
         ReleaseVerdict.BrokenChain => "这个版本写的信任人名单，从程序自带的名单接不上（trust-chain.json 缺了或签得不够）。不要安装。",
-        ReleaseVerdict.NotEnoughSignatures => "签的信任人不够（要 3 人里 2 人，两种签名都要对）。不要安装。",
+        ReleaseVerdict.NotEnoughSignatures => $"发版钥匙签得不够数（{JayTrust.ReleaseKeys.Count} 把里要 {JayTrust.ReleaseNeed} 把，两种签名都要对）。不要安装。",
         ReleaseVerdict.WrongTag => $"签名属于 {check.Tag}，不是你要的版本。不要安装。",
         ReleaseVerdict.NotListed => "清单里没有这个文件名。",
         ReleaseVerdict.HashMismatch => "安装包的 SHA-256 和清单不一样（文件被改过或没下载完整）。不要安装。",
