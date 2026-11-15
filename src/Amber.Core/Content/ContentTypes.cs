@@ -75,9 +75,6 @@ public interface IContentProvider
     Task<ContentFile> GetFileAsync(string projectId, string fileId, CancellationToken ct = default);
 }
 
-/// <summary>按 SHA1 或指纹识别本地文件得到的结果。</summary>
-public sealed record IdentifiedFile(string LocalPath, ContentFile File);
-
 /// <summary>可更新的模组：Current 是本地文件，Latest 是远端的新版本。</summary>
 public sealed record ModUpdate(string LocalPath, ContentFile Latest);
 

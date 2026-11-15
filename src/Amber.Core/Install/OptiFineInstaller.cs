@@ -42,6 +42,8 @@ public sealed class OptiFineInstaller(LoaderContext ctx) : ILoaderInstaller
     public async Task<string> InstallAsync(LoaderVersion version, string? customId = null, IProgress<LoaderProgress>? progress = null, CancellationToken ct = default)
     {
         var id = string.IsNullOrWhiteSpace(customId) ? version.DefaultId : customId.Trim();
+        // A name equal to the game version would overwrite the vanilla version the loader is built on.
+        InstanceInstallDirectory.CheckBase(ctx.Dir, id, version.McVersion);
         var dir = ctx.Dir;
         progress?.Report(new(L.F("core.install.loader.installvanilla", version.McVersion)));
         await ctx.Vanilla.InstallAsync(version.McVersion, new Progress<InstallProgress>(p => LoaderInstallers.ReportFiles(progress, L.T("core.install.loader.downloadvanilla"), p)), ct);

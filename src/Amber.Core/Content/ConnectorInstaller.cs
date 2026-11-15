@@ -7,8 +7,6 @@ namespace Amber.Core.Content;
 /// </summary>
 public static class ConnectorInstaller
 {
-    public const string ProjectPage = "https://modrinth.com/mod/connector";
-
     /// <summary>实例的 mods 里是不是已经有 Connector（按模组 id）。</summary>
     public static bool IsInstalled(IEnumerable<ModRequirements?> mods) =>
         mods.Any(m => m?.Ids.Any(id => id.Equals("connector", StringComparison.OrdinalIgnoreCase)) == true);
