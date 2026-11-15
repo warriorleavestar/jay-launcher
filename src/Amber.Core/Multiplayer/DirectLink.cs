@@ -342,11 +342,14 @@ public sealed class DirectBridge : IAsyncDisposable
             if (!Ipv6Held(allowed, endpoint.Address)) continue;
             _pausedPeers.Remove(endpoint);
             peer.Local?.Dispose();
+            // Its kick hook goes with it. Unregister doesn't wait for a hook already running (that one takes this lock).
+            peer.Revocation.Unregister();
         }
         foreach (var (endpoint, peer) in _peers)
         {
             if (peer.Admitted || !Ipv6Held(allowed, endpoint.Address) || !_peers.TryRemove(endpoint, out var removed)) continue;
             removed.Local?.Dispose();
+            removed.Revocation.Unregister();
         }
     }
 

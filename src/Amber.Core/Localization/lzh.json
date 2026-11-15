@@ -1458,7 +1458,7 @@
   "multiplayer.direct.invite_created": "邀碼已生，錄而予友可也（碼中無君之址）",
   "multiplayer.kick.you_were_kicked": "君已見逐於房",
   "core.mp.direct.closed_to_new": "{0} 欲直連而入，然今無待用之邀，不受新直連",
-  "core.mp.direct.exit_holds_ipv6": "方借成員上網，新之 IPv6 直連未受，彼戲者當改由房中他路",
+  "core.mp.direct.exit_holds_ipv6": "方借成員上網，新之 IPv6 直連未受。彼戲者猶可由 IPv4 或轉驛而入；皆不可，則待汝罷借成員上網而後入",
   "multiplayer.clipboard.autoclear_hint": "五分之後自剪貼簿除之",
   "multiplayer.clipboard.copied_autoclear": "已錄，五分之後自剪貼簿除之",
   "multiplayer.transport.privacy.general": "最速。成員間戲之流，唯恃房網之鑰護之，房中人人皆有此鑰。",

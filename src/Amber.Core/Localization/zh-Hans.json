@@ -1508,7 +1508,7 @@
   "multiplayer.direct.invite_created": "已生成邀请，复制给朋友即可（邀请里没有你的地址）",
   "multiplayer.kick.you_were_kicked": "你已被移出房间",
   "core.mp.direct.closed_to_new": "{0} 想直连进来，但现在没有待用的邀请，不接新的直连",
-  "core.mp.direct.exit_holds_ipv6": "正在经成员上网，新的 IPv6 直连没有接，那位玩家会改走房间的其他路",
+  "core.mp.direct.exit_holds_ipv6": "正在经成员上网，新的 IPv6 直连没有接。那位玩家还能经 IPv4 或中转进来；都不行的话，等你不再经成员上网后再进",
   "multiplayer.clipboard.autoclear_hint": "5 分钟后自动从剪贴板清除",
   "multiplayer.clipboard.copied_autoclear": "已复制，5 分钟后自动从剪贴板清除",
   "multiplayer.transport.privacy.general": "最快。成员之间的游戏流量只靠房间网络密钥保护，房间里每个人都有这把密钥。",

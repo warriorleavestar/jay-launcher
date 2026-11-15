@@ -222,12 +222,18 @@ public sealed class ExitPeerTrustTests
         var v4 = new DirectPeer { Remote = new IPEndPoint(IPAddress.Parse("203.0.113.5"), 40000), Path = PathKind.Punch };
         var paused = Peer("2001:db8::a", admitted: true, verified: true);
         foreach (var p in new[] { planned, quietJoiner, admittedOutside, v4 }) host.AddPeerForTest(p);
+        // The paused member's kick hook (registered on its key's revocation) must go with it.
+        using var revoked = new CancellationTokenSource();
+        var hookRan = false;
+        paused.Revocation = revoked.Token.Register(() => hookRan = true);
         host.AddPeerForTest(paused, paused: true);
 
         host.Ipv6Allowed = new HashSet<IPAddress> { IPAddress.Parse("2001:db8::7") };
         Assert.Equal([planned, admittedOutside, v4], host.Peers.OrderBy(p => p.Remote.Address.ToString()).ToArray(),
             ReferenceEqualityComparer.Instance);
         Assert.Equal(0, host.PausedPeerCountForTest);
+        revoked.Cancel();
+        Assert.False(hookRan);
 
         // Without a limit nothing is dropped.
         host.AddPeerForTest(quietJoiner);
