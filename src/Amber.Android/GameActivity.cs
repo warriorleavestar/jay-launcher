@@ -766,8 +766,9 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         var bounds = new RectF((float)Math.Round(x - halfWidth), (float)Math.Round(y - halfHeight),
             (float)Math.Round(x + halfWidth), (float)Math.Round(y + halfHeight));
         bounds.Offset(0, pressOffset);
-        var castShadow = !(_profile.Mode == TouchControlMode.DPadAndTap &&
-            control.Action == TouchControlAction.Sneak);
+        var castShadow = control.Action != TouchControlAction.Inventory &&
+            !(_profile.Mode == TouchControlMode.DPadAndTap &&
+              control.Action == TouchControlAction.Sneak);
         DrawBlockButton(canvas, bounds, pressed, radius * 0.10f, castShadow);
         DrawGlyph(canvas, control.Action, x, y + pressOffset,
             Math.Min(halfWidth, halfHeight) * 0.68f, label);
