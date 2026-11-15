@@ -129,8 +129,80 @@ public sealed class EntryRotationTests : IAsyncLifetime
         Assert.Null(error);
         Assert.Equal(Rule, parsed.Rotation!.Rotation);
         Assert.Equal(rotation.Seed, parsed.Rotation.Seed);
+        Assert.NotNull(GateInvite.TryParse(invite.Encode() + " thanks, see you at 8", out _));
+        Assert.NotNull(GateInvite.TryParse(invite.Encode() + "\nJoin tonight", out _));
         var plain = GateInvite.TryParse((invite with { Rotation = null }).Encode(), out _)!;
         Assert.Null(plain.Rotation);
+    }
+
+    /// <summary>A rotating port that is taken is retried on every sync but logged only once, and opens once it is free.</summary>
+    [Fact]
+    public async Task BusyRotatingPortIsLoggedOnceAndRetried()
+    {
+        var log = new List<string>();
+        await using var listeners = new EntryListeners("127.0.0.1", 0, client => client.Dispose(), line => { lock (log) log.Add(line); });
+        var blocker = new TcpListener(IPAddress.Loopback, 0);
+        blocker.Start();
+        var port = ((IPEndPoint)blocker.LocalEndpoint).Port;
+        try
+        {
+            for (var i = 0; i < 3; i++) listeners.SetRotating([port]);
+            Assert.Single(log);
+            Assert.Empty(listeners.RotatingPorts);
+        }
+        finally { blocker.Stop(); }
+        listeners.SetRotating([port]);
+        Assert.Equal([port], listeners.RotatingPorts);
+        Assert.Single(log);
+    }
+
+    /// <summary>
+    /// A taken fixed port is logged once per attempt to turn it on: retries while it stays on are quiet, but after it is
+    /// turned off and on again a new failure is logged. The same holds for a rotating port that leaves the set and returns.
+    /// </summary>
+    [Fact]
+    public async Task BusyPortsAreLoggedAgainAfterBeingTurnedOffAndOn()
+    {
+        var log = new List<string>();
+        int Logged() { lock (log) return log.Count; }
+        await using var listeners = new EntryListeners("127.0.0.1", 0, client => client.Dispose(), line => { lock (log) log.Add(line); });
+        var fixedPort = listeners.FixedPort;
+        listeners.SetFixedOpen(false);
+        var blocker = new TcpListener(IPAddress.Loopback, fixedPort);
+        blocker.Start();
+        var other = new TcpListener(IPAddress.Loopback, 0);
+        other.Start();
+        var rotating = ((IPEndPoint)other.LocalEndpoint).Port;
+        try
+        {
+            listeners.SetFixedOpen(true);
+            listeners.SetFixedOpen(true);
+            Assert.Equal(1, Logged());
+            listeners.SetFixedOpen(false);
+            listeners.SetFixedOpen(true);
+            Assert.Equal(2, Logged());
+            // Closing an already closed fixed port also starts over.
+            listeners.SetFixedOpen(false);
+            listeners.SetFixedOpen(false);
+            listeners.SetFixedOpen(true);
+            Assert.Equal(3, Logged());
+            Assert.False(listeners.FixedOpen);
+
+            listeners.SetRotating([rotating]);
+            listeners.SetRotating([rotating]);
+            Assert.Equal(4, Logged());
+            listeners.SetRotating([]);
+            listeners.SetRotating([rotating]);
+            Assert.Equal(5, Logged());
+        }
+        finally
+        {
+            blocker.Stop();
+            other.Stop();
+        }
+        listeners.SetFixedOpen(true);
+        Assert.True(listeners.FixedOpen);
+        Assert.Equal(fixedPort, listeners.FixedPort);
     }
 
     [Fact]
