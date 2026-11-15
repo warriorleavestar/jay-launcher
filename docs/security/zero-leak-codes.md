@@ -23,8 +23,7 @@ Codes that must travel are either public by design (a public key) or never leave
 `JAYC1-` + Crockford Base32 of the X25519 identity public key and a 2-byte check (55 characters).
 `Contacts/ContactCode.cs`. Parsing ignores case, spaces and dashes, and refuses a code with a wrong check.
 
-The JAYF1 device fingerprint code (shown in the UI as the "friend code") is a different thing: it finds a friend's hidden
-room. The UI needs a name for JAYC1 that doesn't clash with it.
+JAYF1 device codes are a different thing: they find a device's hidden room.
 
 ## Adding a contact: the emoji check
 
@@ -81,8 +80,7 @@ So **directory trust no longer decides whether a code leaks**. It only decides w
 - `InviteBook.Create(…, boundTo: contactKey)`: a knock with this invite from any other identity gets `denied`. The
   invite isn't used up and no failure is counted.
 - `KnockClient.KnockAsync(…, expectedHost: hostKey)`: the guest stops right after the host's handshake message, before
-  sending its name, device proof or account, if the host's proven key isn't the one named in the mailed invite. This is
-  item 8 of the security report, for mailed invites.
+  sending its name, device proof or account, if the host's proven key isn't the one named in the mailed invite.
 
 ## Directory trust: pinned keys, root certificates, first use
 
@@ -241,7 +239,7 @@ domain name publishes where it is as a signed record, and its code carries an id
 - **Limits**: 4 KB per blob, 20000 records per directory, 60 puts per source address per hour, memory only. `/metrics`
   shows the total (`jay_signed_records`).
 
-## Directory snapshot (privacy plan item 12)
+## Directory snapshot
 
 `Public/DirectorySnapshot.cs` (`HiddenEntry`, `DirectorySnapshots`), directory op `snap` in `Public/RoomDirectory.cs`. Jay no
 longer asks a directory "where is the room for this invite?". Every Jay downloads the whole directory and looks it up

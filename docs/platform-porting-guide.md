@@ -27,7 +27,7 @@
 - C#，.NET 10，Avalonia 12.1.4，MVVM 用 CommunityToolkit.Mvvm。
 - 加密：.NET 自带的 ChaCha20-Poly1305、AES-GCM、SHA-256、HKDF、ML-KEM；X25519 用 BouncyCastle 的 RFC 7748 实现（`BouncyCastle.Cryptography` 2.7.0），因为 .NET 没有跨平台的 X25519。
 - Windows 凭据加密用 `System.Security.Cryptography.ProtectedData`（DPAPI）。
-- 界面、注释和文档都用简体中文，界面文字另有繁中、英文、日文（`src/Amber.Core/Localization/*.json`，嵌进程序集）。
+- 新写的注释和文档用英文，已有的中文注释和文档保留（见 `CLAUDE.md`）；界面文字以英文为源，另有简中、繁中、日文（`src/Amber.Core/Localization/*.json`，嵌进程序集）。
 
 ### 1.2 代码结构
 
@@ -37,7 +37,7 @@
 | `src/Amber.App` | Avalonia 桌面程序（程序集名 `Jay`）。`ViewModels/` 每页一个，`Views/` 是 XAML，`Services/LauncherService.cs` 把 Core 的服务接起来，`Views/SelfTest*.cs` 是端到端界面自检 |
 | `src/Amber.Cli` | 开发用命令行，复用 Core（测量、脚本化测试） |
 | `src/Amber.Server` | Jay 服务器版 `jay-server`（命令行，网关 + MC 服务端管理 + 节点） |
-| `src/Amber.Core.Tests` | xUnit，约 1000 个测试 |
+| `src/Amber.Core.Tests` | xUnit 测试 |
 | `node/` | EasyTier 联机节点的一键部署脚本（Linux、Docker、Windows） |
 | `server/` | `jay-server` 的说明和 systemd 单元 |
 | `tools/`、`scripts/` | 自检脚本（PowerShell）、macOS 打包脚本 |
@@ -66,7 +66,7 @@
 | Java 自动下载（Mojang 运行时） | ✅ ARM 上 Mojang 不提供的老 Java 退回 x64 版（系统仿真） | ✅ Apple 芯片上 Java 8/16 退回 x64 版（要 Rosetta 2，没装时提示命令） | ✅ x64 用 Mojang；ARM64 从 Adoptium 下 Temurin（校验 SHA-256，安全解压） | `Java/JavaRuntimeInstaller.cs`、`Java/TemurinInstaller.cs` |
 | 启动游戏 | ✅ | ✅ | 🟡 | `Launch/GameLauncher.cs` |
 | 非 ASCII 路径（中文路径）兜底 | ✅ 目录联接 | 不需要 | 不需要 | `Launch/AsciiPaths.cs`、`Launch/WindowsJunction.cs` |
-| 1.6 以前老版本的家目录重定向 | ✅ | 🪟 没做，会写进真实 `minecraft` 目录 | 🪟 同左 | `Launch/AsciiPaths.cs` `LegacyHome` |
+| 1.6 以前老版本的家目录重定向 | ✅ | ✅ `UnixLegacyHome` | ✅ `UnixLegacyHome` | `Launch/AsciiPaths.cs` `LegacyHome` |
 | 正常关闭游戏（让游戏存档） | ✅ `CloseMainWindow` | ✅ `NSRunningApplication.terminate` | 🟡 X11 发 `WM_DELETE_WINDOW`，Wayland 发 SIGTERM（待真机验证） | `Launch/GameLauncher.cs`、`Launch/MacGameProcess.cs`、`Launch/LinuxGameProcess.cs` |
 | 可用内存检测（自动内存） | ✅ `GlobalMemoryStatusEx` | ✅ `sysctl hw.memsize` | ✅ `/proc/meminfo`（MemAvailable） | `Launch/InstanceSettings.cs` |
 | 启动前后命令、导出启动脚本 | ✅ cmd / .bat | ✅ /bin/sh / .sh | ✅ | `ViewModels/HomeViewModel.cs`、`Launch/Toolbox.cs` |
@@ -125,9 +125,9 @@ Linux 可以补的：SDKMAN（`~/.sdkman/candidates/java`）、`/usr/lib64/jvm`�
 平台相关的几处：
 
 - **中文路径兜底（只 Windows 需要）**：Windows 上 Java 按 ANSI 代码页读路径，系统语言是英文时中文路径会变成问号。`AsciiPaths.cs` 检测到当前代码页表示不了路径，就用 `WindowsJunction.cs` 建一个纯英文名的目录联接（不需要管理员），用联接路径启动。Mac/Linux 是 UTF-8，直接跳过。
-- **老版本家目录 🪟**：1.6 以前的 MC 和老 FML 不认 `--gameDir`，固定把 `%APPDATA%\.minecraft` 当家目录。Windows 上 `AsciiPaths.LegacyHome` 建一个指向实例的联接，只给这个游戏进程把 `APPDATA` 指过去，这样不会写进用户真正的 `.minecraft`。Mac/Linux 上这个函数直接返回 null，老版本会写进 `~/Library/Application Support/minecraft` 或 `~/.minecraft`。适配做法：建一个临时目录，里面放指向实例的符号链接（Linux 叫 `.minecraft`，macOS 是 `Library/Application Support/minecraft`），启动时设 `-Duser.home=<临时目录>`（老版本按 `user.home` 找家目录）。
+- **老版本家目录**：1.6 以前的 MC 和老 FML 不认 `--gameDir`，固定把 `%APPDATA%\.minecraft` 当家目录。Windows 上 `AsciiPaths.LegacyHome` 建一个指向实例的联接，只给这个游戏进程把 `APPDATA` 指过去，这样不会写进用户真正的 `.minecraft`。Mac/Linux 上 `UnixLegacyHome` 在数据目录旁建一个家目录，里面放指向实例的符号链接（Linux 叫 `.minecraft`，macOS 是 `Library/Application Support/minecraft`），启动时设 `-Duser.home=<这个目录>`（老版本按 `user.home` 找家目录，`GameLauncher.cs`）。
 - **正常关闭**：`GameLauncher.RequestExit`。Windows 用 `Process.CloseMainWindow()`，macOS 用 `MacGameProcess.cs`（经 objc 运行时调 `NSRunningApplication terminate`，和 Dock 的“退出”一样）。Linux 用 `LinuxGameProcess.cs`：X11 下找 `_NET_WM_PID` 是游戏进程的窗口（往下找几层，窗口管理器会套边框），发 `WM_DELETE_WINDOW`；找不到这样的窗口时（Wayland 原生窗口、没有 X11、还在加载、老 LWJGL 没设 PID）发 SIGTERM（`UnixGameProcess.cs`）（JVM 跑关闭钩子，新版本会存档，老版本不保证），界面提示“可能来不及存档”。libX11 运行时按需加载，没有就当没有 X11。
-- **内存**：`InstanceSettings.FreePhysicalMb` 在 Windows 用 `GlobalMemoryStatusEx`，其他平台用 `GC.GetGCMemoryInfo()` 估算（容器里会被 cgroup 限制影响）。Linux 可以读 `/proc/meminfo` 的 `MemAvailable`，macOS 可以用 `host_statistics64` 或 `sysctl vm.page_free_count`。
+- **内存**：`MemoryPlanner.FreePhysicalMb`（`InstanceSettings.cs`）在 Windows 用 `GlobalMemoryStatusEx`，Linux 读 `/proc/meminfo` 的 `MemAvailable`，macOS 用 `sysctl`（`vm.page_free_count` 等页数乘 `hw.pagesize`）；都拿不到时才用 `GC.GetGCMemoryInfo()` 估算。总内存在 Linux 读 `MemTotal`，macOS 读 `sysctl hw.memsize`。
 - **启动前后命令**：Windows 走 `cmd.exe /s /c "…"`，其他平台走 `/bin/sh -c`（`HomeViewModel.cs`）。
 - **导出启动脚本**：Windows 生成 `.bat`，其他平台生成带 `#!/bin/sh` 的 `.sh` 并加执行权限（`Toolbox.cs`）。令牌默认换成占位符。
 - **无痕模式**：给 log4j2 配置的文件 appender 加 RegexFilter，聊天行不写进 `latest.log`（`ChatLogFilter.cs`、`NoTraceDirs.cs`）。跨平台。
@@ -189,7 +189,7 @@ EasyTier（组网，P2P 或经节点中继）
 
 #### EasyTier 组件 🟡
 
-- `Multiplayer/EasyTier.cs`：固定版本 2.6.4，第一次用联机时从 EasyTier 的 GitHub 发布页下载对应平台的 zip，校验 SHA-256 和大小后解压到数据目录。七个平台都有哈希：windows x86_64 / arm64 / i686，macos x86_64 / aarch64，linux x86_64 / aarch64。Windows 另外要 WinDivert 驱动（32 位包是 `WinDivert32.sys`，其余是 `WinDivert64.sys`；完整局域网模式转发广播用）。非 Windows 解压后加执行权限。
+- `Multiplayer/EasyTier.cs`：用 Jay 的加固版（[jay-easytier](https://github.com/Yumao-Feather/jay-easytier)，基于上游 2.6.4），发布包里自带对应平台的 zip；自带的不在时才从 jay-easytier 的发布页（或 GitHub 下载镜像）下载。无论哪种来源，都校验 SHA-256 和大小后解压到数据目录。七个平台都有哈希：windows x86_64 / arm64 / i686，macos x86_64 / aarch64，linux x86_64 / aarch64。Windows 另外要 WinDivert 驱动（32 位包是 `WinDivert32.sys`，其余是 `WinDivert64.sys`；完整局域网模式转发广播用）。非 Windows 解压后加执行权限。
 - 默认用 `--no-tun`（不建虚拟网卡），所以不需要管理员也不装驱动。加入方用 `--port-forward` 把本机端口转到房主的虚拟地址；房主只放行本次提供服务的 TCP 端口（`--tcp-whitelist`），UDP 全拦。
 - 房间密钥经环境变量 `ET_NETWORK_SECRET` 传，不放命令行。
 - 进程管理：Windows 上 easytier-core 放进作业对象（`ProcessJob.cs`），Jay 崩溃或被结束时系统会一起结束它。Mac/Linux 两层：`EasyTierProcessGuard.cs` 让 easytier-core 经一个 `/bin/sh` 看门脚本启动，脚本每秒看一次 Jay 的 PID，Jay 没了（包括 `kill -9`）就结束 core；`EasyTierProcessTracker.cs` 在工作目录里记录进程（PID、启动时间、可执行文件），下次在同一目录开始联机前清理对得上的旧进程，兜住看门进程也被单独结束的情况。没用 `PR_SET_PDEATHSIG`：它跟的是父线程，.NET 线程池线程退出就会误杀。
@@ -213,11 +213,11 @@ EasyTier（组网，P2P 或经节点中继）
 | 模式 | 内容 | 平台 |
 |---|---|---|
 | 通用 | 不另外封装，只靠 EasyTier 的加密 | ✅ |
-| MC 专用 | 关 Nagle、合并写入，加轻量认证加密 | 🟡 |
-| 高加密 | Noise（X25519 + ChaCha20-Poly1305），定期换钥，长度对齐 64 字节 | 🟡 |
-| 极端加密 | 再加 ML-KEM-768 混合，长度填充到固定档位，空闲时发掩护流量 | 看 `MLKem.IsSupported` |
+| MC 专用 | 关 Nagle、合并写入，加轻量认证加密；握手和其他封装模式一样（Noise NNhfspsk0 混合握手） | 🟡 |
+| 高加密 | Noise NNhfspsk0（X25519 + ML-KEM-768 混合握手，ChaCha20-Poly1305），定期换钥，长度对齐 64 字节 | 🟡 |
+| 极端加密 | 握手和其他封装模式一样；换钥更勤，长度填充到固定档位，空闲时发掩护流量 | 🟡 |
 
-极端加密能不能用取决于 .NET 的 `MLKem.IsSupported`：Windows 要较新的 Windows 11（CNG 带 ML-KEM），Linux 要 OpenSSL 3.5 以上，macOS 上 .NET 目前没有实现。不支持时界面里不显示这个选项，收到极端加密的邀请会提示。如果要在 Mac 上支持，可以改用 BouncyCastle 的 ML-KEM（项目已经依赖 BouncyCastle），但要保证和 .NET 实现的线上格式完全一致，并补互通测试。
+每种封装模式都用混合握手。ML-KEM-768 在 `MLKem.IsSupported` 为真时用 .NET 自带的（较新的 Windows 11、OpenSSL 3.5 以上的 Linux），否则用 BouncyCastle 的实现（`Transport/MlKem768.cs`），两者线上格式相同、可以互通，所以极端加密在每个平台都提供。
 
 #### 直连房间 🟡
 
@@ -245,7 +245,7 @@ EasyTier（组网，P2P 或经节点中继）
 - Mac/Linux 上“经别人上网”（`UnixExitNetwork.cs`，root 守护里运行，对应 Windows 的三个 Exit*Script）：
   1. 启动 easytier-core 之前，按当前路由表给每个承载地址加经物理网关的主机路由（Linux `ip route replace … proto 201`，macOS `route add -host`），EasyTier 的两条 /1 路由不会把承载吸进隧道；
   2. 虚拟网卡就绪后上防漏规则：只放行回环、虚拟网卡、发往承载地址（限定原网卡）的包和 DHCP，其他出站（含 IPv6、局域网）一律丢弃。Linux 用单独的 nftables 表 `inet jay_exit`，macOS 用 pf 锚点 `com.apple/250.JayExit`（`pfctl -E` 拿引用令牌，结束时 `-X` 放掉）；
-  3. DNS 换成 1.1.1.1 / 8.8.8.8（经隧道）：Linux 有 systemd-resolved 时用 `resolvectl dns/domain ~.`，没有时临时改写 `/etc/resolv.conf` 并在结束时写回；macOS 改主服务的 `State:/Network/Service/<id>/DNS`，结束时还原；
+  3. DNS 换成经隧道的 Cloudflare 和 Google 公共 DNS（地址见 `UnixExitNetwork.DnsServers`）：Linux 有 systemd-resolved 时用 `resolvectl dns/domain ~.`，没有时临时改写 `/etc/resolv.conf` 并在结束时写回；macOS 改主服务的 `State:/Network/Service/<id>/DNS`，结束时还原；
   4. 结束顺序：先换回 DNS，再结束核心，最后撤路由和防漏规则，中间不漏。守护被强制结束来不及恢复时，下次开出口先清掉 `proto 201` 路由、`jay_exit` 表和 pf 锚点。
   Linux 缺 `ip` 或 `nft` 时这个按钮不显示，全条件测试不排出口步骤。提供出口（`--enable-exit-node`）不用改系统路由（云端验证过 Linux 不需要 ip_forward）。
 
@@ -273,11 +273,9 @@ EasyTier（组网，P2P 或经节点中继）
 - macOS 可以写 `org.nspasteboard.ConcealedType` 标记，大部分剪贴板管理器会跳过。
 - Linux Wayland 下 Avalonia 的剪贴板读写要实测，读不到时 60 秒清除会失效。
 
-### 3.10 远程控制【实验】【未发布】🪟
+### 3.10 远程控制【实验】【未发布】
 
 在邀请房间里，房主和成员可以互相看屏幕、控制鼠标键盘。每次都要被控方点同意（30 秒不点算拒绝，没有“一直信任”选项）；被控方可以只让看不让控；被控方屏幕四周有红框，顶部有小条，按 Ctrl+Shift+F12 立即停止；踢人、离开房间时自动断开。画面只在内存里，不落盘、不进日志。
-
-设计文档：`/mnt/project-files/amber/remote-desktop-design.md`（项目文件夹）。
 
 #### 结构
 
@@ -366,7 +364,7 @@ main 上 v0.7.0 之后新增【未发布】：
 
 ### 3.12 模组烘焙【实验，默认关闭】🟡
 
-`Bake/BakeService.cs`：启动前调用本机的通用加载器原型（Java 程序，`amber.ul.Bake`）预处理模组并缓存到 `<数据目录>-runtime/bake-cache`（数据目录旁边的运行时目录，不放设置、账号和密钥），只支持 1.21.1 的 Fabric、Quilt 和原版。要另外准备加载器目录（`build/loader`、`build/loader-cp.txt`、`mc/mappings-amber`），普通用户不用开。代码本身跨平台；Windows 上原型遇到过“系统代码页是 1252 时 Java 打不开中文路径”的问题，Mac/Linux 是 UTF-8，应该没有。
+`Bake/BakeService.cs`：启动前调用本机的通用加载器原型（Java 程序，`amber.ul.Bake`）预处理模组并缓存到 `<数据目录>-runtime/bake-cache`（数据目录旁边的运行时目录，不放设置、账号和密钥），只支持 1.21.1 的 Fabric、Quilt 和原版。正常用的是加载器包（`manifest.json`、`loader.jar`、`libs/`、`bridges/`，每个文件按清单的 SHA-256 核对），在设置里选，或用环境变量 `AMBER_BAKE_LOADER` 指定；加载器构建目录（`build/loader`、`build/loader-cp.txt`）只是开发用的兜底。映射表由 Jay 按包里的 `requirements` 下载。普通用户不用开。代码本身跨平台；Windows 上原型遇到过“系统代码页是 1252 时 Java 打不开中文路径”的问题，Mac/Linux 是 UTF-8，应该没有。
 
 ### 3.13 联机节点部署脚本
 
@@ -457,7 +455,6 @@ Linux X11 在 Xvfb 上跑过 `AMBER_SELFTEST_SCOPE=remote`，14 项全过。看 
 
 | # | 内容 | 怎么做 |
 |---|---|---|
-| 33 | 极端加密在 macOS 上可用 | `Transport/Noise.cs` 的 ML-KEM 部分在 `MLKem.IsSupported` 为 false 时改用 BouncyCastle 的 ML-KEM-768（项目已经引用 BouncyCastle）。必须和 .NET 的实现线上格式一致：补一组固定向量测试，并让 Windows（.NET 实现）和 Mac（BouncyCastle）实际握手一次 |
 | 34 | 敏感文字不进剪贴板历史 | macOS 写剪贴板时加 `org.nspasteboard.ConcealedType`；Windows 加 `ExcludeClipboardContentFromMonitorProcessing`；Linux 上 KDE 的 Klipper 认 `x-kde-passwordManagerHint`。要绕过 Avalonia 直接调系统接口 |
 | 35 | 联机节点 macOS 脚本 | `node/` 加一个 launchd plist 的安装脚本 |
 | 36 | Linux Wayland 剪贴板 | 实测 60 秒清除在 Wayland 下是否生效，不生效时查 Avalonia 的 Wayland 后端或者改用 `wl-copy`/`wl-paste` |
