@@ -79,9 +79,10 @@ public static class TouchControlLayout
         // familiar mobile Minecraft layouts instead of floating them near the top edge.
         new(TouchControlAction.Jump, 0.920, 0.805, 0.052, "跳跃"),
         new(TouchControlAction.Sneak, 0.840, 0.885, 0.046, "潜行"),
-        // The inventory key sits on the hotbar centre line. Keeping the centre above the screen
-        // edge prevents gesture navigation and rounded tablet corners from clipping its face.
-        new(TouchControlAction.Inventory, 0.625, 0.950, 0.032, "背包"),
+        // Match Bedrock mobile: one slot-sized key, flush with the hotbar's right edge and
+        // vertically centred on the slots. The Android activity runs immersive fullscreen, so
+        // lifting this for the system gesture area would visibly detach it from the hotbar.
+        new(TouchControlAction.Inventory, 0.620, 0.980, 0.024, "背包"),
         new(TouchControlAction.SecondaryAction, 0.940, 0.455, 0.044, "拆分",
             GameplayVisible: false, MenuVisible: true)
     ];
