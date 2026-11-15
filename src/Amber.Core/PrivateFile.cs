@@ -32,11 +32,21 @@ public static class PrivateFile
         }
     }
 
-    /// <summary>Creates the directory owner-only (0700) on macOS and Linux when it doesn't exist yet. Existing directories are left as they are.</summary>
+    /// <summary>
+    /// Creates the directory owner-only (0700) on macOS and Linux when it doesn't exist yet, and so every missing folder
+    /// above it (the mode given to <see cref="Directory.CreateDirectory(string, UnixFileMode)"/> covers only the last one).
+    /// Existing directories are left as they are.
+    /// </summary>
     public static void EnsureDirectory(string dir)
     {
         if (Directory.Exists(dir)) return;
-        if (OperatingSystem.IsWindows()) Directory.CreateDirectory(dir);
-        else Directory.CreateDirectory(dir, OwnerOnlyDirectory);
+        if (OperatingSystem.IsWindows())
+        {
+            Directory.CreateDirectory(dir);
+            return;
+        }
+        var parent = Path.GetDirectoryName(Path.GetFullPath(dir));
+        if (parent is not null) EnsureDirectory(parent);
+        Directory.CreateDirectory(dir, OwnerOnlyDirectory);
     }
 }

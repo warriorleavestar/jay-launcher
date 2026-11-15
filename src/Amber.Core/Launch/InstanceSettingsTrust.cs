@@ -331,7 +331,7 @@ internal static class InstanceSettingsTrust
         {
             try
             {
-                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                PrivateFile.EnsureDirectory(Path.GetDirectoryName(path)!);
                 return new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
             }
             catch (IOException) when (Stopwatch.GetTimestamp() < deadline)
@@ -419,16 +419,30 @@ internal static class InstanceSettingsTrust
                 ["trusted"] = new JsonArray([.. store.Trusted.Select(t => (JsonNode?)JsonValue.Create(t))]),
                 ["uses"] = uses,
             };
-            Directory.CreateDirectory(Path.GetDirectoryName(StorePath)!);
+            PrivateFile.EnsureDirectory(Path.GetDirectoryName(StorePath)!);
             // Written aside and moved over the record in one step, so a read without the lock never sees half a file.
+            // A temp file left by a crash is removed first: the new one is created fresh, owner-only.
             var temp = StorePath + "." + Environment.ProcessId + ".tmp";
-            File.WriteAllText(temp, json.ToJsonString());
+            File.Delete(temp);
+            using (var stream = CreateOwnerOnly(temp))
+                stream.Write(Encoding.UTF8.GetBytes(json.ToJsonString()));
             MoveOver(temp, StorePath);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
             throw Unavailable(e);
         }
+    }
+
+    /// <summary>
+    /// Creates a new file only if nothing (not even a link) has that name yet; on macOS and Linux it is readable and
+    /// writable by the owner only from the start.
+    /// </summary>
+    internal static FileStream CreateOwnerOnly(string path)
+    {
+        var options = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write, Share = FileShare.None };
+        if (!OperatingSystem.IsWindows()) options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+        return new FileStream(path, options);
     }
 
     /// <summary>

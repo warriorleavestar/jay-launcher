@@ -652,4 +652,39 @@ public sealed class InstanceSettingsTrustTests : IDisposable
         Assert.Contains(grants.ReadOnly, p => GameSandbox.SamePath(p, config));
         launcher.DeleteNoTraceDir(dir2);
     }
+
+    [Fact]
+    public void SavedSettingsCopiesAndTheRecordStayOwnerOnly()
+    {
+        if (OperatingSystem.IsWindows()) return; // Unix file modes only
+        const UnixFileMode ownerOnly = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+        const UnixFileMode ownerOnlyFolder = ownerOnly | UnixFileMode.UserExecute;
+        const UnixFileMode others = UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.GroupExecute
+            | UnixFileMode.OtherRead | UnixFileMode.OtherWrite | UnixFileMode.OtherExecute;
+        var store = UsePrivateStore();
+        Assert.False(Directory.Exists(_data));
+        WriteRaw("a", """{"MaxMemoryMb":2048}""");
+        File.SetUnixFileMode(FileOf("a"), ownerOnly);
+
+        // A normal save, a memory change (what a fix from the last run does) and undoing it.
+        new InstanceSettings { MaxMemoryMb = 2048, JvmArgs = "-Dx=" + _marker }.Save(Dir, "a");
+        Assert.Equal(0, (int)(File.GetUnixFileMode(FileOf("a")) & others));
+        new InstanceSettings { MaxMemoryMb = 4096, JvmArgs = "-Dx=" + _marker }.Save(Dir, "a");
+        Assert.Equal(0, (int)(File.GetUnixFileMode(FileOf("a")) & others));
+        new InstanceSettings { MaxMemoryMb = 2048, JvmArgs = "-Dx=" + _marker }.Save(Dir, "a");
+        Assert.Equal(0, (int)(File.GetUnixFileMode(FileOf("a")) & others));
+
+        // Values written behind Jay's back are copied aside before the next save replaces them.
+        WriteRaw("a", $$"""{"PreLaunchCommand":"echo {{_marker}}"}""");
+        new InstanceSettings { MaxMemoryMb = 2048 }.Save(Dir, "a");
+        var copy = Assert.Single(InstanceSettings.UnconfirmedCopies(Dir, "a"));
+        Assert.Equal(ownerOnly, File.GetUnixFileMode(copy));
+        Assert.Equal(ownerOnly, File.GetUnixFileMode(store));
+        Assert.Equal(0, (int)(File.GetUnixFileMode(FileOf("a")) & others));
+
+        // Folders Jay created for them.
+        Assert.Equal(ownerOnlyFolder, File.GetUnixFileMode(_data));
+        Assert.Equal(ownerOnlyFolder, File.GetUnixFileMode(Path.GetDirectoryName(copy)!));
+        Assert.Equal(ownerOnlyFolder, File.GetUnixFileMode(Path.GetDirectoryName(Path.GetDirectoryName(copy)!)!));
+    }
 }

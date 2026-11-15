@@ -185,14 +185,15 @@ public sealed class InstanceSettings
     /// Writes the settings file as a new file next to it, then moves that over it. The game can write the instance
     /// folder, so the file there may be a link (or a hard link) to some other file; writing into it would change that
     /// file. A move replaces only the name in this folder. The new file is created only if nothing has that name yet
-    /// (not even a link), so it cannot be redirected either.
+    /// (not even a link), so it cannot be redirected either. On macOS and Linux it is created readable by the owner only,
+    /// so the move never leaves the settings more open than they were.
     /// </summary>
     private static void WriteReplacing(string folder, string path, string json)
     {
         var temp = Path.Combine(folder, "." + FileName + "." + Guid.NewGuid().ToString("N") + ".tmp");
         try
         {
-            using (var stream = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            using (var stream = InstanceSettingsTrust.CreateOwnerOnly(temp))
                 stream.Write(Encoding.UTF8.GetBytes(json));
             InstanceSettingsTrust.MoveOver(temp, path);
         }
@@ -225,7 +226,7 @@ public sealed class InstanceSettings
         if (oldPrint == newPrint) return;
         var droppedHere = DroppedOnLoad.TryGetValue(Path.GetFullPath(path), out var dropped) && dropped == oldPrint;
         if (isTrusted(oldPrint) && !droppedHere) return;
-        Directory.CreateDirectory(keptFolder);
+        PrivateFile.EnsureDirectory(keptFolder);
         string? free = null;
         for (var n = 1; n <= MaxUnconfirmedCopies; n++)
         {
@@ -238,7 +239,7 @@ public sealed class InstanceSettings
             if (File.ReadAllText(copy) == text) return; // kept already
         }
         // All copies in use: the newest takes the place of the last, so the oldest (likely the player's own) stay.
-        File.WriteAllText(free ?? UnconfirmedPath(keptFolder, MaxUnconfirmedCopies), text);
+        PrivateFile.WriteAllText(free ?? UnconfirmedPath(keptFolder, MaxUnconfirmedCopies), text);
     }
 
     /// <summary>
