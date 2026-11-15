@@ -1290,7 +1290,7 @@ public sealed class RunLog : ObservableObject
 
 public sealed partial class LogViewModel : PageViewModel
 {
-    private const int MaxLines = 5000;
+    internal const int MaxLines = 5000;
 
     /// <summary>最多留几次启动的日志（多开测联机时够用）。</summary>
     internal const int KeptRuns = 6;
