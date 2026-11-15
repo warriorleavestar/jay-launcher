@@ -13,13 +13,19 @@ public sealed class TouchInputRouter
 {
     private const double DragThreshold = 0.015;
     private const double ScrollStep = 0.035;
+    private const double DoubleTapDistance = 0.030;
+    private const long DoubleTapWindowMs = 350;
     private readonly Dictionary<int, PointerState> _pointers = [];
     private readonly ITouchInputSink _sink;
+    private readonly Func<long> _clock;
+    private MenuTap? _lastMenuTap;
 
-    public TouchInputRouter(ITouchInputSink sink, TouchControlProfile? profile = null)
+    public TouchInputRouter(ITouchInputSink sink, TouchControlProfile? profile = null,
+        Func<long>? clock = null)
     {
         _sink = sink;
         Profile = profile ?? new TouchControlProfile();
+        _clock = clock ?? (() => Environment.TickCount64);
     }
 
     public TouchControlProfile Profile { get; }
@@ -36,21 +42,32 @@ public sealed class TouchInputRouter
         Release(pointerId);
         var control = Profile.HitTest(x, y, controlsEnabled);
         if (!controlsEnabled && control?.Action is not (TouchControlAction.Menu or TouchControlAction.Keyboard or
-            TouchControlAction.SecondaryAction or TouchControlAction.Settings))
+            TouchControlAction.Settings))
             control = null;
         if (control is null)
         {
-            var clickOnRelease = controlsEnabled && Profile.Mode != TouchControlMode.JoystickAndCrosshair;
+            // Every touch scheme uses the same Bedrock-style interaction: tap to interact,
+            // hold to mine and drag to look. Crosshair mode changes aiming, not the gesture set.
+            var clickOnRelease = controlsEnabled;
             var pointerHeld = !controlsEnabled;
-            TouchControlAction? heldAction = pointerHeld
-                ? IsMenuSplitModifierHeld() ? TouchControlAction.SecondaryAction : TouchControlAction.PrimaryAction
-                : null;
-            _pointers[pointerId] = new(null, x, y, clickOnRelease, pointerHeld, heldAction: heldAction);
+            if (!controlsEnabled && IsMenuDoubleTap(x, y))
+            {
+                // The first tap has already lifted the complete stack. Put it back, then perform
+                // a right click at the same slot: Minecraft's native inventory logic picks half
+                // (for example 32 from a stack of 64) and retains all of its normal slot rules.
+                _lastMenuTap = null;
+                _pointers[pointerId] = new(null, x, y, clickOnRelease: false,
+                    pointerHeld: false, menuInteraction: true, menuDoubleTap: true);
+                _sink.SetPointer(x, y, false);
+                return true;
+            }
+            TouchControlAction? heldAction = pointerHeld ? TouchControlAction.PrimaryAction : null;
+            _pointers[pointerId] = new(null, x, y, clickOnRelease, pointerHeld,
+                heldAction: heldAction, menuInteraction: !controlsEnabled);
             _sink.SetPointer(x, y, false);
             if (heldAction is { } action) _sink.SetAction(action, true);
             return true;
         }
-        var menuSplitModifier = !controlsEnabled && control.Action == TouchControlAction.SecondaryAction;
         if (control.Action == TouchControlAction.Sprint)
         {
             SprintLocked = !SprintLocked;
@@ -58,17 +75,16 @@ public sealed class TouchInputRouter
             _sink.SetAction(control.Action, SprintLocked);
             return true;
         }
-        _pointers[pointerId] = new(control.Action, x, y, menuSplitModifier: menuSplitModifier);
+        _pointers[pointerId] = new(control.Action, x, y);
         if (control.Action == TouchControlAction.Move)
             Move(pointerId, x, y);
-        else if (!menuSplitModifier)
+        else
             _sink.SetAction(control.Action, true);
         return true;
     }
 
     public bool BeginLongPress(int pointerId)
     {
-        if (Profile.Mode == TouchControlMode.JoystickAndCrosshair) return false;
         if (!_pointers.TryGetValue(pointerId, out var pointer) ||
             pointer.Action is not null || pointer.HasDragged || pointer.LongPressAction ||
             !pointer.ClickOnRelease)
@@ -124,10 +140,10 @@ public sealed class TouchInputRouter
                     };
                 }
             }
-            else if (pointer.HeldAction == TouchControlAction.SecondaryAction)
+            else if (pointer.MenuDoubleTap)
             {
-                // Inventory split mode is a real held right mouse button. Moving across slots
-                // must remain a right-drag so Minecraft can distribute one item per slot.
+                // Wait for release so a second touch that turns into a drag is not mistaken for
+                // an inventory double tap.
             }
             else if (pointer.PointerHeld || pointer.Scrolling)
             {
@@ -175,12 +191,21 @@ public sealed class TouchInputRouter
         }
         else if (pointer.Action is null)
         {
-            if (pointer.PointerHeld && pointer.HeldAction is { } heldAction)
+            if (pointer.MenuDoubleTap && !pointer.HasDragged)
+            {
+                _sink.SetPointer(pointer.X, pointer.Y, false);
+                TapAction(TouchControlAction.PrimaryAction);
+                TapAction(TouchControlAction.SecondaryAction);
+            }
+            else if (pointer.PointerHeld && pointer.HeldAction is { } heldAction)
                 _sink.SetAction(heldAction, false);
             else if (pointer.ClickOnRelease && !pointer.HasDragged)
                 _sink.SetPointer(pointer.X, pointer.Y, true);
+            if (pointer.MenuInteraction && !pointer.HasDragged && !pointer.Scrolling &&
+                pointer.PointerHeld && pointer.HeldAction == TouchControlAction.PrimaryAction)
+                _lastMenuTap = new(pointer.X, pointer.Y, _clock());
         }
-        else if (!pointer.MenuSplitModifier && !pointer.ToggleAction && pointer.Action is { } action)
+        else if (!pointer.ToggleAction && pointer.Action is { } action)
             _sink.SetAction(action, false);
         return true;
     }
@@ -190,8 +215,24 @@ public sealed class TouchInputRouter
         foreach (var pointerId in _pointers.Keys.ToArray()) Release(pointerId);
     }
 
-    private bool IsMenuSplitModifierHeld() =>
-        _pointers.Values.Any(pointer => pointer.MenuSplitModifier);
+    private bool IsMenuDoubleTap(double x, double y)
+    {
+        if (_lastMenuTap is not { } previous) return false;
+        var elapsed = _clock() - previous.At;
+        var dx = x - previous.X;
+        var dy = y - previous.Y;
+        if (elapsed is >= 0 and <= DoubleTapWindowMs &&
+            dx * dx + dy * dy <= DoubleTapDistance * DoubleTapDistance)
+            return true;
+        if (elapsed > DoubleTapWindowMs) _lastMenuTap = null;
+        return false;
+    }
+
+    private void TapAction(TouchControlAction action)
+    {
+        _sink.SetAction(action, true);
+        _sink.SetAction(action, false);
+    }
 
     private void SetAutoSprint(bool active)
     {
@@ -216,15 +257,18 @@ public sealed class TouchInputRouter
         bool Scrolling,
         double ScrollRemainder,
         TouchControlAction? HeldAction,
-        bool MenuSplitModifier,
+        bool MenuInteraction,
+        bool MenuDoubleTap,
         bool ToggleAction,
         bool LongPressAction)
     {
         public PointerState(TouchControlAction? action, double x, double y,
             bool clickOnRelease = true, bool pointerHeld = false,
-            TouchControlAction? heldAction = null, bool menuSplitModifier = false,
-            bool toggleAction = false)
+            TouchControlAction? heldAction = null, bool menuInteraction = false,
+            bool menuDoubleTap = false, bool toggleAction = false)
             : this(action, x, y, clickOnRelease, pointerHeld, x, y, false, false, 0,
-                heldAction, menuSplitModifier, toggleAction, false) { }
+                heldAction, menuInteraction, menuDoubleTap, toggleAction, false) { }
     }
+
+    private readonly record struct MenuTap(double X, double Y, long At);
 }

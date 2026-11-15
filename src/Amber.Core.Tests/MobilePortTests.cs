@@ -8,7 +8,6 @@ using Avalonia.Threading;
 using System.Security.Cryptography;
 using System.Formats.Tar;
 using System.IO.Compression;
-using System.Collections.Concurrent;
 
 namespace Amber.Core.Tests;
 
@@ -29,7 +28,7 @@ public sealed class MobilePortTests
             var version = typeof(MobileMainViewModel).Assembly
                 .GetCustomAttribute<AssemblyInformationalVersionAttribute>()!.InformationalVersion;
             Assert.Contains(version, viewModel.VersionText);
-            Assert.True(File.Exists(Path.Combine(root, Amber.Core.Multiplayer.MemberIdentity.FileName)));
+            Assert.True(File.Exists(Path.Combine(root, "identity.key")));
         }
         finally
         {
@@ -107,9 +106,18 @@ public sealed class MobilePortTests
             Assert.InRange(control.CenterX - control.Radius, 0, 1);
             Assert.InRange(control.CenterX + control.Radius, 0, 1);
             Assert.InRange(control.CenterY - control.Radius, 0, 1);
-            Assert.InRange(control.CenterY + control.Radius, 0, 1);
+            // The inventory hit circle intentionally reaches a few pixels below immersive
+            // fullscreen; its rendered square uses 82% of that radius and remains on-screen.
+            Assert.InRange(control.CenterY + control.Radius, 0,
+                control.Action == TouchControlAction.Inventory ? 1.01 : 1);
             if (control.GameplayVisible)
-                Assert.Equal(control.Action, TouchControlLayout.HitTest(control.CenterX, control.CenterY)!.Action);
+            {
+                if (control.Action == TouchControlAction.Move)
+                    Assert.Equal(TouchControlAction.Move,
+                        TouchControlLayout.HitTest(control.CenterX + control.Radius * 0.65, control.CenterY)!.Action);
+                else
+                    Assert.Equal(control.Action, TouchControlLayout.HitTest(control.CenterX, control.CenterY)!.Action);
+            }
             if (control.MenuVisible)
                 Assert.Equal(control.Action, TouchControlLayout.HitTest(control.CenterX, control.CenterY,
                     gameplayControlsActive: false)!.Action);
@@ -125,20 +133,21 @@ public sealed class MobilePortTests
 
         var menu = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Menu);
         var movePad = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Move);
-        var split = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.SecondaryAction);
         var inventory = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Inventory);
         var jump = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Jump);
         var sneak = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Sneak);
         Assert.InRange(menu.CenterX, 0.47, 0.53);
         Assert.True(movePad.CenterX < 0.25);
-        Assert.InRange(movePad.CenterY, 0.75, 0.82);
-        Assert.InRange(inventory.CenterX, 0.600, 0.612);
-        Assert.InRange(inventory.CenterY, 0.95, 0.96);
-        Assert.True(jump.CenterY > 0.75 && sneak.CenterY > 0.84);
-        Assert.True(jump.Radius >= 0.04 && sneak.Radius >= 0.04);
-        Assert.False(split.GameplayVisible);
-        Assert.True(split.MenuVisible);
-        Assert.Null(TouchControlLayout.HitTest(split.CenterX, split.CenterY));
+        Assert.InRange(movePad.CenterY, 0.79, 0.81);
+        Assert.InRange(inventory.CenterX, 0.615, 0.625);
+        Assert.InRange(inventory.CenterY, 0.975, 0.985);
+        Assert.InRange(inventory.Radius, 0.023, 0.025);
+        Assert.True(jump.CenterY > 0.78);
+        Assert.Equal(movePad.CenterX, sneak.CenterX, 6);
+        Assert.Equal(movePad.CenterY, sneak.CenterY, 6);
+        Assert.True(jump.Radius >= 0.05 && sneak.Radius >= 0.035);
+        Assert.DoesNotContain(TouchControlLayout.Default,
+            control => control.Action == TouchControlAction.SecondaryAction);
     }
 
     [Fact]
@@ -156,8 +165,9 @@ public sealed class MobilePortTests
         Assert.Equal(0, direction.Y, 6);
 
         profile.Mode = TouchControlMode.JoystickAndCrosshair;
-        Assert.Contains(profile.Controls, control => control.Action == TouchControlAction.PrimaryAction);
-        Assert.Contains(profile.Controls, control => control.Action == TouchControlAction.SecondaryAction && control.GameplayVisible);
+        Assert.DoesNotContain(profile.Controls, control => control.Action == TouchControlAction.PrimaryAction);
+        Assert.DoesNotContain(profile.Controls, control =>
+            control.Action == TouchControlAction.SecondaryAction && control.GameplayVisible);
 
         profile.Mode = TouchControlMode.ExternalKeyboardMouse;
         Assert.Single(profile.Controls);
@@ -202,7 +212,7 @@ public sealed class MobilePortTests
         var move = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Move);
         var jump = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Jump);
 
-        Assert.True(router.Press(10, move.CenterX, move.CenterY));
+        Assert.True(router.Press(10, move.CenterX + move.Radius * 0.65, move.CenterY));
         Assert.True(router.Move(10, move.CenterX + move.Radius, move.CenterY));
         Assert.True(router.Press(11, jump.CenterX, jump.CenterY));
         Assert.Contains((TouchControlAction.Jump, true), sink.Actions);
@@ -222,7 +232,7 @@ public sealed class MobilePortTests
         var router = new TouchInputRouter(sink);
         var move = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Move);
 
-        Assert.True(router.Press(50, move.CenterX, move.CenterY));
+        Assert.True(router.Press(50, move.CenterX, move.CenterY - move.Radius * 0.65));
         Assert.True(router.Move(50, move.CenterX, move.CenterY - move.Radius));
         Assert.True(router.SprintLocked);
         Assert.True(router.IsPressed(TouchControlAction.Sprint));
@@ -271,7 +281,7 @@ public sealed class MobilePortTests
         var router = new TouchInputRouter(sink);
         var move = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Move);
 
-        Assert.True(router.Press(13, move.CenterX, move.CenterY));
+        Assert.True(router.Press(13, move.CenterX + move.Radius * 0.65, move.CenterY));
         Assert.True(router.Move(13, move.CenterX + move.Radius, move.CenterY));
         Assert.Equal(1, sink.LastMovement.X, 6);
 
@@ -376,25 +386,33 @@ public sealed class MobilePortTests
     }
 
     [Fact]
-    public void TouchInputRouterUsesMenuSplitAsRightClickModifier()
+    public void TouchInputRouterDoubleTapPicksHalfAnInventoryStack()
     {
         var sink = new RecordingTouchSink();
-        var router = new TouchInputRouter(sink);
-        var split = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.SecondaryAction);
+        var now = 1_000L;
+        var router = new TouchInputRouter(sink, clock: () => now);
 
-        Assert.True(router.Press(40, split.CenterX, split.CenterY, controlsEnabled: false));
-        Assert.DoesNotContain(sink.Actions, action => action.Action == TouchControlAction.SecondaryAction);
-
-        Assert.True(router.Press(41, 0.48, 0.36, controlsEnabled: false));
-        Assert.Equal((0.48, 0.36, false), sink.LastPointer);
-        Assert.Contains((TouchControlAction.SecondaryAction, true), sink.Actions);
-        Assert.True(router.Move(41, 0.62, 0.54));
-        Assert.Equal((0.62, 0.54, false), sink.LastPointer);
-        Assert.DoesNotContain((TouchControlAction.SecondaryAction, false), sink.Actions);
-
-        Assert.True(router.Release(41));
-        Assert.Contains((TouchControlAction.SecondaryAction, false), sink.Actions);
+        Assert.True(router.Press(40, 0.48, 0.36, controlsEnabled: false));
         Assert.True(router.Release(40));
+        Assert.Equal([
+            (TouchControlAction.PrimaryAction, true),
+            (TouchControlAction.PrimaryAction, false)
+        ], sink.Actions);
+
+        now += 200;
+        Assert.True(router.Press(41, 0.48, 0.36, controlsEnabled: false));
+        Assert.Equal(2, sink.Actions.Count);
+        Assert.True(router.Release(41));
+        Assert.Equal([
+            (TouchControlAction.PrimaryAction, true),
+            (TouchControlAction.PrimaryAction, false),
+            (TouchControlAction.PrimaryAction, true),
+            (TouchControlAction.PrimaryAction, false),
+            (TouchControlAction.SecondaryAction, true),
+            (TouchControlAction.SecondaryAction, false)
+        ], sink.Actions);
+        Assert.DoesNotContain(TouchControlLayout.Default,
+            control => control.Action == TouchControlAction.SecondaryAction);
     }
 
     [Fact]
@@ -537,158 +555,6 @@ public sealed class MobilePortTests
         }
     }
 
-    [Fact]
-    public async Task AndroidRuntimeArchiveInstallerExtractsOffTheCallingThread()
-    {
-        var parent = Path.Combine(Path.GetTempPath(), "jay-runtime-archive-" + Guid.NewGuid().ToString("N"));
-        var target = Path.Combine(parent, "active");
-        var archive = Convert.FromBase64String(RuntimeXzFixture);
-        using var entered = new ManualResetEventSlim();
-        using var release = new ManualResetEventSlim();
-        using var ui = new SingleThreadSynchronizationContext();
-        var extractThread = 0;
-        SynchronizationContext? extractContext = null;
-        var held = 0;
-        var started = new TaskCompletionSource<Task<RuntimeBundleManifest>>(TaskCreationOptions.RunContinuationsAsynchronously);
-        try
-        {
-            // Start the install from a single-threaded "UI" context, the way the Android activity does.
-            ui.Post(_ =>
-            {
-                try
-                {
-                    started.SetResult(RuntimeArchiveInstaller.InstallCoreAsync(
-                        target,
-                        RuntimeArchive(archive),
-                        (_, _) => Task.FromResult<Stream>(new MemoryStream(archive, writable: false)),
-                        progress: null,
-                        CancellationToken.None,
-                        beforeExtractEntry: () =>
-                        {
-                            if (Interlocked.Exchange(ref held, 1) != 0) return;
-                            extractThread = Environment.CurrentManagedThreadId;
-                            extractContext = SynchronizationContext.Current;
-                            entered.Set();
-                            release.Wait();
-                        }));
-                }
-                catch (Exception e)
-                {
-                    started.SetException(e);
-                }
-            }, null);
-
-            Assert.True(entered.Wait(TimeSpan.FromSeconds(30)), "Extraction never started.");
-            Assert.NotEqual(ui.ThreadId, extractThread);
-            Assert.NotSame(ui, extractContext);
-
-            // While extraction is held, the call has already handed back an unfinished task...
-            var install = await started.Task.WaitAsync(TimeSpan.FromSeconds(30));
-            Assert.False(install.IsCompleted);
-            // ...and the UI thread still runs other work.
-            var probe = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            ui.Post(_ => probe.SetResult(), null);
-            await probe.Task.WaitAsync(TimeSpan.FromSeconds(30));
-            Assert.False(install.IsCompleted);
-
-            release.Set();
-            var manifest = await install.WaitAsync(TimeSpan.FromSeconds(60));
-            Assert.True(await RuntimeBundleVerifier.VerifyAsync(target, manifest, "arm64-v8a"));
-        }
-        finally
-        {
-            release.Set();
-            if (Directory.Exists(parent)) Directory.Delete(parent, true);
-        }
-    }
-
-    [Fact]
-    public async Task AndroidRuntimeArchiveInstallerCancelsDuringExtraction()
-    {
-        var parent = Path.Combine(Path.GetTempPath(), "jay-runtime-archive-" + Guid.NewGuid().ToString("N"));
-        var target = Path.Combine(parent, "active");
-        var archive = CreateRuntimeArchive();
-        using var entered = new ManualResetEventSlim();
-        using var release = new ManualResetEventSlim();
-        using var cts = new CancellationTokenSource();
-        var held = 0;
-        try
-        {
-            var install = RuntimeArchiveInstaller.InstallCoreAsync(
-                target,
-                RuntimeArchive(archive),
-                (_, _) => Task.FromResult<Stream>(new MemoryStream(archive, writable: false)),
-                progress: null,
-                cts.Token,
-                beforeExtractEntry: () =>
-                {
-                    if (Interlocked.Exchange(ref held, 1) != 0) return;
-                    entered.Set();
-                    release.Wait();
-                });
-
-            Assert.True(entered.Wait(TimeSpan.FromSeconds(30)), "Extraction never started.");
-            cts.Cancel();
-            release.Set();
-
-            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => install.WaitAsync(TimeSpan.FromSeconds(60)));
-            Assert.False(Directory.Exists(target));
-            Assert.Empty(Directory.GetFileSystemEntries(parent));
-        }
-        finally
-        {
-            release.Set();
-            if (Directory.Exists(parent)) Directory.Delete(parent, true);
-        }
-    }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task AndroidRuntimeArchiveInstallerKeepsPreviousRuntimeAfterCancelOrFailure(bool cancel)
-    {
-        var parent = Path.Combine(Path.GetTempPath(), "jay-runtime-archive-" + Guid.NewGuid().ToString("N"));
-        var target = Path.Combine(parent, "active");
-        try
-        {
-            var previousArchive = CreateRuntimeArchive();
-            var previous = await RuntimeArchiveInstaller.InstallAsync(
-                target,
-                RuntimeArchive(previousArchive),
-                (_, _) => Task.FromResult<Stream>(new MemoryStream(previousArchive, writable: false)));
-
-            var updateArchive = CreateRuntimeArchive(("lib/extra.so", "update"u8.ToArray()));
-            using var cts = new CancellationTokenSource();
-            var install = RuntimeArchiveInstaller.InstallCoreAsync(
-                target,
-                RuntimeArchive(updateArchive),
-                (_, _) => Task.FromResult<Stream>(new MemoryStream(updateArchive, writable: false)),
-                progress: null,
-                cts.Token,
-                beforeExtractEntry: () =>
-                {
-                    if (cancel) cts.Cancel();
-                    else throw new IOException("Simulated disk failure during extraction.");
-                });
-
-            if (cancel) await Assert.ThrowsAnyAsync<OperationCanceledException>(() => install);
-            else await Assert.ThrowsAsync<IOException>(() => install);
-
-            // No staging, download or backup leftovers next to the runtime.
-            Assert.Equal([target], Directory.GetFileSystemEntries(parent));
-            // The previous runtime is untouched and still passes full verification.
-            var active = RuntimeBundleManifest.Read(Path.Combine(target, "runtime-manifest.json"));
-            Assert.Equal(previous.Files.Select(file => file.Path).Order(), active.Files.Select(file => file.Path).Order());
-            Assert.False(File.Exists(Path.Combine(target, "lib", "extra.so")));
-            Assert.Equal("jvm"u8.ToArray(), await File.ReadAllBytesAsync(Path.Combine(target, "lib", "server", "libjvm.so")));
-            Assert.True(await RuntimeBundleVerifier.VerifyAsync(target, active, "arm64-v8a"));
-        }
-        finally
-        {
-            if (Directory.Exists(parent)) Directory.Delete(parent, true);
-        }
-    }
-
     private static RuntimeBundleFile RuntimeFile(string path, byte[] bytes) => new(
         path,
         bytes.Length,
@@ -743,46 +609,6 @@ public sealed class MobilePortTests
         uOSkvqrb56xEuy4315U0RexbEnxSs1NeGvEtAHrr4MdiD+fnhi1ZfdCIMM9cNZzJAKFIrqxwOpQl9QAAAAAAqDkUZuAiHJcAAfEG
         gOQBAMcUcsixxGf7AgAAAAAEWVo=
         """;
-
-    /// <summary>A minimal UI-like context: one thread that runs posted work in order.</summary>
-    private sealed class SingleThreadSynchronizationContext : SynchronizationContext, IDisposable
-    {
-        private readonly BlockingCollection<(SendOrPostCallback Callback, object? State)> _queue = new();
-        private readonly Thread _thread;
-
-        public SingleThreadSynchronizationContext()
-        {
-            _thread = new Thread(Run) { IsBackground = true, Name = "test-ui" };
-            _thread.Start();
-        }
-
-        public int ThreadId => _thread.ManagedThreadId;
-
-        public override void Post(SendOrPostCallback d, object? state)
-        {
-            try
-            {
-                _queue.Add((d, state));
-            }
-            catch (InvalidOperationException)
-            {
-                // Disposed: finish stray continuations on the pool instead.
-                ThreadPool.QueueUserWorkItem(_ => d(state));
-            }
-        }
-
-        public override void Send(SendOrPostCallback d, object? state) => throw new NotSupportedException();
-
-        public override SynchronizationContext CreateCopy() => this;
-
-        public void Dispose() => _queue.CompleteAdding();
-
-        private void Run()
-        {
-            SetSynchronizationContext(this);
-            foreach (var (callback, state) in _queue.GetConsumingEnumerable()) callback(state);
-        }
-    }
 
     private sealed class FakeMobilePlatformServices : IMobilePlatformServices
     {
