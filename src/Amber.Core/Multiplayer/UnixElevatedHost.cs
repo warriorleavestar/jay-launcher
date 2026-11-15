@@ -24,12 +24,21 @@ public static class UnixElevatedGuardHost
     public static bool IsGuardInvocation(string[] args) => args.Length > 0 && args[0] == UnixElevatedGuard.GuardFlag;
 
     /// <summary>守护入口，返回进程退出码：0 正常结束，2 参数或环境不对，3 核对失败，4 运行中出错。</summary>
-    public static int Run(string[] args) => Run(args, requireRoot: true);
+    public static int Run(string[] args) => Run(args, requireRoot: true, RestoreSystemLeftovers);
 
-    /// <summary>测试用：在测试进程里以当前用户身份跑守护。</summary>
-    internal static int RunForTest(string[] args) => Run(args, requireRoot: false);
+    /// <summary>
+    /// 测试用：在测试进程里以当前用户身份跑守护。It never touches system files, even when the tests run as root: the
+    /// leftover check at each start goes to <paramref name="restoreLeftovers"/>, which does nothing unless a test gives one.
+    /// </summary>
+    internal static int RunForTest(string[] args, Action? restoreLeftovers = null) => Run(args, requireRoot: false, restoreLeftovers ?? (() => { }));
 
-    private static int Run(string[] args, bool requireRoot)
+    /// <summary>A guard killed during an exit session may have left Jay's temporary resolv.conf in place: put the original back.</summary>
+    private static void RestoreSystemLeftovers()
+    {
+        if (OperatingSystem.IsLinux() && UnixIds.EffectiveUserId() == 0) UnixExitNetwork.RestoreResolvConf();
+    }
+
+    private static int Run(string[] args, bool requireRoot, Action restoreLeftovers)
     {
         if (args.Length != 5 || !uint.TryParse(args[2], out var uid) || !int.TryParse(args[3], out var jayPid)) return 2;
         if (requireRoot && UnixIds.EffectiveUserId() != 0) return 2;
@@ -51,11 +60,11 @@ public static class UnixElevatedGuardHost
             }
         }
         catch (Exception e) when (e is IOException or SocketException or UnauthorizedAccessException or ArgumentException) { return 3; }
-        using var session = new GuardSession(socket, corePath);
+        using var session = new GuardSession(socket, corePath, restoreLeftovers);
         return session.Run();
     }
 
-    private sealed class GuardSession(Socket socket, string corePath) : IDisposable
+    private sealed class GuardSession(Socket socket, string corePath, Action restoreLeftovers) : IDisposable
     {
         private readonly NetworkStream _stream = new(socket, ownsSocket: true);
         private readonly object _writeLock = new();
@@ -108,12 +117,8 @@ public static class UnixElevatedGuardHost
         private void StartCore(UnixGuardCommand cmd)
         {
             StopCore();
-            // A guard killed during an exit session may have left Jay's temporary resolv.conf in place: put the original back.
-            if (OperatingSystem.IsLinux() && UnixIds.EffectiveUserId() == 0)
-            {
-                try { UnixExitNetwork.RestoreResolvConf(); }
-                catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Send("error " + B64(e.Message)); }
-            }
+            try { restoreLeftovers(); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Send("error " + B64(e.Message)); }
             var core = ResolveCore();
             CheckCore(core);
             // 经别人上网：承载地址的主机路由要在 EasyTier 加 /1 路由之前查好、加好。

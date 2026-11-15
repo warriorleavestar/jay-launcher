@@ -55,6 +55,7 @@ internal static class ElevatedCoreStore
         EnsureRoot(root);
         // Before anything is written into it: a root that already existed must be one only administrators or root control.
         CheckRoot(root);
+        HoldBuild(Path.Combine(root, EasyTierRelease.InstallTag));
         if (!Directory.Exists(dir))
         {
             var package = ReadPackage(packagePath, asset);
@@ -118,10 +119,92 @@ internal static class ElevatedCoreStore
     private static readonly System.Text.RegularExpressions.Regex RetiredFolder =
         new(@"^\d+\.\d+\.\d+-jay-[0-9a-f]{12}\.old-[0-9a-f]{16}$", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
+    /// <summary>A build's folder holds this file open while a guard uses that build (see <see cref="HoldBuild"/>).</summary>
+    internal const string InUseFile = ".in-use";
+
+    private static readonly object HoldGate = new();
+    private static FileStream? _held;
+
+    /// <summary>
+    /// Marks this build's folder as in use for as long as this guard runs: a shared hold on <see cref="InUseFile"/>, which
+    /// guards of the same build share and which keeps a guard of another build from removing the folder (see
+    /// <see cref="RemoveOtherBuilds"/>) between preparing the copy and starting it. The file is readable by root or
+    /// administrators only. When it can't be held within a few seconds the guard goes on without it.
+    /// </summary>
+    private static void HoldBuild(string folder)
+    {
+        CreateProtectedDirectory(folder);
+        var path = Path.Combine(folder, InUseFile);
+        var deadline = Environment.TickCount64 + 5000;
+        while (true)
+        {
+            try
+            {
+                var options = new FileStreamOptions { Mode = FileMode.OpenOrCreate, Access = FileAccess.ReadWrite, Share = FileShare.Read | FileShare.Write };
+                if (!OperatingSystem.IsWindows()) options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+                var hold = new FileStream(path, options);
+                lock (HoldGate)
+                {
+                    _held?.Dispose();
+                    _held = hold;
+                }
+                return;
+            }
+            catch (IOException) when (Environment.TickCount64 < deadline)
+            {
+                // Another build's guard is checking this folder right now; it lets go at once.
+                Thread.Sleep(50);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                return;
+            }
+        }
+    }
+
+    /// <summary>Tests: lets go of the hold, so the test's folder can be deleted.</summary>
+    internal static void ReleaseForTest()
+    {
+        lock (HoldGate)
+        {
+            _held?.Dispose();
+            _held = null;
+        }
+    }
+
+    /// <summary>
+    /// Whether a guard of that build holds its folder now. On Mac/Linux the probe is returned and kept open while the folder
+    /// is renamed, so no guard can take the folder up in between. On Windows it is closed first: there a file open inside a
+    /// folder already makes the rename fail.
+    /// </summary>
+    private static bool InUse(string folder, out FileStream? probe)
+    {
+        probe = null;
+        try
+        {
+            probe = new FileStream(Path.Combine(folder, InUseFile), FileMode.Open, FileAccess.Read, FileShare.None);
+            if (OperatingSystem.IsWindows())
+            {
+                probe.Dispose();
+                probe = null;
+            }
+            return false;
+        }
+        catch (Exception e) when (e is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return false;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return true;
+        }
+    }
+
     /// <summary>
     /// Once the current build's copy checks out: removes the copies of earlier builds next to it. Each one is first renamed
     /// aside, which fails on Windows while its easytier-core still runs; such a folder is left for a later start, so a
-    /// half-deleted copy never sits under a build's own name. Only folders named like a build are touched, and failures
+    /// half-deleted copy never sits under a build's own name. A folder whose build a guard holds (see <see cref="HoldBuild"/>)
+    /// is left too. Only folders named like a build are touched, and failures
     /// are ignored.
     /// </summary>
     internal static void RemoveOtherBuilds(string root)
@@ -135,9 +218,14 @@ internal static class ElevatedCoreStore
                 var doomed = folder;
                 if (BuildFolder.IsMatch(name))
                 {
-                    doomed = folder + ".old-" + Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(8));
-                    try { Directory.Move(folder, doomed); }
-                    catch (Exception e) when (e is IOException or UnauthorizedAccessException) { continue; }
+                    // Another build's guard is using it (a second Jay of another version): leave it for a later start.
+                    if (InUse(folder, out var probe)) continue;
+                    using (probe)
+                    {
+                        doomed = folder + ".old-" + Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(8));
+                        try { Directory.Move(folder, doomed); }
+                        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { continue; }
+                    }
                 }
                 else if (!RetiredFolder.IsMatch(name)) continue;
                 try { Directory.Delete(doomed, recursive: true); }

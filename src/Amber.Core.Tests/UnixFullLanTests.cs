@@ -186,12 +186,14 @@ public sealed class UnixFullLanTests
         File.WriteAllText(core, "#!/bin/sh\necho \"started $1 secret=$ET_NETWORK_SECRET other=$OTHER\"\nexec sleep 30\n");
         File.SetUnixFileMode(core, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         Thread? host = null;
+        var leftoverChecks = 0;
         UnixElevatedGuard.LaunchForTest = command =>
         {
             var flag = command.ToList().IndexOf(UnixElevatedGuard.GuardFlag);
             var args = command.Skip(flag).ToArray();
-            // 守护本来以 root 运行；测试里核对对端的 uid 就是自己。
-            host = new Thread(() => UnixElevatedGuardHost.RunForTest(args)) { IsBackground = true };
+            // 守护本来以 root 运行；测试里核对对端的 uid 就是自己。The leftover check goes to the test, never to the
+            // system's resolv.conf, even when the tests run as root.
+            host = new Thread(() => UnixElevatedGuardHost.RunForTest(args, () => Interlocked.Increment(ref leftoverChecks))) { IsBackground = true };
             host.Start();
             return Process.GetCurrentProcess();
         };
@@ -208,6 +210,8 @@ public sealed class UnixFullLanTests
             Assert.True(guard.StartAsync(["two"], new Dictionary<string, string>(), null, "10.233.144.250").Wait(TimeSpan.FromSeconds(10)));
             Assert.True(SpinWait.SpinUntil(() => guard.RecentOutput.Any(l => l.StartsWith("started two", StringComparison.Ordinal)), 5000));
             Assert.False(guard.HasExited);
+            // Each start first looks for what a killed guard may have left.
+            Assert.Equal(2, Volatile.Read(ref leftoverChecks));
 
             guard.Dispose();
             Assert.True(guard.WaitForExit(TimeSpan.FromSeconds(10)));
@@ -253,6 +257,7 @@ public sealed class UnixFullLanTests
             ElevatedCoreStore.RootForTest = null;
             ElevatedCoreStore.AssetForTest = null;
             ElevatedCoreStore.OwnerForTest = null;
+            ElevatedCoreStore.ReleaseForTest();
             dir.Delete(true);
         }
     }
@@ -293,7 +298,8 @@ public sealed class UnixFullLanTests
             File.Delete(package);
             Assert.Throws<InvalidDataException>(() => ElevatedCoreStore.Prepare(package));
             Assert.False(Directory.Exists(Path.Combine(ElevatedCoreStore.RootForTest!, EasyTierRelease.InstallTag)) &&
-                Directory.EnumerateFileSystemEntries(Path.Combine(ElevatedCoreStore.RootForTest!, EasyTierRelease.InstallTag)).Any(e => !e.Contains(".tmp-")));
+                Directory.EnumerateFileSystemEntries(Path.Combine(ElevatedCoreStore.RootForTest!, EasyTierRelease.InstallTag))
+                    .Any(e => !e.Contains(".tmp-") && Path.GetFileName(e) != ElevatedCoreStore.InUseFile));
         });
     }
 
@@ -368,6 +374,45 @@ public sealed class UnixFullLanTests
             Assert.True(File.Exists(cores[0]));
             Assert.True(Directory.Exists(busy));
         });
+    }
+
+    [Fact]
+    public void APreparedBuildIsHeldUntilItsGuardLetsGo()
+    {
+        if (OperatingSystem.IsWindows() && !IsElevatedOnWindows()) return;
+        WithCoreStore((_, package, _, _) =>
+        {
+            ElevatedCoreStore.Prepare(package);
+            var inUse = Path.Combine(ElevatedCoreStore.RootForTest!, EasyTierRelease.InstallTag, ElevatedCoreStore.InUseFile);
+            // What a guard of another build does before removing this folder: it finds it held.
+            Assert.ThrowsAny<IOException>(() => new FileStream(inUse, FileMode.Open, FileAccess.Read, FileShare.None).Dispose());
+            // Guards of the same build share the hold.
+            new FileStream(inUse, FileMode.Open, FileAccess.ReadWrite, FileShare.Read | FileShare.Write).Dispose();
+            ElevatedCoreStore.ReleaseForTest();
+            new FileStream(inUse, FileMode.Open, FileAccess.Read, FileShare.None).Dispose();
+        });
+    }
+
+    [Fact]
+    public void AnotherBuildsFolderIsLeftWhileItsGuardUsesIt()
+    {
+        var root = Directory.CreateTempSubdirectory("jay-core-builds-");
+        try
+        {
+            var other = Directory.CreateDirectory(Path.Combine(root.FullName, "2.4.5-jay-0123456789ab")).FullName;
+            File.WriteAllText(Path.Combine(other, "easytier-core"), "x");
+            // The other build's guard has prepared its copy and holds the folder until its core is done.
+            using (new FileStream(Path.Combine(other, ElevatedCoreStore.InUseFile), FileMode.Create, FileAccess.ReadWrite, FileShare.Read | FileShare.Write))
+            {
+                ElevatedCoreStore.RemoveOtherBuilds(root.FullName);
+                Assert.True(File.Exists(Path.Combine(other, "easytier-core")));
+            }
+            // Once it lets go, a later start removes the folder.
+            ElevatedCoreStore.RemoveOtherBuilds(root.FullName);
+            Assert.False(Directory.Exists(other));
+            Assert.Empty(Directory.EnumerateFileSystemEntries(root.FullName));
+        }
+        finally { root.Delete(true); }
     }
 
     /// <summary>The Windows guard runs elevated; creating an administrators-owned folder needs that too.</summary>
