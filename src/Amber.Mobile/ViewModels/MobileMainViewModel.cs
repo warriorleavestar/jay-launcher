@@ -73,7 +73,7 @@ public sealed partial class MobileMainViewModel : ObservableObject, IAsyncDispos
     public string AppearanceTitle => L.T("settings.group.appearance");
     public string AppearanceHint => L.T("settings.group.appearance.note");
     public string LanguageTitle => L.T("settings.language.label");
-    public string LanguageValue => L.T("settings.language.system");
+    public string LanguageValue => L.Languages.First(language => language.Code == L.Language).Name;
     private static string PlatformName => OperatingSystem.IsIOS()
         ? L.T("mobile.platform.ios")
         : OperatingSystem.IsAndroid()

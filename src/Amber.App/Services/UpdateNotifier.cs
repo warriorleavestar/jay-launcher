@@ -8,7 +8,7 @@ namespace Amber.App.Services;
 /// <summary>
 /// The automatic update check (Settings › About › "Check for a new Jay once a day"). A minute after start and then once
 /// an hour it looks whether a day has passed since the last check; if so it asks the update feed (the official releases
-/// unless the user set another address). A newer version is put on the request bar only when 2 of the 3 Jay trustees
+/// unless the user set another address). A newer version is put on the request bar only when enough Jay release keys
 /// signed it; unsigned or failed checks stay silent (Settings › About › Check for updates says why). The notice only
 /// opens the release page: Jay never downloads or installs an update by itself.
 /// </summary>

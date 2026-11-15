@@ -161,7 +161,17 @@ internal static class AndroidEmbeddedGame
     private static async Task CreateMobileOptionsIfMissingAsync(string gameRoot, CancellationToken ct)
     {
         var path = Path.Combine(gameRoot, "options.txt");
-        if (File.Exists(path)) return;
+        if (File.Exists(path))
+        {
+            var existing = await File.ReadAllTextAsync(path, ct);
+            if (existing.Split('\n').Any(line =>
+                    line.Trim().StartsWith("lang:", StringComparison.Ordinal) &&
+                    line.Trim().Length > "lang:".Length)) return;
+            await File.AppendAllTextAsync(path,
+                (existing.Length > 0 && !existing.EndsWith('\n') ? Environment.NewLine : "") +
+                "lang:zh_cn" + Environment.NewLine, ct);
+            return;
+        }
 
         const string defaults = """
             version:4671
@@ -173,6 +183,7 @@ internal static class AndroidEmbeddedGame
             entityShadows:false
             graphicsPreset:"fast"
             guiScale:3
+            lang:zh_cn
             maxFps:60
             mipmapLevels:2
             onboardAccessibility:false

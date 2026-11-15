@@ -14,7 +14,8 @@ on:
 
 # 同一个 PR 推了新提交时，取消旧提交还在排队或在跑的检查；main 和标签上的不取消
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  # Key on ref and SHA so a tag run never queues behind (or is cancelled by) a main or manual run on the same commit.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || format('{0}-{1}', github.ref, github.sha) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
@@ -96,6 +97,7 @@ jobs:
           -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
           -p:PublishReadyToRun=true -p:DebugType=none
           -o ../out/${{ matrix.rid }}
+          ${{ matrix.rid == 'win-x64' && '-p:RequireJayDns=true' || '' }}
 
       - name: Publish Jay Server (single file)
         run: >-
@@ -104,7 +106,7 @@ jobs:
           -p:DebugType=none
           -o ../out/server-${{ matrix.rid }}
 
-      # 发布包自带 EasyTier 官方安装包（校验固定的 SHA-256），网络不好也能直接用联机。
+      # 发布包自带 EasyTier 的 Jay 加固版（校验固定的 SHA-256），网络不好也能直接用联机。
       - name: Bundle EasyTier
         shell: bash
         run: bash ../scripts/bundle-easytier.sh ${{ matrix.rid }} ../out/${{ matrix.rid }}/easytier
@@ -225,8 +227,8 @@ jobs:
           -p:AndroidKeyStore=true
           -p:AndroidSigningKeyStore=${{ runner.temp }}/jay-android-preview.p12
           -p:AndroidSigningKeyAlias="$ANDROID_RELEASE_KEY_ALIAS"
-          -p:AndroidSigningStorePass="$ANDROID_RELEASE_STORE_PASSWORD"
-          -p:AndroidSigningKeyPass="$ANDROID_RELEASE_KEY_PASSWORD"
+          -p:AndroidSigningStorePass=env:ANDROID_RELEASE_STORE_PASSWORD
+          -p:AndroidSigningKeyPass=env:ANDROID_RELEASE_KEY_PASSWORD
 
       - name: Stage APK
         shell: bash
@@ -484,7 +486,8 @@ jobs:
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
-          pattern: jay-*
+          # Desktop and server packages only; the Android and iOS simulator builds are not release assets.
+          pattern: 'jay-{win,osx,linux}-*'
           path: release-assets
           merge-multiple: true
 
