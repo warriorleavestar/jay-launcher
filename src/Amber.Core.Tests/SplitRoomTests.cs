@@ -593,7 +593,7 @@ public sealed class SplitRoomTests
         var accepting = Task.Run(async () =>
         {
             try { while (true) { var c = await silent.AcceptTcpClientAsync(); lock (held) held.Add(c); } }
-            catch (Exception e) when (e is SocketException or ObjectDisposedException) { }
+            catch (Exception e) when (e is SocketException or ObjectDisposedException or InvalidOperationException) { }
         });
         var silentPort = ((IPEndPoint)silent.LocalEndpoint).Port;
         var singlePort = rig.SinglePort;
