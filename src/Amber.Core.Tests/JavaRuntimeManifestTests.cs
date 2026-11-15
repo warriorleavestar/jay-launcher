@@ -88,6 +88,7 @@ public sealed class JavaRuntimeManifestTests : IDisposable
     [Fact]
     public void AJavaWithoutAReleaseFileIsAskedForItsVersion()
     {
+        if (!EscapingJava.Runs) return;
         Assert.Equal(0, JavaFinder.MajorOf(Path.Combine(Path.GetTempPath(), "no-such-java", "bin", "java.exe")));
         // A Java home with no release file (as some older Mojang runtimes): a stand-in java that only answers the
         // version question, so the answer can only come from running it.

@@ -64,6 +64,28 @@ internal sealed class EscapingJava
         Environment.SetEnvironmentVariable(Secret, "s3cret");
     }
 
+    // Some Windows builds refuse to run any batch file inside an AppContainer ("Access is denied"), and this stand-in
+    // is a batch file there. Tests that need it to run return early on such a machine;
+    // TheProbeContainerReadsOnlyTheJavaFolder covers the container there with a real program.
+    private static readonly Lazy<bool> BatchRunsInContainer = new(() =>
+    {
+        if (!OperatingSystem.IsWindows()) return true;
+        var root = Path.Combine(Path.GetTempPath(), "amber-probe-batch-" + Guid.NewGuid().ToString("N")[..8]);
+        try
+        {
+            var exe = Path.Combine(Directory.CreateDirectory(Path.Combine(root, "bin")).FullName, "java.cmd");
+            File.WriteAllText(exe, $"@echo off\r\necho     java.version = {HonestVersion} 1>&2\r\n");
+            return JavaVersionProbe.Restricted(root, exe) is not null;
+        }
+        finally
+        {
+            try { Directory.Delete(root, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        }
+    });
+
+    /// <summary>Whether the stand-in can run in the restricted probe on this machine.</summary>
+    public static bool Runs => !OperatingSystem.IsWindows() || BatchRunsInContainer.Value;
+
     /// <summary>Where this platform has a restricted probe at all (Windows; Linux with working bubblewrap).</summary>
     public static bool ProbeAvailable => OperatingSystem.IsWindows() || OperatingSystem.IsLinux() && LinuxSandbox.Problem() is null;
 
@@ -96,6 +118,7 @@ public sealed class JavaVersionProbeTests : IDisposable
     [Fact]
     public void AJavaWithoutVersionFilesRunsOnlyInTheRestrictedProbe_WhereItsEscapesFail()
     {
+        if (!EscapingJava.Runs) return;
         var java = new EscapingJava(_root);
         var runs = JavaVersionProbe.RestrictedRuns;
         var major = JavaFinder.MajorOf(java.Java);
@@ -121,7 +144,7 @@ public sealed class JavaVersionProbeTests : IDisposable
     [Fact]
     public void TheJavaFolderIsGrantedOnlyForTheProbe()
     {
-        if (!OperatingSystem.IsWindows()) return;
+        if (!OperatingSystem.IsWindows() || !EscapingJava.Runs) return;
         var java = new EscapingJava(_root);
         AssertMajor(8, JavaFinder.MajorOf(java.Java));
         var sid = WindowsSandbox.ContainerSid(JavaVersionProbe.ContainerName);
@@ -152,6 +175,7 @@ public sealed class JavaVersionProbeTests : IDisposable
     [Fact]
     public async Task AJavaThatHangsIsStoppedInTime_AndACancelStopsTheProbe()
     {
+        if (!EscapingJava.Runs) return;
         if (!EscapingJava.ProbeAvailable) return;
         var hang = OperatingSystem.IsWindows()
             // No network in the probe (ping returns at once), so it spins instead.
@@ -221,6 +245,7 @@ public sealed class JavaVersionProbeTests : IDisposable
     [InlineData(true)]
     public async Task TheSandboxDecisionNeverRunsThePickedJavaUnrestricted(bool strong)
     {
+        if (!EscapingJava.Runs) return;
         if (!OperatingSystem.IsWindows()) return;
         var java = new EscapingJava(_root);
         using var service = Service();
@@ -292,6 +317,27 @@ public sealed class JavaVersionProbeTests : IDisposable
         BitConverter.GetBytes((ushort)0x8664).CopyTo(bytes, pe + 4);
         File.WriteAllBytes(exe, bytes);
         Assert.True(JavaVersionProbe.Is64Executable(exe));
+    }
+
+    [Fact]
+    public void TheProbeContainerReadsOnlyTheJavaFolder_AndSeesNoneOfJaysEnvironment()
+    {
+        // A real program (cmd.exe) run the way the probe runs a Java: it reads the Java folder, nothing else of the
+        // player's, cannot write outside and does not see Jay's environment.
+        if (!OperatingSystem.IsWindows()) return;
+        var java = new EscapingJava(_root);
+        var inside = Path.Combine(java.Home, "inside.txt");
+        File.WriteAllText(inside, "runtime-file");
+        var cmd = Path.Combine(Environment.SystemDirectory, "cmd.exe");
+        // Temp paths have no spaces, so cmd needs no quotes here.
+        var output = JavaVersionProbe.RunInProbeContainer([java.Home], cmd,
+            ["/d", "/c", "type", inside, "&", "type", java.Marker, "&", "echo", "escaped>" + java.Escape, "&", "set"]);
+        Assert.True(output is not null, JavaVersionProbe.LastProblem);
+        Assert.Contains("runtime-file", output);
+        Assert.DoesNotContain("only the player may read this", output);
+        Assert.DoesNotContain(EscapingJava.Secret, output);
+        java.AssertContained();
+        Assert.False(WindowsSandbox.NamesExplicitly(java.Home, WindowsSandbox.ContainerSid(JavaVersionProbe.ContainerName)));
     }
 
     private static void AssertMajor(int expected, int actual) =>

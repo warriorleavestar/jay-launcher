@@ -171,7 +171,20 @@ public static partial class JavaVersionProbe
     private static readonly string[] Arguments = ["-XshowSettings:properties", "-version"];
 
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]
-    private static string? RunWindows(string home, string exe, CancellationToken ct)
+    private static string? RunWindows(string home, string exe, CancellationToken ct) => RunInContainer(Homes(home, exe), exe, Arguments, ct);
+
+    /// <summary>Tests: runs a program of their own exactly the way the probe runs a Java, one at a time with the probe.</summary>
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    internal static string? RunInProbeContainer(IEnumerable<string> readable, string exe, IEnumerable<string> arguments, CancellationToken ct = default)
+    {
+        Gate.Wait(ct);
+        try { return RunInContainer(readable, exe, arguments, ct); }
+        finally { Gate.Release(); }
+    }
+
+    /// <summary>Runs <paramref name="exe"/> in the probe's container with read access to <paramref name="readable"/> for this run only; both outputs, or null.</summary>
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private static string? RunInContainer(IEnumerable<string> readable, string exe, IEnumerable<string> arguments, CancellationToken ct)
     {
         System.Security.Principal.SecurityIdentifier sid;
         string temp;
@@ -189,7 +202,7 @@ public static partial class JavaVersionProbe
 
         // Read access to the runtime for this run only (a Java under Program Files is readable to every container already).
         var granted = new List<string>();
-        foreach (var folder in Homes(home, exe))
+        foreach (var folder in readable)
         {
             if (WindowsSandbox.NamesExplicitly(folder, sid)) continue;
             try
@@ -209,7 +222,7 @@ public static partial class JavaVersionProbe
                 CreateNoWindow = true,
                 WorkingDirectory = temp,
             };
-            foreach (var arg in Arguments) psi.ArgumentList.Add(arg);
+            foreach (var arg in arguments) psi.ArgumentList.Add(arg);
             var system = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
             psi.Environment.Clear();
             psi.Environment["SystemRoot"] = system;

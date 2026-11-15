@@ -1286,6 +1286,7 @@ public sealed class BakeTests : IDisposable
     [Fact]
     public async Task Forge1122TellsAPickedJavaWithoutVersionFilesOnlyInTheRestrictedProbe()
     {
+        if (!EscapingJava.Runs) return;
         LegacyInstall();
         var instance = Instance("forge", "1.12.2", LegacyForge, "f1122");
         var bake = Service(LegacyLoader());
