@@ -236,7 +236,17 @@ public sealed class SplitRoomTests
             }
             Assert.True(await WaitAsync(() => rig.Server.PendingHandshakes == SplitTunnelServer.MaxPendingHandshakes, 60));
             Assert.Equal(0, rig.Server.Evicted);
-            var connector = rig.Connector(TunnelService.Game);
+            // Every leg arrives while every place is held: none starts its handshake (which frees its place) until the
+            // server has taken all of them in. Otherwise a quick first leg is done before the last one arrives, and the
+            // last one finds a free place instead of pushing a stalled leg out.
+            IReadOnlyList<Func<CancellationToken, Task<Stream>>> legs = [.. ports.Select(p => (Func<CancellationToken, Task<Stream>>)(async ct =>
+            {
+                var leg = await TunnelClient.Raw("127.0.0.1", p, ct);
+                if (!await WaitAsync(() => rig.Server.Evicted == ports.Count, 20)) throw new TimeoutException("legs not all taken in");
+                return leg;
+            }))];
+            Func<CancellationToken, Task<Stream>> single = _ => throw new InvalidOperationException("not split");
+            var connector = new SplitConnector(rig.Member, TunnelService.Game, single, legs);
             await using (var stream = await connector.OpenAsync(CancellationToken.None))
             {
                 Assert.IsType<SplitStream>(stream);
@@ -248,6 +258,8 @@ public sealed class SplitRoomTests
             }
             Assert.Equal(ports.Count, rig.Server.Evicted);
             Assert.True(rig.Server.PendingHandshakes <= SplitTunnelServer.MaxPendingHandshakes);
+            // The ones that made room are the oldest stalled legs.
+            Assert.True(await WaitAsync(() => idle.Take(ports.Count).All(IsClosed)));
         }
         finally
         {
@@ -311,6 +323,13 @@ public sealed class SplitRoomTests
         var connector = rig.Connector(TunnelService.Game);
         await using var stream = await connector.OpenAsync(CancellationToken.None);
         Assert.IsType<SplitStream>(stream);
+    }
+
+    /// <summary>The other end closed this connection (an orderly close or a reset; it never sends anything).</summary>
+    private static bool IsClosed(TcpClient client)
+    {
+        try { return client.Client.Poll(0, SelectMode.SelectRead) && client.Client.Available == 0; }
+        catch (Exception e) when (e is SocketException or ObjectDisposedException) { return true; }
     }
 
     private static async Task<bool> WaitAsync(Func<bool> condition, int seconds = 5)
