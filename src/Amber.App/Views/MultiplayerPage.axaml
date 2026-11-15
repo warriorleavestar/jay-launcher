@@ -374,9 +374,10 @@
             <Border x:Name="JoinCard" Grid.ColumnSpan="3" Classes="card" Margin="0">
               <StackPanel Spacing="8">
                 <TextBlock Classes="h2" Text="{l:T multiplayer.lobby.join_title}" Margin="0" />
-                <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.lobby.join_hint}" />
-                <!-- One box for every code; pasted codes are masked until "show". -->
-                <Grid ColumnDefinitions="*,Auto">
+                <TextBlock x:Name="JoinHintText" Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.lobby.join_hint}" />
+                <!-- One box for every code; pasted codes are masked until "show". Capped so it stays readable on wide windows. -->
+                <Grid>
+                  <Grid.ColumnDefinitions><ColumnDefinition Width="*" MaxWidth="640" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                   <TextBox x:Name="JoinCodeBox" Text="{Binding JoinCode}" PlaceholderText="{l:T multiplayer.join.code_placeholder}" PasswordChar="•" RevealPassword="{Binding JoinCodeShown}"
                            c:EnterSubmit.Command="{Binding JoinCommand}" />
                   <Button Grid.Column="1" Command="{Binding ToggleJoinCodeShownCommand}" Margin="6,0,0,0" VerticalAlignment="Top">
@@ -426,7 +427,7 @@
                   </ComboBox>
                   <Button Grid.Column="2" Content="{l:T common.find}" Command="{Binding ScanCommand}" Margin="6,0,0,0" ToolTip.Tip="{l:T multiplayer.lan.scan_tooltip}" />
                 </Grid>
-                <TextBlock FontSize="12" TextWrapping="Wrap" Text="{Binding GameStatusText}" Classes.hint="{Binding HasHostGame}" />
+                <TextBlock FontSize="12" TextWrapping="Wrap" Text="{Binding GameStatusText}" Classes.hint="{Binding HasHostGame}" MaxWidth="720" HorizontalAlignment="Left" />
 
                 <!-- Opening a room asks four things. Each has a default; what cannot be picked now is greyed out with the reason. -->
                 <Grid x:Name="OpenChoicesGrid" ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="6" ColumnSpacing="10">

@@ -44,6 +44,10 @@ public static class ThemeSlots
     /// <summary>In the order the "make a theme from pictures" panel lists them.</summary>
     public static readonly string[] All = [Background, Sidebar, Mascot, Banner];
 
+    /// <summary>Reserved for a later version: a 3D or pseudo-3D scene behind the pages. Read past without a problem.</summary>
+    public const string Scene = "scene";
+    public static readonly string[] Reserved = [Scene];
+
     public const double MaxDim = 0.9;
     public const double MaxBlur = 40;
     public const double MinMascotSize = 0.15;
@@ -66,6 +70,7 @@ public static class ThemeSlots
         foreach (var p in slots.EnumerateObject())
         {
             var where = "slots." + p.Name;
+            if (Reserved.Contains(p.Name)) { pack.ReservedKeys.Add(where); continue; }
             if (!All.Contains(p.Name)) { pack.Problems.Add(new("unknown_key", where)); continue; }
             var s = p.Value;
             if (s.ValueKind != JsonValueKind.Object || !s.TryGetProperty("image", out var img) || img.ValueKind != JsonValueKind.String)

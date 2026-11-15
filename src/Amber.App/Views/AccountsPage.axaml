@@ -22,6 +22,11 @@
     <Style Selector="Border#AddCard Button /template/ ContentPresenter">
       <Setter Property="TextWrapping" Value="Wrap" />
     </Style>
+    <!-- Explanations stay at a readable line length on wide windows -->
+    <Style Selector="TextBlock.hint[TextWrapping=Wrap]">
+      <Setter Property="MaxWidth" Value="720" />
+      <Setter Property="HorizontalAlignment" Value="Left" />
+    </Style>
     <!-- The other cards can be narrow too (expanded sidebar beside a small content area): their buttons wrap the same way. -->
     <Style Selector="Border.card Button /template/ ContentPresenter">
       <Setter Property="TextWrapping" Value="Wrap" />

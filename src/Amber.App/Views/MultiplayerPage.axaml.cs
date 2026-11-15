@@ -34,6 +34,8 @@ public partial class MultiplayerPage : UserControl
             LessonDrawer.HorizontalAlignment = DiagnosticsDrawer.HorizontalAlignment;
             // Pictures hide in short windows (official §4.9).
             LessonArt.IsVisible = e.NewSize.Height >= 560;
+            // Short windows: the join explanation folds away so "open a room" and its button come up higher.
+            JoinHintText.IsVisible = e.NewSize.Height >= 620;
         };
         foreach (var box in (ComboBox[])[OpenWhoBox, OpenRouteBox, OpenProtectionBox, OpenScopeBox]) box.SelectionChanged += OnOpenChoiceChanged;
         AddHandler(KeyDownEvent, OnRoomKeyDown, Avalonia.Interactivity.RoutingStrategies.Tunnel);

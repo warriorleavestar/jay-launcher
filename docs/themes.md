@@ -112,6 +112,17 @@ JSON 里可以写 `//` 注释和结尾逗号。每一部分都可选，没写的
 - 写了 `slots.background` 时它优先；旧的 `background` 照样能用（相当于 `dim = 1 - opacity`）。用图片做主题时 Jay 两个都写，旧版 Jay 读不懂 `slots` 也能显示背景。
 - 立绘和背景都在内容后面，画不到锁定的安全界面和侧栏的隐私行上。
 
+### Reserved for later: `motion3d` and the `scene` slot
+
+Two names are reserved for pseudo-3D motion and 3D scenes, which a later Jay will read. This version reads past
+them without a problem, so a pack written for that later Jay still loads here:
+
+- `tokens.json` → `"motion3d"`: tilt, depth and timing for page and card motion. Data only, never code or shaders.
+- `slots` → `"scene"`: a scene behind the pages.
+
+Whatever they will hold, reduced motion turns all of it off, and safety surfaces (knock, file offer, privacy row)
+stay flat and unthemed.
+
 ### 颜色名
 
 format 2 的名字和 format 1 的名字都认（左边是 format 2 写法，括号里是 format 1 的旧名字，同一个颜色）：

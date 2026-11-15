@@ -2,7 +2,7 @@
 id: friends
 category: multiplayer
 routes: people, people/*
-related: knock, multiplayer, child-mode, accounts
+related: knock, multiplayer, files-remote, child-mode, accounts
 ---
 
 # 朋友
@@ -16,6 +16,7 @@ related: knock, multiplayer, child-mode, accounts
 - 邀请：先开一个房间，再点【邀请到我的房间】。对话里会记一行，后面写已寄出、已送达，或者还没送到。
 - 进 TA 的房间：TA 邀请你以后，这里会出现【加入“房间名”】。
 - 发消息：现在只有两人在同一个房间里时才能发。不在一起时输入框是灰的，下面写着原因。
+- 发文件：点输入框左边的回形针，或者把文件拖到对话上。不在同一个房间时文件先在你电脑上排着，碰面后自动发出。见[传文件和远程协助](help:files-remote)。
 - **TA 敲门直接进**：打开后，TA 拿着你任何一张还有效的邀请敲门，不用先问你。原来的“信任的人”名单就是这个开关。
 - 备份和恢复朋友列表：右上角的【⋯】。备份用你的 Jay 账户锁着。
 
