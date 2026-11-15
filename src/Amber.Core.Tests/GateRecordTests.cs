@@ -242,6 +242,36 @@ public sealed class GateRecordTests : IAsyncLifetime
         }
     }
 
+    /// <summary>A join still waiting for a slow network is given up when the setting changes, and the new one is joined.</summary>
+    [Fact]
+    public async Task ASettingChangeEndsAJoinStillWaiting()
+    {
+        _store.EnableRecords("jay");
+        var calls = 0;
+        var firstCancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var log = new List<string>();
+        var published = L.F("core.gate.record.published", GateRecordPublisher.Profile("jay").Name);
+        await using (GateRecordPublisher.Start(_store, _store.LoadConfig(), async (_, ct) =>
+        {
+            if (Interlocked.Increment(ref calls) == 1)
+            {
+                try { await Task.Delay(Timeout.Infinite, ct); }
+                finally { firstCancelled.TrySetResult(); }
+            }
+            return new FakeJoined(Directories());
+        }, line => { lock (log) log.Add(line); }, TimeSpan.FromMilliseconds(50), TimeSpan.FromHours(1)))
+        {
+            await Until(() => Task.FromResult(Volatile.Read(ref calls) == 1));
+            _store.DisableRecords();
+            _store.EnableRecords("jay");
+            await firstCancelled.Task.WaitAsync(TimeSpan.FromSeconds(15));
+            await Until(() => { lock (log) return Task.FromResult(log.Contains(published)); });
+            Assert.Equal(2, Volatile.Read(ref calls));
+            // Giving up on a join is not a failure.
+            lock (log) Assert.DoesNotContain(log, l => l.StartsWith(L.F("core.gate.record.failed", "").TrimEnd(), StringComparison.Ordinal));
+        }
+    }
+
     /// <summary>A running gate follows records on/off and republishes when its entries change, without a restart.</summary>
     [Fact]
     public async Task RunningPublisherFollowsTheRecordsSetting()

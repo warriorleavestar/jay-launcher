@@ -1134,8 +1134,8 @@ public static class Program
                 var open = store.OpenInvitesFor(name);
                 if (n > 0 && open.Count > 0)
                 {
-                    // Invites made before the revoke now only serve devices they turned away for the device limit.
-                    output.WriteLine($"{name} 还有没用完的邀请（之前因设备满了被拒的设备仍可以用它们重试，新设备不行）：");
+                    // Invites made before the revoke add no device any more: they only let devices still on the name enroll again.
+                    output.WriteLine($"{name} 还有没用完的邀请（只能让还在名下的设备重新登记，不能再添设备；换设备请发新邀请：jay-server invite {name}）：");
                     foreach (var i in open)
                         output.WriteLine($"    {i.Id}  剩 {i.UsesLeft} 次  到期 {i.Expires.ToLocalTime():yyyy-MM-dd HH:mm}");
                     output.WriteLine("不想让它们再用，就作废：jay-server cancel-invite <编号>");

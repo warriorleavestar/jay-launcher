@@ -140,7 +140,10 @@ public sealed class GateRecordPublisher : IAsyncDisposable
                     {
                         if (joined is null)
                         {
-                            joined = await join(network, ct);
+                            // Joining can take minutes when the network is slow to answer: a change of the record setting
+                            // meanwhile ends this attempt, and the next round starts on the new setting at once.
+                            joined = await JoinUnlessChangedAsync(store, join, network, state.RecordChanges, poll, ct);
+                            if (joined is null) continue;
                             joinedNetwork = network;
                         }
                         var content = Content(store, config, state);
@@ -170,6 +173,50 @@ public sealed class GateRecordPublisher : IAsyncDisposable
         {
             Leave();
         }
+    }
+
+    /// <summary>
+    /// Joins <paramref name="network"/>, or gives up and returns null when the record setting changes before the join is
+    /// done (records turned off, turned off and on again, or moved to another network).
+    /// </summary>
+    private static async Task<IJoined?> JoinUnlessChangedAsync(GateStore store, Func<string, CancellationToken, Task<IJoined>> join,
+        string network, int changes, TimeSpan poll, CancellationToken ct)
+    {
+        using var superseded = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var watch = WatchSettingAsync(store, network, changes, poll, superseded);
+        try
+        {
+            return await join(network, superseded.Token);
+        }
+        catch (Exception) when (!ct.IsCancellationRequested && superseded.IsCancellationRequested)
+        {
+            return null;
+        }
+        finally
+        {
+            await superseded.CancelAsync();
+            await watch;
+        }
+    }
+
+    private static async Task WatchSettingAsync(GateStore store, string network, int changes, TimeSpan poll, CancellationTokenSource superseded)
+    {
+        try
+        {
+            while (true)
+            {
+                await Task.Delay(poll, superseded.Token);
+                GateState state;
+                try { state = store.Read(); }
+                catch (Exception e) when (e is not OperationCanceledException) { continue; }
+                if (state.RecordNetwork != network || state.RecordChanges != changes)
+                {
+                    await superseded.CancelAsync();
+                    return;
+                }
+            }
+        }
+        catch (OperationCanceledException) { }
     }
 
     public async ValueTask DisposeAsync()

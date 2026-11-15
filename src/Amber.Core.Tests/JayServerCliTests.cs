@@ -128,6 +128,9 @@ public sealed class JayServerCliTests
             var text = output.ToString();
             Assert.Contains(id, text);
             Assert.Contains("cancel-invite", text);
+            // Older invites no longer add a device after a revoke: the hint points to a new invite, not to retrying.
+            Assert.Contains("jay-server invite Steve", text);
+            Assert.DoesNotContain("重试", text);
             Assert.DoesNotContain(alex, text);
 
             output.GetStringBuilder().Clear();
