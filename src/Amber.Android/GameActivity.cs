@@ -623,7 +623,9 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
             var bounds = new RectF(x + col * cell - cell * 0.48f, y + row * cell - cell * 0.48f,
                 x + col * cell + cell * 0.48f, y + row * cell + cell * 0.48f);
             var active = _router.IsPressed(TouchControlAction.Move) && col * moveX + row * moveY > 0.45;
-            DrawBlockButton(canvas, bounds, active, cell * 0.08f);
+            // Direction cells sit next to one another, so an offset drop shadow reads as a
+            // second copy of the pad on translucent HUDs. Keep these deliberately single-layer.
+            DrawBlockButton(canvas, bounds, active, cell * 0.08f, castShadow: false);
             DrawDirectionGlyph(canvas, x + col * cell, y + row * cell, col, row, cell * 0.28f);
         }
     }
@@ -764,26 +766,35 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         var bounds = new RectF((float)Math.Round(x - halfWidth), (float)Math.Round(y - halfHeight),
             (float)Math.Round(x + halfWidth), (float)Math.Round(y + halfHeight));
         bounds.Offset(0, pressOffset);
-        DrawBlockButton(canvas, bounds, pressed, radius * 0.10f);
+        var castShadow = !(_profile.Mode == TouchControlMode.DPadAndTap &&
+            control.Action == TouchControlAction.Sneak);
+        DrawBlockButton(canvas, bounds, pressed, radius * 0.10f, castShadow);
         DrawGlyph(canvas, control.Action, x, y + pressOffset,
             Math.Min(halfWidth, halfHeight) * 0.68f, label);
     }
 
-    private void DrawBlockButton(Canvas canvas, RectF bounds, bool pressed, float depth)
+    private void DrawBlockButton(Canvas canvas, RectF bounds, bool pressed, float depth,
+        bool castShadow = true)
     {
-        var shadow = new RectF(bounds);
-        shadow.Offset(Math.Max(2, depth * 0.7f), Math.Max(3, depth));
-        canvas.DrawRect(shadow, _buttonShadow);
+        if (castShadow)
+        {
+            var shadow = new RectF(bounds);
+            shadow.Offset(Math.Max(2, depth * 0.7f), Math.Max(3, depth));
+            canvas.DrawRect(shadow, _buttonShadow);
+        }
         canvas.DrawRect(bounds, pressed ? _buttonPressed : _buttonFace);
         _buttonBorder.SetStyle(Paint.Style.Stroke);
         _buttonBorder.StrokeWidth = Math.Max(2, depth * 0.24f);
         canvas.DrawRect(bounds, _buttonBorder);
-        _buttonHighlight.StrokeWidth = Math.Max(1, depth * 0.20f);
-        var inset = Math.Max(2, depth * 0.30f);
-        canvas.DrawLine(bounds.Left + inset, bounds.Top + inset,
-            bounds.Right - inset, bounds.Top + inset, _buttonHighlight);
-        canvas.DrawLine(bounds.Left + inset, bounds.Top + inset,
-            bounds.Left + inset, bounds.Bottom - inset, _buttonHighlight);
+        if (castShadow)
+        {
+            _buttonHighlight.StrokeWidth = Math.Max(1, depth * 0.20f);
+            var inset = Math.Max(2, depth * 0.30f);
+            canvas.DrawLine(bounds.Left + inset, bounds.Top + inset,
+                bounds.Right - inset, bounds.Top + inset, _buttonHighlight);
+            canvas.DrawLine(bounds.Left + inset, bounds.Top + inset,
+                bounds.Left + inset, bounds.Bottom - inset, _buttonHighlight);
+        }
     }
 
     private void DrawGlyph(Canvas canvas, TouchControlAction action, float x, float y, float size, string fallback)
