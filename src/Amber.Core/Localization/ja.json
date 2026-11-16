@@ -1159,6 +1159,7 @@
   "content.install.shared_hint": "「インスタンスごとに分離」がオフのため、すべてのインスタンスが共有するフォルダーに入ります。選んだインスタンスは対応するゲームバージョンとローダーの絞り込みにだけ使います。",
   "home.button.need_account": "先にアカウントを追加",
   "home.button.need_instance": "先にゲームをインストール",
+  "home.button.installing": "インストール中…（クリックでキャンセル）",
   "home.button.resume_install": "インストールを再開",
   "home.button.repair": "修復して起動",
   "home.button.cancel_launch": "起動をキャンセル",

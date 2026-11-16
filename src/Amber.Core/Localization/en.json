@@ -1188,6 +1188,7 @@
   "content.install.shared_hint": "\"Separate folder per instance\" is off, so this goes into the folder all instances share. The selected instance is only used to filter compatible game versions and loaders.",
   "home.button.need_account": "Add an account first",
   "home.button.need_instance": "Install a game first",
+  "home.button.installing": "Installing… (click to cancel)",
   "home.button.resume_install": "Resume install",
   "home.button.repair": "Repair and play",
   "home.button.cancel_launch": "Cancel launch",

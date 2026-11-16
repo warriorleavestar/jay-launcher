@@ -1130,6 +1130,7 @@
   "content.install.shared_hint": "「各實例分夾」已閉，將置於諸實例共之目錄。所擇之實例，唯以篩相容之戲版與載入器。",
   "home.button.need_account": "先增籍",
   "home.button.need_instance": "先置戲",
+  "home.button.installing": "方置戲…（點此可止）",
   "home.button.resume_install": "續置",
   "home.button.repair": "修而啟之",
   "home.button.cancel_launch": "罷啟",

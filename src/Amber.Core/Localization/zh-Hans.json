@@ -1159,6 +1159,7 @@
   "content.install.shared_hint": "“按实例分开文件夹”已关闭，会装进所有实例共用的目录。选的实例只用来筛选兼容的游戏版本和加载器。",
   "home.button.need_account": "先添加账号",
   "home.button.need_instance": "先安装游戏",
+  "home.button.installing": "正在安装…（点此取消）",
   "home.button.resume_install": "继续安装",
   "home.button.repair": "修复后启动",
   "home.button.cancel_launch": "取消启动",

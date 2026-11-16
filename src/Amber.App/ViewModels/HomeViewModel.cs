@@ -312,6 +312,10 @@ public sealed partial class HomeViewModel : PageViewModel
         _service = service;
         _log = log;
         Onboarding = new OnboardingViewModel(service);
+        Onboarding.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(OnboardingViewModel.IsInstalling)) Dispatcher.UIThread.Post(UpdateRunState);
+        };
         service.InstalledVersionsChanged += () => Dispatcher.UIThread.Post(RefreshVersions);
         service.AccountsChanged += RefreshAccounts;
         service.LaunchRequested += request => Dispatcher.UIThread.Post(() => _ = RunAsync(request));
@@ -444,6 +448,7 @@ public sealed partial class HomeViewModel : PageViewModel
     {
         if (run is not null)
             return run.Game is null ? "home.button.cancel_launch" : run.Exiting ? "home.button.exiting" : "home.button.exit_game";
+        if (Onboarding.IsInstalling) return "home.button.installing";
         if (SelectedAccount is null) return "home.button.need_account";
         if (SelectedVersion is not { } id) return "home.button.need_instance";
         return _service.Directory.StateOf(id) switch
@@ -469,6 +474,11 @@ public sealed partial class HomeViewModel : PageViewModel
             else if (!run.Exiting) ExitGame(run);
             return;
         }
+        if (Onboarding.IsInstalling)
+        {
+            Onboarding.CancelInstallCommand.Execute(null);
+            return;
+        }
         if (SelectedAccount is null)
         {
             Toasts.Show(L.T("home.status.account_required"), Avalonia.Controls.Notifications.NotificationType.Warning);
@@ -477,10 +487,44 @@ public sealed partial class HomeViewModel : PageViewModel
         }
         if (SelectedVersion is not { } id)
         {
-            NavigateToNewInstance?.Invoke();
+            // Fast path from the Library: install the latest release here and surface it in the inline task card.
+            // "New instance" remains available when an older version, loader or mods need to be chosen.
+            if (Onboarding.LatestRelease is { } latest)
+                await InstallDefaultAsync(latest);
+            else
+            {
+                Onboarding.EnsureLoaded();
+                Toasts.Show(L.T("onboarding.install.latest_loading"), Avalonia.Controls.Notifications.NotificationType.Information);
+            }
             return;
         }
         await RunAsync(new LaunchRequest(id));
+    }
+
+    private async Task InstallDefaultAsync(string version)
+    {
+        var task = _service.Tasks.Track("install", L.F("activity.kind.install", version),
+            () => Onboarding.CancelInstallCommand.Execute(null), $"install:{version}");
+        void Report(object? _, System.ComponentModel.PropertyChangedEventArgs e)
+        {
+            if (e.PropertyName is not (nameof(OnboardingViewModel.Progress) or nameof(OnboardingViewModel.ProgressIndeterminate)
+                or nameof(OnboardingViewModel.StageText) or nameof(OnboardingViewModel.DetailText))) return;
+            var detail = string.Join(" · ", new[] { Onboarding.StageText, Onboarding.DetailText }.Where(text => !string.IsNullOrWhiteSpace(text)));
+            task.Report(Onboarding.ProgressIndeterminate ? null : Onboarding.Progress / 100.0, detail);
+        }
+        Onboarding.PropertyChanged += Report;
+        try
+        {
+            var id = await Onboarding.InstallAsync(version, Onboarding.WithFabric ? LoaderKind.Fabric : null, fallbackToVanilla: true);
+            if (id is not null) task.Succeed(Onboarding.Message?.Text);
+            else if (task.CancelRequested) task.Cancelled();
+            else task.Fail(Onboarding.Message?.Text ?? L.T("common.install_failed"));
+        }
+        finally
+        {
+            Onboarding.PropertyChanged -= Report;
+            if (task.IsRunning) task.Cancelled();
+        }
     }
 
     /// <summary>

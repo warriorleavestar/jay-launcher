@@ -78,6 +78,7 @@ internal sealed partial class SelfTest
             Check("游戏下载：游戏库下方出现真实任务进度条", library.HasActiveTasks && inlineLine is not null
                 && inlineLine.Percent == 42 && inlineLine.Step == "126/300 个文件" && inlineLine.CanCancel,
                 $"tasks={library.ActiveTasks.Count} percent={inlineLine?.Percent} step={inlineLine?.Step}");
+            page?.InlineTasks.BringIntoView();
             await ShotAsync("library-download-progress");
             downloadTask.Succeed();
             await WaitAsync(() => !library.HasActiveTasks, 3);

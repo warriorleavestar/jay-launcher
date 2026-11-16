@@ -5,7 +5,7 @@ using Amber.Core.Net;
 namespace Amber.Core.Java;
 
 /// <summary>按版本要求找 Java：本机有完全匹配的就用，没有就下载 Mojang 运行时，最后才退而用更高版本。</summary>
-public sealed class JavaManager(Downloader downloader, GameDirectory dir)
+public sealed class JavaManager(Downloader downloader, GameDirectory dir, string? sharedRoot = null)
 {
     private readonly SemaphoreSlim _lock = new(1, 1);
     private List<JavaInstall>? _cache;
@@ -18,7 +18,16 @@ public sealed class JavaManager(Downloader downloader, GameDirectory dir)
     public async Task<List<JavaInstall>> ScanAsync(bool refresh = false)
     {
         if (_cache is null || refresh)
-            _cache = await Task.Run(() => JavaFinder.FindAll(dir.Root));
+            _cache = await Task.Run(() =>
+            {
+                var found = JavaFinder.FindAll(dir.Root);
+                // Jay's runtime cache is shared between game-library folders. Keep scanning the current game folder
+                // too so runtimes installed by older builds are reused instead of downloaded again.
+                if (!string.IsNullOrWhiteSpace(sharedRoot)
+                    && !Path.GetFullPath(sharedRoot).Equals(Path.GetFullPath(dir.Root), OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+                    found.AddRange(JavaFinder.FindAll(sharedRoot));
+                return found.DistinctBy(java => Path.GetFullPath(java.JavaPath), OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal).ToList();
+            });
         return _cache;
     }
 
@@ -40,7 +49,7 @@ public sealed class JavaManager(Downloader downloader, GameDirectory dir)
                 try
                 {
                     Status?.Report(L.F("core.java.manager.downloading", major));
-                    var runtime = new JavaRuntimeInstaller(downloader, dir.Root);
+                    var runtime = new JavaRuntimeInstaller(downloader, string.IsNullOrWhiteSpace(sharedRoot) ? dir.Root : sharedRoot);
                     var path = await runtime.InstallAsync(component, major, new Progress<DownloadProgress>(p =>
                         Status?.Report(L.F("core.java.manager.downloadprogress", major, p.CompletedFiles, p.TotalFiles))), ct);
                     await ScanAsync(true);

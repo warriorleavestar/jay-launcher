@@ -1159,6 +1159,7 @@
   "content.install.shared_hint": "「依實例分開資料夾」已關閉，會裝進所有實例共用的目錄。選的實例只用來篩選相容的遊戲版本和載入器。",
   "home.button.need_account": "先新增帳號",
   "home.button.need_instance": "先安裝遊戲",
+  "home.button.installing": "正在安裝…（點此取消）",
   "home.button.resume_install": "繼續安裝",
   "home.button.repair": "修復後啟動",
   "home.button.cancel_launch": "取消啟動",
