@@ -19,7 +19,6 @@ public sealed partial class LibraryCard(LibraryEntry entry, int modCount, double
     public string Id => Entry.Id;
     public string Name => Entry.Name;
     public int ModCount { get; } = modCount;
-    public string Initial => CoverArt.InitialOf(Entry.Name);
     public int CoverSlot => CoverArt.SlotFor(Entry.Id);
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasCoverImage))]

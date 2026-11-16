@@ -82,14 +82,10 @@
                 </LinearGradientBrush>
               </Border.Background>
             </Border>
-            <TextBlock Classes="initial" Text="{Binding Continue.Initial}" FontSize="120" Opacity="0.14" Foreground="#FFFFFF"
-                       HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,24,0" IsHitTestVisible="False"
-                       IsVisible="{Binding !Continue.HasCoverImage}" />
             <Grid x:Name="ContinueContent" ColumnDefinitions="Auto,*" Margin="20,16" ColumnSpacing="16">
               <Border x:Name="ContinueThumb" Classes="cover" Width="88" Height="88" IsVisible="False" VerticalAlignment="Top" ClipToBounds="True"
                       Background="{Binding Continue.CoverSlot, Converter={x:Static v:CoverBrush.Instance}, FallbackValue={x:Null}}">
                 <Panel>
-                  <TextBlock Classes="initial" Text="{Binding Continue.Initial}" FontSize="40" IsVisible="{Binding !Continue.HasCoverImage}" />
                   <Image Source="{Binding Continue.CoverImage}" Stretch="UniformToFill" IsVisible="{Binding Continue.HasCoverImage}" />
                 </Panel>
               </Border>
@@ -182,7 +178,6 @@
                     <StackPanel>
                       <Border Classes="cover" Height="104" CornerRadius="10,10,0,0" ClipToBounds="True" Background="{Binding CoverSlot, Converter={x:Static v:CoverBrush.Instance}}">
                         <Panel>
-                          <TextBlock Classes="initial" Text="{Binding Initial}" FontSize="44" IsVisible="{Binding !HasCoverImage}" />
                           <Image Source="{Binding CoverImage}" Stretch="UniformToFill" IsVisible="{Binding HasCoverImage}" />
                         </Panel>
                       </Border>
@@ -222,7 +217,6 @@
                   <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
                     <Border Classes="cover" Width="40" Height="40" ClipToBounds="True" Background="{Binding CoverSlot, Converter={x:Static v:CoverBrush.Instance}}">
                       <Panel>
-                        <TextBlock Classes="initial" Text="{Binding Initial}" FontSize="18" IsVisible="{Binding !HasCoverImage}" />
                         <Image Source="{Binding CoverImage}" Stretch="UniformToFill" IsVisible="{Binding HasCoverImage}" />
                       </Panel>
                     </Border>
