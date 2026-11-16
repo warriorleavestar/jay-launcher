@@ -400,7 +400,7 @@
                       <Path Classes="icon" Data="{StaticResource Icon.Close}" Width="18" Height="18" />
                     </Button>
                   </Grid>
-                  <ListBox x:Name="ActivityTabsPart" DockPanel.Dock="Top" Classes="subtabs" ItemsSource="{Binding Activity.TabOptions}" SelectedIndex="{Binding Activity.Tab}"
+                  <ListBox x:Name="ActivityTabsPart" DockPanel.Dock="Top" Classes="subtabs activity-tabs" ItemsSource="{Binding Activity.TabOptions}" SelectedIndex="{Binding Activity.Tab}"
                            Background="Transparent" Margin="-4,0,0,8" ScrollViewer.HorizontalScrollBarVisibility="Auto">
                     <ListBox.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" Spacing="4" /></ItemsPanelTemplate></ListBox.ItemsPanel>
                     <ListBox.ItemTemplate>
@@ -422,7 +422,7 @@
                           <ItemsControl.ItemTemplate>
                             <DataTemplate DataType="vm:TaskItem">
                               <Border Classes="card" Padding="12" Margin="0,0,0,8">
-                                <Panel>
+                                <StackPanel Spacing="8">
                                   <!-- Running: the one progress line. Finished: the name and how it ended. -->
                                   <c:ProgressLine Title="{Binding Title}" Step="{Binding Step}" Percent="{Binding Percent}" IsIndeterminate="{Binding Indeterminate}"
                                                   BytesPerSecond="{Binding Speed}" Remaining="{Binding Remaining}"
@@ -431,7 +431,31 @@
                                     <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Title}" />
                                     <TextBlock Text="{Binding Detail}" Classes="hint" Classes.error="{Binding IsFailed}" TextWrapping="Wrap" />
                                   </StackPanel>
-                                </Panel>
+                                  <Button Classes="ghost small" HorizontalAlignment="Left" Padding="4,2"
+                                          Content="{Binding DetailsLabel}" Command="{Binding ToggleDetailsCommand}"
+                                          IsVisible="{Binding HasFiles}" />
+                                  <Border Background="{DynamicResource SurfaceMuted}" CornerRadius="6" Padding="8"
+                                          IsVisible="{Binding IsExpanded}">
+                                    <StackPanel Spacing="5">
+                                      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                        <TextBlock Text="{l:T activity.task.downloading_files}" Classes="hint" FontSize="12" />
+                                        <TextBlock Grid.Column="1" Text="{Binding DownloadSpeedText}" Classes="hint"
+                                                   FontSize="12" FontWeight="SemiBold" />
+                                      </Grid>
+                                      <ItemsControl ItemsSource="{Binding ActiveFiles}">
+                                        <ItemsControl.ItemTemplate>
+                                          <DataTemplate>
+                                            <Grid ColumnDefinitions="Auto,*" ColumnSpacing="7">
+                                              <Border Width="6" Height="6" CornerRadius="3" Background="{DynamicResource Accent}" VerticalAlignment="Center" />
+                                              <TextBlock Grid.Column="1" Text="{Binding}" FontFamily="{DynamicResource FontMono}"
+                                                         FontSize="12" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding}" />
+                                            </Grid>
+                                          </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                      </ItemsControl>
+                                    </StackPanel>
+                                  </Border>
+                                </StackPanel>
                               </Border>
                             </DataTemplate>
                           </ItemsControl.ItemTemplate>

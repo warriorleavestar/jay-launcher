@@ -60,7 +60,7 @@ jobs:
       fail-fast: false
       matrix:
         # PR 上不打 Intel Mac 包（GitHub 免费账号 Mac 机器很少，排队最久）；main 和发版标签照常打全部五个平台。
-        include: ${{ fromJSON(github.event_name == 'pull_request' && '[{"os":"windows-latest","rid":"win-x64","archive":"zip"},{"os":"macos-15","rid":"osx-arm64","archive":"tar"},{"os":"ubuntu-latest","rid":"linux-x64","archive":"tar"},{"os":"ubuntu-24.04-arm","rid":"linux-arm64","archive":"tar"}]' || '[{"os":"windows-latest","rid":"win-x64","archive":"zip"},{"os":"macos-15-intel","rid":"osx-x64","archive":"tar"},{"os":"macos-15","rid":"osx-arm64","archive":"tar"},{"os":"ubuntu-latest","rid":"linux-x64","archive":"tar"},{"os":"ubuntu-24.04-arm","rid":"linux-arm64","archive":"tar"}]') }}
+        include: ${{ fromJSON(github.event_name == 'pull_request' && '[{"os":"windows-latest","rid":"win-x64","archive":"zip"},{"os":"macos-15","rid":"osx-arm64","archive":"dmg"},{"os":"ubuntu-latest","rid":"linux-x64","archive":"tar"},{"os":"ubuntu-24.04-arm","rid":"linux-arm64","archive":"tar"}]' || '[{"os":"windows-latest","rid":"win-x64","archive":"zip"},{"os":"macos-15-intel","rid":"osx-x64","archive":"dmg"},{"os":"macos-15","rid":"osx-arm64","archive":"dmg"},{"os":"ubuntu-latest","rid":"linux-x64","archive":"tar"},{"os":"ubuntu-24.04-arm","rid":"linux-arm64","archive":"tar"}]') }}
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -122,7 +122,17 @@ jobs:
           Copy-Item ../docs/network-server.md ../out/server-${{ matrix.rid }}/
           Compress-Archive -Path ../out/server-${{ matrix.rid }}/* -DestinationPath ../packages/JayServer-${{ matrix.rid }}.zip
 
-      - name: Package macOS/Linux
+      - name: Package macOS app and DMG
+        if: matrix.archive == 'dmg'
+        shell: bash
+        run: |
+          find ../out/${{ matrix.rid }} -name '*.pdb' -delete
+          bash ../scripts/publish-macos.sh "${{ matrix.rid }}" "../out/${{ matrix.rid }}" "../packages"
+          chmod +x ../out/server-${{ matrix.rid }}/jay-server
+          cp ../server/README.md ../docs/network-server.md ../out/server-${{ matrix.rid }}/
+          tar -C ../out/server-${{ matrix.rid }} -czf ../packages/JayServer-${{ matrix.rid }}.tar.gz .
+
+      - name: Package Linux
         if: matrix.archive == 'tar'
         shell: bash
         run: |
@@ -130,7 +140,7 @@ jobs:
           find ../out/${{ matrix.rid }} -name '*.pdb' -delete
           chmod +x ../out/${{ matrix.rid }}/Jay
           # Linux 版内置了思源黑体，按 OFL 附上许可证。
-          if [[ "${{ matrix.rid }}" == linux-* ]]; then cp Amber.App/Assets/Fonts/OFL.txt ../out/${{ matrix.rid }}/NotoSansSC-OFL.txt; fi
+          cp Amber.App/Assets/Fonts/OFL.txt ../out/${{ matrix.rid }}/NotoSansSC-OFL.txt
           tar -C ../out/${{ matrix.rid }} -czf ../packages/Jay-${{ matrix.rid }}.tar.gz .
           chmod +x ../out/server-${{ matrix.rid }}/jay-server
           cp ../server/README.md ../server/jay-server.service ../server/jay-public-node.service ../server/install-network-node.sh ../docs/network-server.md ../out/server-${{ matrix.rid }}/

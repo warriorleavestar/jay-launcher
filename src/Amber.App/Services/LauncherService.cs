@@ -207,7 +207,9 @@ public sealed class LauncherService : IDisposable
             Hashes = new HashCache(Path.Combine(Settings.GameDirectory, ".amber-hashes")),
         };
         var installer = new VanillaInstaller(downloader, directory);
-        var java = new JavaManager(downloader, directory) { AutoDownload = Settings.AutoJavaDownload };
+        // Java belongs to Jay, not to one library folder. Share it when the player switches game directories;
+        // JavaManager still scans the game folder as a migration fallback for runtimes from older builds.
+        var java = new JavaManager(downloader, directory, AppSettings.DataDir) { AutoDownload = Settings.AutoJavaDownload };
         var loaders = new LoaderContext(downloader, directory, installer, java.ForMajorAsync);
         Modrinth = new ModrinthProvider(_http);
         NetworkPolicy.Register(Settings.CurseForgeApiRoot, NetworkCategory.ContentApi);
@@ -294,6 +296,18 @@ public sealed class LauncherService : IDisposable
     public void SetPinned(string id, bool pinned)
     {
         EnsureMeta(id).Pinned = pinned;
+        SaveQuietly();
+        LibraryChanged?.Invoke();
+    }
+
+    /// <summary>Remember the provider artwork of an installed modpack. Invalid and non-HTTPS URLs are ignored.</summary>
+    public void SetInstanceCover(string id, string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url) || !Uri.TryCreate(url, UriKind.Absolute, out var uri)
+            || uri.Scheme != Uri.UriSchemeHttps) return;
+        var meta = EnsureMeta(id);
+        if (meta.CoverUrl == uri.AbsoluteUri) return;
+        meta.CoverUrl = uri.AbsoluteUri;
         SaveQuietly();
         LibraryChanged?.Invoke();
     }

@@ -30,6 +30,15 @@ public final class AndroidGameBootstrap {
     private static Method startAttack;
     private static Method startUseItem;
     private static Class<?> blockHitType;
+    private static Class<?> containerScreenType;
+    private static Method containerHoveredSlot;
+    private static Method containerSlotClicked;
+    private static Field screenWidth;
+    private static Field screenHeight;
+    private static Field slotId;
+    private static Method slotGetItem;
+    private static Field itemStackCount;
+    private static Object pickupClickType;
     private static boolean inputBridgeReady;
     private static boolean inputBridgeFailed;
     private static boolean inputDispatchErrorLogged;
@@ -74,6 +83,21 @@ public final class AndroidGameBootstrap {
             startAttack = accessible(minecraftType.getDeclaredMethod("bu"));
             startUseItem = accessible(minecraftType.getDeclaredMethod("bv"));
             blockHitType = Class.forName("fti");
+            Class<?> screenType = Class.forName("gsb");
+            containerScreenType = Class.forName("gti");
+            Class<?> slotType = Class.forName("dji");
+            Class<?> itemStackType = Class.forName("dlt");
+            Class<?> clickType = Class.forName("dhu");
+            screenWidth = accessible(screenType.getDeclaredField("o"));
+            screenHeight = accessible(screenType.getDeclaredField("p"));
+            containerHoveredSlot = accessible(containerScreenType.getDeclaredMethod(
+                "b", double.class, double.class));
+            containerSlotClicked = accessible(containerScreenType.getDeclaredMethod(
+                "a", slotType, int.class, int.class, clickType));
+            slotId = accessible(slotType.getDeclaredField("a"));
+            slotGetItem = accessible(slotType.getDeclaredMethod("g"));
+            itemStackCount = accessible(itemStackType.getDeclaredField("r"));
+            pickupClickType = accessible(clickType.getDeclaredField("a")).get(null);
             inputBridgeReady = true;
             return true;
         } catch (ReflectiveOperationException | RuntimeException error) {
@@ -128,6 +152,54 @@ public final class AndroidGameBootstrap {
                     mouseButton.invoke(mouse, handle, mouseInput.newInstance(0, 0), 0);
                 }
             }
+            return true;
+        } catch (ReflectiveOperationException | RuntimeException error) {
+            return reportInputError(error);
+        }
+    }
+
+    /** Returns the live count under a normalized pointer, or zero outside a container slot. */
+    public static int inventoryStackCount(float normalizedX, float normalizedY) {
+        if (!prepareInputBridge()) return 0;
+        try {
+            Object minecraft = minecraft();
+            if (minecraft == null) return 0;
+            Object screen = minecraftScreen.get(minecraft);
+            if (!containerScreenType.isInstance(screen)) return 0;
+            double x = Math.max(0.0, Math.min(1.0, normalizedX)) * screenWidth.getInt(screen);
+            double y = Math.max(0.0, Math.min(1.0, normalizedY)) * screenHeight.getInt(screen);
+            Object slot = containerHoveredSlot.invoke(screen, x, y);
+            if (slot == null) return 0;
+            Object stack = slotGetItem.invoke(slot);
+            return stack == null ? 0 : Math.max(0, itemStackCount.getInt(stack));
+        } catch (ReflectiveOperationException | RuntimeException error) {
+            reportInputError(error);
+            return 0;
+        }
+    }
+
+    /** Picks an exact quantity from a slot using Minecraft's own synchronized click path. */
+    public static boolean dispatchInventorySplit(float normalizedX, float normalizedY, int requested) {
+        if (!prepareInputBridge()) return false;
+        try {
+            Object minecraft = minecraft();
+            if (minecraft == null) return false;
+            Object screen = minecraftScreen.get(minecraft);
+            if (!containerScreenType.isInstance(screen)) return false;
+            double x = Math.max(0.0, Math.min(1.0, normalizedX)) * screenWidth.getInt(screen);
+            double y = Math.max(0.0, Math.min(1.0, normalizedY)) * screenHeight.getInt(screen);
+            Object slot = containerHoveredSlot.invoke(screen, x, y);
+            if (slot == null) return false;
+            Object stack = slotGetItem.invoke(slot);
+            int total = stack == null ? 0 : Math.max(0, itemStackCount.getInt(stack));
+            int selected = Math.max(1, Math.min(total, requested));
+            if (total <= 0) return false;
+            int id = slotId.getInt(slot);
+            // Left pickup takes the whole stack. Each right pickup on the source returns one,
+            // leaving precisely "selected" items on the cursor for the next finger tap.
+            containerSlotClicked.invoke(screen, slot, id, 0, pickupClickType);
+            for (int index = selected; index < total; index++)
+                containerSlotClicked.invoke(screen, slot, id, 1, pickupClickType);
             return true;
         } catch (ReflectiveOperationException | RuntimeException error) {
             return reportInputError(error);

@@ -993,6 +993,8 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
     private async Task<string?> InstallModpackFromFileAsync(ContentFile file)
     {
         string? id = null;
+        var coverUrl = Detail?.Project.Id == file.ProjectId ? Detail.Project.IconUrl
+            : Results.FirstOrDefault(item => item.Project.Id == file.ProjectId && item.Project.Source == file.Source)?.Project.IconUrl;
         IsBusy = true;
         _workCts = new CancellationTokenSource();
         var importStarted = false;
@@ -1003,6 +1005,16 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
             await _service.Downloader.DownloadOneAsync(ContentInstaller.ToItem(file, Path.GetDirectoryName(temp)!), _workCts.Token);
             importStarted = true;
             id = await ImportCoreAsync(temp, NewInstanceName, _workCts.Token);
+            if (coverUrl is null)
+            {
+                try
+                {
+                    var source = file.Source == ContentSource.Modrinth ? 0 : 1;
+                    coverUrl = (await _providerForSource(source).GetProjectAsync(file.ProjectId, _workCts.Token)).IconUrl;
+                }
+                catch (Exception e) when (e is HttpRequestException or NotSupportedException or InvalidOperationException or System.Text.Json.JsonException) { }
+            }
+            _service.SetInstanceCover(id, coverUrl);
         }
         catch (ManualDownloadRequiredException e)
         {

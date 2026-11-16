@@ -7,7 +7,7 @@ namespace Amber.Android;
 
 internal static partial class NativeJvmHost
 {
-    private const int ExpectedAbiVersion = 10;
+    private const int ExpectedAbiVersion = 11;
 
     public static bool GameplayControlsActive => IsAvailable && GetNativeGameplayMode() != 0;
 
@@ -119,6 +119,18 @@ internal static partial class NativeJvmHost
         if (IsAvailable) SetNativePointer((float)x, (float)y, click ? 1 : 0);
     }
 
+    public static int InventoryStackCount(double x, double y)
+    {
+        if (!IsAvailable) return 0;
+        try { return GetNativeInventoryStackCount((float)x, (float)y); }
+        catch (EntryPointNotFoundException) { return 0; }
+    }
+
+    public static void SplitInventoryStack(double x, double y, int count)
+    {
+        if (IsAvailable) SetNativeInventorySplit((float)x, (float)y, count);
+    }
+
     public static void AddCodePoint(int codePoint)
     {
         if (IsAvailable) AddNativeCodePoint((uint)codePoint);
@@ -175,6 +187,12 @@ internal static partial class NativeJvmHost
 
     [LibraryImport("jayjvm", EntryPoint = "jay_input_set_pointer")]
     private static partial void SetNativePointer(float x, float y, int click);
+
+    [LibraryImport("jayjvm", EntryPoint = "jay_inventory_stack_count")]
+    private static partial int GetNativeInventoryStackCount(float x, float y);
+
+    [LibraryImport("jayjvm", EntryPoint = "jay_input_split_inventory")]
+    private static partial void SetNativeInventorySplit(float x, float y, int count);
 
     [LibraryImport("jayjvm", EntryPoint = "jay_input_add_codepoint")]
     private static partial void AddNativeCodePoint(uint codePoint);

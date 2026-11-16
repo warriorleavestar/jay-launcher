@@ -107,9 +107,18 @@ public sealed class MobilePortTests
             Assert.InRange(control.CenterX - control.Radius, 0, 1);
             Assert.InRange(control.CenterX + control.Radius, 0, 1);
             Assert.InRange(control.CenterY - control.Radius, 0, 1);
-            Assert.InRange(control.CenterY + control.Radius, 0, 1);
+            // The inventory hit circle intentionally reaches a few pixels below immersive
+            // fullscreen; its rendered square uses 82% of that radius and remains on-screen.
+            Assert.InRange(control.CenterY + control.Radius, 0,
+                control.Action == TouchControlAction.Inventory ? 1.01 : 1);
             if (control.GameplayVisible)
-                Assert.Equal(control.Action, TouchControlLayout.HitTest(control.CenterX, control.CenterY)!.Action);
+            {
+                if (control.Action == TouchControlAction.Move)
+                    Assert.Equal(TouchControlAction.Move,
+                        TouchControlLayout.HitTest(control.CenterX + control.Radius * 0.65, control.CenterY)!.Action);
+                else
+                    Assert.Equal(control.Action, TouchControlLayout.HitTest(control.CenterX, control.CenterY)!.Action);
+            }
             if (control.MenuVisible)
                 Assert.Equal(control.Action, TouchControlLayout.HitTest(control.CenterX, control.CenterY,
                     gameplayControlsActive: false)!.Action);
@@ -125,20 +134,21 @@ public sealed class MobilePortTests
 
         var menu = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Menu);
         var movePad = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Move);
-        var split = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.SecondaryAction);
         var inventory = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Inventory);
         var jump = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Jump);
         var sneak = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Sneak);
         Assert.InRange(menu.CenterX, 0.47, 0.53);
         Assert.True(movePad.CenterX < 0.25);
-        Assert.InRange(movePad.CenterY, 0.75, 0.82);
-        Assert.InRange(inventory.CenterX, 0.600, 0.612);
-        Assert.InRange(inventory.CenterY, 0.95, 0.96);
-        Assert.True(jump.CenterY > 0.75 && sneak.CenterY > 0.84);
-        Assert.True(jump.Radius >= 0.04 && sneak.Radius >= 0.04);
-        Assert.False(split.GameplayVisible);
-        Assert.True(split.MenuVisible);
-        Assert.Null(TouchControlLayout.HitTest(split.CenterX, split.CenterY));
+        Assert.InRange(movePad.CenterY, 0.79, 0.81);
+        Assert.InRange(inventory.CenterX, 0.615, 0.625);
+        Assert.InRange(inventory.CenterY, 0.975, 0.985);
+        Assert.InRange(inventory.Radius, 0.023, 0.025);
+        Assert.True(jump.CenterY > 0.78);
+        Assert.Equal(movePad.CenterX, sneak.CenterX, 6);
+        Assert.Equal(movePad.CenterY, sneak.CenterY, 6);
+        Assert.True(jump.Radius >= 0.05 && sneak.Radius >= 0.035);
+        Assert.DoesNotContain(TouchControlLayout.Default,
+            control => control.Action == TouchControlAction.SecondaryAction);
     }
 
     [Fact]
@@ -156,8 +166,9 @@ public sealed class MobilePortTests
         Assert.Equal(0, direction.Y, 6);
 
         profile.Mode = TouchControlMode.JoystickAndCrosshair;
-        Assert.Contains(profile.Controls, control => control.Action == TouchControlAction.PrimaryAction);
-        Assert.Contains(profile.Controls, control => control.Action == TouchControlAction.SecondaryAction && control.GameplayVisible);
+        Assert.DoesNotContain(profile.Controls, control => control.Action == TouchControlAction.PrimaryAction);
+        Assert.DoesNotContain(profile.Controls, control =>
+            control.Action == TouchControlAction.SecondaryAction && control.GameplayVisible);
 
         profile.Mode = TouchControlMode.ExternalKeyboardMouse;
         Assert.Single(profile.Controls);
@@ -202,7 +213,7 @@ public sealed class MobilePortTests
         var move = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Move);
         var jump = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Jump);
 
-        Assert.True(router.Press(10, move.CenterX, move.CenterY));
+        Assert.True(router.Press(10, move.CenterX + move.Radius * 0.65, move.CenterY));
         Assert.True(router.Move(10, move.CenterX + move.Radius, move.CenterY));
         Assert.True(router.Press(11, jump.CenterX, jump.CenterY));
         Assert.Contains((TouchControlAction.Jump, true), sink.Actions);
@@ -222,7 +233,7 @@ public sealed class MobilePortTests
         var router = new TouchInputRouter(sink);
         var move = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Move);
 
-        Assert.True(router.Press(50, move.CenterX, move.CenterY));
+        Assert.True(router.Press(50, move.CenterX, move.CenterY - move.Radius * 0.65));
         Assert.True(router.Move(50, move.CenterX, move.CenterY - move.Radius));
         Assert.True(router.SprintLocked);
         Assert.True(router.IsPressed(TouchControlAction.Sprint));
@@ -271,7 +282,7 @@ public sealed class MobilePortTests
         var router = new TouchInputRouter(sink);
         var move = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Move);
 
-        Assert.True(router.Press(13, move.CenterX, move.CenterY));
+        Assert.True(router.Press(13, move.CenterX + move.Radius * 0.65, move.CenterY));
         Assert.True(router.Move(13, move.CenterX + move.Radius, move.CenterY));
         Assert.Equal(1, sink.LastMovement.X, 6);
 
@@ -323,10 +334,8 @@ public sealed class MobilePortTests
         Assert.True(router.Press(21, jump.CenterX, jump.CenterY, controlsEnabled: false));
         Assert.DoesNotContain(sink.Actions, action => action.Action == TouchControlAction.Jump);
         Assert.Equal((jump.CenterX, jump.CenterY, false), sink.LastPointer);
-        Assert.Contains((TouchControlAction.PrimaryAction, true), sink.Actions);
         Assert.True(router.Release(21));
-        Assert.Contains((TouchControlAction.PrimaryAction, false), sink.Actions);
-        Assert.DoesNotContain(sink.Pointers, pointer => pointer.Click);
+        Assert.Single(sink.Pointers, pointer => pointer.Click);
 
         var menu = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Menu);
         Assert.True(router.Press(22, menu.CenterX, menu.CenterY, controlsEnabled: false));
@@ -340,8 +349,9 @@ public sealed class MobilePortTests
         var router = new TouchInputRouter(sink);
 
         Assert.True(router.Press(30, 0.35, 0.55, controlsEnabled: false));
-        Assert.Contains((TouchControlAction.PrimaryAction, true), sink.Actions);
+        Assert.DoesNotContain(sink.Actions, action => action.Action == TouchControlAction.PrimaryAction);
         Assert.True(router.Move(30, 0.70, 0.55));
+        Assert.Contains((TouchControlAction.PrimaryAction, true), sink.Actions);
         Assert.True(router.Release(30));
         Assert.Contains((TouchControlAction.PrimaryAction, false), sink.Actions);
         Assert.Equal((0.70, 0.55, false), sink.LastPointer);
@@ -357,7 +367,7 @@ public sealed class MobilePortTests
         Assert.True(router.Move(31, 0.50, 0.55));
         Assert.True(router.Move(31, 0.50, 0.40));
         Assert.True(router.Release(31));
-        Assert.Contains((TouchControlAction.PrimaryAction, false), sink.Actions);
+        Assert.DoesNotContain(sink.Actions, action => action.Action == TouchControlAction.PrimaryAction);
         Assert.Contains((TouchControlAction.NextSlot, true), sink.Actions);
         Assert.Contains((TouchControlAction.NextSlot, false), sink.Actions);
     }
@@ -376,25 +386,70 @@ public sealed class MobilePortTests
     }
 
     [Fact]
-    public void TouchInputRouterUsesMenuSplitAsRightClickModifier()
+    public void TouchInputRouterDoubleTapUsesMinecraftsNativeDoubleClick()
     {
         var sink = new RecordingTouchSink();
         var router = new TouchInputRouter(sink);
-        var split = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.SecondaryAction);
 
-        Assert.True(router.Press(40, split.CenterX, split.CenterY, controlsEnabled: false));
-        Assert.DoesNotContain(sink.Actions, action => action.Action == TouchControlAction.SecondaryAction);
+        Assert.True(router.Press(40, 0.48, 0.36, controlsEnabled: false));
+        Assert.True(router.Release(40));
+        Assert.Single(sink.Pointers, pointer => pointer.Click);
+        Assert.Empty(sink.Actions);
 
         Assert.True(router.Press(41, 0.48, 0.36, controlsEnabled: false));
-        Assert.Equal((0.48, 0.36, false), sink.LastPointer);
-        Assert.Contains((TouchControlAction.SecondaryAction, true), sink.Actions);
-        Assert.True(router.Move(41, 0.62, 0.54));
-        Assert.Equal((0.62, 0.54, false), sink.LastPointer);
-        Assert.DoesNotContain((TouchControlAction.SecondaryAction, false), sink.Actions);
-
+        Assert.Empty(sink.Actions);
         Assert.True(router.Release(41));
-        Assert.Contains((TouchControlAction.SecondaryAction, false), sink.Actions);
-        Assert.True(router.Release(40));
+        Assert.Empty(sink.Actions);
+        Assert.Equal(2, sink.Pointers.Count(pointer => pointer.Click));
+        Assert.DoesNotContain(TouchControlLayout.Default,
+            control => control.Action == TouchControlAction.SecondaryAction);
+    }
+
+    [Fact]
+    public void TouchInputRouterLongPressSelectsOneInventoryItem()
+    {
+        var sink = new RecordingTouchSink();
+        var router = new TouchInputRouter(sink, inventoryStackCount: (_, _) => 64);
+
+        Assert.True(router.Press(42, 0.48, 0.36, controlsEnabled: false));
+        Assert.True(router.BeginLongPress(42));
+        Assert.True(router.Release(42));
+
+        Assert.Equal([(0.48, 0.36, 1)], sink.InventorySplits);
+        Assert.DoesNotContain(sink.Pointers, pointer => pointer.Click);
+    }
+
+    [Fact]
+    public void TouchInputRouterLongPressSwipeSelectsExactInventoryQuantity()
+    {
+        var sink = new RecordingTouchSink();
+        var router = new TouchInputRouter(sink, inventoryStackCount: (_, _) => 64);
+
+        Assert.True(router.Press(44, 0.42, 0.40, controlsEnabled: false));
+        Assert.True(router.BeginLongPress(44));
+        Assert.True(router.Move(44, 0.42 + 0.24 * 31 / 63, 0.40));
+        Assert.Equal(32, Assert.Single(router.InventorySplitSelections).Count);
+        Assert.True(router.Release(44));
+        Assert.Equal([(0.42, 0.40, 32)], sink.InventorySplits);
+        Assert.DoesNotContain(sink.Pointers, pointer => pointer.Click);
+    }
+
+    [Fact]
+    public void TouchInputRouterCraftingDragHoldsOnePrimaryButton()
+    {
+        var sink = new RecordingTouchSink();
+        var router = new TouchInputRouter(sink);
+
+        Assert.True(router.Press(43, 0.40, 0.40, controlsEnabled: false));
+        Assert.True(router.Move(43, 0.46, 0.40));
+        Assert.True(router.Move(43, 0.52, 0.40));
+        Assert.True(router.Release(43));
+
+        Assert.Equal(1, sink.Actions.Count(action =>
+            action == (TouchControlAction.PrimaryAction, true)));
+        Assert.Equal(1, sink.Actions.Count(action =>
+            action == (TouchControlAction.PrimaryAction, false)));
+        Assert.DoesNotContain(sink.Pointers, pointer => pointer.Click);
     }
 
     [Fact]
@@ -806,6 +861,7 @@ public sealed class MobilePortTests
         public (double X, double Y) LastLook { get; private set; }
         public (double X, double Y, bool Click) LastPointer { get; private set; }
         public List<(double X, double Y, bool Click)> Pointers { get; } = [];
+        public List<(double X, double Y, int Count)> InventorySplits { get; } = [];
 
         public void SetAction(TouchControlAction action, bool pressed) => Actions.Add((action, pressed));
         public void SetMovement(double x, double y) => LastMovement = (x, y);
@@ -815,6 +871,8 @@ public sealed class MobilePortTests
             LastPointer = (x, y, click);
             Pointers.Add((x, y, click));
         }
+        public void SplitInventoryStack(double x, double y, int count) =>
+            InventorySplits.Add((x, y, count));
     }
 
 }

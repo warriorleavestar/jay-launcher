@@ -49,6 +49,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\Amber.App\Amber.App.csproj" AdditionalProperties="AmberAppAsLibrary=true" />
     <ProjectReference Include="..\Amber.Mobile\Amber.Mobile.csproj" />
   </ItemGroup>
 </Project>

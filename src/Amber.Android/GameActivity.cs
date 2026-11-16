@@ -24,6 +24,8 @@ namespace Amber.Android;
 public sealed class GameActivity : Activity, ISurfaceHolderCallback
 {
     public const string ServerAddressExtra = "nz.work.minecraft.jay.SERVER_ADDRESS";
+    public const string VersionIdExtra = "nz.work.minecraft.jay.VERSION_ID";
+    public const string PlayerNameExtra = "nz.work.minecraft.jay.PLAYER_NAME";
     private CancellationTokenSource? _runtimeSetup;
     private CancellationTokenSource? _gameSetup;
     private TouchControlOverlay? _touchOverlay;
@@ -191,11 +193,15 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
     private void AddGameSetup(FrameLayout root)
     {
         var preferences = GetPreferences(FileCreationMode.Private)!;
+        var versionId = Intent?.GetStringExtra(VersionIdExtra) ?? AndroidEmbeddedGame.FirstPlayableVersion;
+        var suppliedPlayerName = Intent?.GetStringExtra(PlayerNameExtra);
         var (backdrop, content, status) = AddSetupShell(root, L.T("mobile.game.setup"));
         var playerName = new EditText(this)
         {
             Hint = L.T("mobile.game.player_name"),
-            Text = preferences.GetString("offline-player", "Player")
+            Text = string.IsNullOrWhiteSpace(suppliedPlayerName)
+                ? preferences.GetString("offline-player", "Player")
+                : suppliedPlayerName
         };
         playerName.SetTextColor(Color.White);
         playerName.SetHintTextColor(Color.LightGray);
@@ -206,7 +212,7 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
         content.AddView(playerName, SetupRow(Dp(54), Dp(18), 0));
         var progress = CreateSetupProgress();
         content.AddView(progress, SetupRow(Dp(6), Dp(16), Dp(4)));
-        var play = CreateSetupButton(L.F("mobile.game.install_play", AndroidEmbeddedGame.FirstPlayableVersion), true);
+        var play = CreateSetupButton(L.F("mobile.game.install_play", versionId), true);
         var cancel = CreateSetupButton(L.T("mobile.runtime.cancel"), false);
         cancel.Visibility = ViewStates.Gone;
         var buttons = CreateButtonRow(play, cancel);
@@ -237,7 +243,7 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
             try
             {
                 var name = playerName.Text?.Trim() ?? "";
-                var prepared = await AndroidEmbeddedGame.PrepareAsync(this, name,
+                var prepared = await AndroidEmbeddedGame.PrepareAsync(this, versionId, name,
                     Intent?.GetStringExtra(ServerAddressExtra), report, _gameSetup.Token);
                 var editor = preferences.Edit();
                 editor?.PutString("offline-player", name);
@@ -493,11 +499,11 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     private const long LongPressRingMs = 900;
     private readonly Paint _fill = new() { AntiAlias = true, Color = Color.Argb(142, 48, 53, 59) };
     private readonly Paint _activeFill = new() { AntiAlias = true, Color = Color.Argb(218, 105, 112, 120) };
-    private readonly Paint _buttonFace = new() { AntiAlias = false, Color = Color.Argb(82, 76, 82, 86) };
-    private readonly Paint _buttonPressed = new() { AntiAlias = false, Color = Color.Argb(145, 142, 146, 150) };
-    private readonly Paint _buttonShadow = new() { AntiAlias = false, Color = Color.Argb(155, 8, 10, 12) };
-    private readonly Paint _buttonHighlight = new() { AntiAlias = false, Color = Color.Argb(150, 238, 241, 244), StrokeWidth = 2 };
-    private readonly Paint _buttonBorder = new() { AntiAlias = false, Color = Color.Argb(145, 225, 228, 232), StrokeWidth = 2 };
+    private readonly Paint _buttonFace = new() { AntiAlias = false, Color = Color.Argb(168, 55, 59, 63) };
+    private readonly Paint _buttonPressed = new() { AntiAlias = false, Color = Color.Argb(220, 104, 109, 114) };
+    private readonly Paint _buttonShadow = new() { AntiAlias = false, Color = Color.Argb(205, 5, 7, 9) };
+    private readonly Paint _buttonHighlight = new() { AntiAlias = false, Color = Color.Argb(185, 226, 229, 232), StrokeWidth = 2 };
+    private readonly Paint _buttonBorder = new() { AntiAlias = false, Color = Color.Argb(210, 22, 25, 28), StrokeWidth = 2 };
     private readonly Paint _joystickMark = new() { AntiAlias = true, Color = Color.Argb(145, 235, 238, 242), StrokeWidth = 3, StrokeCap = Paint.Cap.Round };
     private readonly Paint _stroke = new() { AntiAlias = true, Color = Color.Argb(210, 235, 238, 242), StrokeWidth = 2, StrokeCap = Paint.Cap.Square, StrokeJoin = Paint.Join.Miter };
     private readonly Paint _glyph = new() { AntiAlias = true, Color = Color.Argb(235, 255, 255, 255), StrokeWidth = 5, StrokeCap = Paint.Cap.Round, StrokeJoin = Paint.Join.Round };
@@ -517,7 +523,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     private bool _layoutEditing;
     private int? _editingPointer;
     private TouchControlAction? _editingAction;
-    private float _controlOpacity = 0.62f;
+    private float _controlOpacity = 0.74f;
     private float _lastMouseX;
     private float _lastMouseY;
     private bool _hasMousePosition;
@@ -527,7 +533,8 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     {
         _preferences = context.GetSharedPreferences("jay-touch-controls", FileCreationMode.Private)!;
         LoadProfile();
-        _router = new TouchInputRouter(this, _profile);
+        _router = new TouchInputRouter(this, _profile,
+            inventoryStackCount: NativeJvmHost.InventoryStackCount);
         Clickable = true;
         Focusable = true;
         FocusableInTouchMode = true;
@@ -574,6 +581,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
                         : control.Label);
         }
         DrawLongPressIndicators(canvas);
+        DrawInventorySplitSelection(canvas);
         if (_profile.Mode == TouchControlMode.JoystickAndCrosshair && gameplayControlsActive)
             DrawCrosshair(canvas);
         if (_settingsOpen)
@@ -614,41 +622,41 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
 
     private void DrawDirectionPad(Canvas canvas, float x, float y, float radius)
     {
-        var cell = radius * 0.62f;
+        var cell = radius * 0.64f;
+        var (moveX, moveY) = _router.Movement;
         for (var row = -1; row <= 1; row++)
         for (var col = -1; col <= 1; col++)
         {
             if ((row != 0 && col != 0) || (row == 0 && col == 0)) continue;
             var bounds = new RectF(x + col * cell - cell * 0.48f, y + row * cell - cell * 0.48f,
                 x + col * cell + cell * 0.48f, y + row * cell + cell * 0.48f);
-            canvas.DrawRect(bounds, _router.IsPressed(TouchControlAction.Move) ? _buttonPressed : _buttonFace);
-            canvas.DrawRect(bounds, _buttonBorder);
+            var active = _router.IsPressed(TouchControlAction.Move) && col * moveX + row * moveY > 0.45;
+            // Direction cells sit next to one another, so an offset drop shadow reads as a
+            // second copy of the pad on translucent HUDs. Keep these deliberately single-layer.
+            DrawBlockButton(canvas, bounds, active, cell * 0.08f, castShadow: false);
             DrawDirectionGlyph(canvas, x + col * cell, y + row * cell, col, row, cell * 0.28f);
         }
     }
 
     private void DrawDirectionGlyph(Canvas canvas, float x, float y, int dx, int dy, float size)
     {
-        _glyph.SetStyle(Paint.Style.Stroke);
-        _glyph.StrokeWidth = Math.Max(3, size * 0.22f);
+        _glyph.SetStyle(Paint.Style.Fill);
         var path = new global::Android.Graphics.Path();
         if (dx != 0)
         {
-            canvas.DrawLine(x - dx * size * 0.70f, y, x + dx * size * 0.58f, y, _glyph);
-            path.MoveTo(x + dx * size * 0.66f, y);
-            path.LineTo(x + dx * size * 0.12f, y - size * 0.50f);
-            path.MoveTo(x + dx * size * 0.66f, y);
-            path.LineTo(x + dx * size * 0.12f, y + size * 0.50f);
+            path.MoveTo(x + dx * size * 0.72f, y);
+            path.LineTo(x - dx * size * 0.44f, y - size * 0.62f);
+            path.LineTo(x - dx * size * 0.44f, y + size * 0.62f);
         }
         else
         {
-            canvas.DrawLine(x, y - dy * size * 0.70f, x, y + dy * size * 0.58f, _glyph);
-            path.MoveTo(x, y + dy * size * 0.66f);
-            path.LineTo(x - size * 0.50f, y + dy * size * 0.12f);
-            path.MoveTo(x, y + dy * size * 0.66f);
-            path.LineTo(x + size * 0.50f, y + dy * size * 0.12f);
+            path.MoveTo(x, y + dy * size * 0.72f);
+            path.LineTo(x - size * 0.62f, y - dy * size * 0.44f);
+            path.LineTo(x + size * 0.62f, y - dy * size * 0.44f);
         }
+        path.Close();
         canvas.DrawPath(path, _glyph);
+        _glyph.SetStyle(Paint.Style.Stroke);
     }
 
     private void DrawCrosshair(Canvas canvas)
@@ -718,11 +726,11 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
             (int)Math.Clamp(color.A * opacity, 0, 255), color.R, color.G, color.B);
         _fill.Color = WithAlpha(Color.Argb(142, 48, 53, 59), _controlOpacity);
         _activeFill.Color = WithAlpha(Color.Argb(218, 105, 112, 120), _controlOpacity);
-        _buttonFace.Color = WithAlpha(Color.Argb(82, 76, 82, 86), _controlOpacity);
-        _buttonPressed.Color = WithAlpha(Color.Argb(145, 142, 146, 150), _controlOpacity);
-        _buttonShadow.Color = WithAlpha(Color.Argb(155, 8, 10, 12), Math.Max(0.55f, _controlOpacity));
-        _buttonHighlight.Color = WithAlpha(Color.Argb(150, 238, 241, 244), Math.Max(0.45f, _controlOpacity));
-        _buttonBorder.Color = WithAlpha(Color.Argb(145, 225, 228, 232), Math.Max(0.45f, _controlOpacity));
+        _buttonFace.Color = WithAlpha(Color.Argb(168, 55, 59, 63), _controlOpacity);
+        _buttonPressed.Color = WithAlpha(Color.Argb(220, 104, 109, 114), _controlOpacity);
+        _buttonShadow.Color = WithAlpha(Color.Argb(205, 5, 7, 9), Math.Max(0.62f, _controlOpacity));
+        _buttonHighlight.Color = WithAlpha(Color.Argb(185, 226, 229, 232), Math.Max(0.55f, _controlOpacity));
+        _buttonBorder.Color = WithAlpha(Color.Argb(210, 22, 25, 28), Math.Max(0.62f, _controlOpacity));
         _joystickMark.Color = WithAlpha(Color.Argb(145, 235, 238, 242), Math.Max(0.45f, _controlOpacity));
     }
 
@@ -753,6 +761,30 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         }
     }
 
+    private void DrawInventorySplitSelection(Canvas canvas)
+    {
+        foreach (var selection in _router.InventorySplitSelections)
+        {
+            var scale = Math.Min(Width, Height);
+            var width = Math.Max(scale * 0.25f, 210f);
+            var height = Math.Max(scale * 0.038f, 32f);
+            var centerX = Math.Clamp((float)(selection.X * Width), width * 0.55f,
+                Width - width * 0.55f);
+            var bottom = Math.Max(height * 1.5f,
+                (float)(selection.Y * Height) - scale * 0.055f);
+            var bounds = new RectF(centerX - width / 2, bottom - height,
+                centerX + width / 2, bottom);
+            canvas.DrawRect(bounds, _buttonShadow);
+            var fill = new RectF(bounds.Left, bounds.Top,
+                bounds.Left + bounds.Width() * selection.Count / selection.Total, bounds.Bottom);
+            canvas.DrawRect(fill, _activeFill);
+            canvas.DrawRect(bounds, _buttonBorder);
+            _hint.TextSize = Math.Max(18, height * 0.62f);
+            canvas.DrawText($"{selection.Count}/{selection.Total}", centerX,
+                bounds.CenterY() - (_hint.Ascent() + _hint.Descent()) / 2, _hint);
+        }
+    }
+
     private void DrawActionButton(Canvas canvas, TouchControlDefinition control,
         float x, float y, float radius, string label)
     {
@@ -766,17 +798,36 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         var bounds = new RectF((float)Math.Round(x - halfWidth), (float)Math.Round(y - halfHeight),
             (float)Math.Round(x + halfWidth), (float)Math.Round(y + halfHeight));
         bounds.Offset(0, pressOffset);
-        var shadow = new RectF(bounds);
-        shadow.Offset(Math.Max(2, radius * 0.08f), Math.Max(3, radius * 0.12f));
-        canvas.DrawRect(shadow, _buttonShadow);
-        _buttonBorder.SetStyle(Paint.Style.Stroke);
-        canvas.DrawRect(bounds, pressed ? _buttonPressed : _buttonFace);
-        canvas.DrawRect(bounds, _buttonBorder);
-        _buttonHighlight.StrokeWidth = Math.Max(1, radius * 0.045f);
-        canvas.DrawLine(bounds.Left + 2, bounds.Top + 2, bounds.Right - 2, bounds.Top + 2, _buttonHighlight);
-        canvas.DrawLine(bounds.Left + 2, bounds.Top + 2, bounds.Left + 2, bounds.Bottom - 2, _buttonHighlight);
+        var castShadow = control.Action != TouchControlAction.Inventory &&
+            !(_profile.Mode == TouchControlMode.DPadAndTap &&
+              control.Action == TouchControlAction.Sneak);
+        DrawBlockButton(canvas, bounds, pressed, radius * 0.10f, castShadow);
         DrawGlyph(canvas, control.Action, x, y + pressOffset,
             Math.Min(halfWidth, halfHeight) * 0.68f, label);
+    }
+
+    private void DrawBlockButton(Canvas canvas, RectF bounds, bool pressed, float depth,
+        bool castShadow = true)
+    {
+        if (castShadow)
+        {
+            var shadow = new RectF(bounds);
+            shadow.Offset(Math.Max(2, depth * 0.7f), Math.Max(3, depth));
+            canvas.DrawRect(shadow, _buttonShadow);
+        }
+        canvas.DrawRect(bounds, pressed ? _buttonPressed : _buttonFace);
+        _buttonBorder.SetStyle(Paint.Style.Stroke);
+        _buttonBorder.StrokeWidth = Math.Max(2, depth * 0.24f);
+        canvas.DrawRect(bounds, _buttonBorder);
+        if (castShadow)
+        {
+            _buttonHighlight.StrokeWidth = Math.Max(1, depth * 0.20f);
+            var inset = Math.Max(2, depth * 0.30f);
+            canvas.DrawLine(bounds.Left + inset, bounds.Top + inset,
+                bounds.Right - inset, bounds.Top + inset, _buttonHighlight);
+            canvas.DrawLine(bounds.Left + inset, bounds.Top + inset,
+                bounds.Left + inset, bounds.Bottom - inset, _buttonHighlight);
+        }
     }
 
     private void DrawGlyph(Canvas canvas, TouchControlAction action, float x, float y, float size, string fallback)
@@ -923,10 +974,10 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     private void LoadProfile()
     {
         _profile.Mode = Enum.TryParse<TouchControlMode>(_preferences.GetString("mode", null), out var mode)
-            ? mode : TouchControlMode.JoystickAndTap;
+            ? mode : TouchControlMode.DPadAndTap;
         _profile.Scale = Math.Clamp(_preferences.GetFloat("scale", 1f), 0.70, 1.35);
         _profile.ForcedSprint = _preferences.GetBoolean("forced-sprint", true);
-        _controlOpacity = Math.Clamp(_preferences.GetFloat("opacity", 0.62f), 0.30f, 1f);
+        _controlOpacity = Math.Clamp(_preferences.GetFloat("opacity", 0.74f), 0.30f, 1f);
         foreach (var modeValue in Enum.GetValues<TouchControlMode>())
         foreach (var action in Enum.GetValues<TouchControlAction>())
         {
@@ -974,7 +1025,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         {
             _profile.ResetPositions();
             _profile.Scale = 1;
-            _controlOpacity = 0.62f;
+            _controlOpacity = 0.74f;
             _profile.ForcedSprint = true;
         }
         else if (y is > 0.83f and < 0.90f && x > 0.78f)
@@ -1064,9 +1115,10 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
                     return true;
                 }
                 var handled = _router.Press(pointerId, x, y, gameplay);
-                if (handled && gameplay && control is null)
+                if (handled && control is null)
                 {
-                    _longPressIndicators[pointerId] = new(x, y, SystemClock.UptimeMillis());
+                    if (gameplay)
+                        _longPressIndicators[pointerId] = new(x, y, SystemClock.UptimeMillis());
                     PostDelayed(() =>
                     {
                         if (!_router.BeginLongPress(pointerId))
@@ -1146,7 +1198,11 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
 
     public void AddLook(double x, double y) => AndroidGameInputBridge.AddLook(x, y);
 
-    public void SetPointer(double x, double y, bool click) => AndroidGameInputBridge.SetPointer(x, y, click);
+    public void SetPointer(double x, double y, bool click)
+        => AndroidGameInputBridge.SetPointer(x, y, click);
+
+    public void SplitInventoryStack(double x, double y, int count)
+        => NativeJvmHost.SplitInventoryStack(x, y, count);
 
     public bool HandleHardwareKey(KeyEvent? e)
     {

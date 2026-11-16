@@ -14,7 +14,7 @@
 [![许可证: PolyForm Noncommercial](https://img.shields.io/badge/%E8%AE%B8%E5%8F%AF%E8%AF%81-PolyForm%20Noncommercial-4b6584)](LICENSE)
 
 [![下载 Windows 版](https://img.shields.io/badge/Windows-%E4%B8%8B%E8%BD%BD-d98a1f?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-win-x64.zip)
-[![下载 macOS 版](https://img.shields.io/badge/macOS-%E4%B8%8B%E8%BD%BD-4b6584?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-osx-arm64.tar.gz)
+[![下载 macOS 版](https://img.shields.io/badge/macOS-%E4%B8%8B%E8%BD%BD-4b6584?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-osx-arm64.dmg)
 [![下载 Linux 版](https://img.shields.io/badge/Linux-%E4%B8%8B%E8%BD%BD-4b6584?style=for-the-badge&logo=linux&logoColor=white)](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-linux-x64.tar.gz)
 
 [English](README.md) · **简体中文** · [下载](#下载) · [功能](#功能) · [隐私](#隐私) · [常见问题](#常见问题) · [参与贡献](CONTRIBUTING.zh-Hans.md)
@@ -66,13 +66,13 @@ Fabric、Quilt、Forge、NeoForge、OptiFine 一键安装，内置 Modrinth 和 
 
 ## 下载
 
-到[最新版本](https://github.com/warriorleavestar/jay-launcher/releases/latest)下载与你的电脑对应的文件，解压就能用。不用另装任何东西：.NET 已经打包在里面，Jay 会为每个游戏版本找到或下载合适的 Java。
+到[最新版本](https://github.com/warriorleavestar/jay-launcher/releases/latest)下载与你的电脑对应的文件。不用另装运行库：.NET 已经打包在里面，Jay 会为每个游戏版本找到或下载合适的 Java。
 
 | 系统 | 文件 | 状态 |
 |---|---|---|
 | **Windows 10+** x64 | [`Jay-win-x64.zip`](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-win-x64.zip) | ✅ 稳定 |
-| **macOS** Apple 芯片 | [`Jay-osx-arm64.tar.gz`](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-osx-arm64.tar.gz) | ✅ 已真机测试 |
-| **macOS** Intel | [`Jay-osx-x64.tar.gz`](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-osx-x64.tar.gz) | 🧪 实验 |
+| **macOS** Apple 芯片 | [`Jay-osx-arm64.dmg`](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-osx-arm64.dmg) | ✅ 已真机测试 |
+| **macOS** Intel | [`Jay-osx-x64.dmg`](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-osx-x64.dmg) | 🧪 实验 |
 | **Linux** x64 | [`Jay-linux-x64.tar.gz`](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-linux-x64.tar.gz) | 🧪 实验 |
 | **Linux** ARM64 | [`Jay-linux-arm64.tar.gz`](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-linux-arm64.tar.gz) | 🧪 实验（需自备 Java） |
 | **Android** 伴侣 | [`Jay-android-experimental.apk`](https://github.com/warriorleavestar/jay-launcher/releases/download/android-preview/Jay-android-experimental.apk) | 🧪 实验，见 [docs/android.md](docs/android.md) |
@@ -89,7 +89,7 @@ Fabric、Quilt、Forge、NeoForge、OptiFine 一键安装，内置 Modrinth 和 
 <details>
 <summary><b>macOS 说明</b></summary>
 
-解压后在终端里运行 `./Jay`。macOS 版暂时没有签名：如果第一次打开被 Gatekeeper 拦下，到“系统设置 → 隐私与安全性”里允许。完整局域网和出口节点模式开启时会要一次管理员密码。
+打开 DMG，把 **Jay** 拖到 **Applications（应用程序）**，再从“应用程序”打开。配置 Apple Developer ID 证书前，Mac 版使用 ad-hoc 签名；如果第一次被 Gatekeeper 拦下，按住 Control 点击 Jay，选“打开”并确认一次。完整局域网和出口节点模式开启时会要一次管理员密码。
 </details>
 
 <details>

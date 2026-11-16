@@ -312,6 +312,10 @@ public sealed partial class HomeViewModel : PageViewModel
         _service = service;
         _log = log;
         Onboarding = new OnboardingViewModel(service);
+        Onboarding.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(OnboardingViewModel.IsInstalling)) Dispatcher.UIThread.Post(UpdateRunState);
+        };
         service.InstalledVersionsChanged += () => Dispatcher.UIThread.Post(RefreshVersions);
         service.AccountsChanged += RefreshAccounts;
         service.LaunchRequested += request => Dispatcher.UIThread.Post(() => _ = RunAsync(request));
@@ -444,6 +448,7 @@ public sealed partial class HomeViewModel : PageViewModel
     {
         if (run is not null)
             return run.Game is null ? "home.button.cancel_launch" : run.Exiting ? "home.button.exiting" : "home.button.exit_game";
+        if (Onboarding.IsInstalling) return "home.button.installing";
         if (SelectedAccount is null) return "home.button.need_account";
         if (SelectedVersion is not { } id) return "home.button.need_instance";
         return _service.Directory.StateOf(id) switch
@@ -469,6 +474,11 @@ public sealed partial class HomeViewModel : PageViewModel
             else if (!run.Exiting) ExitGame(run);
             return;
         }
+        if (Onboarding.IsInstalling)
+        {
+            Onboarding.CancelInstallCommand.Execute(null);
+            return;
+        }
         if (SelectedAccount is null)
         {
             Toasts.Show(L.T("home.status.account_required"), Avalonia.Controls.Notifications.NotificationType.Warning);
@@ -477,10 +487,45 @@ public sealed partial class HomeViewModel : PageViewModel
         }
         if (SelectedVersion is not { } id)
         {
-            NavigateToNewInstance?.Invoke();
+            // Fast path from the Library: install the latest release here and surface it in the inline task card.
+            // "New instance" remains available when an older version, loader or mods need to be chosen.
+            if (Onboarding.LatestRelease is { } latest)
+                await InstallDefaultAsync(latest);
+            else
+            {
+                Onboarding.EnsureLoaded();
+                Toasts.Show(L.T("onboarding.install.latest_loading"), Avalonia.Controls.Notifications.NotificationType.Information);
+            }
             return;
         }
         await RunAsync(new LaunchRequest(id));
+    }
+
+    private async Task InstallDefaultAsync(string version)
+    {
+        var task = _service.Tasks.Track("install", L.F("activity.kind.install", version),
+            () => Onboarding.CancelInstallCommand.Execute(null), $"install:{version}");
+        void Report(object? _, System.ComponentModel.PropertyChangedEventArgs e)
+        {
+            if (e.PropertyName is not (nameof(OnboardingViewModel.Progress) or nameof(OnboardingViewModel.ProgressIndeterminate)
+                or nameof(OnboardingViewModel.StageText) or nameof(OnboardingViewModel.DetailText)
+                or nameof(OnboardingViewModel.ActiveFiles))) return;
+            var detail = string.Join(" · ", new[] { Onboarding.StageText, Onboarding.DetailText }.Where(text => !string.IsNullOrWhiteSpace(text)));
+            task.Report(Onboarding.ProgressIndeterminate ? null : Onboarding.Progress / 100.0, detail, activeFiles: Onboarding.ActiveFiles);
+        }
+        Onboarding.PropertyChanged += Report;
+        try
+        {
+            var id = await Onboarding.InstallAsync(version, Onboarding.WithFabric ? LoaderKind.Fabric : null, fallbackToVanilla: true);
+            if (id is not null) task.Succeed(Onboarding.Message?.Text);
+            else if (task.CancelRequested) task.Cancelled();
+            else task.Fail(Onboarding.Message?.Text ?? L.T("common.install_failed"));
+        }
+        finally
+        {
+            Onboarding.PropertyChanged -= Report;
+            if (task.IsRunning) task.Cancelled();
+        }
     }
 
     /// <summary>
@@ -556,6 +601,17 @@ public sealed partial class HomeViewModel : PageViewModel
         SelectedVersion = id;
         _service.SetCurrentInstance(id);
 
+        // Android uses the complete desktop launcher UI and instance model, but its JVM lives in a native Activity.
+        // Hand the exact selected instance to that Activity instead of trying to spawn a desktop java process.
+        if (Amber.App.App.MobileLaunchRequested is { } mobileLaunch)
+        {
+            var mobileSettings = _service.EffectiveSettings(_service.Context, id);
+            await mobileLaunch(id, account.Name, request.JoinServer ?? mobileSettings.JoinServer);
+            _service.RecordPlayed(id, DateTimeOffset.Now);
+            SetStatus(StatusMessage.Info("home.status.launching"));
+            return;
+        }
+
         // 这一局全程用开始时的游戏目录、安装器和 Java：准备到一半换了目录，也还是在原目录里补文件、启动。
         var ctx = request.ExpectedContext ?? _service.Context;
         var workDir = _service.WorkDirFor(ctx, id);
@@ -602,8 +658,39 @@ public sealed partial class HomeViewModel : PageViewModel
             if (string.IsNullOrEmpty(javaPath) || !File.Exists(javaPath))
             {
                 Progress = 0;
+                var javaMajor = version.JavaVersion?.MajorVersion ?? 8;
+                var needsJavaDownload = Amber.Core.Java.JavaFinder.PickExact(await ctx.Java.ScanAsync(), javaMajor) is null;
+                var javaTask = needsJavaDownload
+                    ? _service.Tasks.Track("java", L.F("tools.java.downloading", javaMajor), () => run.Cts.Cancel(), $"java:{javaMajor}")
+                    : null;
                 ctx.Java.Status = new Progress<string>(text => Status = text);
-                javaPath = await ctx.Java.ForVersionAsync(version, ct);
+                ctx.Java.FileProgress = new Progress<Amber.Core.Net.DownloadProgress>(p =>
+                {
+                    Progress = 100.0 * p.CompletedFiles / Math.Max(1, p.TotalFiles);
+                    _launchMeter.Add(DateTimeOffset.Now, Progress / 100.0, p.BytesDownloaded);
+                    javaTask?.Report(Progress / 100.0,
+                        L.F("tools.java.progress", javaMajor, p.CompletedFiles, p.TotalFiles), p.BytesDownloaded, p.ActiveFiles);
+                });
+                try
+                {
+                    javaPath = await ctx.Java.ForVersionAsync(version, ct);
+                    javaTask?.Succeed();
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    javaTask?.Cancelled();
+                    throw;
+                }
+                catch (Exception e)
+                {
+                    javaTask?.Fail(ErrorText.Describe(e));
+                    throw;
+                }
+                finally
+                {
+                    ctx.Java.Status = null;
+                    ctx.Java.FileProgress = null;
+                }
             }
 
             Progress = 0;
@@ -1240,10 +1327,11 @@ public sealed partial class HomeViewModel : PageViewModel
                 Failure = null;
                 var task = _service.Tasks.Start("java", L.F("tools.java.downloading", major), async (ctx, ct) =>
                 {
-                    await new Amber.Core.Java.JavaRuntimeInstaller(_service.Downloader, _service.Directory.Root).InstallAsync(null, major,
-                        new Progress<Amber.Core.Net.DownloadProgress>(p => ctx.Report((double)p.CompletedFiles / Math.Max(1, p.TotalFiles),
-                            L.F("tools.java.progress", major, p.CompletedFiles, p.TotalFiles))), ct);
-                    await _service.Java.ScanAsync(true);
+                    var java = _service.Java;
+                    java.FileProgress = new Progress<Amber.Core.Net.DownloadProgress>(p => ctx.Report((double)p.CompletedFiles / Math.Max(1, p.TotalFiles),
+                        L.F("tools.java.progress", major, p.CompletedFiles, p.TotalFiles), p.BytesDownloaded, p.ActiveFiles));
+                    try { await java.ForMajorAsync(major, ct); }
+                    finally { java.FileProgress = null; }
                     return Amber.Core.Activity.TaskOutcome.Success();
                 }, $"java:{major}");
                 while (task.IsRunning) await Task.Delay(200);

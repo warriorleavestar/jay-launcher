@@ -14,7 +14,7 @@ help a friend with remote control, or borrow a friend's connection. Source avail
 [![License: PolyForm Noncommercial](https://img.shields.io/badge/license-PolyForm%20Noncommercial-4b6584)](LICENSE)
 
 [![Download for Windows](https://img.shields.io/badge/Windows-Download-d98a1f?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-win-x64.zip)
-[![Download for macOS](https://img.shields.io/badge/macOS-Download-4b6584?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-osx-arm64.tar.gz)
+[![Download for macOS](https://img.shields.io/badge/macOS-Download-4b6584?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-osx-arm64.dmg)
 [![Download for Linux](https://img.shields.io/badge/Linux-Download-4b6584?style=for-the-badge&logo=linux&logoColor=white)](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-linux-x64.tar.gz)
 
 **English** · [简体中文](README.zh-Hans.md) · [Download](#download) · [Features](#features) · [Privacy](#privacy) · [FAQ](#faq) · [Contributing](CONTRIBUTING.md)
@@ -66,13 +66,13 @@ Fabric, Quilt, Forge, NeoForge and OptiFine in one click, Modrinth and CurseForg
 
 ## Download
 
-Grab the file for your computer from the [latest release](https://github.com/warriorleavestar/jay-launcher/releases/latest), unzip it and run. Nothing to install: .NET is included, and Jay finds or downloads the right Java for each game version.
+Grab the file for your computer from the [latest release](https://github.com/warriorleavestar/jay-launcher/releases/latest). Nothing else is required: .NET is included, and Jay finds or downloads the right Java for each game version.
 
 | System | File | Status |
 |---|---|---|
 | **Windows 10+** x64 | [`Jay-win-x64.zip`](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-win-x64.zip) | ✅ Stable |
-| **macOS** Apple silicon | [`Jay-osx-arm64.tar.gz`](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-osx-arm64.tar.gz) | ✅ Tested on a real Mac |
-| **macOS** Intel | [`Jay-osx-x64.tar.gz`](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-osx-x64.tar.gz) | 🧪 Experimental |
+| **macOS** Apple silicon | [`Jay-osx-arm64.dmg`](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-osx-arm64.dmg) | ✅ Tested on a real Mac |
+| **macOS** Intel | [`Jay-osx-x64.dmg`](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-osx-x64.dmg) | 🧪 Experimental |
 | **Linux** x64 | [`Jay-linux-x64.tar.gz`](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-linux-x64.tar.gz) | 🧪 Experimental |
 | **Linux** ARM64 | [`Jay-linux-arm64.tar.gz`](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-linux-arm64.tar.gz) | 🧪 Experimental (bring your own Java) |
 | **Android** companion | [`Jay-android-experimental.apk`](https://github.com/warriorleavestar/jay-launcher/releases/download/android-preview/Jay-android-experimental.apk) | 🧪 Experimental, see [docs/android.md](docs/android.md) |
@@ -89,7 +89,7 @@ The builds aren't code-signed yet, so Windows SmartScreen may warn you the first
 <details>
 <summary><b>macOS notes</b></summary>
 
-Extract the archive and run `./Jay` in Terminal. The macOS builds are unsigned for now: if Gatekeeper blocks the first launch, allow it under System Settings → Privacy & Security. Full-LAN and exit-node modes ask for your administrator password once.
+Open the DMG and drag **Jay** to **Applications**, then open it from Applications. The macOS builds use an ad-hoc signature until a Developer ID certificate is configured; if Gatekeeper blocks the first launch, Control-click Jay, choose **Open**, then confirm once. Full-LAN and exit-node modes ask for your administrator password once.
 </details>
 
 <details>

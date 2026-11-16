@@ -10,7 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define JAY_JVM_ABI_VERSION 10
+#define JAY_JVM_ABI_VERSION 11
 #define JAY_ACTION_COUNT 12
 #define JAY_TEXT_CAPACITY 64
 #define JAY_KEY_CAPACITY 16
@@ -32,6 +32,10 @@ typedef struct {
     uint32_t text[JAY_TEXT_CAPACITY];
     int32_t keys[JAY_KEY_CAPACITY];
     uint64_t pointer_generation;
+    float inventory_split_x;
+    float inventory_split_y;
+    int32_t inventory_split_count;
+    uint64_t inventory_split_generation;
     uint64_t generation;
 } jay_input_snapshot;
 
@@ -46,6 +50,8 @@ static jmethodID g_dispatch_scroll;
 static jmethodID g_dispatch_char;
 static jmethodID g_dispatch_look;
 static jmethodID g_is_block_target;
+static jmethodID g_inventory_stack_count;
+static jmethodID g_dispatch_inventory_split;
 static _Atomic int g_input_bridge_error_logged;
 static char g_load_error[256];
 static char g_runtime_error[2048];
@@ -63,6 +69,10 @@ static _Atomic uint32_t g_actions;
 static _Atomic uint32_t g_action_taps;
 static _Atomic int g_gameplay_mode;
 static _Atomic int g_block_target;
+static _Atomic float g_inventory_split_x;
+static _Atomic float g_inventory_split_y;
+static _Atomic int g_inventory_split_count;
+static _Atomic uint64_t g_inventory_split_generation;
 static _Atomic uint64_t g_generation;
 static pthread_mutex_t g_event_mutex = PTHREAD_MUTEX_INITIALIZER;
 static uint32_t g_text[JAY_TEXT_CAPACITY];
@@ -234,6 +244,8 @@ int jay_jvm_run_main(JNIEnv *env, const char *class_name, int argc, const char *
         JAY_INPUT_METHOD(g_dispatch_char, "dispatchChar", "(I)Z");
         JAY_INPUT_METHOD(g_dispatch_look, "dispatchLook", "(FF)Z");
         JAY_INPUT_METHOD(g_is_block_target, "isBlockTarget", "()Z");
+        JAY_INPUT_METHOD(g_inventory_stack_count, "inventoryStackCount", "(FF)I");
+        JAY_INPUT_METHOD(g_dispatch_inventory_split, "dispatchInventorySplit", "(FFI)Z");
 #undef JAY_INPUT_METHOD
     }
     jclass string_class = (*env)->FindClass(env, "java/lang/String");
@@ -286,6 +298,32 @@ int jay_java_pointer(float x, float y, uint32_t clicks) {
     if (env == NULL || g_dispatch_pointer == NULL) return 0;
     jboolean delivered = (*env)->CallStaticBooleanMethod(env, g_input_bridge_class,
         g_dispatch_pointer, (jfloat)x, (jfloat)y, (jint)clicks);
+    return jay_finish_input_call(env, attached, delivered);
+}
+
+__attribute__((visibility("default")))
+int jay_inventory_stack_count(float x, float y) {
+    int attached;
+    JNIEnv *env = jay_input_environment(&attached);
+    if (env == NULL || g_inventory_stack_count == NULL) return 0;
+    jint count = (*env)->CallStaticIntMethod(env, g_input_bridge_class,
+        g_inventory_stack_count, (jfloat)x, (jfloat)y);
+    if ((*env)->ExceptionCheck(env)) {
+        if (!atomic_exchange(&g_input_bridge_error_logged, 1)) (*env)->ExceptionDescribe(env);
+        (*env)->ExceptionClear(env);
+        count = 0;
+    }
+    if (attached && g_vm != NULL) (*g_vm)->DetachCurrentThread(g_vm);
+    return count;
+}
+
+__attribute__((visibility("default")))
+int jay_java_inventory_split(float x, float y, int count) {
+    int attached;
+    JNIEnv *env = jay_input_environment(&attached);
+    if (env == NULL || g_dispatch_inventory_split == NULL) return 0;
+    jboolean delivered = (*env)->CallStaticBooleanMethod(env, g_input_bridge_class,
+        g_dispatch_inventory_split, (jfloat)x, (jfloat)y, (jint)count);
     return jay_finish_input_call(env, attached, delivered);
 }
 
@@ -433,6 +471,16 @@ void jay_input_set_pointer(float x, float y, int click) {
 }
 
 __attribute__((visibility("default")))
+void jay_input_split_inventory(float x, float y, int count) {
+    if (count < 1) return;
+    atomic_store(&g_inventory_split_x, x);
+    atomic_store(&g_inventory_split_y, y);
+    atomic_store(&g_inventory_split_count, count);
+    atomic_fetch_add(&g_inventory_split_generation, 1);
+    atomic_fetch_add(&g_generation, 1);
+}
+
+__attribute__((visibility("default")))
 void jay_input_add_codepoint(uint32_t codepoint) {
     if (codepoint == 0 || codepoint > 0x10ffffu || (codepoint >= 0xd800u && codepoint <= 0xdfffu)) return;
     pthread_mutex_lock(&g_event_mutex);
@@ -472,6 +520,10 @@ void jay_input_read(jay_input_snapshot *snapshot) {
     g_text_count = 0;
     g_key_count = 0;
     snapshot->pointer_generation = atomic_load(&g_pointer_generation);
+    snapshot->inventory_split_x = atomic_load(&g_inventory_split_x);
+    snapshot->inventory_split_y = atomic_load(&g_inventory_split_y);
+    snapshot->inventory_split_count = atomic_load(&g_inventory_split_count);
+    snapshot->inventory_split_generation = atomic_load(&g_inventory_split_generation);
     snapshot->generation = atomic_load(&g_generation);
     pthread_mutex_unlock(&g_event_mutex);
 }

@@ -23,11 +23,13 @@ internal static class AndroidEmbeddedGame
 
     public static async Task<AndroidPreparedGame> PrepareAsync(
         Context context,
+        string versionId,
         string playerName,
         string? serverAddress,
         IProgress<AndroidGameInstallProgress>? progress,
         CancellationToken ct)
     {
+        versionId = GameDirectory.CheckId(versionId);
         playerName = playerName.Trim();
         if (playerName.Length is < 1 or > 16 || playerName.Any(c => !(char.IsAsciiLetterOrDigit(c) || c == '_')))
             throw new ArgumentException("Minecraft names must use 1-16 letters, numbers or underscores.");
@@ -41,7 +43,10 @@ internal static class AndroidEmbeddedGame
         var installer = new VanillaInstaller(downloader, gameDirectory) { Rules = rules };
         var forwardedProgress = new Progress<InstallProgress>(value =>
             progress?.Report(new(value.Stage, value.Files.CompletedFiles, value.Files.TotalFiles, value.Files.BytesDownloaded)));
-        await installer.InstallAsync(FirstPlayableVersion, forwardedProgress, ct);
+        if (!File.Exists(gameDirectory.VersionJsonPath(versionId)))
+            await installer.InstallAsync(versionId, forwardedProgress, ct);
+        else
+            await installer.CompleteAsync(versionId, forwardedProgress, ct);
         await CreateMobileOptionsIfMissingAsync(gameRoot, ct);
 
         var runtimeRoot = AndroidRuntimeStore.Root(context);
@@ -65,13 +70,13 @@ internal static class AndroidEmbeddedGame
             "-Dorg.lwjgl.opengl.explicitInit=true",
             "-Dorg.lwjgl.freetype.libname=" + Path.Combine(nativeRoot, "libfreetype.so"),
             "-Dorg.lwjgl.openal.libname=" + Path.Combine(nativeRoot, "libopenal.so"),
-            "-Djay.minecraft.version=" + FirstPlayableVersion,
+            "-Djay.minecraft.version=" + versionId,
         };
 
         var launcher = new GameLauncher(gameDirectory) { BaseRules = rules };
         var invocation = launcher.BuildEmbeddedInvocation(new LaunchOptions
         {
-            VersionId = FirstPlayableVersion,
+            VersionId = versionId,
             JavaPath = Path.Combine(runtimeRoot, "bin", "java"),
             Session = OfflineAccount.Create(playerName),
             WorkingDirectory = gameRoot,

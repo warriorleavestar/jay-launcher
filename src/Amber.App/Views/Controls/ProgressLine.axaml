@@ -12,7 +12,10 @@
     <Grid RowDefinitions="Auto,Auto,Auto" ColumnDefinitions="*,Auto" ColumnSpacing="8" VerticalAlignment="Center">
       <TextBlock x:Name="TitleText" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
       <TextBlock x:Name="FactsText" Grid.Column="1" Classes="hint" VerticalAlignment="Center" />
-      <ProgressBar x:Name="Bar" Grid.Row="1" Grid.ColumnSpan="2" Maximum="100" Margin="0,6,0,0" />
+      <!-- Fixed directly on the shared control so both the Library "running" card and the Activity drawer
+           receive the same bright, continuous blue bar instead of inheriting the older dark/wing style. -->
+      <ProgressBar x:Name="Bar" Grid.Row="1" Grid.ColumnSpan="2" Maximum="100" Margin="0,6,0,0"
+                   MinHeight="10" Foreground="#2997FF" Background="#102A45" BorderBrush="#62B7FF" />
       <TextBlock x:Name="StepText" Grid.Row="2" Grid.ColumnSpan="2" Classes="hint" TextTrimming="CharacterEllipsis" Margin="0,4,0,0"
                  AutomationProperties.LiveSetting="Polite" />
     </Grid>
