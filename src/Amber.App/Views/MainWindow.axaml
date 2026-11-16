@@ -401,7 +401,7 @@
                       <Path Classes="icon" Data="{StaticResource Icon.Close}" Width="18" Height="18" />
                     </Button>
                   </Grid>
-                  <ListBox x:Name="ActivityTabsPart" DockPanel.Dock="Top" Classes="subtabs" ItemsSource="{Binding Activity.TabOptions}" SelectedIndex="{Binding Activity.Tab}"
+                  <ListBox x:Name="ActivityTabsPart" DockPanel.Dock="Top" Classes="subtabs activity-tabs" ItemsSource="{Binding Activity.TabOptions}" SelectedIndex="{Binding Activity.Tab}"
                            Background="Transparent" Margin="-4,0,0,8" ScrollViewer.HorizontalScrollBarVisibility="Auto">
                     <ListBox.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" Spacing="4" /></ItemsPanelTemplate></ListBox.ItemsPanel>
                     <ListBox.ItemTemplate>
