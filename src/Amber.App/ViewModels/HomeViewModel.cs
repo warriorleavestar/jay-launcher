@@ -508,9 +508,10 @@ public sealed partial class HomeViewModel : PageViewModel
         void Report(object? _, System.ComponentModel.PropertyChangedEventArgs e)
         {
             if (e.PropertyName is not (nameof(OnboardingViewModel.Progress) or nameof(OnboardingViewModel.ProgressIndeterminate)
-                or nameof(OnboardingViewModel.StageText) or nameof(OnboardingViewModel.DetailText))) return;
+                or nameof(OnboardingViewModel.StageText) or nameof(OnboardingViewModel.DetailText)
+                or nameof(OnboardingViewModel.ActiveFiles))) return;
             var detail = string.Join(" · ", new[] { Onboarding.StageText, Onboarding.DetailText }.Where(text => !string.IsNullOrWhiteSpace(text)));
-            task.Report(Onboarding.ProgressIndeterminate ? null : Onboarding.Progress / 100.0, detail);
+            task.Report(Onboarding.ProgressIndeterminate ? null : Onboarding.Progress / 100.0, detail, activeFiles: Onboarding.ActiveFiles);
         }
         Onboarding.PropertyChanged += Report;
         try
@@ -657,8 +658,39 @@ public sealed partial class HomeViewModel : PageViewModel
             if (string.IsNullOrEmpty(javaPath) || !File.Exists(javaPath))
             {
                 Progress = 0;
+                var javaMajor = version.JavaVersion?.MajorVersion ?? 8;
+                var needsJavaDownload = Amber.Core.Java.JavaFinder.PickExact(await ctx.Java.ScanAsync(), javaMajor) is null;
+                var javaTask = needsJavaDownload
+                    ? _service.Tasks.Track("java", L.F("tools.java.downloading", javaMajor), () => run.Cts.Cancel(), $"java:{javaMajor}")
+                    : null;
                 ctx.Java.Status = new Progress<string>(text => Status = text);
-                javaPath = await ctx.Java.ForVersionAsync(version, ct);
+                ctx.Java.FileProgress = new Progress<Amber.Core.Net.DownloadProgress>(p =>
+                {
+                    Progress = 100.0 * p.CompletedFiles / Math.Max(1, p.TotalFiles);
+                    _launchMeter.Add(DateTimeOffset.Now, Progress / 100.0, p.BytesDownloaded);
+                    javaTask?.Report(Progress / 100.0,
+                        L.F("tools.java.progress", javaMajor, p.CompletedFiles, p.TotalFiles), p.BytesDownloaded, p.ActiveFiles);
+                });
+                try
+                {
+                    javaPath = await ctx.Java.ForVersionAsync(version, ct);
+                    javaTask?.Succeed();
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    javaTask?.Cancelled();
+                    throw;
+                }
+                catch (Exception e)
+                {
+                    javaTask?.Fail(ErrorText.Describe(e));
+                    throw;
+                }
+                finally
+                {
+                    ctx.Java.Status = null;
+                    ctx.Java.FileProgress = null;
+                }
             }
 
             Progress = 0;
@@ -1295,10 +1327,11 @@ public sealed partial class HomeViewModel : PageViewModel
                 Failure = null;
                 var task = _service.Tasks.Start("java", L.F("tools.java.downloading", major), async (ctx, ct) =>
                 {
-                    await new Amber.Core.Java.JavaRuntimeInstaller(_service.Downloader, _service.Directory.Root).InstallAsync(null, major,
-                        new Progress<Amber.Core.Net.DownloadProgress>(p => ctx.Report((double)p.CompletedFiles / Math.Max(1, p.TotalFiles),
-                            L.F("tools.java.progress", major, p.CompletedFiles, p.TotalFiles))), ct);
-                    await _service.Java.ScanAsync(true);
+                    var java = _service.Java;
+                    java.FileProgress = new Progress<Amber.Core.Net.DownloadProgress>(p => ctx.Report((double)p.CompletedFiles / Math.Max(1, p.TotalFiles),
+                        L.F("tools.java.progress", major, p.CompletedFiles, p.TotalFiles), p.BytesDownloaded, p.ActiveFiles));
+                    try { await java.ForMajorAsync(major, ct); }
+                    finally { java.FileProgress = null; }
                     return Amber.Core.Activity.TaskOutcome.Success();
                 }, $"java:{major}");
                 while (task.IsRunning) await Task.Delay(200);

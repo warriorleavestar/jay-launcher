@@ -157,10 +157,10 @@ public sealed partial class ToolsViewModel : PageViewModel
     private void Cancel() => _cts?.Cancel();
 
     /// <summary>Progress goes to the activity center's task, and its speed and time left come back for the line on the page.</summary>
-    private void Report(double? fraction, long bytes)
+    private void Report(double? fraction, long bytes, IReadOnlyList<string>? activeFiles = null)
     {
         if (_task is not { } task) return;
-        task.Report(fraction, Status, bytes);
+        task.Report(fraction, Status, bytes, activeFiles);
         BytesPerSecond = task.BytesPerSecond;
         Remaining = task.Remaining;
     }
@@ -189,13 +189,26 @@ public sealed partial class ToolsViewModel : PageViewModel
     {
         var major = SelectedJavaMajor;
         SetStatus(StatusMessage.Info("tools.java.downloading", major));
-        var path = await new JavaRuntimeInstaller(service.Downloader, service.Directory.Root).InstallAsync(null, major, new Progress<DownloadProgress>(p =>
+        var java = service.Java;
+        java.Status = new Progress<string>(text => SetStatus(StatusMessage.Plain(text)));
+        java.FileProgress = new Progress<DownloadProgress>(p =>
         {
             Progress = 100.0 * p.CompletedFiles / Math.Max(1, p.TotalFiles);
             SetStatus(StatusMessage.Info("tools.java.progress", major, p.CompletedFiles, p.TotalFiles));
-            Report(Progress / 100, p.BytesDownloaded);
-        }), ct);
-        await service.Java.ScanAsync(true);
+            Report(Progress / 100, p.BytesDownloaded, p.ActiveFiles);
+        });
+        string path;
+        try
+        {
+            // JavaManager scans the current library and Jay's shared runtime cache first. Only a missing
+            // major is downloaded, so changing game directories never redownloads an installed runtime.
+            path = await java.ForMajorAsync(major, ct);
+        }
+        finally
+        {
+            java.Status = null;
+            java.FileProgress = null;
+        }
         await Ui.FlushAsync();
         SetStatus(StatusMessage.Success("tools.java.installed", path));
     }, L.F("tools.java.downloading", SelectedJavaMajor));

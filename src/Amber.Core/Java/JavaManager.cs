@@ -14,6 +14,8 @@ public sealed class JavaManager(Downloader downloader, GameDirectory dir, string
     public bool AutoDownload { get; init; } = true;
 
     public IProgress<string>? Status { get; set; }
+    /// <summary>运行时下载的原始进度，供所有桌面端共用的任务详情界面显示文件名。</summary>
+    public IProgress<DownloadProgress>? FileProgress { get; set; }
 
     public async Task<List<JavaInstall>> ScanAsync(bool refresh = false)
     {
@@ -51,7 +53,10 @@ public sealed class JavaManager(Downloader downloader, GameDirectory dir, string
                     Status?.Report(L.F("core.java.manager.downloading", major));
                     var runtime = new JavaRuntimeInstaller(downloader, string.IsNullOrWhiteSpace(sharedRoot) ? dir.Root : sharedRoot);
                     var path = await runtime.InstallAsync(component, major, new Progress<DownloadProgress>(p =>
-                        Status?.Report(L.F("core.java.manager.downloadprogress", major, p.CompletedFiles, p.TotalFiles))), ct);
+                    {
+                        Status?.Report(L.F("core.java.manager.downloadprogress", major, p.CompletedFiles, p.TotalFiles));
+                        FileProgress?.Report(p);
+                    }), ct);
                     await ScanAsync(true);
                     return path;
                 }

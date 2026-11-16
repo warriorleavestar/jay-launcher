@@ -250,10 +250,12 @@
            naturally look after starting an install. It folds away as soon as the last running task finishes. -->
       <Border x:Name="InlineTasks" Classes="card" IsVisible="{Binding HasActiveTasks}" svc:ThemeRegion.Name="library.tasks">
         <StackPanel Spacing="12">
-          <StackPanel Orientation="Horizontal" Spacing="8">
+          <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
             <Path Classes="icon" Data="{StaticResource Icon.Download}" Width="18" Height="18" VerticalAlignment="Center" />
-            <TextBlock Text="{l:T activity.tab.tasks}" FontWeight="SemiBold" VerticalAlignment="Center" />
-          </StackPanel>
+            <TextBlock Grid.Column="1" Text="{l:T activity.tab.tasks}" FontWeight="SemiBold" VerticalAlignment="Center" />
+            <Button Grid.Column="2" Classes="secondary small" Content="{l:T activity.task.show_details}"
+                    Command="{Binding OpenDownloadDetailsCommand}" />
+          </Grid>
           <ItemsControl x:Name="InlineTaskList" ItemsSource="{Binding ActiveTasks}">
             <ItemsControl.ItemsPanel>
               <ItemsPanelTemplate><StackPanel Spacing="14" /></ItemsPanelTemplate>

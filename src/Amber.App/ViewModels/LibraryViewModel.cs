@@ -117,6 +117,13 @@ public sealed partial class LibraryViewModel : PageViewModel
     public ObservableCollection<TaskItem> ActiveTasks { get; } = [];
     public bool HasActiveTasks => ActiveTasks.Count > 0;
 
+    [RelayCommand]
+    private void OpenDownloadDetails()
+    {
+        _activity.Tab = 0;
+        _activity.IsOpen = true;
+    }
+
     private void SyncActiveTasks()
     {
         var handles = _service.Tasks.Active.Reverse().ToList();

@@ -72,7 +72,8 @@ internal sealed partial class SelfTest
             Check("游戏库：中档是封面视图", page?.CardGrid.IsEffectivelyVisible == true && page.CardRows.IsVisible == false);
 
             var downloadTask = service.Tasks.Track("install", "安装 1.21.11", () => { });
-            downloadTask.Report(0.42, "126/300 个文件", 42 * 1024 * 1024);
+            downloadTask.Report(0.42, "126/300 个文件", 42 * 1024 * 1024,
+                ["client-1.21.11.jar", "lwjgl-glfw-3.3.3-natives-macos-arm64.jar"]);
             await WaitAsync(() => library.ActiveTasks.Count == 1 && page?.InlineTasks.IsEffectivelyVisible == true, 3);
             var inlineLine = page?.InlineTaskList.GetVisualDescendants().OfType<Controls.ProgressLine>().FirstOrDefault();
             Check("游戏下载：游戏库下方出现真实任务进度条", library.HasActiveTasks && inlineLine is not null
@@ -80,6 +81,16 @@ internal sealed partial class SelfTest
                 $"tasks={library.ActiveTasks.Count} percent={inlineLine?.Percent} step={inlineLine?.Step}");
             page?.InlineTasks.BringIntoView();
             await ShotAsync("library-download-progress");
+            library.OpenDownloadDetailsCommand.Execute(null);
+            await WaitAsync(() => main.Activity.IsOpen && main.Activity.Tasks.Count > 0, 3);
+            var detailTask = main.Activity.Tasks.First(t => t.Handle == downloadTask);
+            detailTask.ToggleDetailsCommand.Execute(null);
+            await Task.Delay(200);
+            var showsFile = window.GetVisualDescendants().OfType<TextBlock>()
+                .Any(text => text.IsEffectivelyVisible && text.Text == "client-1.21.11.jar");
+            Check("下载详情：由用户手动打开并显示正在下载的文件", main.Activity.IsOpen && detailTask.IsExpanded && showsFile);
+            await ShotAsync("library-download-details");
+            main.Activity.CloseCommand.Execute(null);
             downloadTask.Succeed();
             await WaitAsync(() => !library.HasActiveTasks, 3);
             Check("游戏下载：任务完成后进度区自动收起", page?.InlineTasks.IsEffectivelyVisible == false);

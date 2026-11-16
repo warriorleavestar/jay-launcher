@@ -576,7 +576,7 @@ public sealed partial class DownloadViewModel : PageViewModel, ISnapshotDemo
                     Work.Bytes(p.Files.BytesDownloaded);
                     Progress = 100.0 * p.Files.CompletedFiles / p.Files.TotalFiles;
                     // The speed and the time left are the progress line's; the step only says how far.
-                    task.Report(Progress / 100, L.F("activity.task.files", p.Files.CompletedFiles, p.Files.TotalFiles), p.Files.BytesDownloaded);
+                    task.Report(Progress / 100, L.F("activity.task.files", p.Files.CompletedFiles, p.Files.TotalFiles), p.Files.BytesDownloaded, p.Files.ActiveFiles);
                     SetStatus(StatusMessage.Info("download.status.progress", id, p.Files.CompletedFiles, p.Files.TotalFiles));
                 }), ct);
                 item.Installed = true;
