@@ -3,14 +3,6 @@
              xmlns:l="using:Amber.App.Localization"
              x:Class="Amber.App.Views.Controls.ProgressLine"
              x:Name="Root">
-  <UserControl.Styles>
-    <!-- The library download card uses one calm, continuous fill instead of the global wing pattern. -->
-    <Style Selector="ProgressBar.solid">
-      <Setter Property="Foreground" Value="#174A87" />
-      <Setter Property="Background" Value="#0A182B" />
-      <Setter Property="BorderBrush" Value="#285A91" />
-    </Style>
-  </UserControl.Styles>
   <!--
     The one progress line (design: "one kind of progress"): name, current step, percent, speed, time left, [Cancel].
     Game files, Java, loaders, mods, modpacks, the multiplayer component and Jay updates all use it, in the page that
@@ -20,7 +12,10 @@
     <Grid RowDefinitions="Auto,Auto,Auto" ColumnDefinitions="*,Auto" ColumnSpacing="8" VerticalAlignment="Center">
       <TextBlock x:Name="TitleText" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
       <TextBlock x:Name="FactsText" Grid.Column="1" Classes="hint" VerticalAlignment="Center" />
-      <ProgressBar x:Name="Bar" Classes="solid" Grid.Row="1" Grid.ColumnSpan="2" Maximum="100" Margin="0,6,0,0" />
+      <!-- Fixed directly on the shared control so both the Library "running" card and the Activity drawer
+           receive the same bright, continuous blue bar instead of inheriting the older dark/wing style. -->
+      <ProgressBar x:Name="Bar" Grid.Row="1" Grid.ColumnSpan="2" Maximum="100" Margin="0,6,0,0"
+                   MinHeight="10" Foreground="#2997FF" Background="#102A45" BorderBrush="#62B7FF" />
       <TextBlock x:Name="StepText" Grid.Row="2" Grid.ColumnSpan="2" Classes="hint" TextTrimming="CharacterEllipsis" Margin="0,4,0,0"
                  AutomationProperties.LiveSetting="Polite" />
     </Grid>
