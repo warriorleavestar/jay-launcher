@@ -5,6 +5,7 @@ using Amber.Core.Content;
 using Amber.Core.GameLibrary;
 using Amber.Core.Launch;
 using Amber.Core.Localization;
+using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -20,6 +21,10 @@ public sealed partial class LibraryCard(LibraryEntry entry, int modCount, double
     public int ModCount { get; } = modCount;
     public string Initial => CoverArt.InitialOf(Entry.Name);
     public int CoverSlot => CoverArt.SlotFor(Entry.Id);
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasCoverImage))]
+    public partial Bitmap? CoverImage { get; set; }
+    public bool HasCoverImage => CoverImage is not null;
     /// <summary>Loader tag class (vanilla, fabric, forge, …).</summary>
     public string LoaderClass => Entry.Loader ?? "vanilla";
     public string LoaderName => LibraryViewModel.LoaderName(Entry.Loader);
@@ -62,6 +67,7 @@ public sealed partial class LibraryViewModel : PageViewModel
     private List<LibraryCard> _all = [];
     private int _refreshing;
     private bool _refreshAgain;
+    private readonly Dictionary<string, Task<Bitmap?>> _coverLoads = new(StringComparer.Ordinal);
 
     public override string Title => L.T("shell.nav.library");
     public override string Icon => "M4 19.5V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14.5M4 19.5A2.5 2.5 0 0 0 6.5 22H20M8 7h8M8 11h8";
@@ -224,9 +230,27 @@ public sealed partial class LibraryViewModel : PageViewModel
         var pick = LibraryQuery.ContinueWith(_all.Select(c => c.Entry).ToList(),
             current is null ? _service.Settings.RecentInstances : [current, .. _service.Settings.RecentInstances ?? []], null);
         Continue = pick is null ? null : _all.First(c => c.Id == pick.Id);
+        foreach (var card in _all)
+            if (_service.MetaOf(card.Id)?.CoverUrl is { Length: > 0 } url)
+                _ = LoadCoverAsync(card, url);
         IsLoaded = true;
         ApplyQuery();
         RefreshNeeds();
+    }
+
+    private async Task LoadCoverAsync(LibraryCard card, string url)
+    {
+        try
+        {
+            if (!_coverLoads.TryGetValue(url, out var load))
+                _coverLoads[url] = load = InstanceCoverCache.LoadAsync(_service.Http, url, CancellationToken.None);
+            var bitmap = await load;
+            if (bitmap is not null && _all.Contains(card)) card.CoverImage = bitmap;
+        }
+        catch (Exception e) when (e is IOException or HttpRequestException or ArgumentException or InvalidOperationException)
+        {
+            // Artwork is optional; the deterministic pixel cover stays underneath.
+        }
     }
 
     // ---- search, filter, sort, view ----

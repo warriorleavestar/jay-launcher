@@ -295,6 +295,9 @@ public sealed class InstanceMeta
     /// <summary>界面上显示的名字；null 时按游戏版本和加载器生成。</summary>
     public string? DisplayName { get; set; }
 
+    /// <summary>Modpack artwork from its trusted provider (Modrinth/CurseForge). The library keeps a local cache.</summary>
+    public string? CoverUrl { get; set; }
+
     /// <summary>null 表示正常；incomplete（安装未完成）/ broken（已损坏）。</summary>
     public string? State { get; set; }
 

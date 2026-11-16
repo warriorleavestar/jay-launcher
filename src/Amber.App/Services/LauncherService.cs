@@ -286,6 +286,18 @@ public sealed class LauncherService : IDisposable
         LibraryChanged?.Invoke();
     }
 
+    /// <summary>Remember the provider artwork of an installed modpack. Invalid and non-HTTPS URLs are ignored.</summary>
+    public void SetInstanceCover(string id, string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url) || !Uri.TryCreate(url, UriKind.Absolute, out var uri)
+            || uri.Scheme != Uri.UriSchemeHttps) return;
+        var meta = EnsureMeta(id);
+        if (meta.CoverUrl == uri.AbsoluteUri) return;
+        meta.CoverUrl = uri.AbsoluteUri;
+        SaveQuietly();
+        LibraryChanged?.Invoke();
+    }
+
     private void SaveQuietly()
     {
         try { Settings.Save(); } catch (IOException) { } catch (UnauthorizedAccessException) { }

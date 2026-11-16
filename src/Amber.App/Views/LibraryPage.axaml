@@ -70,9 +70,10 @@
 
       <!-- 继续玩 + 需要你处理：宽档并排，其余上下 -->
       <Grid x:Name="TopRow" ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto" svc:ThemeRegion.Name="library.continue">
-        <Border x:Name="ContinueCard" Classes="continue" IsVisible="{Binding HasContinue}"
+        <Border x:Name="ContinueCard" Classes="continue" IsVisible="{Binding HasContinue}" ClipToBounds="True"
                 Background="{Binding Continue.CoverSlot, Converter={x:Static v:CoverBrush.Instance}, FallbackValue={x:Null}}">
           <Panel>
+            <Image Source="{Binding Continue.CoverImage}" Stretch="UniformToFill" IsVisible="{Binding Continue.HasCoverImage}" />
             <Border>
               <Border.Background>
                 <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
@@ -82,11 +83,15 @@
               </Border.Background>
             </Border>
             <TextBlock Classes="initial" Text="{Binding Continue.Initial}" FontSize="120" Opacity="0.14" Foreground="#FFFFFF"
-                       HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,24,0" IsHitTestVisible="False" />
+                       HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,24,0" IsHitTestVisible="False"
+                       IsVisible="{Binding !Continue.HasCoverImage}" />
             <Grid x:Name="ContinueContent" ColumnDefinitions="Auto,*" Margin="20,16" ColumnSpacing="16">
-              <Border x:Name="ContinueThumb" Classes="cover" Width="88" Height="88" IsVisible="False" VerticalAlignment="Top"
+              <Border x:Name="ContinueThumb" Classes="cover" Width="88" Height="88" IsVisible="False" VerticalAlignment="Top" ClipToBounds="True"
                       Background="{Binding Continue.CoverSlot, Converter={x:Static v:CoverBrush.Instance}, FallbackValue={x:Null}}">
-                <TextBlock Classes="initial" Text="{Binding Continue.Initial}" FontSize="40" />
+                <Panel>
+                  <TextBlock Classes="initial" Text="{Binding Continue.Initial}" FontSize="40" IsVisible="{Binding !Continue.HasCoverImage}" />
+                  <Image Source="{Binding Continue.CoverImage}" Stretch="UniformToFill" IsVisible="{Binding Continue.HasCoverImage}" />
+                </Panel>
               </Border>
               <StackPanel Grid.Column="1" Spacing="4" VerticalAlignment="Bottom">
                 <TextBlock Classes="on-cover-dim" Text="{l:T library.continue}" FontSize="{DynamicResource FontBodySmall}" FontWeight="SemiBold" />
@@ -175,8 +180,11 @@
                   <Button Classes="ghost" Padding="0" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Command="{Binding OpenCommand}"
                           ToolTip.Tip="{Binding OpenTip}" AutomationProperties.Name="{Binding OpenTip}">
                     <StackPanel>
-                      <Border Classes="cover" Height="104" CornerRadius="10,10,0,0" Background="{Binding CoverSlot, Converter={x:Static v:CoverBrush.Instance}}">
-                        <TextBlock Classes="initial" Text="{Binding Initial}" FontSize="44" />
+                      <Border Classes="cover" Height="104" CornerRadius="10,10,0,0" ClipToBounds="True" Background="{Binding CoverSlot, Converter={x:Static v:CoverBrush.Instance}}">
+                        <Panel>
+                          <TextBlock Classes="initial" Text="{Binding Initial}" FontSize="44" IsVisible="{Binding !HasCoverImage}" />
+                          <Image Source="{Binding CoverImage}" Stretch="UniformToFill" IsVisible="{Binding HasCoverImage}" />
+                        </Panel>
                       </Border>
                       <StackPanel Margin="12,8,12,12" Spacing="2">
                         <StackPanel Orientation="Horizontal" Spacing="6">
@@ -212,8 +220,11 @@
                 <Button Classes="ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Padding="6" Command="{Binding OpenCommand}"
                         ToolTip.Tip="{Binding OpenTip}" AutomationProperties.Name="{Binding OpenTip}">
                   <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
-                    <Border Classes="cover" Width="40" Height="40" Background="{Binding CoverSlot, Converter={x:Static v:CoverBrush.Instance}}">
-                      <TextBlock Classes="initial" Text="{Binding Initial}" FontSize="18" />
+                    <Border Classes="cover" Width="40" Height="40" ClipToBounds="True" Background="{Binding CoverSlot, Converter={x:Static v:CoverBrush.Instance}}">
+                      <Panel>
+                        <TextBlock Classes="initial" Text="{Binding Initial}" FontSize="18" IsVisible="{Binding !HasCoverImage}" />
+                        <Image Source="{Binding CoverImage}" Stretch="UniformToFill" IsVisible="{Binding HasCoverImage}" />
+                      </Panel>
                     </Border>
                     <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
                       <StackPanel Orientation="Horizontal" Spacing="6">
