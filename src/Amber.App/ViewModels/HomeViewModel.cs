@@ -556,6 +556,17 @@ public sealed partial class HomeViewModel : PageViewModel
         SelectedVersion = id;
         _service.SetCurrentInstance(id);
 
+        // Android uses the complete desktop launcher UI and instance model, but its JVM lives in a native Activity.
+        // Hand the exact selected instance to that Activity instead of trying to spawn a desktop java process.
+        if (Amber.App.App.MobileLaunchRequested is { } mobileLaunch)
+        {
+            var mobileSettings = _service.EffectiveSettings(_service.Context, id);
+            await mobileLaunch(id, account.Name, request.JoinServer ?? mobileSettings.JoinServer);
+            _service.RecordPlayed(id, DateTimeOffset.Now);
+            SetStatus(StatusMessage.Info("home.status.launching"));
+            return;
+        }
+
         // 这一局全程用开始时的游戏目录、安装器和 Java：准备到一半换了目录，也还是在原目录里补文件、启动。
         var ctx = request.ExpectedContext ?? _service.Context;
         var workDir = _service.WorkDirFor(ctx, id);

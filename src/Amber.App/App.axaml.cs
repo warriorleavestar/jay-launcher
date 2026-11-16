@@ -10,6 +10,14 @@ namespace Amber.App;
 
 public sealed class App : Application
 {
+    private LauncherService? _mobileService;
+
+    /// <summary>Set by the native mobile host so the full launcher uses the same game directory as the embedded runtime.</summary>
+    public static string? MobileGameDirectory { get; set; }
+
+    /// <summary>Starts the selected desktop-style instance in the native mobile game activity.</summary>
+    public static Func<string, string, string?, Task>? MobileLaunchRequested { get; set; }
+
     public override void Initialize()
     {
         StartupTrace.Mark("platform");
@@ -75,6 +83,26 @@ public sealed class App : Application
                 // 清掉以前留下的无痕模式临时配置（Amber 没等到游戏退出就关了、崩溃了之类）。
                 _ = Task.Run(() => Amber.Core.Launch.GameLauncher.SweepNoTrace());
             }
+        }
+        else if (ApplicationLifetime is ISingleViewApplicationLifetime singleView)
+        {
+            var settings = AppSettings.Load();
+            if (settings.IsFresh)
+            {
+                settings.Language = "zh-Hans";
+                settings.FirstRunDone = true;
+            }
+            if (!string.IsNullOrWhiteSpace(MobileGameDirectory))
+                settings.GameDirectory = MobileGameDirectory;
+            settings.Save();
+            Amber.Core.Localization.L.SetLanguage(settings.Language ?? "zh-Hans");
+            settings.ReduceMotionMode = Amber.Core.Layout.MotionPreference.Migrate(settings.ReduceMotionMode, settings.ReduceMotion);
+            DensityService.Apply(settings.Density);
+            _mobileService = new LauncherService(settings);
+            singleView.MainView = new MobileLauncherView
+            {
+                DataContext = new MainViewModel(_mobileService)
+            };
         }
         base.OnFrameworkInitializationCompleted();
     }

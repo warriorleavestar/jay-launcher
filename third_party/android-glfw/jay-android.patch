@@ -35,7 +35,7 @@ diff --git a/src/null_window.c b/src/null_window.c
 index 1db0811..b84b668 100644
 --- a/src/null_window.c
 +++ b/src/null_window.c
-@@ -29,6 +29,43 @@
+@@ -29,6 +29,92 @@
 
  #include <stdlib.h>
 
@@ -61,6 +61,10 @@ index 1db0811..b84b668 100644
 +    uint32_t text[64];
 +    int32_t keys[16];
 +    uint64_t pointerGeneration;
++    float inventorySplitX;
++    float inventorySplitY;
++    int32_t inventorySplitCount;
++    uint64_t inventorySplitGeneration;
 +    uint64_t generation;
 +} JayInputSnapshot;
 +typedef void (*JayInputRead)(JayInputSnapshot*);
@@ -71,6 +75,7 @@ index 1db0811..b84b668 100644
 +typedef int (*JayJavaScroll)(double, double);
 +typedef int (*JayJavaChar)(uint32_t);
 +typedef int (*JayJavaLook)(float, float);
++typedef int (*JayJavaInventorySplit)(float, float, int);
 +
 +static JaySurfaceAcquire jaySurfaceAcquire;
 +static JaySurfaceRelease jaySurfaceRelease;
@@ -82,6 +87,8 @@ index 1db0811..b84b668 100644
 +static JayJavaScroll jayJavaScroll;
 +static JayJavaChar jayJavaChar;
 +static JayJavaLook jayJavaLook;
++static JayJavaInventorySplit jayJavaInventorySplit;
++static uint64_t jayInventorySplitGeneration;
 +static void* jayBridge;
 +
 +static GLFWbool connectJayBridge(void)
@@ -110,9 +117,11 @@ index 1db0811..b84b668 100644
 +        jayJavaChar = (JayJavaChar) dlsym(jayBridge, "jay_java_char");
 +    if (!jayJavaLook)
 +        jayJavaLook = (JayJavaLook) dlsym(jayBridge, "jay_java_look");
++    if (!jayJavaInventorySplit)
++        jayJavaInventorySplit = (JayJavaInventorySplit) dlsym(jayBridge, "jay_java_inventory_split");
 +    return jaySurfaceAcquire && jaySurfaceRelease && jayInputRead && jayGameplayModeSet &&
 +           jayJavaPointer && jayJavaMouseButton && jayJavaKey && jayJavaScroll &&
-+           jayJavaChar && jayJavaLook;
++           jayJavaChar && jayJavaLook && jayJavaInventorySplit;
 +}
 +#endif
 +
@@ -204,7 +213,7 @@ index 1db0811..b84b668 100644
  }
  
  void _glfwSetWindowTitleNull(_GLFWwindow* window, const char* title)
-@@ -486,6 +544,61 @@ GLFWbool _glfwWindowVisibleNull(_GLFWwindow* window)
+@@ -486,6 +544,168 @@ GLFWbool _glfwWindowVisibleNull(_GLFWwindow* window)
  
 +#if defined(__ANDROID__)
 +static void inputMouseButton(_GLFWwindow* window, int button, int action)
@@ -260,7 +269,19 @@ index 1db0811..b84b668 100644
 +    if (input.generation == window->null.jayInputGeneration)
 +        return;
 +    window->null.jayInputGeneration = input.generation;
-+    if (window->cursorMode != GLFW_CURSOR_DISABLED &&
++    if (input.inventorySplitGeneration != jayInventorySplitGeneration)
++    {
++        jayInventorySplitGeneration = input.inventorySplitGeneration;
++        jayJavaInventorySplit(input.inventorySplitX, input.inventorySplitY,
++                              input.inventorySplitCount);
++    }
++    if (window->cursorMode == GLFW_CURSOR_DISABLED && input.pointerClicks > 0)
++    {
++        // Gameplay owns a disabled/locked cursor, but touchscreen taps still need to
++        // reach Minecraft.  Run the contextual attack/use call here on the game thread.
++        jayJavaPointer(input.pointerX, input.pointerY, input.pointerClicks);
++    }
++    else if (window->cursorMode != GLFW_CURSOR_DISABLED &&
 +        input.pointerGeneration != window->null.jayPointerGeneration)
 +    {
 +        window->null.jayPointerGeneration = input.pointerGeneration;
