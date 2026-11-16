@@ -1980,6 +1980,8 @@
   "activity.task.show_details": "觀取檔之詳",
   "activity.task.hide_details": "收取檔之詳",
   "activity.task.downloading_files": "方取檔",
+  "activity.task.speed": "取檔之速：{0}",
+  "activity.task.measuring_speed": "取檔之速：方度之…",
   "activity.task.manual": "有檔須親取之，觀於覓頁。",
   "activity.run.preparing": "方備",
   "activity.run.entering": "方入戲",

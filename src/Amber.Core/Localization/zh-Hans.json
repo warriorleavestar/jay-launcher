@@ -2085,6 +2085,8 @@
   "activity.task.show_details": "查看下载详情",
   "activity.task.hide_details": "收起下载详情",
   "activity.task.downloading_files": "正在下载",
+  "activity.task.speed": "下载速度：{0}",
+  "activity.task.measuring_speed": "下载速度：正在测速…",
   "activity.task.manual": "有些文件需要手动下载，到发现页查看。",
   "activity.run.preparing": "准备中",
   "activity.run.entering": "正在进入游戏",

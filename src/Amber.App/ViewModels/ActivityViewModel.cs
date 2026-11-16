@@ -28,6 +28,9 @@ public sealed partial class TaskItem(TaskHandle handle) : ObservableObject
     public TimeSpan? Remaining => Handle.Remaining;
     public IReadOnlyList<string> ActiveFiles => Handle.ActiveFiles;
     public bool HasFiles => ActiveFiles.Count > 0;
+    public string DownloadSpeedText => Speed is { } speed && speed > 0
+        ? L.F("activity.task.speed", Fmt.Speed(speed))
+        : L.T("activity.task.measuring_speed");
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(DetailsLabel))]

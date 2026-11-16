@@ -72,13 +72,19 @@ internal sealed partial class SelfTest
             Check("游戏库：中档是封面视图", page?.CardGrid.IsEffectivelyVisible == true && page.CardRows.IsVisible == false);
 
             var downloadTask = service.Tasks.Track("install", "安装 1.21.11", () => { });
+            downloadTask.Report(0.40, "120/300 个文件", 32 * 1024 * 1024,
+                ["client-1.21.11.jar", "lwjgl-glfw-3.3.3-natives-macos-arm64.jar"]);
+            await Task.Delay(1100);
             downloadTask.Report(0.42, "126/300 个文件", 42 * 1024 * 1024,
                 ["client-1.21.11.jar", "lwjgl-glfw-3.3.3-natives-macos-arm64.jar"]);
-            await WaitAsync(() => library.ActiveTasks.Count == 1 && page?.InlineTasks.IsEffectivelyVisible == true, 3);
+            await WaitAsync(() => library.ActiveTasks.Count == 1 && page?.InlineTasks.IsEffectivelyVisible == true
+                && library.ActiveTasks[0].Percent == 42 && library.ActiveTasks[0].Speed is > 0, 3);
+            await Task.Delay(100); // let the computed bindings reach the rendered ProgressLine
             var inlineLine = page?.InlineTaskList.GetVisualDescendants().OfType<Controls.ProgressLine>().FirstOrDefault();
             Check("游戏下载：游戏库下方出现真实任务进度条", library.HasActiveTasks && inlineLine is not null
-                && inlineLine.Percent == 42 && inlineLine.Step == "126/300 个文件" && inlineLine.CanCancel,
-                $"tasks={library.ActiveTasks.Count} percent={inlineLine?.Percent} step={inlineLine?.Step}");
+                && inlineLine.Percent == 42 && inlineLine.Step == "126/300 个文件" && inlineLine.CanCancel
+                && inlineLine.Facts.Contains("/s", StringComparison.Ordinal),
+                $"tasks={library.ActiveTasks.Count} percent={inlineLine?.Percent} step={inlineLine?.Step} facts={inlineLine?.Facts}");
             page?.InlineTasks.BringIntoView();
             await ShotAsync("library-download-progress");
             library.OpenDownloadDetailsCommand.Execute(null);

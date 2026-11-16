@@ -438,7 +438,11 @@
                                   <Border Background="{DynamicResource SurfaceMuted}" CornerRadius="6" Padding="8"
                                           IsVisible="{Binding IsExpanded}">
                                     <StackPanel Spacing="5">
-                                      <TextBlock Text="{l:T activity.task.downloading_files}" Classes="hint" FontSize="12" />
+                                      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                        <TextBlock Text="{l:T activity.task.downloading_files}" Classes="hint" FontSize="12" />
+                                        <TextBlock Grid.Column="1" Text="{Binding DownloadSpeedText}" Classes="hint"
+                                                   FontSize="12" FontWeight="SemiBold" />
+                                      </Grid>
                                       <ItemsControl ItemsSource="{Binding ActiveFiles}">
                                         <ItemsControl.ItemTemplate>
                                           <DataTemplate>

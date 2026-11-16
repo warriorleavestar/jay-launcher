@@ -2117,6 +2117,8 @@
   "activity.task.show_details": "View download details",
   "activity.task.hide_details": "Hide download details",
   "activity.task.downloading_files": "Downloading now",
+  "activity.task.speed": "Download speed: {0}",
+  "activity.task.measuring_speed": "Download speed: measuring…",
   "activity.task.manual": "Some files need to be downloaded by hand. See the Discover page.",
   "activity.run.preparing": "Preparing",
   "activity.run.entering": "Starting the game",

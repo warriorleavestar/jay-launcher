@@ -2085,6 +2085,8 @@
   "activity.task.show_details": "ダウンロード詳細を表示",
   "activity.task.hide_details": "ダウンロード詳細を閉じる",
   "activity.task.downloading_files": "ダウンロード中",
+  "activity.task.speed": "ダウンロード速度：{0}",
+  "activity.task.measuring_speed": "ダウンロード速度：測定中…",
   "activity.task.manual": "手動でダウンロードが必要なファイルがあります。「見つける」ページを確認してください。",
   "activity.run.preparing": "準備中",
   "activity.run.entering": "ゲームを起動中",
