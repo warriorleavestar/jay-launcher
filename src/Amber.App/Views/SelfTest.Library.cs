@@ -70,6 +70,19 @@ internal sealed partial class SelfTest
                 string.Join(",", library.Cards.Select(c => c.Id)));
             Check("游戏库：没装完的实例标成有问题", library.Cards.First(c => c.Id == "forge-1.20.1").HasProblem);
             Check("游戏库：中档是封面视图", page?.CardGrid.IsEffectivelyVisible == true && page.CardRows.IsVisible == false);
+
+            var downloadTask = service.Tasks.Track("install", "安装 1.21.11", () => { });
+            downloadTask.Report(0.42, "126/300 个文件", 42 * 1024 * 1024);
+            await WaitAsync(() => library.ActiveTasks.Count == 1 && page?.InlineTasks.IsEffectivelyVisible == true, 3);
+            var inlineLine = page?.InlineTaskList.GetVisualDescendants().OfType<Controls.ProgressLine>().FirstOrDefault();
+            Check("游戏下载：游戏库下方出现真实任务进度条", library.HasActiveTasks && inlineLine is not null
+                && inlineLine.Percent == 42 && inlineLine.Step == "126/300 个文件" && inlineLine.CanCancel,
+                $"tasks={library.ActiveTasks.Count} percent={inlineLine?.Percent} step={inlineLine?.Step}");
+            await ShotAsync("library-download-progress");
+            downloadTask.Succeed();
+            await WaitAsync(() => !library.HasActiveTasks, 3);
+            Check("游戏下载：任务完成后进度区自动收起", page?.InlineTasks.IsEffectivelyVisible == false);
+
             await ShotAsync("library-1024-zh");
             await LibraryScrollbarGutterAsync(page);
 

@@ -81,6 +81,7 @@ public sealed partial class LibraryViewModel : PageViewModel
         service.CurrentInstanceChanged += () => Dispatcher.UIThread.Post(Refresh);
         service.LibraryChanged += () => Dispatcher.UIThread.Post(Refresh);
         service.ContentChanged += () => Dispatcher.UIThread.Post(Refresh);
+        service.Tasks.Changed += _ => Dispatcher.UIThread.Post(SyncActiveTasks);
         _activity.Runs.CollectionChanged += (_, _) => Dispatcher.UIThread.Post(Refresh);
         home.PropertyChanged += (_, e) =>
         {
@@ -89,9 +90,17 @@ public sealed partial class LibraryViewModel : PageViewModel
         };
     }
 
-    protected override void OnFirstActivated() => Refresh();
+    protected override void OnFirstActivated()
+    {
+        Refresh();
+        SyncActiveTasks();
+    }
     protected override void OnBecameCurrent() => Refresh();
-    protected override void OnLanguageChanged() => Refresh();
+    protected override void OnLanguageChanged()
+    {
+        Refresh();
+        foreach (var task in ActiveTasks) task.Refresh();
+    }
 
     // ---- data ----
 
@@ -100,6 +109,28 @@ public sealed partial class LibraryViewModel : PageViewModel
     /// <summary>All cards after search, filter and sort.</summary>
     public ObservableCollection<LibraryCard> Cards { get; } = [];
     public ObservableCollection<NeedItem> Needs { get; } = [];
+
+    /// <summary>
+    /// Long-running work also appears inline below the instance list. The activity drawer remains the full history;
+    /// this compact list deliberately keeps only work that is still running and disappears when it finishes.
+    /// </summary>
+    public ObservableCollection<TaskItem> ActiveTasks { get; } = [];
+    public bool HasActiveTasks => ActiveTasks.Count > 0;
+
+    private void SyncActiveTasks()
+    {
+        var handles = _service.Tasks.Active.Reverse().ToList();
+        for (var i = ActiveTasks.Count - 1; i >= 0; i--)
+            if (!handles.Contains(ActiveTasks[i].Handle)) ActiveTasks.RemoveAt(i);
+
+        foreach (var (handle, index) in handles.Select((handle, index) => (handle, index)))
+        {
+            var existing = ActiveTasks.FirstOrDefault(task => task.Handle == handle);
+            if (existing is null) ActiveTasks.Insert(Math.Min(index, ActiveTasks.Count), new TaskItem(handle));
+            else existing.Refresh();
+        }
+        OnPropertyChanged(nameof(HasActiveTasks));
+    }
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasContinue))]

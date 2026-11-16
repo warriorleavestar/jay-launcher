@@ -2,6 +2,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Amber.App.ViewModels"
              xmlns:v="using:Amber.App.Views"
+             xmlns:c="using:Amber.App.Views.Controls"
              xmlns:l="using:Amber.App.Localization"
              xmlns:svc="using:Amber.App.Services"
              x:Class="Amber.App.Views.LibraryPage"
@@ -244,6 +245,30 @@
           <Button Classes="secondary small" Content="{l:T library.clear_filters}" Command="{Binding ClearFiltersCommand}" />
         </StackPanel>
       </StackPanel>
+
+      <!-- PCL-style inline task progress: the same live task data as the activity drawer, placed where players
+           naturally look after starting an install. It folds away as soon as the last running task finishes. -->
+      <Border x:Name="InlineTasks" Classes="card" IsVisible="{Binding HasActiveTasks}" svc:ThemeRegion.Name="library.tasks">
+        <StackPanel Spacing="12">
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <Path Classes="icon" Data="{StaticResource Icon.Download}" Width="18" Height="18" VerticalAlignment="Center" />
+            <TextBlock Text="{l:T activity.tab.tasks}" FontWeight="SemiBold" VerticalAlignment="Center" />
+          </StackPanel>
+          <ItemsControl x:Name="InlineTaskList" ItemsSource="{Binding ActiveTasks}">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate><StackPanel Spacing="14" /></ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate DataType="vm:TaskItem">
+                <c:ProgressLine Title="{Binding Title}" Step="{Binding Step}" Percent="{Binding Percent}"
+                                IsIndeterminate="{Binding Indeterminate}" BytesPerSecond="{Binding Speed}"
+                                Remaining="{Binding Remaining}" CancelCommand="{Binding CancelCommand}"
+                                CanCancel="{Binding CanCancel}" />
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+      </Border>
 
       <!-- 没有实例 -->
       <StackPanel x:Name="EmptyLibrary" Classes="empty-state" IsVisible="{Binding IsEmpty}">
