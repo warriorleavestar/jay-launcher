@@ -29,6 +29,7 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
     private CancellationTokenSource? _runtimeSetup;
     private CancellationTokenSource? _gameSetup;
     private TouchControlOverlay? _touchOverlay;
+    private readonly TaskCompletionSource _surfaceReady = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     protected override void OnCreate(Bundle? savedInstanceState)
     {
@@ -46,13 +47,10 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
         };
         root.AddView(_touchOverlay, MatchParent());
 
-        if (!AndroidRuntimeStore.IsInstalled(this))
-            AddRuntimeSetup(root);
-        else
-            AddGameSetup(root);
-
         SetContentView(root);
         EnterImmersiveMode();
+        _gameSetup = new CancellationTokenSource();
+        _ = RunPreparedGameAsync(_gameSetup.Token);
     }
 
     public override void OnWindowFocusChanged(bool hasFocus)
@@ -113,6 +111,48 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
     {
         _touchOverlay?.ReleaseHardwareInput();
         base.OnPause();
+    }
+
+    private async Task RunPreparedGameAsync(CancellationToken ct)
+    {
+        try
+        {
+            if (!AndroidRuntimeStore.IsInstalled(this))
+                throw new InvalidOperationException("Android runtime preparation did not finish in the launcher.");
+            var versionId = Intent?.GetStringExtra(VersionIdExtra);
+            if (string.IsNullOrWhiteSpace(versionId))
+                throw new InvalidOperationException("No Minecraft instance was selected.");
+            var playerName = Intent?.GetStringExtra(PlayerNameExtra);
+            if (string.IsNullOrWhiteSpace(playerName))
+                throw new InvalidOperationException("No Minecraft account was selected.");
+
+            // The launcher has already completed all network work. This second pass only rebuilds the invocation
+            // inside the isolated game process, then switches directly to Minecraft without a setup screen.
+            var prepared = await AndroidEmbeddedGame.PrepareAsync(this, versionId, playerName,
+                Intent?.GetStringExtra(ServerAddressExtra), progress: null, ct);
+            await _surfaceReady.Task.WaitAsync(ct);
+            var runTask = Task.Run(() => AndroidEmbeddedGame.Run(prepared), ct);
+            await Task.Delay(900, ct);
+            if (_touchOverlay is not null)
+            {
+                _touchOverlay.Visibility = ViewStates.Visible;
+                _touchOverlay.Alpha = 1;
+                _touchOverlay.UpdateHardwareCapture(HasWindowFocus);
+            }
+            await runTask;
+            Finish();
+        }
+        catch (System.OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            Finish();
+        }
+        catch (Exception exception) when (exception is IOException or InvalidDataException or HttpRequestException
+                                           or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
+        {
+            global::Android.Util.Log.Error("JayGame", exception.ToString());
+            Toast.MakeText(this, exception.Message, ToastLength.Long)?.Show();
+            Finish();
+        }
     }
 
     private void AddRuntimeSetup(FrameLayout root)
@@ -193,7 +233,7 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
     private void AddGameSetup(FrameLayout root)
     {
         var preferences = GetPreferences(FileCreationMode.Private)!;
-        var versionId = Intent?.GetStringExtra(VersionIdExtra) ?? AndroidEmbeddedGame.FirstPlayableVersion;
+        var versionId = Intent?.GetStringExtra(VersionIdExtra) ?? "";
         var suppliedPlayerName = Intent?.GetStringExtra(PlayerNameExtra);
         var (backdrop, content, status) = AddSetupShell(root, L.T("mobile.game.setup"));
         var playerName = new EditText(this)
@@ -439,7 +479,11 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
 
     private int Dp(float value) => (int)Math.Round(value * (Resources?.DisplayMetrics?.Density ?? 1));
 
-    public void SurfaceCreated(ISurfaceHolder holder) => NativeJvmHost.SetSurface(holder.Surface);
+    public void SurfaceCreated(ISurfaceHolder holder)
+    {
+        NativeJvmHost.SetSurface(holder.Surface);
+        _surfaceReady.TrySetResult();
+    }
 
     public void SurfaceChanged(ISurfaceHolder holder, Format format, int width, int height) =>
         NativeJvmHost.SetSurface(holder.Surface);
