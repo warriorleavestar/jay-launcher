@@ -75,9 +75,33 @@ public sealed class SecurityHardeningTests : IDisposable
         PrivateFile.WriteAllText(path, "second\n");
         Assert.Equal("second\n", File.ReadAllText(path));
         Assert.Single(Directory.GetFiles(Path.GetDirectoryName(path)!));
-        if (OperatingSystem.IsWindows()) return;
+        PrivateFile.WriteAllBytes(path + ".hw", [1, 2, 3]);
+        Assert.Equal([1, 2, 3], File.ReadAllBytes(path + ".hw"));
+        Assert.Equal(2, Directory.GetFiles(Path.GetDirectoryName(path)!).Length);
+        if (OperatingSystem.IsWindows())
+        {
+            AssertLockedOnWindows(path);
+            return;
+        }
         Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(path));
+        Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(path + ".hw"));
         Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute, File.GetUnixFileMode(Path.GetDirectoryName(path)!));
+    }
+
+    /// <summary>A private file and its folder have their own protected ACL: nothing inherited, only this user, SYSTEM and Administrators.</summary>
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private static void AssertLockedOnWindows(string path)
+    {
+        var owners = PrivateFile.Owners().Select(s => s.Value).ToHashSet();
+        foreach (var security in new System.Security.AccessControl.FileSystemSecurity[]
+                     { new FileInfo(path).GetAccessControl(), new FileInfo(path + ".hw").GetAccessControl(), new DirectoryInfo(Path.GetDirectoryName(path)!).GetAccessControl() })
+        {
+            Assert.True(security.AreAccessRulesProtected);
+            var rules = security.GetAccessRules(true, true, typeof(System.Security.Principal.SecurityIdentifier))
+                .OfType<System.Security.AccessControl.FileSystemAccessRule>().ToList();
+            Assert.NotEmpty(rules);
+            foreach (var rule in rules) Assert.Contains(rule.IdentityReference.Value, owners);
+        }
     }
 
     [Fact]

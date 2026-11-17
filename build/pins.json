@@ -102,7 +102,7 @@
       "license": "LGPL-3.0",
       "sha256": "6ad63ed07f270f2942387d1257ef0db45a31b2e525c73f8aa981c7c94fbcb300",
       "size": 13500986,
-      "usedBy": ["src/Amber.Core/Multiplayer/EasyTier.cs", "scripts/bundle-easytier.sh", "node/install.sh"]
+      "usedBy": ["src/Amber.Core/Multiplayer/EasyTier.cs", "scripts/bundle-easytier.sh", "node/install.sh", "node/Dockerfile"]
     },
     {
       "id": "easytier-linux-aarch64",
@@ -117,7 +117,7 @@
       "license": "LGPL-3.0",
       "sha256": "6c1a99ea81f1e1dd8fc8f13aa6f0df8d9e22925202dda18b4e40ad62ac49f7ac",
       "size": 12087737,
-      "usedBy": ["src/Amber.Core/Multiplayer/EasyTier.cs", "scripts/bundle-easytier.sh", "node/install.sh"]
+      "usedBy": ["src/Amber.Core/Multiplayer/EasyTier.cs", "scripts/bundle-easytier.sh", "node/install.sh", "node/Dockerfile"]
     },
     {
       "id": "mojang-java-runtime-manifest",

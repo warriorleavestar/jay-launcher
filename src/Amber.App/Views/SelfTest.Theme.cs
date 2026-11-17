@@ -158,7 +158,24 @@ internal sealed class ThemeSelfTest(MainWindow window, MainViewModel main, strin
                   "downloads.body" ] }
             }
             """),
-            ("layout/pages/content.json", """{ "type": "dock", "children": [ { "type": "region", "name": "content.status", "dock": "top" }, { "type": "region", "name": "content.header", "dock": "top" }, { "type": "region", "name": "content.filters", "dock": "top" }, "content.body" ] }"""));
+            ("layout/pages/content.json", """{ "type": "dock", "children": [ { "type": "region", "name": "content.status", "dock": "top" }, { "type": "region", "name": "content.header", "dock": "top" }, { "type": "region", "name": "content.filters", "dock": "top" }, "content.body" ] }"""),
+            // The multiplayer page as the example `topbar` theme lays it out: its drawers must still open over it.
+            ("layout/pages/multiplayer.json", """
+            {
+              "wide": { "type": "grid", "columns": ["*", "320"], "rows": ["auto", "auto", "auto", "*"], "spacing": 12, "children": [
+                  { "type": "region", "name": "multiplayer.title", "columnSpan": 2 },
+                  { "type": "region", "name": "multiplayer.tabs", "row": 1, "columnSpan": 2 },
+                  { "type": "region", "name": "multiplayer.room", "row": 2, "columnSpan": 2 },
+                  { "type": "region", "name": "multiplayer.body", "row": 3 },
+                  { "type": "stack", "row": 3, "column": 1, "spacing": 12, "valign": "start", "children": ["multiplayer.status"] } ] },
+              "default": { "type": "dock", "children": [
+                  { "type": "region", "name": "multiplayer.title", "dock": "top" },
+                  { "type": "region", "name": "multiplayer.tabs", "dock": "top" },
+                  { "type": "region", "name": "multiplayer.room", "dock": "top" },
+                  { "type": "region", "name": "multiplayer.status", "dock": "bottom" },
+                  "multiplayer.body" ] }
+            }
+            """));
         settings.ImportThemePack(path);
         await Task.Delay(500);
         Check("导入带排版的主题包：导航挪到顶上", window.ShellNav == "top" && window.SidebarHost.Bounds.Width > window.Bounds.Width - 4
@@ -201,9 +218,24 @@ internal sealed class ThemeSelfTest(MainWindow window, MainViewModel main, strin
         Check("发现页也能重排：状态卡片挪到最上面",
             discover.ThemeLayout.UsingThemeLayout && discover.ThemeLayout.Regions["content.status"].TranslatePoint(default, discover) is { Y: < 20 },
             $"{discover.ThemeLayout.Regions["content.status"].TranslatePoint(default, discover)}");
-        main.CurrentPage = main.Pages.OfType<MultiplayerViewModel>().Single();
+        var mp = main.Pages.OfType<MultiplayerViewModel>().Single();
+        main.CurrentPage = mp;
         window.Width = 1280;
         window.Height = 800;
+        await Task.Delay(600);
+        var mpPage = window.GetVisualDescendants().OfType<MultiplayerPage>().First();
+        Check("联机页用主题的布局，抽屉还在页面上（“连接有问题？”、演练、小课堂）",
+            mpPage.ThemeLayout.UsingThemeLayout && mpPage.ThemeLayout.Overlays.Count >= 3
+            && new Control[] { mpPage.DiagnosticsDrawer, mpPage.DrillDrawer, mpPage.LessonDrawer }.All(d => d.GetVisualAncestors().Contains(mpPage)),
+            $"overlays {mpPage.ThemeLayout.Overlays.Count}");
+        mp.DiagnosticsOpen = true;
+        await Task.Delay(500);
+        Check("主题布局下点“连接有问题？”：抽屉盖在页面上看得见",
+            mpPage.DiagnosticsDrawer.IsEffectivelyVisible && mpPage.DiagnosticsDrawer.Bounds.Width > 300 && mpPage.DiagnosticsDrawer.Bounds.Height > 300,
+            $"{mpPage.DiagnosticsDrawer.Bounds}");
+        await ShotAsync("layout-multiplayer-drawer-1280x800");
+        mp.DiagnosticsOpen = false;
+        await Task.Delay(300);
         await ShotAsync("layout-multiplayer-1280x800");
         main.CurrentPage = settings;
         await Task.Delay(300);
