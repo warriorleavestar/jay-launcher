@@ -18,9 +18,6 @@ internal sealed record AndroidPreparedGame(
 /// <summary>Installs Mojang files and prepares the same launch command used by desktop Jay for an embedded JVM.</summary>
 internal static class AndroidEmbeddedGame
 {
-    // Newest release that uses Java 21 and LWJGL 3.3.3/GLFW. The 26.x line uses Java 25 and SDL3.
-    public const string FirstPlayableVersion = "1.21.11";
-
     public static async Task<AndroidPreparedGame> PrepareAsync(
         Context context,
         string versionId,

@@ -49,9 +49,6 @@ public final class AndroidGameBootstrap {
         if (inputBridgeReady) return true;
         if (inputBridgeFailed) return false;
         try {
-            String version = System.getProperty("jay.minecraft.version", "");
-            if (!version.equals("1.21.11"))
-                throw new IllegalStateException("Unsupported Minecraft input mapping: " + version);
             Class<?> minecraftType = Class.forName("gfj");
             Class<?> mouseType = Class.forName("gfk");
             Class<?> keyboardType = Class.forName("gfi");

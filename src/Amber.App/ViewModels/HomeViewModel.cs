@@ -602,13 +602,33 @@ public sealed partial class HomeViewModel : PageViewModel
         _service.SetCurrentInstance(id);
 
         // Android uses the complete desktop launcher UI and instance model, but its JVM lives in a native Activity.
-        // Hand the exact selected instance to that Activity instead of trying to spawn a desktop java process.
+        // Download and prepare everything in the launcher's normal task UI. The native game Activity is opened only
+        // after that succeeds, so Android never replaces the launcher with a separate full-screen setup/download page.
         if (Amber.App.App.MobileLaunchRequested is { } mobileLaunch)
         {
             var mobileSettings = _service.EffectiveSettings(_service.Context, id);
-            await mobileLaunch(id, account.Name, request.JoinServer ?? mobileSettings.JoinServer);
-            _service.RecordPlayed(id, DateTimeOffset.Now);
-            SetStatus(StatusMessage.Info("home.status.launching"));
+            using var mobileCts = new CancellationTokenSource();
+            var mobileTask = _service.Tasks.Track("install", L.F("activity.kind.install", id),
+                () => mobileCts.Cancel(), $"android-launch:{id}");
+            try
+            {
+                await mobileLaunch(id, account.Name, request.JoinServer ?? mobileSettings.JoinServer,
+                    new Progress<Amber.App.MobileLaunchProgress>(value =>
+                        mobileTask.Report(value.Fraction, value.Detail, value.Bytes)), mobileCts.Token);
+                mobileTask.Succeed();
+                _service.RecordPlayed(id, DateTimeOffset.Now);
+                SetStatus(StatusMessage.Info("home.status.launching"));
+            }
+            catch (OperationCanceledException) when (mobileCts.IsCancellationRequested)
+            {
+                mobileTask.Cancelled();
+            }
+            catch (Exception e) when (e is IOException or InvalidDataException or HttpRequestException
+                                       or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
+            {
+                mobileTask.Fail(e.Message);
+                SetStatus(StatusMessage.Error("common.raw", e.Message));
+            }
             return;
         }
 

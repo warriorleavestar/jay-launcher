@@ -8,6 +8,8 @@ using Avalonia.Styling;
 
 namespace Amber.App;
 
+public sealed record MobileLaunchProgress(double? Fraction, string Detail, long? Bytes = null);
+
 public sealed class App : Application
 {
     private LauncherService? _mobileService;
@@ -16,7 +18,7 @@ public sealed class App : Application
     public static string? MobileGameDirectory { get; set; }
 
     /// <summary>Starts the selected desktop-style instance in the native mobile game activity.</summary>
-    public static Func<string, string, string?, Task>? MobileLaunchRequested { get; set; }
+    public static Func<string, string, string?, IProgress<MobileLaunchProgress>?, CancellationToken, Task>? MobileLaunchRequested { get; set; }
 
     public override void Initialize()
     {
