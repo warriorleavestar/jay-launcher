@@ -2,16 +2,12 @@ using Android.App;
 using Android.Content;
 using Android.Content.PM;
 using Android.Graphics;
-using Android.Graphics.Drawables;
 using Android.OS;
 using Android.Text;
 using Android.Views;
 using Android.Views.InputMethods;
 using Android.Widget;
-using Amber.Core.Localization;
-using Amber.Core.Install;
 using Amber.Mobile;
-using System.Text;
 
 namespace Amber.Android;
 
@@ -26,7 +22,6 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
     public const string ServerAddressExtra = "nz.work.minecraft.jay.SERVER_ADDRESS";
     public const string VersionIdExtra = "nz.work.minecraft.jay.VERSION_ID";
     public const string PlayerNameExtra = "nz.work.minecraft.jay.PLAYER_NAME";
-    private CancellationTokenSource? _runtimeSetup;
     private CancellationTokenSource? _gameSetup;
     private TouchControlOverlay? _touchOverlay;
     private readonly TaskCompletionSource _surfaceReady = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -98,9 +93,6 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
 
     protected override void OnDestroy()
     {
-        _runtimeSetup?.Cancel();
-        _runtimeSetup?.Dispose();
-        _runtimeSetup = null;
         _gameSetup?.Cancel();
         _gameSetup?.Dispose();
         _gameSetup = null;
@@ -155,329 +147,6 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
         }
     }
 
-    private void AddRuntimeSetup(FrameLayout root)
-    {
-        var (backdrop, content, status) = AddSetupShell(root, L.T("mobile.runtime.missing"));
-        var progress = CreateSetupProgress();
-        content.AddView(progress, SetupRow(Dp(6), Dp(18), Dp(4)));
-        var install = CreateSetupButton(L.T("mobile.runtime.install"), true);
-        var cancel = CreateSetupButton(L.T("mobile.runtime.cancel"), false);
-        cancel.Visibility = ViewStates.Gone;
-        var buttons = CreateButtonRow(install, cancel);
-        content.AddView(buttons, SetupRow(ViewGroup.LayoutParams.WrapContent, Dp(20), 0));
-
-        install.Click += async (_, _) =>
-        {
-            var descriptor = AndroidRuntimeCatalog.ForCurrentProcess();
-            if (descriptor is null)
-            {
-                status.Text = L.T("mobile.runtime.unsupported");
-                return;
-            }
-
-            _runtimeSetup?.Dispose();
-            _runtimeSetup = new CancellationTokenSource();
-            install.Enabled = false;
-            cancel.Visibility = ViewStates.Visible;
-            progress.Visibility = ViewStates.Visible;
-            progress.Progress = 0;
-
-            var acceptingProgress = true;
-            var report = new Progress<RuntimeInstallProgress>(value =>
-            {
-                if (!acceptingProgress) return;
-                var percent = value.Total <= 0 ? 0 : (int)Math.Clamp(value.Completed * 100 / value.Total, 0, 100);
-                progress.Progress = percent;
-                status.Text = value.Phase switch
-                {
-                    RuntimeInstallPhase.Downloading => L.F("mobile.runtime.downloading", percent),
-                    RuntimeInstallPhase.Extracting => L.F("mobile.runtime.extracting", percent),
-                    RuntimeInstallPhase.Verifying => L.F("mobile.runtime.verifying", percent),
-                    _ => L.T("mobile.runtime.activating")
-                };
-            });
-
-            try
-            {
-                await AndroidRuntimeStore.InstallAsync(this, descriptor, report, _runtimeSetup.Token);
-                acceptingProgress = false;
-                progress.Progress = 100;
-                status.Text = L.T("mobile.runtime.ready");
-                install.Visibility = ViewStates.Gone;
-                await FadeOutAsync(backdrop, content);
-                root.RemoveView(backdrop);
-                root.RemoveView(content);
-                AddGameSetup(root);
-            }
-            catch (System.OperationCanceledException)
-            {
-                acceptingProgress = false;
-                status.Text = L.T("mobile.runtime.missing");
-                progress.Visibility = ViewStates.Gone;
-            }
-            catch (Exception exception)
-            {
-                acceptingProgress = false;
-                global::Android.Util.Log.Error("JayRuntime", exception.ToString());
-                status.Text = L.F("mobile.runtime.failed", exception.Message);
-            }
-            finally
-            {
-                install.Enabled = true;
-                cancel.Visibility = ViewStates.Gone;
-            }
-        };
-        cancel.Click += (_, _) => _runtimeSetup?.Cancel();
-    }
-
-    private void AddGameSetup(FrameLayout root)
-    {
-        var preferences = GetPreferences(FileCreationMode.Private)!;
-        var versionId = Intent?.GetStringExtra(VersionIdExtra) ?? "";
-        var suppliedPlayerName = Intent?.GetStringExtra(PlayerNameExtra);
-        var (backdrop, content, status) = AddSetupShell(root, L.T("mobile.game.setup"));
-        var playerName = new EditText(this)
-        {
-            Hint = L.T("mobile.game.player_name"),
-            Text = string.IsNullOrWhiteSpace(suppliedPlayerName)
-                ? preferences.GetString("offline-player", "Player")
-                : suppliedPlayerName
-        };
-        playerName.SetTextColor(Color.White);
-        playerName.SetHintTextColor(Color.LightGray);
-        playerName.SetSingleLine(true);
-        playerName.TextSize = 16;
-        playerName.SetPadding(Dp(16), 0, Dp(16), 0);
-        playerName.Background = Rounded(Color.Argb(238, 37, 41, 47), Dp(8), Color.Argb(170, 94, 102, 112));
-        content.AddView(playerName, SetupRow(Dp(54), Dp(18), 0));
-        var progress = CreateSetupProgress();
-        content.AddView(progress, SetupRow(Dp(6), Dp(16), Dp(4)));
-        var play = CreateSetupButton(L.F("mobile.game.install_play", versionId), true);
-        var cancel = CreateSetupButton(L.T("mobile.runtime.cancel"), false);
-        cancel.Visibility = ViewStates.Gone;
-        var buttons = CreateButtonRow(play, cancel);
-        content.AddView(buttons, SetupRow(ViewGroup.LayoutParams.WrapContent, Dp(20), 0));
-
-        play.Click += async (_, _) =>
-        {
-            _gameSetup?.Dispose();
-            _gameSetup = new CancellationTokenSource();
-            play.Enabled = false;
-            playerName.Enabled = false;
-            playerName.Visibility = ViewStates.Gone;
-            play.Visibility = ViewStates.Gone;
-            cancel.Visibility = ViewStates.Visible;
-            progress.Visibility = ViewStates.Visible;
-            var report = new Progress<AndroidGameInstallProgress>(value =>
-            {
-                var percent = value.Total <= 0 ? 0 : (int)Math.Clamp(value.Completed * 100L / value.Total, 0, 100);
-                progress.Progress = percent;
-                status.Text = value.Stage switch
-                {
-                    InstallStage.Manifest or InstallStage.VersionJson => L.T("mobile.game.fetching_manifest"),
-                    InstallStage.AssetIndex => L.T("mobile.game.fetching_assets"),
-                    InstallStage.Files => L.F("mobile.game.downloading", value.Completed, value.Total),
-                    _ => L.T("mobile.game.preparing")
-                };
-            });
-            try
-            {
-                var name = playerName.Text?.Trim() ?? "";
-                var prepared = await AndroidEmbeddedGame.PrepareAsync(this, versionId, name,
-                    Intent?.GetStringExtra(ServerAddressExtra), report, _gameSetup.Token);
-                var editor = preferences.Edit();
-                editor?.PutString("offline-player", name);
-                editor?.Apply();
-                progress.Progress = 100;
-                status.Text = L.T("mobile.game.preparing");
-                var runTask = Task.Run(() => AndroidEmbeddedGame.Run(prepared), _gameSetup.Token);
-                await Task.Delay(900);
-                await RevealGameAsync(backdrop, content);
-                await runTask;
-                _touchOverlay?.Animate().Cancel();
-                if (_touchOverlay is not null)
-                {
-                    _touchOverlay.Visibility = ViewStates.Gone;
-                    _touchOverlay.Alpha = 0;
-                }
-                status.Text = L.T("mobile.game.exited");
-                backdrop.Visibility = ViewStates.Visible;
-                content.Visibility = ViewStates.Visible;
-                backdrop.Alpha = 0;
-                content.Alpha = 0;
-                backdrop.Animate().Alpha(1).SetDuration(240).Start();
-                content.Animate().Alpha(1).SetDuration(240).Start();
-            }
-            catch (System.OperationCanceledException)
-            {
-                status.Text = L.T("mobile.game.setup");
-                RestoreSetup(backdrop, content);
-            }
-            catch (Exception exception) when (exception is IOException or InvalidDataException or HttpRequestException
-                                               or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
-            {
-                status.Text = L.F("mobile.game.failed", exception.Message);
-                RestoreSetup(backdrop, content);
-            }
-            finally
-            {
-                play.Enabled = true;
-                play.Visibility = ViewStates.Visible;
-                playerName.Enabled = true;
-                playerName.Visibility = ViewStates.Visible;
-                cancel.Visibility = ViewStates.Gone;
-                progress.Visibility = ViewStates.Gone;
-            }
-        };
-        cancel.Click += (_, _) => _gameSetup?.Cancel();
-    }
-
-    private (View Backdrop, LinearLayout Content, TextView Status) AddSetupShell(
-        FrameLayout root, string initialStatus)
-    {
-        var backdrop = new GameLoadingBackdrop(this);
-        root.AddView(backdrop, MatchParent());
-
-        var content = new LinearLayout(this)
-        {
-            Orientation = Orientation.Vertical
-        };
-        content.SetGravity(GravityFlags.CenterHorizontal);
-        content.Background = Rounded(Color.Argb(238, 24, 27, 31), Dp(14),
-            Color.Argb(175, 105, 113, 122));
-        content.Elevation = Dp(12);
-        content.SetPadding(Dp(28), Dp(24), Dp(28), Dp(24));
-
-        var mark = new TextView(this) { Text = "J", Gravity = GravityFlags.Center };
-        mark.SetTextColor(Color.Rgb(31, 24, 13));
-        mark.TextSize = 26;
-        mark.SetTypeface(Typeface.Default, TypefaceStyle.Bold);
-        mark.Background = Rounded(Color.Rgb(217, 138, 30), Dp(8));
-        content.AddView(mark, new LinearLayout.LayoutParams(Dp(52), Dp(52)));
-
-        var brand = new TextView(this) { Text = "JAY", Gravity = GravityFlags.Center };
-        brand.SetTextColor(Color.White);
-        brand.TextSize = 24;
-        brand.LetterSpacing = 0.12f;
-        brand.SetTypeface(Typeface.Default, TypefaceStyle.Bold);
-        content.AddView(brand, SetupRow(ViewGroup.LayoutParams.WrapContent, Dp(10), 0));
-
-        var status = new TextView(this) { Text = initialStatus, Gravity = GravityFlags.Center };
-        status.SetTextColor(Color.Rgb(218, 222, 227));
-        status.TextSize = 15;
-        status.SetLineSpacing(0, 1.12f);
-        content.AddView(status, SetupRow(ViewGroup.LayoutParams.WrapContent, Dp(8), 0));
-
-        var metrics = Resources?.DisplayMetrics;
-        var width = Math.Min((metrics?.WidthPixels ?? Dp(600)) - Dp(48), Dp(560));
-        var panel = new FrameLayout.LayoutParams(width, ViewGroup.LayoutParams.WrapContent, GravityFlags.Center);
-        root.AddView(content, panel);
-        return (backdrop, content, status);
-    }
-
-    private ProgressBar CreateSetupProgress()
-    {
-        var progress = new ProgressBar(this, null, 0, Resource.Style.JayProgressBarHorizontal)
-        {
-            Max = 100,
-            Visibility = ViewStates.Gone,
-            Progress = 0
-        };
-        if (Build.VERSION.SdkInt >= BuildVersionCodes.Lollipop)
-        {
-            progress.ProgressTintList = global::Android.Content.Res.ColorStateList.ValueOf(Color.Rgb(217, 138, 30));
-            progress.ProgressBackgroundTintList = global::Android.Content.Res.ColorStateList.ValueOf(Color.Rgb(55, 60, 67));
-        }
-        return progress;
-    }
-
-    private Button CreateSetupButton(string text, bool primary)
-    {
-        var button = new Button(this)
-        {
-            Text = text,
-            StateListAnimator = null
-        };
-        button.SetAllCaps(false);
-        button.SetMinHeight(Dp(50));
-        button.SetMinWidth(Dp(148));
-        button.SetPadding(Dp(18), 0, Dp(18), 0);
-        button.SetTextColor(primary ? Color.Rgb(31, 24, 13) : Color.White);
-        button.TextSize = 15;
-        button.SetTypeface(Typeface.Default, TypefaceStyle.Bold);
-        button.Background = Rounded(primary ? Color.Rgb(217, 138, 30) : Color.Rgb(48, 53, 60),
-            Dp(8), primary ? Color.Rgb(245, 184, 83) : Color.Rgb(105, 113, 122));
-        return button;
-    }
-
-    private LinearLayout CreateButtonRow(params Button[] buttons)
-    {
-        var row = new LinearLayout(this) { Orientation = Orientation.Horizontal };
-        row.SetGravity(GravityFlags.Center);
-        foreach (var button in buttons)
-        {
-            var parameters = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, Dp(50));
-            parameters.SetMargins(Dp(5), 0, Dp(5), 0);
-            row.AddView(button, parameters);
-        }
-        return row;
-    }
-
-    private LinearLayout.LayoutParams SetupRow(int height, int topMargin, int bottomMargin)
-    {
-        var parameters = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, height);
-        parameters.SetMargins(0, topMargin, 0, bottomMargin);
-        return parameters;
-    }
-
-    private async Task RevealGameAsync(View backdrop, View content)
-    {
-        if (_touchOverlay is not null)
-        {
-            _touchOverlay.Visibility = ViewStates.Visible;
-            _touchOverlay.Alpha = 0;
-            _touchOverlay.Animate().Alpha(1).SetDuration(320).Start();
-            _touchOverlay.UpdateHardwareCapture(HasWindowFocus);
-        }
-        await FadeOutAsync(backdrop, content);
-        backdrop.Visibility = ViewStates.Gone;
-        content.Visibility = ViewStates.Gone;
-    }
-
-    private void RestoreSetup(View backdrop, View content)
-    {
-        _touchOverlay?.Animate().Cancel();
-        if (_touchOverlay is not null)
-        {
-            _touchOverlay.UpdateHardwareCapture(false);
-            _touchOverlay.Visibility = ViewStates.Gone;
-            _touchOverlay.Alpha = 0;
-        }
-
-        backdrop.Animate().Cancel();
-        content.Animate().Cancel();
-        backdrop.Visibility = ViewStates.Visible;
-        content.Visibility = ViewStates.Visible;
-        backdrop.Alpha = 1;
-        content.Alpha = 1;
-    }
-
-    private static async Task FadeOutAsync(params View[] views)
-    {
-        foreach (var view in views) view.Animate().Alpha(0).SetDuration(260).Start();
-        await Task.Delay(280);
-    }
-
-    private static GradientDrawable Rounded(Color fill, int radius, Color? stroke = null)
-    {
-        var drawable = new GradientDrawable();
-        drawable.SetColor(fill);
-        drawable.SetCornerRadius(radius);
-        if (stroke is { } border) drawable.SetStroke(1, border);
-        return drawable;
-    }
-
-    private int Dp(float value) => (int)Math.Round(value * (Resources?.DisplayMetrics?.Density ?? 1));
 
     public void SurfaceCreated(ISurfaceHolder holder)
     {
@@ -495,48 +164,7 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
         ViewGroup.LayoutParams.MatchParent);
 }
 
-/// <summary>A lightweight, original loading scene that avoids showing a blank surface or stock Android chrome.</summary>
-internal sealed class GameLoadingBackdrop(Context context) : View(context)
-{
-    private readonly Paint _paint = new() { AntiAlias = false };
-    private readonly Paint _glow = new() { AntiAlias = true };
-    private long _startedAt = SystemClock.UptimeMillis();
-
-    protected override void OnDraw(Canvas canvas)
-    {
-        base.OnDraw(canvas);
-        var width = Width;
-        var height = Height;
-        if (width <= 0 || height <= 0) return;
-
-        _paint.SetShader(new LinearGradient(0, 0, width, height,
-            Color.Rgb(19, 23, 29), Color.Rgb(38, 31, 24), Shader.TileMode.Clamp));
-        canvas.DrawRect(0, 0, width, height, _paint);
-        _paint.SetShader(null);
-
-        var cell = Math.Max(22, Math.Min(width, height) / 18);
-        var elapsed = (SystemClock.UptimeMillis() - _startedAt) / 1000f;
-        for (var row = 0; row <= height / cell + 1; row++)
-        for (var col = 0; col <= width / cell + 1; col++)
-        {
-            var wave = Math.Sin(col * 0.72 + row * 0.51 + elapsed * 0.35);
-            if (wave < 0.60) continue;
-            var alpha = (int)(8 + (wave - 0.60) * 22);
-            _paint.Color = Color.Argb(alpha, 217, 138, 30);
-            var left = col * cell;
-            var top = row * cell;
-            canvas.DrawRect(left + 1, top + 1, left + cell - 2, top + cell - 2, _paint);
-        }
-
-        _glow.SetShader(new RadialGradient(width * 0.5f, height * 0.48f,
-            Math.Min(width, height) * 0.58f,
-            Color.Argb(55, 217, 138, 30), Color.Transparent, Shader.TileMode.Clamp));
-        canvas.DrawCircle(width * 0.5f, height * 0.48f, Math.Min(width, height) * 0.58f, _glow);
-        _glow.SetShader(null);
-        PostInvalidateDelayed(66);
-    }
-}
-
+/// <summary>Touch and hardware input overlay shown only after Minecraft owns the game surface.</summary>
 internal sealed class TouchControlOverlay : View, ITouchInputSink
 {
     private const long LongPressDelayMs = 340;
