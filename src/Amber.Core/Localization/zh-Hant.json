@@ -1067,7 +1067,7 @@
   "settings.java.rescan": "重新掃描",
   "settings.language.label": "語言 / Language",
   "settings.language.system": "跟隨系統 / System",
-  "settings.privacy.hint": "Jay 沒有遙測、雲端控制或強制更新，也不會產生裝置識別碼。地區資訊僅用於選擇預設下載來源。",
+  "settings.privacy.hint": "Jay 沒有遙測、雲端控制或強制更新，也沒有硬體或廠商的裝置 ID。連線使用「這台裝置的身分」：這次安裝自行產生的一把金鑰，可以重設。地區資訊僅用於選擇預設下載來源。",
   "settings.privacy.title": "隱私與網路連線",
   "settings.save": "儲存設定",
   "settings.saved_directory_changed": "已儲存並切換至新的遊戲目錄",

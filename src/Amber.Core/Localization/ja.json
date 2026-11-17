@@ -1067,7 +1067,7 @@
   "settings.java.rescan": "再スキャン",
   "settings.language.label": "言語 / Language",
   "settings.language.system": "システムに合わせる / System",
-  "settings.privacy.hint": "Jay にはテレメトリ、リモート制御、強制更新がなく、デバイス識別子も生成しません。地域情報は既定のダウンロード元を選ぶためだけに使います。",
+  "settings.privacy.hint": "Jay にはテレメトリ、リモート制御、強制更新がなく、ハードウェアやメーカーのデバイス ID も使いません。マルチプレイでは「このデバイスの身元」（このインストールで作られた鍵で、リセットできます）を使います。地域情報は既定のダウンロード元を選ぶためだけに使います。",
   "settings.privacy.title": "プライバシーとネットワーク",
   "settings.save": "設定を保存",
   "settings.saved_directory_changed": "保存し、新しいゲームディレクトリに切り替えました",
