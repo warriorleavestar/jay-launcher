@@ -189,7 +189,7 @@ public sealed class GateServer : IAsyncDisposable
                         _log(L.F("core.gate.log.split_required", fingerprint));
                         return;
                     }
-                    if (BreakerOpen)
+                    if (Refusing(state))
                     {
                         await GateProtocol.SendJoinResultAsync(secure, GateStatus.CircuitOpen, timeout.Token, network);
                         await secure.CloseAsync(timeout.Token);
@@ -239,7 +239,7 @@ public sealed class GateServer : IAsyncDisposable
                 Release(remote);
                 remote = IPAddress.None;
                 // 配对和读登录包期间刚好熔断了：不再接进服务端。
-                if (BreakerOpen) throw new IOException(GateRejectedException.Describe(GateStatus.CircuitOpen));
+                if (Refusing(state)) throw new IOException(GateRejectedException.Describe(GateStatus.CircuitOpen));
                 using var backend = new TcpClient();
                 await backend.ConnectAsync(_config.BackendHost, _config.BackendPort, ct);
                 Pump.Tune(backend);
@@ -302,12 +302,22 @@ public sealed class GateServer : IAsyncDisposable
     private readonly ConcurrentDictionary<string, DateTime> _heartbeats = new();
     private readonly ConcurrentDictionary<string, SecureStream> _relayChannels = new();
     private volatile bool _breakerOpen;
+    // Whether the last check counted enough healthy relays for privacy++. False until a check has run, so a server
+    // that has just started, or just switched to privacy++, lets nobody in before it has counted its relays.
+    private volatile bool _relaysCounted;
     private int _epoch;
     private DateTime _healthySince = DateTime.MinValue;
     private HashSet<string> _healthyLast = [];
 
     /// <summary>隐私++ 熔断中：断开了全部游戏连接，暂停接受新连接。</summary>
     public bool BreakerOpen => _breakerOpen;
+    /// <summary>Relays whose heartbeat the last check counted as healthy.</summary>
+    public int HealthyRelays => _healthyLast.Count;
+    /// <summary>The last check counted enough healthy relays for privacy++ (false before the first check).</summary>
+    public bool RelaysCounted => _relaysCounted;
+
+    /// <summary>New game connections are refused: the breaker is open, or privacy++ has not yet counted enough healthy relays.</summary>
+    private bool Refusing(GateState state) => _breakerOpen || state.Privacy == PrivacyLevel.PlusPlus && !_relaysCounted;
     public int ActiveSessions => _sessions.Count;
     /// <summary>熔断状态变了（true = 熔断，false = 恢复）。第二个参数是原因（哪些节点不可用）。运行程序拿去执行 save-all。</summary>
     public event Action<bool, string>? BreakerChanged;
@@ -503,6 +513,7 @@ public sealed class GateServer : IAsyncDisposable
         _healthyLast = healthy;
 
         var enough = healthy.Count >= GateStore.RequiredHealthyRelays(state);
+        _relaysCounted = enough;
         if (state.Privacy != PrivacyLevel.PlusPlus || enough)
         {
             if (_healthySince == DateTime.MinValue) _healthySince = now;
