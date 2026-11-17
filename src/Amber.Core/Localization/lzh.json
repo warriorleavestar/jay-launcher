@@ -1522,7 +1522,7 @@
   "core.gate.record.needs_network": "此邀碼須於公網「{0}」查址。請先於 Jay 之公網增此網，或求管理者發已封之邀碼。",
   "core.gate.record.looking_up": "正於 {0} 查伺服器之址……",
   "core.gate.record.mobile": "此邀碼須於公網查址，手機版暫不能入公網。請求管理者發已封之邀碼。",
-  "core.gate.status.devicelimit": "此名所綁之器已滿，請管者先撤一舊器",
+  "core.gate.status.devicelimit": "此名所綁之器已滿，請管者先撤一舊器，再發新邀",
   "core.gate.status.notmember": "此器不在伺服器之錄（或已見撤），請管者復發邀",
   "core.gate.status.disabled": "此名已為管者所停",
   "core.gate.status.unknown": "伺服器拒連",

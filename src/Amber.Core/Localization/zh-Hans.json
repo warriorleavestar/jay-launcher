@@ -1572,7 +1572,7 @@
   "core.gate.record.needs_network": "这份邀请要到公共网络“{0}”里查地址。请先在 Jay 的公共网络里添加这个网络，或者让管理员发一份加密邀请。",
   "core.gate.record.looking_up": "正在 {0} 上查服务器地址……",
   "core.gate.record.mobile": "这份邀请要到公共网络里查地址，手机版暂时连不了公共网络。请让管理员发一份加密邀请。",
-  "core.gate.status.devicelimit": "这个用户名绑定的设备已满，请让管理员先撤销一台旧设备",
+  "core.gate.status.devicelimit": "这个用户名绑定的设备已满，请让管理员先撤销一台旧设备，再给你发一个新邀请",
   "core.gate.status.notmember": "这台设备不在服务器名单里（可能被撤销了），请让管理员重新发邀请",
   "core.gate.status.disabled": "这个用户名已被管理员停用",
   "core.gate.status.unknown": "服务器拒绝了连接",
