@@ -5,7 +5,10 @@ using CommunityToolkit.Mvvm.Input;
 
 namespace Amber.App.ViewModels;
 
-/// <summary>The four tabs of the multiplayer page (official design §6.14).</summary>
+/// <summary>
+/// The views of the multiplayer page. <see cref="Play"/> is the page itself (the lobby, or the room when in one); the
+/// others are sub-views with a way back. They used to be four tabs (official design §6.14).
+/// </summary>
 public enum MultiplayerTab
 {
     Play,
@@ -15,28 +18,39 @@ public enum MultiplayerTab
 }
 
 /// <summary>
-/// The multiplayer lobby (§6.14): tabs, the two cards (open a room / join a friend), one paste box that recognises
-/// every kind of code, and the "one lamp" rule (only one amber button on screen).
+/// The multiplayer lobby: one paste box that recognises every kind of code, the open-a-room card, "where to play", the
+/// sub-views behind it, and the "one lamp" rule (only one amber button on screen).
 /// </summary>
 public sealed partial class MultiplayerViewModel
 {
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsPlayTab), nameof(IsPublicTab), nameof(IsServersTab), nameof(IsSettingsTab), nameof(TabIndex))]
+    [NotifyPropertyChangedFor(nameof(IsPlayTab), nameof(IsPublicTab), nameof(IsServersTab), nameof(IsSettingsTab), nameof(TabIndex), nameof(IsSubView), nameof(SubViewTitle))]
     public partial MultiplayerTab Tab { get; set; }
+
+    /// <summary>Not the lobby or the room: the network view, my server, or the multiplayer settings.</summary>
+    public bool IsSubView => Tab != MultiplayerTab.Play;
+
+    public string SubViewTitle => Tab switch
+    {
+        MultiplayerTab.Public => L.T("multiplayer.subview.network"),
+        MultiplayerTab.Servers => L.T("multiplayer.subview.server"),
+        MultiplayerTab.Settings => L.T("multiplayer.tab.settings"),
+        _ => "",
+    };
 
     public bool IsPlayTab => Tab == MultiplayerTab.Play;
     public bool IsPublicTab => Tab == MultiplayerTab.Public;
     public bool IsServersTab => Tab == MultiplayerTab.Servers;
     public bool IsSettingsTab => Tab == MultiplayerTab.Settings;
 
-    /// <summary>For the segmented header (0 play, 1 public, 2 servers, 3 settings).</summary>
+    /// <summary>The view as a number (0 lobby or room, 1 network, 2 my server, 3 settings); routes set it.</summary>
     public int TabIndex
     {
         get => (int)Tab;
         set
         {
             var tab = (MultiplayerTab)Math.Clamp(value, 0, 3);
-            // Child mode hides the public tab.
+            // Child mode has no public networks.
             if (tab == MultiplayerTab.Public && !ShowPublicNetworks) tab = MultiplayerTab.Play;
             Tab = tab;
         }
@@ -61,16 +75,13 @@ public sealed partial class MultiplayerViewModel
         if (ParseTab(part) is { } tab) TabIndex = (int)tab;
     }
 
-    /// <summary>Servers tab: false = Jay servers (join), true = the server I run.</summary>
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(ShowJayServerList))]
-    public partial bool ShowMyServer { get; set; }
+    /// <summary>"Open an always-on server…" under the open-a-room card, and the room menu: the server I run.</summary>
+    [RelayCommand]
+    private void OpenMyServer() => Tab = MultiplayerTab.Servers;
 
-    public bool ShowJayServerList
-    {
-        get => !ShowMyServer;
-        set => ShowMyServer = !value;
-    }
+    /// <summary>The room menu's way to the multiplayer settings (there is no tab strip to click).</summary>
+    [RelayCommand]
+    private void OpenMultiplayerSettings() => Tab = MultiplayerTab.Settings;
 
     /// <summary>The lobby's "more ways" (manual port, direct connection) is open.</summary>
     [ObservableProperty] public partial bool MoreWaysOpen { get; set; }
@@ -114,6 +125,8 @@ public sealed partial class MultiplayerViewModel
         OnPropertyChanged(nameof(JoinCodeRecognitionWarns));
         OnPropertyChanged(nameof(HostButtonIsAmber));
         OnPropertyChanged(nameof(JoinCodeIsSealed));
+        OnPropertyChanged(nameof(JoinNeedsPassphrase));
+        OnPropertyChanged(nameof(JoinButtonText));
         RepickJoinInstance();
     }
 
@@ -125,13 +138,6 @@ public sealed partial class MultiplayerViewModel
     {
         var kind = PastedCode.Detect(text);
         if (kind == PastedCodeKind.Unknown || text is null) return false;
-        if (kind == PastedCodeKind.JayServer)
-        {
-            Tab = MultiplayerTab.Servers;
-            ShowMyServer = false;
-            JayServers.InviteText = text.Trim();
-            return true;
-        }
         if (kind == PastedCodeKind.FriendCode && ShowPublicNetworks)
         {
             Tab = MultiplayerTab.Public;
@@ -165,12 +171,29 @@ public sealed partial class MultiplayerViewModel
     }
 
     /// <summary>
-    /// The lobby's open-a-room button: opens the room, makes the first invite (1 use, 10 minutes, needs my approval),
-    /// shows the invite card and, when ticked, copies the code (cleared from the clipboard later).
+    /// The lobby's open-a-room button. With the component missing it installs that first. Otherwise it opens the room
+    /// the four choices describe, makes the first invite (1 use, 10 minutes, needs my approval), shows the invite card
+    /// and, when ticked, copies the code (cleared from the clipboard later). "No server" makes a direct room and its
+    /// sealed code instead; "friends" and "public" then tell the friends or list the room.
     /// </summary>
     [RelayCommand]
     private async Task HostFromLobbyAsync()
     {
+        if (!IsComponentReady)
+        {
+            await InstallComponentStepAsync();
+            return;
+        }
+        var access = OpenAccess;
+        var route = OpenRoute;
+        if (route == RoomRoute.Serverless)
+        {
+            await CreateDirectRoomAsync();
+            if (!IsDirectHost) return;
+            RememberLastRoom(1, InviteExpiryChoices[0].Lifetime, false);
+            await CreateSealedOfferAsync();
+            return;
+        }
         if (StartGameToHost()) return;
         await CreateRoomAsync();
         if (!IsHosting) return;
@@ -180,7 +203,67 @@ public sealed partial class MultiplayerViewModel
         RememberLastRoom(1, InviteExpiryChoices[0].Lifetime, false);
         if (AutoCopyInvite && _lastInvite is { } invite && await SecretClipboard.CopyAsync(invite.ToString()))
             SetStatus(StatusMessage.Success("multiplayer.lobby.invite_copied"));
+        await ApplyAccessAsync(access);
     }
+
+    /// <summary>After the room is open: tell the friends, or list the room, as "who can come in" says.</summary>
+    private async Task ApplyAccessAsync(RoomAccess access)
+    {
+        if (!IsHosting || RoomOpening.Blocked(access, OpenRoute, OpenContext) is not null) return;
+        if (access == RoomAccess.Friends) await InviteFriendsToKnockAsync();
+        else if (access == RoomAccess.Public) await PublishFromChoiceAsync();
+    }
+
+    /// <summary>Installs the multiplayer component from the button that needed it.</summary>
+    private async Task InstallComponentStepAsync()
+    {
+        if (IsDownloading) return;
+        if (TestInstallComponent is { } install) await install();
+        else await DownloadComponentCommand.ExecuteAsync(null);
+    }
+
+    /// <summary>Tests: stands in for the component download.</summary>
+    internal Func<Task>? TestInstallComponent { get; set; }
+
+    /// <summary>
+    /// A server invite in the paste box: joins and saves the server (the invite works once, so it is used right away).
+    /// A sealed one first needs the passphrase, typed in the box under the code.
+    /// </summary>
+    private async Task JoinServerFromPasteBoxAsync()
+    {
+        JayServers.InviteText = JoinCode.Trim();
+        JayServers.InvitePassphrase = JoinPassphrase;
+        bool joined;
+        try
+        {
+            joined = await JayServers.EnrollFromInviteAsync();
+        }
+        finally
+        {
+            // The server page that used to show these fields is gone: nothing should keep the invite or passphrase.
+            JayServers.InviteText = "";
+            JayServers.InvitePassphrase = "";
+            JoinPassphrase = "";
+        }
+        if (JayServers.Status.Length > 0) SetStatus(new StatusMessage("common.raw", [JayServers.Status], StatusKind.Info));
+        if (!joined) return;
+        JoinCode = "";
+        Where = WhereFilter.Servers;
+    }
+
+    /// <summary>What the join button does with what is in the paste box.</summary>
+    public string JoinButtonText => JoinCodeKind switch
+    {
+        PastedCodeKind.JayServer => L.T("multiplayer.lobby.join.server"),
+        PastedCodeKind.ContactCode => L.T("multiplayer.lobby.join.friend"),
+        PastedCodeKind.PublicNetwork => L.T("multiplayer.lobby.join.network"),
+        // The component is a step on the button once there is something to join with.
+        PastedCodeKind.Invite or PastedCodeKind.SealedOffer when !IsComponentReady => ComponentStepText,
+        _ => L.T("multiplayer.lobby.join_button"),
+    };
+
+    /// <summary>The passphrase box under the code: a sealed direct code, or a sealed server invite.</summary>
+    public bool JoinNeedsPassphrase => JoinCodeIsSealed || JoinCodeKind == PastedCodeKind.JayServer && Amber.Core.Multiplayer.Gate.GateInvite.IsSealed(JoinCode);
 
     /// <summary>Opens multiplayer help (set by the window: help/{id}).</summary>
     public Action<string>? Navigate { get; set; }

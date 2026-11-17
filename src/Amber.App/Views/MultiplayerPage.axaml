@@ -9,6 +9,23 @@
              xmlns:safety="using:Amber.App.Controls.Safety"
              x:Class="Amber.App.Views.MultiplayerPage"
              x:DataType="vm:MultiplayerViewModel">
+  <UserControl.Resources>
+    <!-- One option of the four open-a-room choices: in the list with what it means (or why it is greyed out), in the box by its name only. -->
+    <DataTemplate x:Key="OpenChoiceInList" x:DataType="vm:OpenChoice">
+      <StackPanel Spacing="1" MaxWidth="420">
+        <TextBlock Text="{Binding Label}" TextWrapping="Wrap" />
+        <TextBlock Classes="hint" FontSize="12" Text="{Binding Line}" TextWrapping="Wrap" />
+      </StackPanel>
+    </DataTemplate>
+    <DataTemplate x:Key="OpenChoiceInBox" x:DataType="vm:OpenChoice">
+      <TextBlock Text="{Binding Label}" TextTrimming="CharacterEllipsis" />
+    </DataTemplate>
+  </UserControl.Resources>
+  <UserControl.Styles>
+    <Style Selector="ComboBox.open-choice ComboBoxItem" x:DataType="vm:OpenChoice">
+      <Setter Property="IsEnabled" Value="{Binding IsEnabled}" />
+    </Style>
+  </UserControl.Styles>
   <Grid RowDefinitions="Auto,Auto,Auto,*,Auto">
     <StackPanel Spacing="6" Margin="0,0,14,0">
       <TextBlock svc:ThemeRegion.Name="multiplayer.title" Classes="h1" Text="{l:T multiplayer.title}" />
@@ -21,15 +38,20 @@
       </Border>
     </StackPanel>
 
-    <!-- Tabs (official §6.14): play · public rooms · servers · settings. A scrolling segmented strip in compact windows. -->
-    <ScrollViewer svc:ThemeRegion.Name="multiplayer.tabs" Grid.Row="1" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled" Margin="0,0,14,10">
-      <StackPanel x:Name="MpTabs" Orientation="Horizontal" Classes="segmented" Spacing="4">
-        <RadioButton x:Name="PlayTabButton" GroupName="MpTab" IsChecked="{Binding IsPlayTab, Mode=OneWay}" Command="{Binding ShowTabCommand}" CommandParameter="play" ><TextBlock Text="{l:T multiplayer.tab.play}" /></RadioButton>
-        <RadioButton x:Name="PublicTabButton" GroupName="MpTab" IsChecked="{Binding IsPublicTab, Mode=OneWay}" Command="{Binding ShowTabCommand}" CommandParameter="public" IsVisible="{Binding ShowPublicNetworks}" ><TextBlock Text="{l:T multiplayer.tab.public}" /></RadioButton>
-        <RadioButton x:Name="ServersTabButton" GroupName="MpTab" IsChecked="{Binding IsServersTab, Mode=OneWay}" Command="{Binding ShowTabCommand}" CommandParameter="servers" ><TextBlock Text="{l:T multiplayer.tab.servers}" /></RadioButton>
-        <RadioButton x:Name="SettingsTabButton" GroupName="MpTab" IsChecked="{Binding IsSettingsTab, Mode=OneWay}" Command="{Binding ShowTabCommand}" CommandParameter="settings" ><TextBlock Text="{l:T multiplayer.tab.settings}" /></RadioButton>
-      </StackPanel>
-    </ScrollViewer>
+    <!-- No tabs: the page is the lobby or the room. The network view, my server and the multiplayer settings are
+         sub-views reached from a button; each has this row to go back. (The theme region keeps its old name.) -->
+    <Border svc:ThemeRegion.Name="multiplayer.tabs" Grid.Row="1" Margin="0,0,14,10" IsVisible="{Binding IsSubView}">
+      <Grid x:Name="MpSubViewRow" ColumnDefinitions="Auto,*" ColumnSpacing="8">
+        <Button x:Name="MpBackButton" Classes="ghost small" Command="{Binding ShowTabCommand}" CommandParameter="play" VerticalAlignment="Center"
+                AutomationProperties.Name="{l:T shell.back}">
+          <StackPanel Orientation="Horizontal" Spacing="2">
+            <Path Classes="icon sm" Data="{StaticResource Icon.ChevronLeft}" Width="14" Height="14" />
+            <TextBlock Text="{l:T shell.back}" VerticalAlignment="Center" />
+          </StackPanel>
+        </Button>
+        <TextBlock x:Name="MpSubViewTitle" Grid.Column="1" Classes="h2" Margin="0" Text="{Binding SubViewTitle}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+      </Grid>
+    </Border>
 
         <!-- In a room: the sticky header (official §6.15) and, under it, the locked knock panel. Both stay put while the body scrolls. -->
     <StackPanel x:Name="RoomHeaderArea" svc:ThemeRegion.Name="multiplayer.room" Grid.Row="2" Spacing="8" Margin="0,0,0,10" IsVisible="{Binding ShowRoomHeader}">
@@ -68,6 +90,9 @@
                   <MenuItem x:Name="RoomProblemsItem" Header="{l:T multiplayer.room.problems}" Command="{Binding OpenDiagnosticsCommand}" />
                   <MenuItem Header="{l:T multiplayer.chat.export}" Click="ExportChat_Click" />
                   <MenuItem x:Name="CopyRoomInfoItem" Header="{l:T multiplayer.room.copy_info}" Command="{Binding CopyRoomInfoCommand}" />
+                  <Separator />
+                  <MenuItem x:Name="RoomMpSettingsItem" Header="{l:T multiplayer.tab.settings}" Command="{Binding OpenMultiplayerSettingsCommand}" />
+                  <MenuItem x:Name="RoomMyServerItem" Header="{l:T multiplayer.subview.server}" Command="{Binding OpenMyServerCommand}" />
                 </MenuFlyout>
               </Button.Flyout>
             </Button>
@@ -221,94 +246,9 @@
 
         <!-- ===== Play: lobby when idle, the room when in one ===== -->
         <StackPanel x:Name="PlayPanel" Spacing="14" IsVisible="{Binding IsPlayTab}">
-          <!-- The component: only when it is missing (it also lives in settings › component). -->
-          <Panel IsVisible="{Binding !IsComponentReady}">
-            <Border Classes="card" Margin="0">
-              <StackPanel Spacing="8">
-                <Grid RowDefinitions="Auto,Auto" RowSpacing="8">
-                  <TextBlock Text="{Binding ComponentText}" TextWrapping="Wrap" VerticalAlignment="Center" />
-                  <WrapPanel Grid.Row="1" ItemSpacing="6" LineSpacing="6" IsVisible="{Binding !IsComponentReady}">
-                    <Button Classes="primary" Content="{l:T multiplayer.component.download}" Command="{Binding DownloadComponentCommand}" IsVisible="{Binding !IsDownloading}" />
-                    <Button Content="{l:T multiplayer.component.import}" Click="ImportComponent_Click" IsVisible="{Binding !IsDownloading}" />
-                  </WrapPanel>
-                </Grid>
-                <c:ProgressLine x:Name="ComponentLine" IsVisible="{Binding IsDownloading}" Step="{Binding Status}"
-                                Percent="{Binding ComponentWork.Percent}" IsIndeterminate="{Binding ComponentWork.IsIndeterminate}"
-                                BytesPerSecond="{Binding ComponentWork.BytesPerSecond}" Remaining="{Binding ComponentWork.Remaining}"
-                                CancelCommand="{Binding CancelDownloadCommand}" />
-                <SelectableTextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{Binding ManualHintText}" IsVisible="{Binding !IsComponentReady}" />
-                <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{Binding LicenseText}" />
-              </StackPanel>
-            </Border>
-          </Panel>
-
-          <!-- Lobby (§6.14): open a room | join a friend. Wide: side by side; medium: stacked; compact: join first. -->
-          <Grid x:Name="LobbyGrid" ColumnDefinitions="*,14,*" RowDefinitions="Auto,Auto,Auto" IsVisible="{Binding IsIdle}">
-            <Border x:Name="HostCard" Classes="card" Margin="0">
-              <StackPanel Spacing="8">
-                <TextBlock Classes="h2" Text="{l:T multiplayer.lobby.host_title}" Margin="0" />
-                <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.lobby.host_hint}" />
-                <Grid ColumnDefinitions="Auto,*,Auto">
-                  <TextBlock Text="{l:T multiplayer.lobby.game}" VerticalAlignment="Center" Margin="0,0,8,0" />
-                  <ComboBox Grid.Column="1" x:Name="LobbyGameBox" ItemsSource="{Binding LanGames}" SelectedItem="{Binding SelectedLanGame}" HorizontalAlignment="Stretch" PlaceholderText="{l:T multiplayer.lan.empty}">
-                    <ComboBox.ItemTemplate>
-                      <DataTemplate DataType="vm:LanGameItem"><TextBlock Text="{Binding Label}" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Label}" /></DataTemplate>
-                    </ComboBox.ItemTemplate>
-                  </ComboBox>
-                  <Button Grid.Column="2" Content="{l:T common.find}" Command="{Binding ScanCommand}" Margin="6,0,0,0" ToolTip.Tip="{l:T multiplayer.lan.scan_tooltip}" />
-                </Grid>
-                <TextBlock FontSize="12" TextWrapping="Wrap" Text="{Binding GameStatusText}" Classes.hint="{Binding HasHostGame}" />
-                <Grid x:Name="LastRoomRow" ColumnDefinitions="*,Auto" IsVisible="{Binding HasLastRoom}">
-                  <TextBlock x:Name="LastRoomText" Classes="hint" FontSize="12" TextWrapping="Wrap" VerticalAlignment="Center" Text="{Binding LastRoomText}" />
-                  <Button x:Name="RepeatLastRoomButton" Grid.Column="1" Classes="small" Margin="8,0,0,0" Command="{Binding RepeatLastRoomCommand}">
-                    <TextBlock Text="{l:T multiplayer.lobby.repeat_room}" TextWrapping="Wrap" />
-                  </Button>
-                </Grid>
-                <Button x:Name="LobbyHostButton" Classes.play="{Binding HostButtonIsAmber}" Command="{Binding HostFromLobbyCommand}"
-                        IsVisible="{Binding ShowHostButton}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center">
-                  <TextBlock Text="{Binding HostButtonText}" TextWrapping="Wrap" TextAlignment="Center" />
-                </Button>
-                <TextBlock x:Name="PlayAndHostHint" Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{Binding PlayAndHostHint}"
-                           IsVisible="{Binding StartsGameToHost}" />
-                <!-- Started from the lobby: the three steps in the game; the room opens by itself when the log says Open to LAN. -->
-                <Border x:Name="WaitingForLanPanel" Background="{DynamicResource AccentTint}" CornerRadius="6" Padding="10" IsVisible="{Binding IsWaitingForLan}">
-                  <Grid ColumnDefinitions="*,Auto">
-                    <TextBlock Text="{Binding WaitingForLanText}" TextWrapping="Wrap" VerticalAlignment="Center" />
-                    <Button x:Name="CancelWaitForLanButton" Grid.Column="1" Classes="small" Margin="8,0,0,0" VerticalAlignment="Center"
-                            Content="{l:T common.cancel}" Command="{Binding CancelWaitForLanCommand}" />
-                  </Grid>
-                </Border>
-                <CheckBox x:Name="AutoCopyInviteBox" IsChecked="{Binding AutoCopyInvite}">
-                  <TextBlock Text="{l:T multiplayer.lobby.auto_copy}" TextWrapping="Wrap" />
-                </CheckBox>
-                <Expander x:Name="MoreWaysExpander" Header="{l:T multiplayer.lobby.more}" HorizontalAlignment="Stretch" IsExpanded="{Binding MoreWaysOpen}">
-                  <StackPanel Spacing="10">
-                    <StackPanel Spacing="4">
-                      <TextBlock Text="{l:T multiplayer.lobby.manual_port}" FontWeight="SemiBold" />
-                      <TextBox Text="{Binding ManualPort}" PlaceholderText="{l:T multiplayer.lan.port_placeholder}" />
-                    </StackPanel>
-                    <StackPanel Spacing="8">
-                      <TextBlock Text="{l:T multiplayer.direct.heading}" FontWeight="SemiBold" TextWrapping="Wrap" />
-                      <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap"
-                                 Text="{l:T multiplayer.direct.hint}" />
-                      <WrapPanel ItemSpacing="6" LineSpacing="4">
-                        <Button Content="{l:T multiplayer.network.check}" Command="{Binding CheckNetworkCommand}" IsEnabled="{Binding !IsCheckingNetwork}" />
-                        <CheckBox Content="{l:T multiplayer.direct.use_nodes}" IsChecked="{Binding DirectUseNodes}" />
-                        <CheckBox Content="{l:T multiplayer.diagnostics.debug_mode}" IsChecked="{Binding DebugMode}" ToolTip.Tip="{l:T multiplayer.diagnostics.debug_tooltip}" />
-                      </WrapPanel>
-                      <SelectableTextBlock Text="{Binding NetworkCheckText}" TextWrapping="Wrap" FontSize="12" IsVisible="{Binding NetworkCheckText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
-                      <StackPanel Spacing="6">
-                        <TextBlock Text="{l:T multiplayer.direct.host_title}" FontWeight="SemiBold" TextWrapping="Wrap" />
-                        <TextBlock FontSize="12" TextWrapping="Wrap" Text="{Binding GameStatusText}" Classes.hint="{Binding HasHostGame}" />
-                        <Button Classes="primary" Content="{l:T multiplayer.direct.create}" Command="{Binding CreateDirectRoomCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
-                      </StackPanel>
-                    </StackPanel>
-                  </StackPanel>
-                </Expander>
-              </StackPanel>
-            </Border>
-
-            <Border x:Name="JoinCard" Grid.Column="2" Classes="card" Margin="0">
+          <!-- Lobby: join (one paste box, the whole width), then open a room | where to play. Side by side when wide, else stacked. -->
+          <Grid x:Name="LobbyGrid" ColumnDefinitions="*,14,*" RowDefinitions="Auto,Auto,Auto,Auto" IsVisible="{Binding IsIdle}">
+            <Border x:Name="JoinCard" Grid.ColumnSpan="3" Classes="card" Margin="0">
               <StackPanel Spacing="8">
                 <TextBlock Classes="h2" Text="{l:T multiplayer.lobby.join_title}" Margin="0" />
                 <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.lobby.join_hint}" />
@@ -327,7 +267,7 @@
                            Classes.warn="{Binding JoinCodeRecognitionWarns}" />
                 <!-- A sealed direct code: the passphrase the host told by another way (a call, in person). -->
                 <TextBox x:Name="JoinPassphraseBox" Text="{Binding JoinPassphrase}" PlaceholderText="{l:T multiplayer.sealed.passphrase_placeholder}"
-                         IsVisible="{Binding JoinCodeIsSealed}" c:EnterSubmit.Command="{Binding JoinCommand}" />
+                         IsVisible="{Binding JoinNeedsPassphrase}" c:EnterSubmit.Command="{Binding JoinCommand}" />
                 <!-- Invite v3: the host's game, the instance Jay picked, or "install one and join". -->
                 <StackPanel x:Name="JoinGamePanel" Spacing="4" IsVisible="{Binding HasJoinGame}">
                   <TextBlock x:Name="JoinGameText" FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap" Text="{Binding JoinGameText}" />
@@ -343,14 +283,242 @@
                     <TextBlock Text="{Binding InstallForInviteText}" TextWrapping="Wrap" TextAlignment="Center" />
                   </Button>
                 </StackPanel>
-                <Button x:Name="LobbyJoinButton" Classes.primary="{Binding !JoinCodeRecognized}" Classes.play="{Binding JoinCodeRecognized}" Content="{l:T multiplayer.lobby.join_button}" Command="{Binding JoinCommand}"
-                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+                <Button x:Name="LobbyJoinButton" Classes.primary="{Binding !JoinCodeRecognized}" Classes.play="{Binding JoinCodeRecognized}" Command="{Binding JoinCommand}"
+                        IsEnabled="{Binding !IsDownloading}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center">
+                  <TextBlock x:Name="LobbyJoinButtonText" Text="{Binding JoinButtonText}" TextWrapping="Wrap" TextAlignment="Center" />
+                </Button>
                 <Button Content="{l:T multiplayer.invite.cancel}" Command="{Binding CancelKnockCommand}" IsVisible="{Binding IsKnocking}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
               </StackPanel>
             </Border>
 
+            <Border x:Name="HostCard" Grid.Row="1" Classes="card" Margin="0,14,0,0">
+              <StackPanel Spacing="8">
+                <TextBlock Classes="h2" Text="{l:T multiplayer.lobby.host_title}" Margin="0" />
+                <Grid ColumnDefinitions="Auto,*,Auto">
+                  <TextBlock Text="{l:T multiplayer.lobby.game}" VerticalAlignment="Center" Margin="0,0,8,0" />
+                  <ComboBox Grid.Column="1" x:Name="LobbyGameBox" ItemsSource="{Binding LanGames}" SelectedItem="{Binding SelectedLanGame}" HorizontalAlignment="Stretch" PlaceholderText="{l:T multiplayer.lan.empty}">
+                    <ComboBox.ItemTemplate>
+                      <DataTemplate DataType="vm:LanGameItem"><TextBlock Text="{Binding Label}" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Label}" /></DataTemplate>
+                    </ComboBox.ItemTemplate>
+                  </ComboBox>
+                  <Button Grid.Column="2" Content="{l:T common.find}" Command="{Binding ScanCommand}" Margin="6,0,0,0" ToolTip.Tip="{l:T multiplayer.lan.scan_tooltip}" />
+                </Grid>
+                <TextBlock FontSize="12" TextWrapping="Wrap" Text="{Binding GameStatusText}" Classes.hint="{Binding HasHostGame}" />
+
+                <!-- Opening a room asks four things. Each has a default; what cannot be picked now is greyed out with the reason. -->
+                <Grid x:Name="OpenChoicesGrid" ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="6" ColumnSpacing="10">
+                  <TextBlock Text="{l:T multiplayer.open.who}" VerticalAlignment="Center" />
+                  <ComboBox x:Name="OpenWhoBox" Grid.Column="1" Classes="open-choice" ItemsSource="{Binding WhoChoices}" SelectedItem="{Binding SelectedWho}"
+                            ItemTemplate="{StaticResource OpenChoiceInList}" SelectionBoxItemTemplate="{StaticResource OpenChoiceInBox}"
+                            HorizontalAlignment="Stretch" AutomationProperties.Name="{l:T multiplayer.open.who}" />
+                  <TextBlock Grid.Row="1" Text="{l:T multiplayer.open.route}" VerticalAlignment="Center" />
+                  <ComboBox x:Name="OpenRouteBox" Grid.Row="1" Grid.Column="1" Classes="open-choice" ItemsSource="{Binding RouteChoices}" SelectedItem="{Binding SelectedRoute}"
+                            ItemTemplate="{StaticResource OpenChoiceInList}" SelectionBoxItemTemplate="{StaticResource OpenChoiceInBox}"
+                            HorizontalAlignment="Stretch" AutomationProperties.Name="{l:T multiplayer.open.route}" />
+                  <TextBlock Grid.Row="2" Text="{l:T multiplayer.open.protection}" VerticalAlignment="Center" />
+                  <ComboBox x:Name="OpenProtectionBox" Grid.Row="2" Grid.Column="1" Classes="open-choice" ItemsSource="{Binding ProtectionChoices}" SelectedItem="{Binding SelectedProtection}"
+                            ItemTemplate="{StaticResource OpenChoiceInList}" SelectionBoxItemTemplate="{StaticResource OpenChoiceInBox}"
+                            IsEnabled="{Binding ProtectionEnabled}" PlaceholderText="{l:T multiplayer.open.protection.custom_short}"
+                            HorizontalAlignment="Stretch" AutomationProperties.Name="{l:T multiplayer.open.protection}" />
+                  <TextBlock Grid.Row="3" Text="{l:T multiplayer.open.scope}" VerticalAlignment="Center" />
+                  <ComboBox x:Name="OpenScopeBox" Grid.Row="3" Grid.Column="1" Classes="open-choice" ItemsSource="{Binding ScopeChoices}" SelectedItem="{Binding SelectedScope}"
+                            ItemTemplate="{StaticResource OpenChoiceInList}" SelectionBoxItemTemplate="{StaticResource OpenChoiceInBox}"
+                            HorizontalAlignment="Stretch" AutomationProperties.Name="{l:T multiplayer.open.scope}" />
+                </Grid>
+                <!-- What the picked options add: a public room's name and password, the two-code exchange without a server, a customised transport. -->
+                <StackPanel x:Name="OpenPublicOptions" Spacing="6" IsVisible="{Binding ShowPublicOptions}">
+                  <TextBox x:Name="OpenRoomNameBox" Text="{Binding PublishRoomName}" PlaceholderText="{l:T multiplayer.public.name_placeholder}" />
+                  <TextBox x:Name="OpenRoomPasswordBox" Text="{Binding PublishPassword}" PasswordChar="•" PlaceholderText="{l:T multiplayer.open.who.public_password}" />
+                </StackPanel>
+                <TextBlock x:Name="OpenServerlessNote" Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.open.route.serverless_note}"
+                           IsVisible="{Binding IsServerlessChosen}" />
+                <Grid x:Name="OpenProtectionCustomRow" ColumnDefinitions="*,Auto" ColumnSpacing="8" IsVisible="{Binding IsProtectionCustom}">
+                  <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" VerticalAlignment="Center" Text="{Binding ProtectionCustomText}" />
+                  <Button x:Name="ResetProtectionButton" Grid.Column="1" Classes="ghost small" Content="{l:T multiplayer.open.protection.reset}" Command="{Binding ResetProtectionCommand}" />
+                </Grid>
+
+                <Grid x:Name="LastRoomRow" ColumnDefinitions="*,Auto" IsVisible="{Binding HasLastRoom}">
+                  <TextBlock x:Name="LastRoomText" Classes="hint" FontSize="12" TextWrapping="Wrap" VerticalAlignment="Center" Text="{Binding LastRoomText}" />
+                  <Button x:Name="RepeatLastRoomButton" Grid.Column="1" Classes="small" Margin="8,0,0,0" Command="{Binding RepeatLastRoomCommand}">
+                    <TextBlock Text="{l:T multiplayer.lobby.repeat_room}" TextWrapping="Wrap" />
+                  </Button>
+                </Grid>
+                <!-- One button. Without the multiplayer component it installs that first; without a server it makes the sealed code. -->
+                <Button x:Name="LobbyHostButton" Classes.play="{Binding HostButtonIsAmber}" Command="{Binding HostFromLobbyCommand}"
+                        IsVisible="{Binding ShowHostButton}" IsEnabled="{Binding !IsDownloading}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center">
+                  <TextBlock x:Name="LobbyHostButtonText" Text="{Binding HostButtonText}" TextWrapping="Wrap" TextAlignment="Center" />
+                </Button>
+                <StackPanel x:Name="ComponentStep" Spacing="6" IsVisible="{Binding ShowComponentStep}">
+                  <c:ProgressLine x:Name="ComponentLine" IsVisible="{Binding IsDownloading}" Step="{Binding Status}"
+                                  Percent="{Binding ComponentWork.Percent}" IsIndeterminate="{Binding ComponentWork.IsIndeterminate}"
+                                  BytesPerSecond="{Binding ComponentWork.BytesPerSecond}" Remaining="{Binding ComponentWork.Remaining}"
+                                  CancelCommand="{Binding CancelDownloadCommand}" />
+                  <WrapPanel ItemSpacing="8" LineSpacing="4" IsVisible="{Binding !IsDownloading}">
+                    <TextBlock x:Name="ComponentStepHint" Classes="hint" FontSize="12" TextWrapping="Wrap" VerticalAlignment="Center" Text="{l:T multiplayer.open.install_hint}" />
+                    <Button x:Name="ImportComponentButton" Classes="ghost small" Content="{l:T multiplayer.component.import}" Click="ImportComponent_Click" />
+                  </WrapPanel>
+                  <!-- What the download is, and what to do when it cannot be reached: folded away. -->
+                  <Expander x:Name="ComponentAbout" Header="{l:T multiplayer.open.install_about}" HorizontalAlignment="Stretch">
+                    <StackPanel Spacing="6">
+                      <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{Binding LicenseText}" />
+                      <SelectableTextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{Binding ManualHintText}" />
+                    </StackPanel>
+                  </Expander>
+                </StackPanel>
+                <TextBlock x:Name="PlayAndHostHint" Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{Binding PlayAndHostHint}"
+                           IsVisible="{Binding StartsGameToHost}" />
+                <!-- Started from the lobby: the three steps in the game; the room opens by itself when the log says Open to LAN. -->
+                <Border x:Name="WaitingForLanPanel" Background="{DynamicResource AccentTint}" CornerRadius="6" Padding="10" IsVisible="{Binding IsWaitingForLan}">
+                  <Grid ColumnDefinitions="*,Auto">
+                    <TextBlock Text="{Binding WaitingForLanText}" TextWrapping="Wrap" VerticalAlignment="Center" />
+                    <Button x:Name="CancelWaitForLanButton" Grid.Column="1" Classes="small" Margin="8,0,0,0" VerticalAlignment="Center"
+                            Content="{l:T common.cancel}" Command="{Binding CancelWaitForLanCommand}" />
+                  </Grid>
+                </Border>
+                <CheckBox x:Name="AutoCopyInviteBox" IsChecked="{Binding AutoCopyInvite}">
+                  <TextBlock Text="{l:T multiplayer.lobby.auto_copy}" TextWrapping="Wrap" />
+                </CheckBox>
+                <!-- Quiet buttons beside the main one: everything else about a room, and the always-on kind of room. -->
+                <WrapPanel x:Name="OpenMoreButtons" ItemSpacing="8" LineSpacing="4">
+                  <Button x:Name="OpenAdvancedButton" Classes="ghost small" Command="{Binding ShowTabCommand}" CommandParameter="settings">
+                    <TextBlock Text="{l:T multiplayer.open.advanced}" TextWrapping="Wrap" />
+                  </Button>
+                  <Button x:Name="OpenServerButton" Classes="ghost small" Command="{Binding OpenMyServerCommand}">
+                    <TextBlock Text="{l:T multiplayer.open.server}" TextWrapping="Wrap" />
+                  </Button>
+                </WrapPanel>
+                <Expander x:Name="MoreWaysExpander" Header="{l:T multiplayer.lobby.more}" HorizontalAlignment="Stretch" IsExpanded="{Binding MoreWaysOpen}">
+                  <StackPanel Spacing="10">
+                    <StackPanel Spacing="4">
+                      <TextBlock Text="{l:T multiplayer.lobby.manual_port}" FontWeight="SemiBold" />
+                      <TextBox Text="{Binding ManualPort}" PlaceholderText="{l:T multiplayer.lan.port_placeholder}" />
+                    </StackPanel>
+                    <StackPanel Spacing="8">
+                      <WrapPanel ItemSpacing="6" LineSpacing="4">
+                        <Button Content="{l:T multiplayer.network.check}" Command="{Binding CheckNetworkCommand}" IsEnabled="{Binding !IsCheckingNetwork}" />
+                        <CheckBox Content="{l:T multiplayer.diagnostics.debug_mode}" IsChecked="{Binding DebugMode}" ToolTip.Tip="{l:T multiplayer.diagnostics.debug_tooltip}" />
+                      </WrapPanel>
+                      <SelectableTextBlock Text="{Binding NetworkCheckText}" TextWrapping="Wrap" FontSize="12" IsVisible="{Binding NetworkCheckText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                    </StackPanel>
+                  </StackPanel>
+                </Expander>
+              </StackPanel>
+            </Border>
+
+            <!-- Where to play: rooms friends invited me to, public rooms of the connected network, servers I saved. -->
+            <Border x:Name="WhereCard" Grid.Row="1" Grid.Column="2" Classes="card" Margin="0,14,0,0">
+              <StackPanel Spacing="8">
+                <TextBlock Classes="h2" Text="{l:T multiplayer.where.title}" Margin="0" />
+                <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+                  <StackPanel x:Name="WhereFilters" Orientation="Horizontal" Classes="segmented" Spacing="4">
+                    <RadioButton x:Name="WhereAllButton" GroupName="MpWhere" IsChecked="{Binding IsWhereAll}"><TextBlock Text="{l:T multiplayer.where.all}" /></RadioButton>
+                    <RadioButton x:Name="WhereFriendsButton" GroupName="MpWhere" IsChecked="{Binding IsWhereFriends}" IsVisible="{Binding ShowPublicNetworks}"><TextBlock Text="{l:T multiplayer.where.friends}" /></RadioButton>
+                    <RadioButton x:Name="WherePublicButton" GroupName="MpWhere" IsChecked="{Binding IsWherePublic}" IsVisible="{Binding ShowPublicNetworks}"><TextBlock Text="{l:T multiplayer.where.public}" /></RadioButton>
+                    <RadioButton x:Name="WhereServersButton" GroupName="MpWhere" IsChecked="{Binding IsWhereServers}"><TextBlock Text="{l:T multiplayer.where.servers}" /></RadioButton>
+                  </StackPanel>
+                </ScrollViewer>
+
+                <TextBlock x:Name="WhereEmptyText" Classes="hint" TextWrapping="Wrap" Text="{l:T multiplayer.where.empty}" IsVisible="{Binding ShowWhereEmpty}" />
+
+                <!-- Friends' rooms -->
+                <ItemsControl x:Name="FriendRoomList" ItemsSource="{Binding FriendRooms}" IsVisible="{Binding ShowFriendRooms}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="vm:FriendRoomItem">
+                      <Grid ColumnDefinitions="*,Auto" Margin="0,2">
+                        <StackPanel Spacing="1">
+                          <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                          <TextBlock Classes="hint" FontSize="12" Text="{Binding Meta}" TextWrapping="Wrap" />
+                        </StackPanel>
+                        <Button Grid.Column="1" Classes="secondary" Content="{l:T multiplayer.public.join}" Margin="8,0,0,0" VerticalAlignment="Center"
+                                Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).JoinFriendRoomCommand}" CommandParameter="{Binding}" />
+                      </Grid>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <TextBlock x:Name="FriendRoomsEmptyText" Classes="hint" TextWrapping="Wrap" Text="{l:T multiplayer.where.friends_empty}" IsVisible="{Binding ShowFriendRoomsEmpty}" />
+
+                <!-- Public rooms: where they come from, connect, or the list with its search and filters. -->
+                <Grid x:Name="WherePublicSetup" ColumnDefinitions="*,Auto" ColumnSpacing="8" IsVisible="{Binding ShowWherePublicSetup}">
+                  <TextBlock Classes="hint" TextWrapping="Wrap" VerticalAlignment="Center" Text="{l:T multiplayer.where.public.setup}" />
+                  <Button x:Name="WhereAddNetworkButton" Grid.Column="1" Classes="secondary small" Content="{l:T multiplayer.public.setup_add}" Command="{Binding AddPublicNetworkCommand}" VerticalAlignment="Center" />
+                </Grid>
+                <Grid x:Name="WherePublicConnect" ColumnDefinitions="*,Auto" ColumnSpacing="8" IsVisible="{Binding ShowWherePublicConnect}">
+                  <TextBlock x:Name="WherePublicConnectText" Classes="hint" TextWrapping="Wrap" VerticalAlignment="Center" Text="{Binding WherePublicConnectText}" />
+                  <Button x:Name="WhereConnectButton" Grid.Column="1" Classes="secondary small" Content="{l:T people.delivery.connect}" Command="{Binding ConnectForPublicRoomsCommand}"
+                          IsEnabled="{Binding !IsPublicConnecting}" VerticalAlignment="Center" />
+                </Grid>
+                <StackPanel x:Name="WherePublicRooms" Spacing="6" IsVisible="{Binding ShowPublicRoomList}">
+                  <WrapPanel x:Name="RoomFilters" ItemSpacing="8" LineSpacing="6">
+                    <TextBox x:Name="RoomSearchBox" Text="{Binding RoomSearch}" PlaceholderText="{l:T multiplayer.public.search}" MinWidth="220" ToolTip.Tip="/" />
+                    <ComboBox x:Name="RoomGameBox" ItemsSource="{Binding RoomGameChoices}" SelectedItem="{Binding SelectedRoomGame}" MinWidth="140">
+                      <ComboBox.ItemTemplate>
+                        <DataTemplate DataType="vm:RoomGameChoice"><TextBlock Text="{Binding Label}" /></DataTemplate>
+                      </ComboBox.ItemTemplate>
+                    </ComboBox>
+                    <CheckBox x:Name="OpenRoomsBox" IsChecked="{Binding OpenRoomsOnly}"><TextBlock Text="{l:T multiplayer.public.open_only}" TextWrapping="Wrap" /></CheckBox>
+                    <ComboBox x:Name="RoomSortBox" ItemsSource="{Binding RoomSortChoices}" SelectedItem="{Binding SelectedRoomSort}" MinWidth="140">
+                      <ComboBox.ItemTemplate>
+                        <DataTemplate DataType="vm:RoomSortChoice"><TextBlock Text="{Binding Label}" /></DataTemplate>
+                      </ComboBox.ItemTemplate>
+                    </ComboBox>
+                  </WrapPanel>
+                  <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding ShowNoPublicRooms}">
+                    <TextBlock Classes="hint" VerticalAlignment="Center" TextWrapping="Wrap" Text="{l:T multiplayer.public.empty}" />
+                    <Button Grid.Column="1" Content="{l:T multiplayer.public.refresh}" Command="{Binding RefreshRoomsCommand}" Margin="8,0,0,0" />
+                  </Grid>
+                  <TextBlock x:Name="NoMatchingRoomsText" Classes="hint" TextWrapping="Wrap" Text="{l:T multiplayer.public.no_match}" IsVisible="{Binding ShowNoMatchingRooms}" />
+                  <ItemsControl x:Name="PublicRoomList" ItemsSource="{Binding VisibleRooms}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate DataType="vm:PublicRoomItem">
+                        <Grid ColumnDefinitions="*,Auto" Margin="0,2">
+                          <StackPanel Spacing="1">
+                            <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                            <TextBlock Classes="hint" FontSize="12" Text="{Binding Meta}" TextWrapping="Wrap" />
+                          </StackPanel>
+                          <Button Grid.Column="1" Content="{l:T multiplayer.public.join}" Margin="8,0,0,0" VerticalAlignment="Center"
+                                  Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).JoinPublicRoomCommand}" CommandParameter="{Binding}" />
+                        </Grid>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                  <TextBox x:Name="PublicRoomPasswordBox" Text="{Binding PublicRoomPassword}" PasswordChar="•" PlaceholderText="{l:T multiplayer.public.password_placeholder}"
+                           IsVisible="{Binding ShowPublicRoomPassword}" />
+                </StackPanel>
+
+                <!-- Servers I saved (an always-on room): joined with an invite pasted into the box above. -->
+                <StackPanel x:Name="WhereServers" Spacing="4" DataContext="{Binding JayServers}" x:DataType="vm:JayServersViewModel"
+                            IsVisible="{Binding $parent[UserControl].((vm:MultiplayerViewModel)DataContext).ShowSavedServers}">
+                  <ItemsControl x:Name="SavedServerList" ItemsSource="{Binding Servers}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate DataType="vm:JayServerItem">
+                        <Grid ColumnDefinitions="*,Auto" Margin="0,2">
+                          <StackPanel VerticalAlignment="Center" Spacing="1">
+                            <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                            <TextBlock Classes="hint" FontSize="12" Text="{Binding Detail}" TextTrimming="CharacterEllipsis" />
+                          </StackPanel>
+                          <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" Margin="8,0,0,0">
+                            <Button Classes="secondary" Content="{l:T multiplayer.jayserver.play}" IsVisible="{Binding !IsConnected}"
+                                    Command="{Binding $parent[ItemsControl].((vm:JayServersViewModel)DataContext).PlayCommand}" CommandParameter="{Binding}" />
+                            <Button Content="{l:T multiplayer.jayserver.disconnect}" IsVisible="{Binding IsConnected}"
+                                    Command="{Binding $parent[ItemsControl].((vm:JayServersViewModel)DataContext).DisconnectCommand}" />
+                            <Button Classes="ghost small" Content="{l:T common.delete}"
+                                    Command="{Binding $parent[ItemsControl].((vm:JayServersViewModel)DataContext).RemoveCommand}" CommandParameter="{Binding}" />
+                          </StackPanel>
+                        </Grid>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                  <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{Binding Status}" IsVisible="{Binding Status, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                </StackPanel>
+                <StackPanel x:Name="SavedServersEmpty" Spacing="4" IsVisible="{Binding ShowSavedServersEmpty}">
+                  <TextBlock x:Name="NoJayServersText" Classes="hint" TextWrapping="Wrap" Text="{l:T multiplayer.jayserver.empty}" />
+                  <SelectableTextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{Binding JayServers.DeviceCode}" />
+                </StackPanel>
+              </StackPanel>
+            </Border>
+
             <!-- Footer: first time? · safety · component and relay servers -->
-            <Grid x:Name="LobbyFooter" Grid.Row="2" Grid.ColumnSpan="3" ColumnDefinitions="*,*" Margin="0,4,0,0">
+            <Grid x:Name="LobbyFooter" Grid.Row="3" Grid.ColumnSpan="3" ColumnDefinitions="*,*" Margin="0,4,0,0">
               <WrapPanel ItemSpacing="12" LineSpacing="4" VerticalAlignment="Center">
                 <Button x:Name="LobbyLessonButton" Classes="ghost small" Command="{Binding OpenLessonCommand}" CommandParameter="multiplayer"><TextBlock Text="{l:T multiplayer.lobby.first_time}" TextWrapping="Wrap" /></Button>
                 <Button x:Name="LobbySafetyButton" Classes="ghost small" Command="{Binding OpenLessonCommand}" CommandParameter="safety"><TextBlock Text="{l:T multiplayer.lobby.safety}" TextWrapping="Wrap" /></Button>
@@ -509,7 +677,7 @@
                     <TextBlock Text="{l:T multiplayer.room.who_find}" FontWeight="SemiBold" />
                     <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.room.who_find_body}" />
                     <Button x:Name="PublishRoomButton" Classes="ghost small" Content="{l:T multiplayer.room.publish}" Command="{Binding ShowTabCommand}" CommandParameter="public"
-                            IsVisible="{Binding ShowPublicNetworks}" HorizontalAlignment="Left" Padding="0,2" />
+                            IsVisible="{Binding ShowPublishRoom}" HorizontalAlignment="Left" Padding="0,2" />
                     <TextBlock Text="{l:T multiplayer.room.wait}" FontWeight="SemiBold" />
                     <ComboBox x:Name="RoomKnockWaitBox" ItemsSource="{Binding KnockWaitChoices}" SelectedItem="{Binding SelectedRoomKnockWait}" MinWidth="160">
                       <ComboBox.ItemTemplate>
@@ -549,8 +717,10 @@
                         </Grid>
                       </StackPanel>
                     </Border>
-                    <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.invite.hint}" IsVisible="{Binding !HasInvite}" />
-                    <Button x:Name="CreateFirstInviteButton" Classes="primary" Content="{l:T multiplayer.invite.create}" Command="{Binding CreateInviteCommand}" IsVisible="{Binding !HasInvite}" HorizontalAlignment="Left" />
+                    <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.invite.hint}" IsVisible="{Binding ShowCreateInvite}" />
+                    <Button x:Name="CreateFirstInviteButton" Classes="primary" Content="{l:T multiplayer.invite.create}" Command="{Binding CreateInviteCommand}" IsVisible="{Binding ShowCreateInvite}" HorizontalAlignment="Left" />
+                    <!-- "No server" room: guests come in with the sealed code in the direct room card. -->
+                    <TextBlock x:Name="DirectInviteHint" Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.direct.use_sealed}" IsVisible="{Binding IsDirectHost}" />
                     <StackPanel Spacing="6" IsVisible="{Binding HasInvite}">
                       <Border Classes="code-card">
                         <Panel>
@@ -635,7 +805,7 @@
                   </StackPanel>
                 </Border>
 
-                <!-- 直连房间：路径、全条件测试（邀请就是普通的 JAY2 邀请，地址只在加密的敲门里交换） -->
+                <!-- 直连房间（不经服务器）：路径、加密直连码、全条件测试。没有普通邀请：它的敲门要经中转，这种房间的大厅不连任何中转。 -->
                 <Border Classes="card" Margin="0" IsVisible="{Binding IsDirect}">
                   <StackPanel Spacing="8">
                     <TextBlock Classes="h2" Text="{l:T multiplayer.direct.title}" Margin="0" />
@@ -649,7 +819,7 @@
                       <StackPanel Spacing="6" IsVisible="{Binding HasSealedOffer}">
                         <Grid ColumnDefinitions="*,Auto">
                           <TextBox x:Name="SealedCodeBox" Text="{Binding SealedOfferCode}" IsReadOnly="True" TextWrapping="Wrap" FontSize="12" />
-                          <Button Grid.Column="1" Content="{l:T multiplayer.sealed.copy_code}" Command="{Binding CopySealedCodeCommand}" Margin="6,0,0,0" VerticalAlignment="Top" />
+                          <Button x:Name="CopySealedCodeButton" Grid.Column="1" Content="{l:T multiplayer.sealed.copy_code}" Command="{Binding CopySealedCodeCommand}" Margin="6,0,0,0" VerticalAlignment="Top" />
                         </Grid>
                         <Grid ColumnDefinitions="Auto,*,Auto">
                           <TextBlock VerticalAlignment="Center" Margin="0,0,6,0" Text="{l:T multiplayer.sealed.passphrase_label}" />
@@ -851,40 +1021,6 @@
               </safety:SafetyPanel>
               <!-- 房间列表（没在房间里时） -->
               <StackPanel Spacing="6" IsVisible="{Binding IsIdle}">
-                <WrapPanel x:Name="RoomFilters" ItemSpacing="8" LineSpacing="6" IsVisible="{Binding IsPublicConnected}">
-                  <TextBox x:Name="RoomSearchBox" Text="{Binding RoomSearch}" PlaceholderText="{l:T multiplayer.public.search}" MinWidth="220" ToolTip.Tip="/" />
-                  <ComboBox x:Name="RoomGameBox" ItemsSource="{Binding RoomGameChoices}" SelectedItem="{Binding SelectedRoomGame}" MinWidth="140">
-                    <ComboBox.ItemTemplate>
-                      <DataTemplate DataType="vm:RoomGameChoice"><TextBlock Text="{Binding Label}" /></DataTemplate>
-                    </ComboBox.ItemTemplate>
-                  </ComboBox>
-                  <CheckBox x:Name="OpenRoomsBox" IsChecked="{Binding OpenRoomsOnly}"><TextBlock Text="{l:T multiplayer.public.open_only}" TextWrapping="Wrap" /></CheckBox>
-                  <ComboBox x:Name="RoomSortBox" ItemsSource="{Binding RoomSortChoices}" SelectedItem="{Binding SelectedRoomSort}" MinWidth="140">
-                    <ComboBox.ItemTemplate>
-                      <DataTemplate DataType="vm:RoomSortChoice"><TextBlock Text="{Binding Label}" /></DataTemplate>
-                    </ComboBox.ItemTemplate>
-                  </ComboBox>
-                </WrapPanel>
-                <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding ShowNoPublicRooms}">
-                  <TextBlock Classes="hint" VerticalAlignment="Center" TextWrapping="Wrap" Text="{l:T multiplayer.public.empty}" />
-                  <Button Grid.Column="1" Content="{l:T multiplayer.public.refresh}" Command="{Binding RefreshRoomsCommand}" Margin="8,0,0,0" />
-                </Grid>
-                <TextBlock x:Name="NoMatchingRoomsText" Classes="hint" TextWrapping="Wrap" Text="{l:T multiplayer.public.no_match}" IsVisible="{Binding ShowNoMatchingRooms}" />
-                <ItemsControl x:Name="PublicRoomList" ItemsSource="{Binding VisibleRooms}" IsVisible="{Binding IsPublicConnected}">
-                  <ItemsControl.ItemTemplate>
-                    <DataTemplate DataType="vm:PublicRoomItem">
-                      <Grid ColumnDefinitions="*,Auto" Margin="0,2">
-                        <StackPanel Spacing="1">
-                          <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                          <TextBlock Classes="hint" FontSize="12" Text="{Binding Meta}" TextWrapping="Wrap" />
-                        </StackPanel>
-                        <Button Grid.Column="1" Content="{l:T multiplayer.public.join}" Margin="8,0,0,0" VerticalAlignment="Center"
-                                Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).JoinPublicRoomCommand}" CommandParameter="{Binding}" />
-                      </Grid>
-                    </DataTemplate>
-                  </ItemsControl.ItemTemplate>
-                </ItemsControl>
-                <TextBox Text="{Binding PublicRoomPassword}" PasswordChar="•" PlaceholderText="{l:T multiplayer.public.password_placeholder}" IsVisible="{Binding IsPublicConnected}" />
                 <!-- 用指纹码找房间 -->
                 <StackPanel Spacing="6" IsVisible="{Binding IsPublicConnected}">
                   <WrapPanel ItemSpacing="2">
@@ -934,51 +1070,9 @@
           </Border>
         </StackPanel>
 
-        <!-- ===== Servers (§6.17): Jay servers | the server I run ===== -->
+        <!-- ===== My server: an always-on room run on this computer (saved servers are listed under "where to play") ===== -->
         <StackPanel x:Name="ServersPanel" Spacing="14" IsVisible="{Binding IsServersTab}">
-          <UniformGrid Columns="2" Classes="segmented" HorizontalAlignment="Left" MinWidth="280">
-            <RadioButton x:Name="JayServersSegment" GroupName="MpServers" IsChecked="{Binding ShowJayServerList}" ><TextBlock Text="{l:T multiplayer.servers.jay}" TextTrimming="CharacterEllipsis" /></RadioButton>
-            <RadioButton x:Name="MyServerSegment" GroupName="MpServers" IsChecked="{Binding ShowMyServer}" ><TextBlock Text="{l:T multiplayer.servers.mine}" TextTrimming="CharacterEllipsis" /></RadioButton>
-          </UniformGrid>
-          <Panel IsVisible="{Binding ShowJayServerList}">
-            <!-- Jay 服务器：经网关进的专用服务器（VPS 或局域网里跑 Jay 服务器版的电脑） -->
-            <Border Classes="card" Margin="0" DataContext="{Binding JayServers}" x:DataType="vm:JayServersViewModel">
-              <StackPanel Spacing="8">
-                <TextBlock Classes="h2" Text="{l:T multiplayer.jayserver.title}" Margin="0" />
-                <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.jayserver.hint}" />
-                <SelectableTextBlock FontSize="12" Text="{Binding DeviceCode}" />
-                <Grid ColumnDefinitions="*,Auto">
-                  <TextBox Text="{Binding InviteText}" PlaceholderText="{l:T multiplayer.jayserver.invite_placeholder}" />
-                  <Button Grid.Column="1" Classes="primary" Margin="6,0,0,0" Content="{l:T multiplayer.jayserver.join}" Command="{Binding JoinCommand}" IsEnabled="{Binding !IsBusy}" />
-                </Grid>
-                <TextBox x:Name="JayServerPassphraseBox" Text="{Binding InvitePassphrase}" IsVisible="{Binding InviteIsSealed}"
-                         PlaceholderText="{l:T multiplayer.jayserver.passphrase_placeholder}" />
-                <TextBlock x:Name="NoJayServersText" Classes="hint" TextWrapping="Wrap" Text="{l:T multiplayer.jayserver.empty}" IsVisible="{Binding !Servers.Count}" />
-                <ItemsControl ItemsSource="{Binding Servers}">
-                  <ItemsControl.ItemTemplate>
-                    <DataTemplate DataType="vm:JayServerItem">
-                      <Grid ColumnDefinitions="*,Auto" Margin="0,4,0,0">
-                        <StackPanel VerticalAlignment="Center">
-                          <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis" />
-                          <TextBlock Classes="hint" FontSize="12" Text="{Binding Detail}" TextTrimming="CharacterEllipsis" />
-                        </StackPanel>
-                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" Margin="12,0,0,0">
-                          <Button Classes="play" Content="{l:T multiplayer.jayserver.play}" IsVisible="{Binding !IsConnected}"
-                                  Command="{Binding $parent[ItemsControl].((vm:JayServersViewModel)DataContext).PlayCommand}" CommandParameter="{Binding}" />
-                          <Button Content="{l:T multiplayer.jayserver.disconnect}" IsVisible="{Binding IsConnected}"
-                                  Command="{Binding $parent[ItemsControl].((vm:JayServersViewModel)DataContext).DisconnectCommand}" />
-                          <Button Content="{l:T common.delete}"
-                                  Command="{Binding $parent[ItemsControl].((vm:JayServersViewModel)DataContext).RemoveCommand}" CommandParameter="{Binding}" />
-                        </StackPanel>
-                      </Grid>
-                    </DataTemplate>
-                  </ItemsControl.ItemTemplate>
-                </ItemsControl>
-                <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{Binding Status}" IsVisible="{Binding Status, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
-              </StackPanel>
-            </Border>
-          </Panel>
-          <Panel IsVisible="{Binding ShowMyServer}">
+          <Panel x:Name="MyServerPanel">
             <!-- 开服：在这台电脑上跑 Jay 服务器版（网关 + 原版 MC 服务端），朋友用邀请码经“Jay 服务器”进来 -->
             <Border Classes="card" Margin="0" DataContext="{Binding HostServer}" x:DataType="vm:HostServerViewModel">
               <StackPanel Spacing="8">

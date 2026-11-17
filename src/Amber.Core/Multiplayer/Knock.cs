@@ -22,6 +22,15 @@ public sealed record RoomCredentials(string Network, string Secret, int Epoch, b
     /// <summary>这个成员要用的设备验证方案（房主开了验证、对方也支持时才有；只走加密的敲门回复）。</summary>
     public AttestationScheme? Scheme { get; init; }
 
+    /// <summary>
+    /// "Relays only": the host opened the room so that Jay never connects members to each other directly. Every member
+    /// runs EasyTier with p2p off and without a listener. Sent in the knock reply. A guest has to say in its knock that
+    /// it knows the field (<see cref="KnockProtocol.RelayOnlyCapability"/>); the host turns the others away, because two
+    /// members that ignore it would connect to each other directly. This binds unmodified Jay only: a member running
+    /// a changed program can still ask another member's EasyTier for its addresses, so the UI does not promise more.
+    /// </summary>
+    public bool RelayOnly { get; init; }
+
     /// <summary>Multi-path split settings (wrapped invite rooms only). <see cref="SplitSettings.None"/> when the room doesn't split.</summary>
     public SplitSettings Split { get; init; } = SplitSettings.None;
 
@@ -38,7 +47,7 @@ public sealed record RoomCredentials(string Network, string Secret, int Epoch, b
     public RoomRekey ToRekey() => new(Network, Secret, Epoch) { SplitNets = UsableSplit.Nets };
 
     /// <summary>加入方：按凭据建出内部的房间对象。</summary>
-    public RoomCode ToRoom() => RoomCode.FromCredentials(Network, Secret, GamePort, Tunnel, Member ?? throw new InvalidOperationException("no member key"), epoch: Epoch) with { Split = UsableSplit };
+    public RoomCode ToRoom() => RoomCode.FromCredentials(Network, Secret, GamePort, Tunnel, Member ?? throw new InvalidOperationException("no member key"), epoch: Epoch) with { Split = UsableSplit, RelayOnly = RelayOnly };
 
     /// <summary>房主：建房间对象，带上成员表，并给自己（本机的聊天客户端）发一把钥匙。</summary>
     public RoomCode ToHostRoom(MemberTable members, string hostName)
@@ -46,7 +55,7 @@ public sealed record RoomCredentials(string Network, string Secret, int Epoch, b
         // 已经有房主自己的那把就接着用：再发一把会让房主本机正在用的聊天钥匙作废。
         var self = members.Host ?? members.Issue(HostPublicKey, hostName, isHost: true);
         if (!self.PublicKey.AsSpan().SequenceEqual(HostPublicKey)) throw new InvalidOperationException("member table belongs to another host");
-        return RoomCode.FromCredentials(Network, Secret, GamePort, Tunnel, self.Key, members, Epoch) with { Split = UsableSplit };
+        return RoomCode.FromCredentials(Network, Secret, GamePort, Tunnel, self.Key, members, Epoch) with { Split = UsableSplit, RelayOnly = RelayOnly };
     }
 
     /// <summary>An extra network must differ from the room's own one; otherwise the split is ignored.</summary>
@@ -58,7 +67,15 @@ public sealed record RoomCredentials(string Network, string Secret, int Epoch, b
 
     public override string ToString() => "RoomCredentials";
 
-    internal JsonObject ToJson() => new()
+    internal JsonObject ToJson()
+    {
+        var json = ToJsonCore();
+        // Written only when on, so a room opened the usual way sends exactly what it always did.
+        if (RelayOnly) json["relayOnly"] = true;
+        return json;
+    }
+
+    private JsonObject ToJsonCore() => new()
     {
         ["ok"] = true,
         ["net"] = Network,
@@ -97,6 +114,7 @@ public sealed record RoomCredentials(string Network, string Secret, int Epoch, b
             {
                 Member = new MemberKey(Convert.FromHexString(memberId), psk),
                 Scheme = json["attest"] is JsonObject attest ? AttestationScheme.FromJson(attest) : null,
+                RelayOnly = json["relayOnly"] is JsonValue relayOnly && relayOnly.TryGetValue<bool>(out var on) && on,
                 Split = tunnel.Wraps ? SplitFor(SplitSettings.FromJson(json["split"]), net, secret) : SplitSettings.None,
             };
         }
@@ -150,6 +168,12 @@ public sealed record RoomRekey(string Network, string Secret, int Epoch)
 public static partial class KnockProtocol
 {
     public const int Port = 47660;
+
+    /// <summary>
+    /// The field a guest sets to 1 in its knock when its Jay keeps to a "relays only" room (see
+    /// <see cref="RoomCredentials.RelayOnly"/>). Jay from before the setting does not send it.
+    /// </summary>
+    public const string RelayOnlyCapability = "relayOnly";
     /// <summary>
     /// Large enough for a Jay account proof (privacy plan item 7): the device certificate (two ML-DSA-65 public keys and a
     /// hybrid account signature, about 9.9 KB as JSON) plus a live device signature (about 4.5 KB) is about 14.5 KB.
@@ -314,12 +338,13 @@ public static class KnockClient
     /// side's addresses and returns them; they go back in the encrypted ack. Null, or a null result, sends none (the guest
     /// then stays on the relay). No address ever travels in a code or before approval.
     /// </param>
+    /// <param name="keepsRelayOnly">Tests pass false to knock like a Jay from before "relays only" (see <see cref="KnockProtocol.RelayOnlyCapability"/>).</param>
     /// <param name="hostVerified">Called once the host has answered the handshake (and, with <paramref name="expectedHost"/>,
     /// proved that key), before this side says anything about itself. Anything after it is between us and the host.</param>
     public static async Task<KnockOutcome> KnockAsync(Stream stream, JayInvite invite, X25519KeyPair me, string name, string version,
         CancellationToken ct = default, TimeSpan? handshakeTimeout = null, TimeSpan? decisionTimeout = null, Public.DeviceFingerprint? device = null,
         string? account = null, byte[]? expectedHost = null, Identity.JayProof? jay = null,
-        Func<DirectAddresses, CancellationToken, Task<DirectAddresses?>>? direct = null, Action? hostVerified = null)
+        Func<DirectAddresses, CancellationToken, Task<DirectAddresses?>>? direct = null, Action? hostVerified = null, bool keepsRelayOnly = true)
     {
         var lobbyName = LobbyKeys.LobbyName(invite.LobbyKey);
         var psk = LobbyKeys.KnockPsk(invite.Token);
@@ -339,7 +364,9 @@ public static class KnockClient
                 throw new WrongHostException(L.T("core.mp.knock.wronghost"));
             hostVerified?.Invoke();
             // attest = 1：这台电脑支持设备验证（旧版房主不认识这个字段，直接忽略）。
+            // relayOnly = 1: this Jay keeps to "relays only" when the host's reply asks for it (older hosts ignore the field).
             var about = new JsonObject { ["v"] = 1, ["name"] = KnockProtocol.SanitizeName(name), ["ver"] = version, ["attest"] = 1 };
+            if (keepsRelayOnly) about[KnockProtocol.RelayOnlyCapability] = 1;
             if (device is not null && hello["device"] is JsonObject ask && handshake.RemoteStaticPublicKey is { } host)
                 about["device"] = device.Prove(host, me.PublicKey, KnockProtocol.ReadChallenges(ask)).ToJson();
             if (account is not null && hello["account"]?.GetValue<bool>() == true) about["account"] = account;
@@ -452,6 +479,12 @@ public sealed class PendingInvite
     /// </summary>
     public byte[]? BoundTo { get; init; }
 
+    /// <summary>
+    /// The host answers every knock on this invite, even from someone on the "let straight in" list (a friend's device or
+    /// Jay account). Used for invites that say so to the host, like "friends can knock".
+    /// </summary>
+    public bool AskEachTime { get; init; }
+
     public bool IsUsable(DateTimeOffset now) => !Revoked && UsesLeft > 0 && (ExpiresAt is not { } at || now < at);
 }
 
@@ -498,8 +531,9 @@ public sealed class InviteBook(Func<DateTimeOffset>? clock = null)
     public InviteGame? Game { get; set; }
 
     /// <param name="boundTo">Only this identity key may use the invite (see <see cref="PendingInvite.BoundTo"/>).</param>
-    public PendingInvite Create(int uses, TimeSpan? lifetime, bool autoApprove, TunnelSettings tunnel, byte[]? boundTo = null)
+    public PendingInvite Create(int uses, TimeSpan? lifetime, bool autoApprove, TunnelSettings tunnel, byte[]? boundTo = null, bool askEachTime = false)
     {
+        if (askEachTime && autoApprove) throw new ArgumentException(null, nameof(askEachTime));
         if (uses is < 1 or > 20) throw new ArgumentOutOfRangeException(nameof(uses));
         if (boundTo is { Length: not X25519KeyPair.Length }) throw new ArgumentException(null, nameof(boundTo));
         PendingInvite invite;
@@ -510,6 +544,7 @@ public sealed class InviteBook(Func<DateTimeOffset>? clock = null)
             invite = new PendingInvite(JayInvite.Create(_lobbyKey, tunnel, Game), uses, lifetime is { } l ? _now() + l : null, autoApprove)
             {
                 BoundTo = boundTo is null ? null : (byte[])boundTo.Clone(),
+                AskEachTime = askEachTime,
             };
             _invites.Add(invite);
         }
@@ -930,11 +965,13 @@ public sealed class KnockServer : IAsyncDisposable
             {
                 string? name = null, version = null;
                 var guestAttests = false;
+                var guestKeepsRelayOnly = false;
                 try
                 {
                     name = KnockProtocol.SanitizeName(about["name"]?.GetValue<string>());
                     version = KnockProtocol.SanitizeName(about["ver"]?.GetValue<string>());
                     guestAttests = about["attest"]?.GetValue<int>() == 1;
+                    guestKeepsRelayOnly = about[KnockProtocol.RelayOnlyCapability]?.GetValue<int>() == 1;
                 }
                 catch (Exception e) when (e is InvalidOperationException or FormatException) { }
                 // 这个房间里被踢出的人：明确告诉他“你已被移出”（回复走握手后的加密通道，只有他能看到），不用掉邀请、不算失败次数。
@@ -950,6 +987,17 @@ public sealed class KnockServer : IAsyncDisposable
                 if (invite.BoundTo is { } bound && !CryptographicOperations.FixedTimeEquals(bound, guestPub))
                 {
                     _log?.Invoke(L.F("core.mp.knock.failed", L.T("core.mp.knock.bound")));
+                    using var refused = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    refused.CancelAfter(_limits.HandshakeTimeout);
+                    await KnockProtocol.WriteFrameAsync(stream, send.EncryptWithAd([], KnockProtocol.Json(Reject("denied"))), refused.Token);
+                    return;
+                }
+                // A "relays only" room and a guest whose Jay does not know the setting: it would connect directly to
+                // other members like it. Turned away without using the invite up; older Jay only knows "denied".
+                if (_credentials().RelayOnly && !guestKeepsRelayOnly)
+                {
+                    _log?.Invoke(L.F("core.mp.knock.failed", L.F("core.mp.knock.relay_only_old", name ?? "")));
+                    RelayOnlyRefused?.Invoke(name ?? "");
                     using var refused = CancellationTokenSource.CreateLinkedTokenSource(ct);
                     refused.CancelAfter(_limits.HandshakeTimeout);
                     await KnockProtocol.WriteFrameAsync(stream, send.EncryptWithAd([], KnockProtocol.Json(Reject("denied"))), refused.Token);
@@ -1000,7 +1048,7 @@ public sealed class KnockServer : IAsyncDisposable
                 if (!_book.TryConsume(invite)) reply = Reject("expired");
                 // 安全策略要求设备验证、对方却不支持（旧版或改过的客户端）：不放进来。旧版客户端只认识 denied。
                 else if (_members.RequireAttestation && (!guestAttests || _members.Attestation is null)) reply = Reject("denied");
-                else if ((AlwaysAsk?.Invoke() != true && (request.Trusted || invite.AutoApprove)) || await AskAsync(request, ct))
+                else if ((AlwaysAsk?.Invoke() != true && !invite.AskEachTime && (request.Trusted || invite.AutoApprove)) || await AskAsync(request, ct))
                 {
                     member = _members.Issue(guestPub, request.Name, invite: invite);
                     var attestation = guestAttests ? _members.Attestation : null;
@@ -1054,6 +1102,9 @@ public sealed class KnockServer : IAsyncDisposable
     }
 
     private static JsonObject Reject(string reason) => new() { ["ok"] = false, ["reason"] = reason };
+
+    /// <summary>A guest was turned away from a "relays only" room because their Jay is too old to keep to it (their name).</summary>
+    public event Action<string>? RelayOnlyRefused;
 
     /// <summary>
     /// How long the host has to answer, read at each knock (the room setting can change while the room is open).

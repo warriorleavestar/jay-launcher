@@ -23,9 +23,11 @@ public sealed partial class MultiplayerViewModel
     public string? HostGameInstance => _service.CurrentOr(Instances, Instances.FirstOrDefault());
 
     /// <summary>No LAN world and no manual port, but an instance to start: the button starts the game first.</summary>
-    public bool StartsGameToHost => !HasHostGame && HostGameInstance is not null && StartInstance is not null;
+    public bool StartsGameToHost => !HasHostGame && HostGameInstance is not null && StartInstance is not null && !IsServerlessChosen;
 
-    public string HostButtonText => StartsGameToHost ? L.T("multiplayer.lobby.play_and_host") : L.T("multiplayer.lobby.host_button");
+    public string HostButtonText => !IsComponentReady ? ComponentStepText
+        : IsServerlessChosen ? L.T("multiplayer.open.make_sealed")
+        : StartsGameToHost ? L.T("multiplayer.lobby.play_and_host") : L.T("multiplayer.lobby.host_button");
 
     public bool ShowHostButton => !IsWaitingForLan;
 
@@ -41,11 +43,6 @@ public sealed partial class MultiplayerViewModel
     private bool StartGameToHost()
     {
         if (!StartsGameToHost || HostGameInstance is not { } id) return false;
-        if (!IsComponentReady)
-        {
-            SetStatus(StatusMessage.Warning("multiplayer.component.download_required"));
-            return true;
-        }
         _waitingInstance = id;
         IsWaitingForLan = true;
         OnPropertyChanged(nameof(WaitingForLanText));

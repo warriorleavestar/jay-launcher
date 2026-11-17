@@ -15,12 +15,12 @@ public sealed class PlayAndHostTests
         var vm = new MultiplayerViewModel(service);
         vm.Instances.Clear();
         vm.Instances.Add("fabric-1.20.1");
+        vm.IsComponentReady = true;
         Assert.False(vm.StartsGameToHost);
         Assert.Equal(L.T("multiplayer.lobby.host_button"), vm.HostButtonText);
 
         var started = new List<string>();
         vm.StartInstance = started.Add;
-        vm.IsComponentReady = true;
         Assert.True(vm.StartsGameToHost);
         Assert.Equal(L.T("multiplayer.lobby.play_and_host"), vm.HostButtonText);
         Assert.Contains("fabric-1.20.1", vm.PlayAndHostHint);
@@ -61,13 +61,25 @@ public sealed class PlayAndHostTests
         var started = new List<string>();
         vm.StartInstance = started.Add;
 
+        // Without the component the button is the install step: it installs and stops there.
+        var installs = 0;
+        vm.TestInstallComponent = () =>
+        {
+            installs++;
+            vm.IsComponentReady = true;
+            return Task.CompletedTask;
+        };
         vm.IsComponentReady = false;
+        Assert.Equal(vm.ComponentStepText, vm.HostButtonText);
         vm.HostFromLobbyCommand.Execute(null);
+        Assert.Equal(1, installs);
         Assert.Empty(started);
         Assert.False(vm.IsWaitingForLan);
 
-        vm.IsComponentReady = true;
+        // The same button then starts the game.
+        Assert.Equal(L.T("multiplayer.lobby.play_and_host"), vm.HostButtonText);
         vm.HostFromLobbyCommand.Execute(null);
+        Assert.Equal(1, installs);
         Assert.True(vm.IsWaitingForLan);
         vm.CancelWaitForLanCommand.Execute(null);
         Assert.False(vm.IsWaitingForLan);

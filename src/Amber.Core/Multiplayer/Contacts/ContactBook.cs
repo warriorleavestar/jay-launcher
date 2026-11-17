@@ -113,6 +113,17 @@ public sealed class ContactBook(string path, Func<DateTimeOffset>? clock = null)
     public event Action? Changed;
 
     /// <summary>
+    /// The file was there but could not be read, so the list is empty for now. Callers must not take that as
+    /// "everyone was removed".
+    /// </summary>
+    public bool Unreadable
+    {
+        get { lock (_gate) { Load(); return _unreadable; } }
+    }
+
+    private bool _unreadable;
+
+    /// <summary>
     /// A known friend's device I hadn't seen before was added without the emoji (their Jay account signed it).
     /// The owner tells the user, so a device they didn't expect doesn't slip in unnoticed.
     /// </summary>
@@ -548,6 +559,7 @@ public sealed class ContactBook(string path, Func<DateTimeOffset>? clock = null)
         if (_contacts is not null) return _contacts;
         _contacts = [];
         _removed.Clear();
+        _unreadable = false;
         try
         {
             if (!File.Exists(path) || JsonNode.Parse(File.ReadAllText(path)) is not JsonArray array) return _contacts;
@@ -578,6 +590,7 @@ public sealed class ContactBook(string path, Func<DateTimeOffset>? clock = null)
         {
             _contacts.Clear();
             _removed.Clear();
+            _unreadable = true;
         }
         return _contacts;
     }

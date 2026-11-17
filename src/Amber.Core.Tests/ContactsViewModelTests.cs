@@ -103,6 +103,34 @@ public sealed class ContactsViewModelTests : IDisposable
     });
 
     [Fact]
+    public void AServerInvitePastedElsewhereGoesToTheLobbysPasteBox() => UiTestThread.Run(() =>
+    {
+        using var service = new LauncherService(new AppSettings { GameDirectory = TestDataDir.Path, PlayerName = "" });
+        var vm = NewVm(service);
+        var code = Amber.Core.Multiplayer.Gate.GateInvite.SealedPrefix + new string('A', 64);
+        Assert.Equal(PastedCodeKind.JayServer, PastedCode.Detect(code));
+
+        // In the friend-code box: it moves to the lobby's paste box, which asks for the passphrase there.
+        vm.ContactCodeInput = code;
+        vm.AddContactCommand.Execute(null);
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal("", vm.ContactCodeInput);
+        Assert.Equal(MultiplayerTab.Play, vm.Tab);
+        Assert.Equal(code, vm.JoinCode);
+        Assert.True(vm.JoinNeedsPassphrase);
+        Assert.Equal("core.gate.invite.sealed", vm.StatusInfo?.Key);
+        Assert.Equal("", vm.JayServers.InviteText);
+
+        // From the command palette: the same place.
+        vm.JoinCode = "";
+        vm.SetStatus(StatusMessage.Info("common.raw", "x"));
+        vm.FillServerInvite(code, join: false);
+        Assert.Equal(code, vm.JoinCode);
+        Assert.Equal("core.gate.invite.sealed", vm.StatusInfo?.Key);
+        Assert.Equal("", vm.JayServers.InviteText);
+    });
+
+    [Fact]
     public void MailedInvitesGoToTheActivityCentreAndMissingReceiptsWarn() => UiTestThread.Run(() =>
     {
         using var service = new LauncherService(new AppSettings { GameDirectory = TestDataDir.Path, PlayerName = "" });

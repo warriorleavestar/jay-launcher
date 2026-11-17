@@ -52,6 +52,9 @@ internal sealed partial class SelfTest
             return;
         }
         var host = vm.HostServer;
+        // "My server" is a sub-view of the multiplayer page.
+        Dispatcher.UIThread.Invoke(() => vm.Tab = MultiplayerTab.Servers);
+        await Task.Delay(300);
         Log("数据目录：" + host.DataDirectory);
         ScrollTo(page, "multiplayer.hostserver.title");
 
@@ -178,6 +181,8 @@ internal sealed partial class SelfTest
         var vm = Page<MultiplayerViewModel>();
         var page = await OpenMultiplayerAsync(vm);
         var host = vm.HostServer;
+        Dispatcher.UIThread.Invoke(() => vm.Tab = MultiplayerTab.Servers);
+        await Task.Delay(300);
         if (page is null || !Dispatcher.UIThread.Invoke(() => host.IsSetUp))
         {
             Check("开服：数据目录已经准备好", false, host.DataDirectory);
@@ -230,18 +235,18 @@ internal sealed partial class SelfTest
         Check("客户端：拿到邀请码", got);
         if (!got) return;
         var lines = File.ReadAllText(invitePath).Trim().Split('\n', StringSplitOptions.TrimEntries);
-        Dispatcher.UIThread.Invoke(() => servers.InviteText = lines[0]);
+        // A server invite goes into the lobby's one paste box; the button then reads "join and save".
+        Dispatcher.UIThread.Invoke(() => vm.JoinCode = lines[0]);
         if (lines.Length > 1)
         {
-            Check("客户端：加密邀请码要口令（显示口令框）", Dispatcher.UIThread.Invoke(() => servers.InviteIsSealed && page.GetVisualDescendants().OfType<TextBox>().FirstOrDefault(c => c.Name == "JayServerPassphraseBox")?.IsVisible == true));
-            Dispatcher.UIThread.Invoke(() => servers.InvitePassphrase = lines[1]);
+            Check("客户端：加密邀请码要口令（显示口令框）", Dispatcher.UIThread.Invoke(() => vm.JoinNeedsPassphrase && page.GetVisualDescendants().OfType<TextBox>().FirstOrDefault(c => c.Name == "JoinPassphraseBox")?.IsVisible == true));
+            Dispatcher.UIThread.Invoke(() => vm.JoinPassphrase = lines[1]);
         }
-        ScrollTo(page, "multiplayer.jayserver.title");
         await ShotAsync("客户端-粘贴邀请码");
-        Check("客户端：点“加入”", Press(await ButtonFor(servers.JoinCommand)));
+        Check("客户端：点“加入并存下”", Dispatcher.UIThread.Invoke(() => vm.JoinButtonText == L.T("multiplayer.lobby.join.server")) && Press(await ButtonFor(vm.JoinCommand)));
         var enrolled = await WaitAsync(() => Dispatcher.UIThread.Invoke(() => servers.Servers.Count == 1 && !servers.IsBusy), 30);
-        Check("客户端：入服成功，列表里有这台服务器", enrolled, Dispatcher.UIThread.Invoke(() => servers.Status));
-        ScrollTo(page, "multiplayer.jayserver.title");
+        Check("客户端：入服成功，“去哪玩”里有这台服务器", enrolled && Dispatcher.UIThread.Invoke(() => vm.Where == WhereFilter.Servers && vm.ShowSavedServers), Dispatcher.UIThread.Invoke(() => servers.Status));
+        ScrollTo(page, "multiplayer.where.title");
         await ShotAsync("客户端-已加入");
         if (!enrolled) return;
 

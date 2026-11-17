@@ -101,7 +101,12 @@ public sealed partial class MultiplayerViewModel
         if (!IsHosting) return;
         Tab = MultiplayerTab.Play;
         CompactSection = 2;
-        if (!HasInvite) await CreateInviteCommand.ExecuteAsync(null);
+        // A "No server" room is joined with a sealed code: make one if there is none yet, and go to it.
+        if (IsDirectHost)
+        {
+            if (!HasSealedOffer) await CreateSealedOfferAsync();
+        }
+        else if (!HasInvite) await CreateInviteCommand.ExecuteAsync(null);
         InviteFocusRequested?.Invoke();
     }
 

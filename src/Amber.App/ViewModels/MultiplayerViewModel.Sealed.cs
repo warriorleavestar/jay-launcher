@@ -136,7 +136,8 @@ public sealed partial class MultiplayerViewModel
         }
         if (!IsComponentReady)
         {
-            SetStatus(StatusMessage.Warning("multiplayer.component.download_required"));
+            // The button reads "install the multiplayer component first": it does that, then the same button joins.
+            await InstallComponentStepAsync();
             return;
         }
         var code = JoinCode;
