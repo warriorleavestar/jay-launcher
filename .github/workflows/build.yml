@@ -218,7 +218,7 @@ jobs:
       - name: Publish CI APK
         if: env.RELEASE_SIGNED_ANDROID != 'true'
         run: >-
-          dotnet publish Amber.Android/Amber.Android.csproj -c Release
+          dotnet publish Amber.Android/Amber.Android.csproj -c Release -m:1
           -p:AndroidSdkDirectory=${{ runner.temp }}/android-sdk
           -p:JavaSdkDirectory=${{ runner.temp }}/jdk
           -p:AndroidPackageFormats=apk
@@ -230,7 +230,7 @@ jobs:
           ANDROID_RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_STORE_PASSWORD }}
           ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
         run: >-
-          dotnet publish Amber.Android/Amber.Android.csproj -c Release
+          dotnet publish Amber.Android/Amber.Android.csproj -c Release -m:1
           -p:AndroidSdkDirectory=${{ runner.temp }}/android-sdk
           -p:JavaSdkDirectory=${{ runner.temp }}/jdk
           -p:AndroidPackageFormats=apk
