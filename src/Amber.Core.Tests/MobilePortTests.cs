@@ -206,6 +206,9 @@ public sealed class MobilePortTests
         var inventory = profile.Controls.Single(control => control.Action == TouchControlAction.Inventory);
         Assert.Equal(tablet.InventoryX, inventory.CenterX, 6);
         Assert.Equal(tablet.CenterY, inventory.CenterY, 6);
+        Assert.InRange(inventory.CenterY, 0.98, 0.982);
+        Assert.Equal(tablet.HotbarRight,
+            inventory.CenterX - inventory.Radius * 0.82 / 1.6, 6);
     }
 
     [Fact]

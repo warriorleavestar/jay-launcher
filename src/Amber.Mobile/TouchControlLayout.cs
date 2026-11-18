@@ -155,10 +155,16 @@ public readonly record struct TouchHudGeometry(
     {
         var safeAspect = Math.Clamp(aspectRatio, 1.2, 3.0);
         var halfWidth = 0.17 / safeAspect;
-        var slotWidth = halfWidth * 2 / 9;
-        const double centerY = 0.953;
+        // Action buttons are drawn from the shorter viewport edge. Convert the inventory
+        // button's visible half-width back to normalised X so its left border meets the
+        // ninth slot exactly instead of leaving a small tablet-dependent gap.
+        var inventoryHalfWidthX = 0.024 * 0.82 / safeAspect;
+        // Minecraft anchors the hotbar itself to the bottom edge. 0.953 was the centre of the
+        // whole HUD band (hearts included), which left the inventory key visibly one slot too
+        // high on 16:10 tablets. The slot centre is about 0.981 of the viewport height.
+        const double centerY = 0.981;
         return new(0.5 - halfWidth, 0.5 + halfWidth, 0.875, 1,
-            centerY, 0.5 + halfWidth + slotWidth * 0.58);
+            centerY, 0.5 + halfWidth + inventoryHalfWidthX);
     }
 
     public bool TryGetSlot(double x, double y, out int slot)
