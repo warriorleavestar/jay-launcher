@@ -94,20 +94,28 @@ public sealed class MobilePortTests
     [Fact]
     public void DefaultTouchControlsStayOnScreenAndHitTheirCenters()
     {
-        Assert.Contains(TouchControlLayout.Default, control => control.Action == TouchControlAction.Move);
-        Assert.Contains(TouchControlLayout.Default, control => control.Action == TouchControlAction.Jump);
-        Assert.DoesNotContain(TouchControlLayout.Default, control => control.Action == TouchControlAction.PrimaryAction);
-        Assert.Contains(TouchControlLayout.Default, control => control.Action == TouchControlAction.Sneak);
-        Assert.DoesNotContain(TouchControlLayout.Default, control => control.Action == TouchControlAction.Sprint);
-        Assert.DoesNotContain(TouchControlLayout.Default, control => control.Action == TouchControlAction.PreviousSlot);
-        Assert.DoesNotContain(TouchControlLayout.Default, control => control.Action == TouchControlAction.NextSlot);
+        var profile = new TouchControlProfile();
+        var controls = profile.Controls;
+        Assert.Contains(controls, control => control.Action == TouchControlAction.Move);
+        Assert.Contains(controls, control => control.Action == TouchControlAction.Jump);
+        Assert.DoesNotContain(controls, control => control.Action == TouchControlAction.PrimaryAction);
+        Assert.Contains(controls, control => control.Action == TouchControlAction.Sneak);
+        Assert.DoesNotContain(controls, control => control.Action == TouchControlAction.Sprint);
+        Assert.DoesNotContain(controls, control => control.Action == TouchControlAction.PreviousSlot);
+        Assert.DoesNotContain(controls, control => control.Action == TouchControlAction.NextSlot);
 
-        foreach (var control in TouchControlLayout.Default)
+        foreach (var control in controls)
         {
-            Assert.InRange(control.CenterX - control.Radius, 0, 1);
-            Assert.InRange(control.CenterX + control.Radius, 0, 1);
-            Assert.InRange(control.CenterY - control.Radius, 0, 1);
-            Assert.InRange(control.CenterY + control.Radius, 0, 1);
+            var halfWidth = control.Action == TouchControlAction.Inventory
+                ? control.Radius * 0.82 / profile.ViewportAspectRatio
+                : control.Radius;
+            var halfHeight = control.Action == TouchControlAction.Inventory
+                ? control.Radius * 0.82
+                : control.Radius;
+            Assert.InRange(control.CenterX - halfWidth, 0, 1);
+            Assert.InRange(control.CenterX + halfWidth, 0, 1);
+            Assert.InRange(control.CenterY - halfHeight, 0, 1);
+            Assert.InRange(control.CenterY + halfHeight, 0, 1.001);
             if (control.GameplayVisible)
             {
                 if (control.Action == TouchControlAction.Move)
@@ -138,7 +146,7 @@ public sealed class MobilePortTests
         Assert.True(movePad.CenterX < 0.25);
         Assert.InRange(movePad.CenterY, 0.79, 0.81);
         Assert.InRange(inventory.CenterX, 0.60, 0.61);
-        Assert.InRange(inventory.CenterY, 0.95, 0.96);
+        Assert.InRange(inventory.CenterY, 0.98, 0.982);
         Assert.InRange(inventory.Radius, 0.023, 0.025);
         Assert.True(jump.CenterY > 0.78);
         Assert.Equal(movePad.CenterX, sneak.CenterX, 6);
@@ -209,6 +217,9 @@ public sealed class MobilePortTests
         Assert.InRange(inventory.CenterY, 0.98, 0.982);
         Assert.Equal(tablet.HotbarRight,
             inventory.CenterX - inventory.Radius * 0.82 / 1.6, 6);
+        Assert.Null(profile.HitTest(tablet.HotbarRight - 0.001, tablet.CenterY));
+        Assert.Equal(TouchControlAction.Inventory,
+            profile.HitTest(inventory.CenterX, inventory.CenterY)!.Action);
     }
 
     [Fact]

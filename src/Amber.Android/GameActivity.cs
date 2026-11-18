@@ -822,9 +822,8 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
                 var x = e.GetX(actionIndex) / Width;
                 var y = e.GetY(actionIndex) / Height;
                 var gameplay = NativeJvmHost.GameplayControlsActive;
-                // The inventory button intentionally sits flush against the hotbar. Its circular
-                // touch target slightly overlaps the ninth-slot rectangle on some aspect ratios,
-                // so visible overlay controls must win before we fall back to hotbar selection.
+                // Visible overlay controls are checked first. The inventory key's hit rectangle
+                // ends exactly where the ninth hotbar slot begins, so neither steals the other.
                 var control = _profile.HitTest(x, y, gameplay);
                 if (gameplay && control is null && TryGetHotbarSlot(x, y, out var slot))
                 {

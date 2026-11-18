@@ -32,7 +32,7 @@ public sealed class TouchControlProfile
     public TouchControlDefinition? HitTest(double x, double y, bool gameplayControlsActive = true) =>
         Controls.LastOrDefault(control =>
             (gameplayControlsActive ? control.GameplayVisible : control.MenuVisible) &&
-            TouchControlLayout.Distance(control, x, y) <= control.Radius);
+            TouchControlLayout.Contains(control, x, y, ViewportAspectRatio));
 
     public bool AllowsAttackAt(double x, double y) => AttackArea switch
     {
@@ -103,7 +103,7 @@ public static class TouchControlLayout
         // Match Bedrock mobile: one slot-sized key, flush with the hotbar's right edge and
         // vertically centred on the slots. The Android activity runs immersive fullscreen, so
         // lifting this for the system gesture area would visibly detach it from the hotbar.
-        new(TouchControlAction.Inventory, 0.606, 0.953, 0.024, "背包")
+        new(TouchControlAction.Inventory, 0.607, 0.981, 0.024, "背包")
     ];
 
     private static readonly IReadOnlyDictionary<TouchControlMode, IReadOnlyList<TouchControlDefinition>> Layouts =
@@ -143,6 +143,21 @@ public static class TouchControlLayout
         var dx = x - control.CenterX;
         var dy = y - control.CenterY;
         return Math.Sqrt(dx * dx + dy * dy);
+    }
+
+    internal static bool Contains(TouchControlDefinition control, double x, double y,
+        double aspectRatio)
+    {
+        if (control.Action != TouchControlAction.Inventory)
+            return Distance(control, x, y) <= control.Radius;
+
+        // The inventory key is flush with the ninth hotbar slot. Match its rendered rectangular
+        // face exactly so its larger circular accessibility target cannot steal taps from slot 9.
+        var safeAspect = Math.Clamp(aspectRatio, 1.2, 3.0);
+        var halfHeight = control.Radius * 0.82;
+        var halfWidth = halfHeight / safeAspect;
+        return Math.Abs(x - control.CenterX) <= halfWidth &&
+               Math.Abs(y - control.CenterY) <= halfHeight;
     }
 }
 
