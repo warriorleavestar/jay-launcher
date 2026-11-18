@@ -285,17 +285,6 @@ public sealed class TouchInputRouter
         _sink.AddLook(x * Profile.LookSensitivity, y * Profile.LookSensitivity);
 
 
-    public void ReleaseAll()
-    {
-        foreach (var pointerId in _pointers.Keys.ToArray()) Release(pointerId, cancelled: true);
-    }
-
-    private void TapAction(TouchControlAction action)
-    {
-        _sink.SetAction(action, true);
-        _sink.SetAction(action, false);
-    }
-
     private void SetAutoSprint(bool active)
     {
         if (SprintLocked == active) return;
