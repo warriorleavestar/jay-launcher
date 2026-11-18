@@ -168,7 +168,7 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
 internal sealed class TouchControlOverlay : View, ITouchInputSink
 {
     private const long LongPressDelayMs = 340;
-    private const long LongPressRingMs = 900;
+    private const long LongPressRingMs = 1150;
     private readonly Paint _fill = new() { AntiAlias = true, Color = Color.Argb(142, 48, 53, 59) };
     private readonly Paint _activeFill = new() { AntiAlias = true, Color = Color.Argb(218, 105, 112, 120) };
     private readonly Paint _buttonFace = new() { AntiAlias = false, Color = Color.Argb(168, 55, 59, 63) };
@@ -229,6 +229,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         // otherwise some Android GPU drivers retain the previous joystick knob position.
         canvas.DrawColor(Color.Transparent, PorterDuff.Mode.Clear);
         var gameplayControlsActive = NativeJvmHost.GameplayControlsActive;
+        UpdateViewportGeometry();
         if (_lastGameplayControlsActive != gameplayControlsActive)
         {
             if (_lastGameplayControlsActive == true && !gameplayControlsActive)
@@ -356,16 +357,18 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         canvas.DrawRect(left, Height * 0.08f, right, Height * 0.96f, _panel);
         _hint.TextSize = Math.Max(17, Math.Min(Width, Height) * 0.021f);
         canvas.DrawText("触控设置", (left + right) / 2, Height * 0.14f, _hint);
-        DrawSettingRow(canvas, "摇杆 + 点击互动", 0.20f, _profile.Mode == TouchControlMode.JoystickAndTap);
-        DrawSettingRow(canvas, "方向键 + 点击互动", 0.29f, _profile.Mode == TouchControlMode.DPadAndTap);
-        DrawSettingRow(canvas, "摇杆 + 准星", 0.38f, _profile.Mode == TouchControlMode.JoystickAndCrosshair);
-        DrawSettingRow(canvas, "外接键盘鼠标", 0.47f, _profile.Mode == TouchControlMode.ExternalKeyboardMouse);
-        DrawStepper(canvas, $"按键大小  {Math.Round(_profile.Scale * 100):0}%", 0.58f);
-        DrawStepper(canvas, $"透明度  {Math.Round(_controlOpacity * 100):0}%", 0.67f);
-        DrawSettingRow(canvas, _profile.ForcedSprint ? "强制疾跑：开" : "强制疾跑：关", 0.76f,
+        DrawSettingRow(canvas, "摇杆 + 点击互动", 0.18f, _profile.Mode == TouchControlMode.JoystickAndTap);
+        DrawSettingRow(canvas, "方向键 + 点击互动", 0.25f, _profile.Mode == TouchControlMode.DPadAndTap);
+        DrawSettingRow(canvas, "摇杆 + 准星", 0.32f, _profile.Mode == TouchControlMode.JoystickAndCrosshair);
+        DrawSettingRow(canvas, "外接键盘鼠标", 0.39f, _profile.Mode == TouchControlMode.ExternalKeyboardMouse);
+        DrawSettingRow(canvas, $"攻击区域：{AttackAreaLabel(_profile.AttackArea)}", 0.47f, true);
+        DrawStepper(canvas, $"视角灵敏度  {Math.Round(_profile.LookSensitivity * 100):0}%", 0.55f);
+        DrawStepper(canvas, $"按键大小  {Math.Round(_profile.Scale * 100):0}%", 0.63f);
+        DrawStepper(canvas, $"透明度  {Math.Round(_controlOpacity * 100):0}%", 0.71f);
+        DrawSettingRow(canvas, _profile.ForcedSprint ? "强制疾跑：开" : "强制疾跑：关", 0.79f,
             _profile.ForcedSprint);
-        DrawPanelButton(canvas, "恢复默认", 0.615f, 0.83f, 0.77f, 0.90f);
-        DrawPanelButton(canvas, "编辑布局", 0.80f, 0.83f, 0.955f, 0.90f);
+        DrawPanelButton(canvas, "恢复默认", 0.615f, 0.84f, 0.77f, 0.90f);
+        DrawPanelButton(canvas, "编辑布局", 0.80f, 0.84f, 0.955f, 0.90f);
         DrawPanelButton(canvas, "完成", 0.70f, 0.91f, 0.87f, 0.955f);
     }
 
@@ -410,7 +413,8 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     {
         var now = SystemClock.UptimeMillis();
         var scale = Math.Min(Width, Height);
-        var radius = scale * 0.035f;
+        // The indicator must remain visible around a resting fingertip on a tablet.
+        var radius = scale * 0.058f;
         _progressTrack.SetStyle(Paint.Style.Stroke);
         _progress.SetStyle(Paint.Style.Stroke);
         _progressTrack.StrokeWidth = Math.Max(5, scale * 0.0045f);
@@ -513,6 +517,12 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
                 canvas.DrawLine(x - size * 0.27f, y - size * 0.45f, x - size * 0.27f, y + size * 0.45f, _glyph);
                 canvas.DrawLine(x + size * 0.27f, y - size * 0.45f, x + size * 0.27f, y + size * 0.45f, _glyph);
                 break;
+            case TouchControlAction.Close:
+                canvas.DrawLine(x - size * 0.46f, y - size * 0.46f,
+                    x + size * 0.46f, y + size * 0.46f, _glyph);
+                canvas.DrawLine(x + size * 0.46f, y - size * 0.46f,
+                    x - size * 0.46f, y + size * 0.46f, _glyph);
+                break;
             case TouchControlAction.Keyboard:
                 canvas.DrawRect(x - size * 0.62f, y - size * 0.42f,
                     x + size * 0.62f, y + size * 0.28f, _glyph);
@@ -610,18 +620,12 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         }
     }
 
-    private static bool TryGetHotbarSlot(double x, double y, out int slot)
-    {
-        const double left = 0.405;
-        const double right = 0.595;
-        if (y < 0.905 || x < left || x >= right)
-        {
-            slot = -1;
-            return false;
-        }
-        slot = Math.Clamp((int)((x - left) / ((right - left) / 9)), 0, 8);
-        return true;
-    }
+    private bool TryGetHotbarSlot(double x, double y, out int slot) =>
+        TouchHudGeometry.ForAspectRatio(CurrentAspectRatio()).TryGetSlot(x, y, out slot);
+
+    private double CurrentAspectRatio() => Height > 0 ? Width / (double)Height : 16d / 9d;
+
+    private void UpdateViewportGeometry() => _profile.ViewportAspectRatio = CurrentAspectRatio();
 
     private void DrawChevron(Canvas canvas, float x, float y, float size)
     {
@@ -645,17 +649,35 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
 
     private void LoadProfile()
     {
+        var layoutVersion = _preferences.GetInt("layout-version", 1);
         _profile.Mode = Enum.TryParse<TouchControlMode>(_preferences.GetString("mode", null), out var mode)
             ? mode : TouchControlMode.DPadAndTap;
         _profile.Scale = Math.Clamp(_preferences.GetFloat("scale", 1f), 0.70, 1.35);
+        _profile.LookSensitivity = Math.Clamp(_preferences.GetFloat("look-sensitivity", 1.65f), 0.50, 3.00);
+        _profile.AttackArea = Enum.TryParse<TouchAttackArea>(_preferences.GetString("attack-area", null), out var attackArea)
+            ? attackArea : TouchAttackArea.Anywhere;
         _profile.ForcedSprint = _preferences.GetBoolean("forced-sprint", true);
         _controlOpacity = Math.Clamp(_preferences.GetFloat("opacity", 0.74f), 0.30f, 1f);
         foreach (var modeValue in Enum.GetValues<TouchControlMode>())
         foreach (var action in Enum.GetValues<TouchControlAction>())
         {
+            // v1 stored the inventory key against a fixed 16:9 coordinate. Dropping only that
+            // stale override lets the new aspect-aware anchor repair existing tablet installs.
+            if (layoutVersion < 2 && action == TouchControlAction.Inventory) continue;
             var x = _preferences.GetFloat($"position-{modeValue}-{action}-x", float.NaN);
             var y = _preferences.GetFloat($"position-{modeValue}-{action}-y", float.NaN);
             if (!float.IsNaN(x) && !float.IsNaN(y)) _profile.SetPosition(modeValue, action, x, y);
+        }
+        if (layoutVersion < 2)
+        {
+            using var editor = _preferences.Edit()!;
+            foreach (var modeValue in Enum.GetValues<TouchControlMode>())
+            {
+                editor.Remove($"position-{modeValue}-{TouchControlAction.Inventory}-x");
+                editor.Remove($"position-{modeValue}-{TouchControlAction.Inventory}-y");
+            }
+            editor.PutInt("layout-version", 2);
+            editor.Apply();
         }
     }
 
@@ -664,8 +686,11 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         using var editor = _preferences.Edit()!;
         editor.PutString("mode", _profile.Mode.ToString());
         editor.PutFloat("scale", (float)_profile.Scale);
+        editor.PutFloat("look-sensitivity", (float)_profile.LookSensitivity);
+        editor.PutString("attack-area", _profile.AttackArea.ToString());
         editor.PutFloat("opacity", _controlOpacity);
         editor.PutBoolean("forced-sprint", _profile.ForcedSprint);
+        editor.PutInt("layout-version", 2);
         foreach (var modeValue in Enum.GetValues<TouchControlMode>())
         foreach (var action in Enum.GetValues<TouchControlAction>())
         {
@@ -684,23 +709,28 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         var y = e.GetY(e.ActionIndex) / Height;
         if (x < 0.60f) return true;
         var previousMode = _profile.Mode;
-        if (y is > 0.16f and < 0.24f) _profile.Mode = TouchControlMode.JoystickAndTap;
-        else if (y is > 0.25f and < 0.33f) _profile.Mode = TouchControlMode.DPadAndTap;
-        else if (y is > 0.34f and < 0.42f) _profile.Mode = TouchControlMode.JoystickAndCrosshair;
-        else if (y is > 0.43f and < 0.51f) _profile.Mode = TouchControlMode.ExternalKeyboardMouse;
-        else if (y is > 0.54f and < 0.62f && x < 0.70f) _profile.Scale = Math.Max(0.70, _profile.Scale - 0.05);
-        else if (y is > 0.54f and < 0.62f && x > 0.87f) _profile.Scale = Math.Min(1.35, _profile.Scale + 0.05);
-        else if (y is > 0.63f and < 0.71f && x < 0.70f) _controlOpacity = Math.Max(0.30f, _controlOpacity - 0.05f);
-        else if (y is > 0.63f and < 0.71f && x > 0.87f) _controlOpacity = Math.Min(1f, _controlOpacity + 0.05f);
-        else if (y is > 0.72f and < 0.80f) _profile.ForcedSprint = !_profile.ForcedSprint;
-        else if (y is > 0.83f and < 0.90f && x < 0.78f)
+        if (y is > 0.145f and < 0.215f) _profile.Mode = TouchControlMode.JoystickAndTap;
+        else if (y is > 0.215f and < 0.285f) _profile.Mode = TouchControlMode.DPadAndTap;
+        else if (y is > 0.285f and < 0.355f) _profile.Mode = TouchControlMode.JoystickAndCrosshair;
+        else if (y is > 0.355f and < 0.425f) _profile.Mode = TouchControlMode.ExternalKeyboardMouse;
+        else if (y is > 0.43f and < 0.51f) _profile.AttackArea = NextAttackArea(_profile.AttackArea);
+        else if (y is > 0.51f and < 0.59f && x < 0.70f) _profile.LookSensitivity = Math.Max(0.50, _profile.LookSensitivity - 0.10);
+        else if (y is > 0.51f and < 0.59f && x > 0.87f) _profile.LookSensitivity = Math.Min(3.00, _profile.LookSensitivity + 0.10);
+        else if (y is > 0.59f and < 0.67f && x < 0.70f) _profile.Scale = Math.Max(0.70, _profile.Scale - 0.05);
+        else if (y is > 0.59f and < 0.67f && x > 0.87f) _profile.Scale = Math.Min(1.35, _profile.Scale + 0.05);
+        else if (y is > 0.67f and < 0.75f && x < 0.70f) _controlOpacity = Math.Max(0.30f, _controlOpacity - 0.05f);
+        else if (y is > 0.67f and < 0.75f && x > 0.87f) _controlOpacity = Math.Min(1f, _controlOpacity + 0.05f);
+        else if (y is > 0.75f and < 0.83f) _profile.ForcedSprint = !_profile.ForcedSprint;
+        else if (y is > 0.84f and < 0.90f && x < 0.78f)
         {
             _profile.ResetPositions();
             _profile.Scale = 1;
+            _profile.LookSensitivity = 1.65;
+            _profile.AttackArea = TouchAttackArea.Anywhere;
             _controlOpacity = 0.74f;
             _profile.ForcedSprint = true;
         }
-        else if (y is > 0.83f and < 0.90f && x > 0.78f)
+        else if (y is > 0.84f and < 0.90f && x > 0.78f)
         {
             _settingsOpen = false;
             _layoutEditing = true;
@@ -718,6 +748,21 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         Invalidate();
         return true;
     }
+
+    private static TouchAttackArea NextAttackArea(TouchAttackArea area) => area switch
+    {
+        TouchAttackArea.Anywhere => TouchAttackArea.RightSide,
+        TouchAttackArea.RightSide => TouchAttackArea.Crosshair,
+        _ => TouchAttackArea.Anywhere
+    };
+
+    private static string AttackAreaLabel(TouchAttackArea area) => area switch
+    {
+        TouchAttackArea.Anywhere => "全屏任意位置",
+        TouchAttackArea.RightSide => "右侧视角区",
+        TouchAttackArea.Crosshair => "准星附近",
+        _ => "全屏任意位置"
+    };
 
     private bool HandleLayoutEditTouch(MotionEvent e)
     {
@@ -763,6 +808,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     public override bool OnTouchEvent(MotionEvent? e)
     {
         if (e is null) return false;
+        UpdateViewportGeometry();
         // Real USB/Bluetooth mice are not consistent on Android: some vendors deliver mouse
         // button and drag packets through the touch channel instead of generic motion.
         if (IsHardwarePointer(e)) return HandleHardwareMotion(e);
@@ -776,9 +822,8 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
                 var x = e.GetX(actionIndex) / Width;
                 var y = e.GetY(actionIndex) / Height;
                 var gameplay = NativeJvmHost.GameplayControlsActive;
-                // The inventory button intentionally sits flush against the hotbar. Its circular
-                // touch target slightly overlaps the ninth-slot rectangle on some aspect ratios,
-                // so visible overlay controls must win before we fall back to hotbar selection.
+                // Visible overlay controls are checked first. The inventory key's hit rectangle
+                // ends exactly where the ninth hotbar slot begins, so neither steals the other.
                 var control = _profile.HitTest(x, y, gameplay);
                 if (gameplay && control is null && TryGetHotbarSlot(x, y, out var slot))
                 {
@@ -861,6 +906,8 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
             }
             return;
         }
+        if (action == TouchControlAction.Close)
+            action = TouchControlAction.Menu;
         AndroidGameInputBridge.SetAction(action, pressed);
         if (action == TouchControlAction.Keyboard && pressed)
             PostDelayed(ShowKeyboard, 100);

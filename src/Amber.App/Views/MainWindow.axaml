@@ -187,16 +187,20 @@
                 ToolTip.Tip="{l:T shell.forward_tip}" AutomationProperties.Name="{l:T shell.forward}" VerticalAlignment="Center">
           <Path Classes="icon" Data="{StaticResource Icon.ChevronRight}" Width="20" Height="20" />
         </Button>
-        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" Margin="8,0,0,0" VerticalAlignment="Center">
+        <!-- Keep the page title inside the star column. A horizontal StackPanel measures its children
+             with infinite width, so a long instance name could draw underneath the network status. -->
+        <Grid Grid.Column="2" ColumnDefinitions="Auto,Auto,*,Auto" ColumnSpacing="8" Margin="8,0,0,0"
+              VerticalAlignment="Center" ClipToBounds="True">
           <!-- Breadcrumb: on library/{instance} and library/new the section name is a way back and the page's name follows it -->
           <Button x:Name="CrumbHome" Classes="ghost small" Content="{Binding Shell.Title}" Command="{Binding Shell.GoSectionHomeCommand}"
                   IsVisible="{Binding Shell.HasCrumb}" VerticalAlignment="Center" Margin="-8,0,-6,0" />
-          <Path x:Name="CrumbSeparator" Classes="icon sm" Data="{StaticResource Icon.ChevronRight}" Width="14" Height="14" Opacity="0.6"
+          <Path x:Name="CrumbSeparator" Grid.Column="1" Classes="icon sm" Data="{StaticResource Icon.ChevronRight}" Width="14" Height="14" Opacity="0.6"
                 IsVisible="{Binding Shell.HasCrumb}" VerticalAlignment="Center" />
-          <TextBlock x:Name="ShellTitle" Text="{Binding Shell.Heading}" FontSize="{DynamicResource FontSubtitle}" FontWeight="SemiBold"
-                     VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-          <TextBlock Text="{Binding Shell.ReturnLabel}" IsVisible="{Binding Shell.HasReturn}" Classes="hint" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-        </StackPanel>
+          <TextBlock x:Name="ShellTitle" Grid.Column="2" Text="{Binding Shell.Heading}" FontSize="{DynamicResource FontSubtitle}" FontWeight="SemiBold"
+                     VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MinWidth="0" />
+          <TextBlock Grid.Column="3" Text="{Binding Shell.ReturnLabel}" IsVisible="{Binding Shell.HasReturn}" Classes="hint"
+                     VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="180" />
+        </Grid>
         <Button Grid.Column="3" Classes="secondary small" Content="{l:T shell.return_done}" Command="{Binding Shell.ReturnCommand}"
                 IsVisible="{Binding Shell.HasReturn}" VerticalAlignment="Center" />
         <!-- Network status, on every page: which networks Jay is using now. The panel lists each one with what it can do. -->
