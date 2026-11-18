@@ -26,13 +26,24 @@
     <AndroidAsset Include="..\..\third_party\android-glfw\LICENSE.md" LogicalName="licenses/GLFW-LICENSE.md" />
   </ItemGroup>
 
+  <ItemGroup Condition="'$(JayModernRuntimeDir)' != ''">
+    <AndroidJavaSource Include="Sdl/JaySdlActivity.java" />
+    <AndroidAsset Include="$(JayModernRuntimeDir)/licenses/*" LogicalName="licenses/%(Filename)%(Extension)" />
+    <AndroidLibrary Include="$(JayModernRuntimeDir)/sdl-classes.jar" Bind="false" />
+    <AndroidNativeLibrary Include="$(JayModernRuntimeDir)/lwjgl/*.so" Abi="arm64-v8a" />
+    <AndroidNativeLibrary Include="$(JayModernRuntimeDir)/libSDL3.so" Abi="arm64-v8a" />
+    <AndroidAsset Include="$(JayModernRuntimeDir)/SDL-LICENSE.txt" LogicalName="licenses/SDL-LICENSE.txt" />
+    <AndroidAsset Include="$(JayModernRuntimeDir)/jre25-arm64-v8a.tar.xz" LogicalName="jre25-arm64-v8a.tar.xz" />
+    <AndroidAsset Include="$(JayModernRuntimeDir)/jre25.json" LogicalName="jre25.json" />
+  </ItemGroup>
+
   <Target Name="BuildJayRuntimeProbe" AfterTargets="_ResolveAndroidTooling" BeforeTargets="_BuildApkEmbed">
     <PropertyGroup>
       <_JayProbeClasses>$(IntermediateOutputPath)jay-runtime-probe-classes</_JayProbeClasses>
       <_JayBootstrapSource>$(MSBuildProjectDirectory)/Java/nz/work/minecraft/jay/AndroidGameBootstrap.java</_JayBootstrapSource>
     </PropertyGroup>
     <MakeDir Directories="$(_JayProbeClasses)" />
-    <Exec Command="&quot;$(_JavaSdkDirectory)/bin/javac&quot; --release 8 -encoding UTF-8 -d &quot;$(_JayProbeClasses)&quot; &quot;$(_JayBootstrapSource)&quot;" />
+    <Exec Command="&quot;$(_JavaSdkDirectory)/bin/javac&quot; --release 8 -encoding UTF-8 -d &quot;$(_JayProbeClasses)&quot; &quot;$(_JayBootstrapSource)&quot; &quot;$(MSBuildProjectDirectory)/Java/nz/work/minecraft/jay/SdlMenuBootstrap.java&quot;" />
     <Exec Command="&quot;$(_JavaSdkDirectory)/bin/jar&quot; --create --file &quot;$(IntermediateOutputPath)jay-runtime-probe.jar&quot; -C &quot;$(_JayProbeClasses)&quot; ." />
   </Target>
 

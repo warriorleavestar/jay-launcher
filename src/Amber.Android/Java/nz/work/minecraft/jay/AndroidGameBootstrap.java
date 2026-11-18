@@ -49,51 +49,62 @@ public final class AndroidGameBootstrap {
         if (inputBridgeReady) return true;
         if (inputBridgeFailed) return false;
         try {
-            Class<?> minecraftType = Class.forName("gfj");
-            Class<?> mouseType = Class.forName("gfk");
-            Class<?> keyboardType = Class.forName("gfi");
-            Class<?> windowType = Class.forName("fyk");
-            Class<?> mouseInputType = Class.forName("gzd");
+            Class<?> minecraftType;
+            boolean legacy;
+            try {
+                minecraftType = Class.forName("enn", false, AndroidGameBootstrap.class.getClassLoader());
+                // Distinguish the vanilla 1.20.1 client from unrelated classes with the same short name.
+                if (minecraftType.getDeclaredField("F").getType() != minecraftType)
+                    throw new NoSuchFieldException("Minecraft.instance");
+                legacy = true;
+            } catch (ClassNotFoundException | NoSuchFieldException otherVersion) {
+                minecraftType = Class.forName("gfj");
+                legacy = false;
+            }
+            Class<?> mouseType = Class.forName(legacy ? "eno" : "gfk");
+            Class<?> keyboardType = Class.forName(legacy ? "enm" : "gfi");
+            Class<?> windowType = Class.forName(legacy ? "ehn" : "fyk");
+            Class<?> mouseInputType = legacy ? null : Class.forName("gzd");
 
-            minecraftInstance = accessible(minecraftType.getDeclaredField("A"));
+            minecraftInstance = accessible(minecraftType.getDeclaredField(legacy ? "F" : "A"));
             minecraftMouse = accessible(minecraftType.getDeclaredField("n"));
             minecraftKeyboard = accessible(minecraftType.getDeclaredField("o"));
-            minecraftWindow = accessible(minecraftType.getDeclaredField("O"));
-            minecraftScreen = accessible(minecraftType.getDeclaredField("x"));
-            minecraftHitResult = accessible(minecraftType.getDeclaredField("u"));
-            mouseX = accessible(mouseType.getDeclaredField("h"));
-            mouseY = accessible(mouseType.getDeclaredField("i"));
-            windowHandle = accessible(windowType.getDeclaredMethod("h"));
-            windowWidth = accessible(windowType.getDeclaredMethod("m"));
-            windowHeight = accessible(windowType.getDeclaredMethod("n"));
+            minecraftWindow = accessible(minecraftType.getDeclaredField(legacy ? "Q" : "O"));
+            minecraftScreen = accessible(minecraftType.getDeclaredField(legacy ? "z" : "x"));
+            minecraftHitResult = accessible(minecraftType.getDeclaredField(legacy ? "w" : "u"));
+            mouseX = accessible(mouseType.getDeclaredField(legacy ? "e" : "h"));
+            mouseY = accessible(mouseType.getDeclaredField(legacy ? "f" : "i"));
+            windowHandle = accessible(windowType.getDeclaredMethod(legacy ? "i" : "h"));
+            windowWidth = accessible(windowType.getDeclaredMethod(legacy ? "k" : "m"));
+            windowHeight = accessible(windowType.getDeclaredMethod(legacy ? "l" : "n"));
             mouseMove = accessible(mouseType.getDeclaredMethod(
                 "b", long.class, double.class, double.class));
-            mouseButton = accessible(mouseType.getDeclaredMethod(
+            mouseButton = legacy ? accessible(mouseType.getDeclaredMethod("a", long.class, int.class, int.class, int.class)) : accessible(mouseType.getDeclaredMethod(
                 "a", long.class, mouseInputType, int.class));
-            mouseInput = accessible(mouseInputType.getDeclaredConstructor(int.class, int.class));
+            mouseInput = legacy ? null : accessible(mouseInputType.getDeclaredConstructor(int.class, int.class));
             mouseScroll = accessible(mouseType.getDeclaredMethod(
-                "c", long.class, double.class, double.class));
+                legacy ? "a" : "c", long.class, double.class, double.class));
             keyboardKey = accessible(keyboardType.getDeclaredMethod(
                 "a", long.class, int.class, int.class, int.class, int.class));
             keyboardChar = accessible(keyboardType.getDeclaredMethod(
                 "a", long.class, int.class, int.class));
-            startAttack = accessible(minecraftType.getDeclaredMethod("bu"));
-            startUseItem = accessible(minecraftType.getDeclaredMethod("bv"));
-            blockHitType = Class.forName("fti");
-            Class<?> screenType = Class.forName("gsb");
-            containerScreenType = Class.forName("gti");
-            Class<?> slotType = Class.forName("dji");
-            Class<?> itemStackType = Class.forName("dlt");
-            Class<?> clickType = Class.forName("dhu");
-            screenWidth = accessible(screenType.getDeclaredField("o"));
-            screenHeight = accessible(screenType.getDeclaredField("p"));
+            startAttack = accessible(minecraftType.getDeclaredMethod(legacy ? "bj" : "bu"));
+            startUseItem = accessible(minecraftType.getDeclaredMethod(legacy ? "bs" : "bv"));
+            blockHitType = Class.forName(legacy ? "eee" : "fti");
+            Class<?> screenType = Class.forName(legacy ? "euq" : "gsb");
+            containerScreenType = Class.forName(legacy ? "evp" : "gti");
+            Class<?> slotType = Class.forName(legacy ? "ccx" : "dji");
+            Class<?> itemStackType = Class.forName(legacy ? "cfz" : "dlt");
+            Class<?> clickType = Class.forName(legacy ? "cbo" : "dhu");
+            screenWidth = accessible(screenType.getDeclaredField(legacy ? "g" : "o"));
+            screenHeight = accessible(screenType.getDeclaredField(legacy ? "h" : "p"));
             containerHoveredSlot = accessible(containerScreenType.getDeclaredMethod(
-                "b", double.class, double.class));
+                legacy ? "a" : "b", double.class, double.class));
             containerSlotClicked = accessible(containerScreenType.getDeclaredMethod(
                 "a", slotType, int.class, int.class, clickType));
-            slotId = accessible(slotType.getDeclaredField("a"));
-            slotGetItem = accessible(slotType.getDeclaredMethod("g"));
-            itemStackCount = accessible(itemStackType.getDeclaredField("r"));
+            slotId = accessible(slotType.getDeclaredField(legacy ? "e" : "a"));
+            slotGetItem = accessible(slotType.getDeclaredMethod(legacy ? "e" : "g"));
+            itemStackCount = accessible(itemStackType.getDeclaredField(legacy ? "s" : "r"));
             pickupClickType = accessible(clickType.getDeclaredField("a")).get(null);
             inputBridgeReady = true;
             return true;
@@ -145,8 +156,8 @@ public final class AndroidGameBootstrap {
                     else
                         startAttack.invoke(minecraft);
                 } else {
-                    mouseButton.invoke(mouse, handle, mouseInput.newInstance(0, 0), 1);
-                    mouseButton.invoke(mouse, handle, mouseInput.newInstance(0, 0), 0);
+                    pressMouse(mouse, handle, 0, 1);
+                    pressMouse(mouse, handle, 0, 0);
                 }
             }
             return true;
@@ -155,23 +166,23 @@ public final class AndroidGameBootstrap {
         }
     }
 
-    /** Returns the live count under a normalized pointer, or zero outside a container slot. */
+    /** Returns the live count under a normalized pointer, or -1 outside a container slot. */
     public static int inventoryStackCount(float normalizedX, float normalizedY) {
-        if (!prepareInputBridge()) return 0;
+        if (!prepareInputBridge()) return -1;
         try {
             Object minecraft = minecraft();
-            if (minecraft == null) return 0;
+            if (minecraft == null) return -1;
             Object screen = minecraftScreen.get(minecraft);
-            if (!containerScreenType.isInstance(screen)) return 0;
+            if (!containerScreenType.isInstance(screen)) return -1;
             double x = Math.max(0.0, Math.min(1.0, normalizedX)) * screenWidth.getInt(screen);
             double y = Math.max(0.0, Math.min(1.0, normalizedY)) * screenHeight.getInt(screen);
             Object slot = containerHoveredSlot.invoke(screen, x, y);
-            if (slot == null) return 0;
+            if (slot == null) return -1;
             Object stack = slotGetItem.invoke(slot);
             return stack == null ? 0 : Math.max(0, itemStackCount.getInt(stack));
         } catch (ReflectiveOperationException | RuntimeException error) {
             reportInputError(error);
-            return 0;
+            return -1;
         }
     }
 
@@ -216,6 +227,11 @@ public final class AndroidGameBootstrap {
         }
     }
 
+    private static void pressMouse(Object mouse, long window, int button, int action) throws ReflectiveOperationException {
+        if (mouseInput == null) mouseButton.invoke(mouse, window, button, action, 0);
+        else mouseButton.invoke(mouse, window, mouseInput.newInstance(button, 0), action);
+    }
+
     public static boolean dispatchMouseButton(int button, int action) {
         if (!prepareInputBridge()) return false;
         try {
@@ -224,8 +240,7 @@ public final class AndroidGameBootstrap {
             Object window = window(minecraft);
             Object mouse = minecraftMouse.get(minecraft);
             if (window == null || mouse == null) return false;
-            mouseButton.invoke(mouse, handle(window),
-                mouseInput.newInstance(button, 0), action);
+            pressMouse(mouse, handle(window), button, action);
             return true;
         } catch (ReflectiveOperationException | RuntimeException error) {
             return reportInputError(error);

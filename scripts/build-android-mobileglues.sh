@@ -34,6 +34,8 @@ git -C "$work/source" submodule update --init --depth 1 \
 patch_file="$(cd "$(dirname "$0")/../third_party/android-mobileglues" && pwd)/jay-android.patch"
 git -C "$work/source" apply --check "$patch_file"
 git -C "$work/source" apply "$patch_file"
+git -C "$work/source" apply "$(dirname "$patch_file")/fragment-output-arrays.patch"
+git -C "$work/source" apply "$(dirname "$patch_file")/emulator-angle.patch"
 
 cmake -S "$work/source/MobileGlues-cpp" -B "$work/build" -G Ninja \
   -DCMAKE_TOOLCHAIN_FILE="$ndk/build/cmake/android.toolchain.cmake" \

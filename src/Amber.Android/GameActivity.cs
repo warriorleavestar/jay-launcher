@@ -109,8 +109,6 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
     {
         try
         {
-            if (!AndroidRuntimeStore.IsInstalled(this))
-                throw new InvalidOperationException("Android runtime preparation did not finish in the launcher.");
             var versionId = Intent?.GetStringExtra(VersionIdExtra);
             if (string.IsNullOrWhiteSpace(versionId))
                 throw new InvalidOperationException("No Minecraft instance was selected.");
@@ -201,8 +199,12 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     private bool _hasMousePosition;
     private bool? _lastGameplayControlsActive;
 
-    public TouchControlOverlay(Context context) : base(context)
+    private readonly SdlTouchInput? _sdl;
+    private bool GameplayActive => _sdl?.InWorld ?? NativeJvmHost.GameplayControlsActive;
+
+    public TouchControlOverlay(Context context, SdlTouchInput? sdl = null) : base(context)
     {
+        _sdl = sdl;
         _preferences = context.GetSharedPreferences("jay-touch-controls", FileCreationMode.Private)!;
         LoadProfile();
         _router = new TouchInputRouter(this, _profile,
@@ -228,7 +230,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         // This view is composited over a SurfaceView. Clear its transparent layer on every frame;
         // otherwise some Android GPU drivers retain the previous joystick knob position.
         canvas.DrawColor(Color.Transparent, PorterDuff.Mode.Clear);
-        var gameplayControlsActive = NativeJvmHost.GameplayControlsActive;
+        var gameplayControlsActive = GameplayActive;
         if (_lastGameplayControlsActive != gameplayControlsActive)
         {
             if (_lastGameplayControlsActive == true && !gameplayControlsActive)
@@ -775,7 +777,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
                 var pointerId = e.GetPointerId(actionIndex);
                 var x = e.GetX(actionIndex) / Width;
                 var y = e.GetY(actionIndex) / Height;
-                var gameplay = NativeJvmHost.GameplayControlsActive;
+                var gameplay = GameplayActive;
                 // The inventory button intentionally sits flush against the hotbar. Its circular
                 // touch target slightly overlaps the ninth-slot rectangle on some aspect ratios,
                 // so visible overlay controls must win before we fall back to hotbar selection.
@@ -783,7 +785,8 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
                 if (gameplay && control is null && TryGetHotbarSlot(x, y, out var slot))
                 {
                     _hotbarPointers.Add(pointerId);
-                    NativeJvmHost.AddKey(49 + slot);
+                    if (_sdl is null) NativeJvmHost.AddKey(49 + slot);
+                    else _sdl.SelectSlot(slot);
                     return true;
                 }
                 var handled = _router.Press(pointerId, x, y, gameplay);
@@ -861,17 +864,29 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
             }
             return;
         }
-        AndroidGameInputBridge.SetAction(action, pressed);
+        if (_sdl is null) AndroidGameInputBridge.SetAction(action, pressed);
+        else _sdl.Action(action, pressed);
         if (action == TouchControlAction.Keyboard && pressed)
             PostDelayed(ShowKeyboard, 100);
     }
 
-    public void SetMovement(double x, double y) => AndroidGameInputBridge.SetMovement(x, y);
+    public void SetMovement(double x, double y)
+    {
+        if (_sdl is null) AndroidGameInputBridge.SetMovement(x, y);
+        else _sdl.Move(x, y);
+    }
 
-    public void AddLook(double x, double y) => AndroidGameInputBridge.AddLook(x, y);
+    public void AddLook(double x, double y)
+    {
+        if (_sdl is null) AndroidGameInputBridge.AddLook(x, y);
+        else _sdl.Look(x, y);
+    }
 
     public void SetPointer(double x, double y, bool click)
-        => AndroidGameInputBridge.SetPointer(x, y, click);
+    {
+        if (_sdl is null) AndroidGameInputBridge.SetPointer(x, y, click);
+        else _sdl.Pointer(x, y, click);
+    }
 
     public void SplitInventoryStack(double x, double y, int count)
         => NativeJvmHost.SplitInventoryStack(x, y, count);
@@ -886,7 +901,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
 
         // Menu and chat screens need ordinary key/character delivery before gameplay
         // bindings. Otherwise W/A/S/D and E/Q/T disappear from typed text.
-        if (!NativeJvmHost.GameplayControlsActive)
+        if (!GameplayActive)
         {
             if (!pressed) return GlfwKey(e.KeyCode) is not null || e.UnicodeChar > 0;
             var handled = false;
@@ -914,7 +929,8 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         if (HardwareAction(e.KeyCode) is { } action)
         {
             if (pressed) _hardwareActions.Add(action); else _hardwareActions.Remove(action);
-            AndroidGameInputBridge.SetAction(action, pressed);
+            if (_sdl is null) AndroidGameInputBridge.SetAction(action, pressed);
+        else _sdl.Action(action, pressed);
             return true;
         }
 
@@ -929,7 +945,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
 
         if (e.ActionMasked == MotionEventActions.Scroll)
         {
-            if (!NativeJvmHost.GameplayControlsActive) return false;
+            if (!GameplayActive) return false;
             var scroll = e.GetAxisValue(Axis.Vscroll);
             if (Math.Abs(scroll) > 0.01f)
             {
@@ -957,7 +973,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
             };
             // DOWN/UP can arrive without a preceding HOVER_MOVE (trackpads and ADB both do
             // this). Synchronize the menu cursor before delivering the click.
-            if (!NativeJvmHost.GameplayControlsActive && Width > 0 && Height > 0)
+            if (!GameplayActive && Width > 0 && Height > 0)
                 AndroidGameInputBridge.SetPointer(e.GetX() / Width, e.GetY() / Height, false);
             if (action is { } mapped)
             {
@@ -968,7 +984,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         }
 
         if (e.ActionMasked is not (MotionEventActions.HoverMove or MotionEventActions.Move)) return true;
-        if (NativeJvmHost.GameplayControlsActive)
+        if (GameplayActive)
         {
             var dx = e.GetAxisValue(Axis.RelativeX);
             var dy = e.GetAxisValue(Axis.RelativeY);
@@ -1001,7 +1017,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
 #pragma warning disable CA1416
         if (hasWindowFocus && Visibility == ViewStates.Visible &&
             _profile.Mode == TouchControlMode.ExternalKeyboardMouse &&
-            NativeJvmHost.GameplayControlsActive)
+            GameplayActive)
         {
             RequestFocus();
             RequestPointerCapture();

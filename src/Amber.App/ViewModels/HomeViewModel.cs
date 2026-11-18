@@ -614,7 +614,7 @@ public sealed partial class HomeViewModel : PageViewModel
             {
                 await mobileLaunch(id, account.Name, request.JoinServer ?? mobileSettings.JoinServer,
                     new Progress<Amber.App.MobileLaunchProgress>(value =>
-                        mobileTask.Report(value.Fraction, value.Detail, value.Bytes)), mobileCts.Token);
+                        mobileTask.Report(value.Fraction, value.Detail, value.Bytes, value.ActiveFiles)), mobileCts.Token);
                 mobileTask.Succeed();
                 _service.RecordPlayed(id, DateTimeOffset.Now);
                 SetStatus(StatusMessage.Info("home.status.launching"));

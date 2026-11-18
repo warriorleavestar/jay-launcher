@@ -22,11 +22,12 @@ public sealed class Application : AvaloniaAndroidApplication<Amber.App.App>
         Amber.App.App.MobileGameDirectory = Path.Combine(files, "minecraft");
         Amber.App.App.MobileLaunchRequested = async (versionId, playerName, serverAddress, progress, ct) =>
         {
-            if (!AndroidRuntimeStore.IsInstalled(this))
+            var java25 = AndroidRuntimeStore.RequiresJava25(this, versionId);
+            if (!AndroidRuntimeStore.IsInstalled(this, java25))
             {
-                var descriptor = AndroidRuntimeCatalog.ForCurrentProcess()
-                    ?? throw new PlatformNotSupportedException(L.T("mobile.runtime.unsupported"));
-                await AndroidRuntimeStore.InstallAsync(this, descriptor, new Progress<RuntimeInstallProgress>(value =>
+                var descriptor = AndroidRuntimeStore.Descriptor(this, java25)
+                    ?? throw new InvalidOperationException(L.T("mobile.runtime.unsupported"));
+                await AndroidRuntimeStore.InstallAsync(this, descriptor, java25, new Progress<RuntimeInstallProgress>(value =>
                 {
                     var fraction = value.Total <= 0 ? null : (double?)value.Completed / value.Total;
                     var detail = value.Phase switch
@@ -36,7 +37,8 @@ public sealed class Application : AvaloniaAndroidApplication<Amber.App.App>
                         RuntimeInstallPhase.Verifying => L.F("mobile.runtime.verifying", (int)((fraction ?? 0) * 100)),
                         _ => L.T("mobile.runtime.activating")
                     };
-                    progress?.Report(new Amber.App.MobileLaunchProgress(fraction, detail, value.Completed));
+                    progress?.Report(new Amber.App.MobileLaunchProgress(fraction, detail, value.Completed,
+                        value.Phase == RuntimeInstallPhase.Downloading ? [Path.GetFileName(new Uri(descriptor.DownloadUrl).AbsolutePath)] : []));
                 }), ct);
             }
 
@@ -53,11 +55,13 @@ public sealed class Application : AvaloniaAndroidApplication<Amber.App.App>
                         InstallStage.Files => L.F("mobile.game.downloading", value.Completed, value.Total),
                         _ => L.T("mobile.game.preparing")
                     };
-                    progress?.Report(new Amber.App.MobileLaunchProgress(fraction, detail, value.Bytes));
+                    progress?.Report(new Amber.App.MobileLaunchProgress(fraction, detail, value.Bytes, value.ActiveFiles));
                 }), ct);
 
             ct.ThrowIfCancellationRequested();
             var intent = new Intent(this, typeof(GameActivity));
+            if (AndroidEmbeddedGame.UsesSdl(this, versionId))
+                intent.SetClassName(this, "nz.work.minecraft.jay.JaySdlActivity");
             intent.AddFlags(ActivityFlags.NewTask);
             intent.PutExtra(GameActivity.VersionIdExtra, versionId);
             intent.PutExtra(GameActivity.PlayerNameExtra, playerName);

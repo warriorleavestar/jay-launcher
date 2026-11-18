@@ -8,7 +8,7 @@ using Avalonia.Styling;
 
 namespace Amber.App;
 
-public sealed record MobileLaunchProgress(double? Fraction, string Detail, long? Bytes = null);
+public sealed record MobileLaunchProgress(double? Fraction, string Detail, long? Bytes = null, IReadOnlyList<string>? ActiveFiles = null);
 
 public sealed class App : Application
 {
