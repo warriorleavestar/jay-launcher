@@ -8,16 +8,24 @@ using System.Runtime.InteropServices;
 
 namespace Amber.Android;
 
-internal readonly record struct AndroidGameInstallProgress(InstallStage Stage, int Completed, int Total, long Bytes);
+internal readonly record struct AndroidGameInstallProgress(InstallStage Stage, int Completed, int Total, long Bytes, IReadOnlyList<string>? ActiveFiles);
 
 internal sealed record AndroidPreparedGame(
     string RuntimeRoot,
     string WorkingDirectory,
+    string NativeRoot,
+    bool Sdl,
     EmbeddedJavaInvocation Invocation);
 
 /// <summary>Installs Mojang files and prepares the same launch command used by desktop Jay for an embedded JVM.</summary>
 internal static class AndroidEmbeddedGame
 {
+    public static bool UsesSdl(Context context, string versionId)
+    {
+        var dir = new GameDirectory(Path.Combine(context.FilesDir!.AbsolutePath, "minecraft"));
+        return dir.ResolveVersion(versionId).Libraries.Any(lib => lib.Name.StartsWith("org.lwjgl:lwjgl-sdl:", StringComparison.Ordinal));
+    }
+
     public static async Task<AndroidPreparedGame> PrepareAsync(
         Context context,
         string versionId,
@@ -30,7 +38,8 @@ internal static class AndroidEmbeddedGame
         playerName = playerName.Trim();
         if (playerName.Length is < 1 or > 16 || playerName.Any(c => !(char.IsAsciiLetterOrDigit(c) || c == '_')))
             throw new ArgumentException("Minecraft names must use 1-16 letters, numbers or underscores.");
-        if (!AndroidRuntimeStore.IsInstalled(context)) throw new InvalidOperationException("The Android runtime is not installed.");
+        var java25 = AndroidRuntimeStore.RequiresJava25(context, versionId);
+        if (!AndroidRuntimeStore.IsInstalled(context, java25)) throw new InvalidOperationException("The Android runtime is not installed.");
 
         var gameRoot = Path.Combine(context.FilesDir!.AbsolutePath, "minecraft");
         var gameDirectory = new GameDirectory(gameRoot);
@@ -39,15 +48,16 @@ internal static class AndroidEmbeddedGame
         var rules = AndroidRules();
         var installer = new VanillaInstaller(downloader, gameDirectory) { Rules = rules };
         var forwardedProgress = new Progress<InstallProgress>(value =>
-            progress?.Report(new(value.Stage, value.Files.CompletedFiles, value.Files.TotalFiles, value.Files.BytesDownloaded)));
+            progress?.Report(new(value.Stage, value.Files.CompletedFiles, value.Files.TotalFiles, value.Files.BytesDownloaded, value.Files.ActiveFiles)));
         if (!File.Exists(gameDirectory.VersionJsonPath(versionId)))
             await installer.InstallAsync(versionId, forwardedProgress, ct);
         else
             await installer.CompleteAsync(versionId, forwardedProgress, ct);
         await CreateMobileOptionsIfMissingAsync(gameRoot, ct);
 
-        var runtimeRoot = AndroidRuntimeStore.Root(context);
-        var nativeRoot = Path.Combine(runtimeRoot, "native");
+        var runtimeRoot = AndroidRuntimeStore.Root(context, java25);
+        var sdl = UsesSdl(context, versionId);
+        var nativeRoot = sdl ? context.ApplicationInfo!.NativeLibraryDir! : Path.Combine(runtimeRoot, "native");
         RequireNativeFiles(nativeRoot, ["liblwjgl.so", "liblwjgl_opengl.so", "liblwjgl_stb.so", "libfreetype.so", "libopenal.so", "libmobileglues.so"]);
         var glfw = Path.Combine(nativeRoot, "libglfw.so");
         if (!File.Exists(glfw)) glfw = Path.Combine(context.ApplicationInfo!.NativeLibraryDir!, "libglfw.so");
@@ -64,12 +74,22 @@ internal static class AndroidEmbeddedGame
             "-Dorg.lwjgl.librarypath=" + nativeRoot,
             "-Dorg.lwjgl.libname=" + Path.Combine(nativeRoot, "liblwjgl.so"),
             "-Dorg.lwjgl.glfw.libname=" + glfw,
-            "-Dorg.lwjgl.opengl.explicitInit=true",
+
             "-Dorg.lwjgl.freetype.libname=" + Path.Combine(nativeRoot, "libfreetype.so"),
             "-Dorg.lwjgl.openal.libname=" + Path.Combine(nativeRoot, "libopenal.so"),
             "-Djay.minecraft.version=" + versionId,
         };
 
+        if (sdl)
+        {
+            extraJvm.Add("-Dorg.lwjgl.sdl.libname=" + Path.Combine(context.ApplicationInfo!.NativeLibraryDir!, "libSDL3.so"));
+            extraJvm.Add("-Dorg.lwjgl.vulkan.libname=/system/lib64/libvulkan.so");
+            extraJvm.Add("-Djna.boot.library.path=" + nativeRoot);
+            extraJvm.Add("-Dorg.lwjgl.spvc.libname=" + Path.Combine(nativeRoot, "libspirv-cross-c-shared.so"));
+            extraJvm.Add("-Dorg.lwjgl.shaderc.libname=" + Path.Combine(nativeRoot, "libshaderc_shared.so"));
+            extraJvm.Add("-Dorg.lwjgl.opengl.libname=" + Path.Combine(nativeRoot, "libmobileglues.so"));
+        }
+        else extraJvm.Add("-Dorg.lwjgl.opengl.explicitInit=true");
         var launcher = new GameLauncher(gameDirectory) { BaseRules = rules };
         var invocation = launcher.BuildEmbeddedInvocation(new LaunchOptions
         {
@@ -86,6 +106,8 @@ internal static class AndroidEmbeddedGame
             ExtraJvmArgs = extraJvm,
             LauncherName = "Jay Android",
         });
+        bool namedSdlInput = sdl && invocation.MainClass == "net.minecraft.client.main.Main" && versionId == "26.3";
+        if (sdl && !namedSdlInput) return new AndroidPreparedGame(runtimeRoot, gameRoot, nativeRoot, true, invocation);
         var bootstrap = Path.Combine(cache, "jay-runtime-probe.jar");
         await CopyAssetAsync(context, "jay-runtime-probe.jar", bootstrap, ct);
         var vmOptions = invocation.VmOptions.Select(value =>
@@ -94,22 +116,25 @@ internal static class AndroidEmbeddedGame
                 : value).ToArray();
         invocation = new EmbeddedJavaInvocation(
             vmOptions,
-            "nz.work.minecraft.jay.AndroidGameBootstrap",
+            namedSdlInput ? "nz.work.minecraft.jay.SdlMenuBootstrap" : "nz.work.minecraft.jay.AndroidGameBootstrap",
             [invocation.MainClass, .. invocation.Arguments],
             invocation.TransientDirectory);
-        return new AndroidPreparedGame(runtimeRoot, gameRoot, invocation);
+        return new AndroidPreparedGame(runtimeRoot, gameRoot, nativeRoot, sdl, invocation);
     }
 
     public static void Run(AndroidPreparedGame game)
     {
-        var nativeRoot = Path.Combine(game.RuntimeRoot, "native");
+        var nativeRoot = game.NativeRoot;
         var mobileGluesRoot = Path.Combine(game.WorkingDirectory, "mobileglues");
         Directory.CreateDirectory(mobileGluesRoot);
         var mobileGlues = Path.Combine(nativeRoot, "libmobileglues.so");
+        bool emulatorAngle = game.Sdl && global::Android.OS.Build.Hardware is ("ranchu" or "goldfish") &&
+            File.Exists(Path.Combine(nativeRoot, "libEGL_angle.so"));
         foreach (var (name, value) in new (string Name, string Value)[]
         {
             ("MG_DIR_PATH", mobileGluesRoot),
-            ("MG_ANGLE_DIR", ""),
+            ("MG_ANGLE_DIR", emulatorAngle ? nativeRoot : ""),
+            ("JAY_EMULATOR_ANGLE", emulatorAngle ? "1" : "0"),
             ("JAY_EGL_LIBRARY", mobileGlues),
             ("JAY_GL_LIBRARY", mobileGlues),
         })
@@ -117,8 +142,17 @@ internal static class AndroidEmbeddedGame
             Environment.SetEnvironmentVariable(name, value);
             NativeJvmHost.SetEnvironmentVariable(name, value);
         }
+        if (game.Sdl)
+        {
+            // SDL and LWJGL must resolve GL entry points through the very same provider.
+            SdlTouchInput.SetHint("SDL_OPENGL_LIBRARY", mobileGlues);
+            SdlTouchInput.SetHint("SDL_EGL_LIBRARY", mobileGlues);
+        }
         Directory.SetCurrentDirectory(game.WorkingDirectory);
 
+        var cpp = Path.Combine(game.RuntimeRoot, "lib", "libc++_shared.so");
+        if (File.Exists(cpp) && NativeJvmHost.Preload(cpp) is { } dependencyError)
+            throw new InvalidOperationException(dependencyError);
         var error = NativeJvmHost.LoadRuntime(Path.Combine(game.RuntimeRoot, "lib", "server", "libjvm.so"));
         if (error is not null) throw new InvalidOperationException(error);
         foreach (var library in new[] { "libjava.so", "libnet.so", "libnio.so" })

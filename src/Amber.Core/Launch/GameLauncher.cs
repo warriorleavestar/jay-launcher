@@ -107,6 +107,14 @@ public sealed class GameLauncher(GameDirectory dir)
                 if (++i >= markerIndex) throw new InvalidDataException("The Java class path option has no value.");
                 vmOptions.Add("-Djava.class.path=" + arguments[i]);
             }
+            else if (arguments[i] is "--add-exports" or "--add-opens" or "--add-reads" or "--add-modules")
+            {
+                // JNI takes one JavaVMOption per module directive, unlike the java executable.
+                var option = arguments[i];
+                if (++i >= markerIndex || arguments[i].StartsWith('-'))
+                    throw new InvalidDataException($"Missing value for embedded Java option {option}.");
+                vmOptions.Add(option + "=" + arguments[i]);
+            }
             else
             {
                 vmOptions.Add(arguments[i]);

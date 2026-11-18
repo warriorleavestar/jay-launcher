@@ -5,5 +5,10 @@
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
   <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
   <application android:label="Jay" android:icon="@drawable/jay" android:allowBackup="false"
-               android:allowNativeHeapPointerTagging="false" />
+               android:allowNativeHeapPointerTagging="false">
+    <activity android:name="nz.work.minecraft.jay.JaySdlActivity" android:process=":sdlgame"
+              android:exported="false" android:screenOrientation="sensorLandscape"
+              android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode"
+              android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen" />
+  </application>
 </manifest>

@@ -421,7 +421,6 @@ public sealed class MobilePortTests
         var close = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Close);
         Assert.True(router.Press(22, close.CenterX, close.CenterY, controlsEnabled: false));
         Assert.Contains((TouchControlAction.Close, true), sink.Actions);
-    }
 
     [Fact]
     public void TouchInputRouterHoldsMenuPointerForSliders()
@@ -513,6 +512,29 @@ public sealed class MobilePortTests
         Assert.True(router.Release(44));
         Assert.Equal([(0.42, 0.40, 32)], sink.InventorySplits);
         Assert.DoesNotContain(sink.Pointers, pointer => pointer.Click);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void DraggingAnOccupiedSlotMovesTheStackOnlyOnRelease(bool cancelled)
+    {
+        var sink = new RecordingTouchSink();
+        var router = new TouchInputRouter(sink, inventoryStackCount: (_, y) => y < 0.5 ? 5 : 0);
+        router.Press(1, 0.4, 0.4, controlsEnabled: false);
+        router.Move(1, 0.4, 0.6);
+        router.Release(1, cancelled);
+
+        if (cancelled)
+        {
+            Assert.Empty(sink.InventorySplits);
+            Assert.DoesNotContain(sink.Pointers, point => point.Click);
+        }
+        else
+        {
+            Assert.Equal([(0.4, 0.4, 5)], sink.InventorySplits);
+            Assert.Contains((0.4, 0.6, true), sink.Pointers);
+        }
     }
 
     [Fact]

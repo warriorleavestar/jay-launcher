@@ -463,11 +463,13 @@ void jay_input_set_pointer(float x, float y, int click) {
     if (x > 1.f) x = 1.f;
     if (y < 0.f) y = 0.f;
     if (y > 1.f) y = 1.f;
+    pthread_mutex_lock(&g_event_mutex);
     atomic_store(&g_pointer_x, x);
     atomic_store(&g_pointer_y, y);
     if (click) atomic_fetch_add(&g_pointer_clicks, 1);
     atomic_fetch_add(&g_pointer_generation, 1);
     atomic_fetch_add(&g_generation, 1);
+    pthread_mutex_unlock(&g_event_mutex);
 }
 
 __attribute__((visibility("default")))
@@ -507,12 +509,12 @@ void jay_input_read(jay_input_snapshot *snapshot) {
     snapshot->move_y = atomic_load(&g_move_y);
     snapshot->look_x = atomic_exchange(&g_look_x, 0.f);
     snapshot->look_y = atomic_exchange(&g_look_y, 0.f);
+    pthread_mutex_lock(&g_event_mutex);
     snapshot->pointer_x = atomic_load(&g_pointer_x);
     snapshot->pointer_y = atomic_load(&g_pointer_y);
     snapshot->pointer_clicks = atomic_exchange(&g_pointer_clicks, 0);
     snapshot->actions = atomic_load(&g_actions);
     snapshot->action_taps = atomic_exchange(&g_action_taps, 0);
-    pthread_mutex_lock(&g_event_mutex);
     snapshot->text_count = g_text_count;
     snapshot->key_count = g_key_count;
     for (uint32_t i = 0; i < g_text_count; i++) snapshot->text[i] = g_text[i];
