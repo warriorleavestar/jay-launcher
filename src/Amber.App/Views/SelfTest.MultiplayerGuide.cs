@@ -239,12 +239,27 @@ internal sealed partial class SelfTest
         main.Shell.Navigate("play");
         await Task.Delay(300);
         page = (await FindAsync<MultiplayerPage>(p => p.IsEffectivelyVisible))!;
-        foreach (var (w, h, expected) in new[] { (900, 700, MultiplayerPage.LobbyArrangement.Stacked), (600, 420, MultiplayerPage.LobbyArrangement.JoinFirst) })
+        foreach (var (w, h, expected, fixedActions) in new[]
+                 {
+                     (900, 700, MultiplayerPage.LobbyArrangement.Stacked, true),
+                     (1024, 640, MultiplayerPage.LobbyArrangement.SideBySide, false),
+                     (600, 420, MultiplayerPage.LobbyArrangement.JoinFirst, true),
+                 })
         {
             window.Width = w;
             window.Height = h;
             await Task.Delay(500);
             Check($"大厅 {w}：卡片排法", page.LobbyLayout == expected, page.LobbyLayout.ToString());
+            Check($"大厅 {w}：短窗口才固定操作栏", (Visible("CompactLobbyJoinButton") is not null) == fixedActions);
+            if (fixedActions)
+            {
+                var compactJoin = Visible("CompactLobbyJoinButton");
+                var compactHost = Visible("CompactLobbyHostButton");
+                Check("大厅紧凑：加入和开房固定在窗口底部，不必滚到卡片末尾",
+                    compactJoin?.TranslatePoint(new Point(0, compactJoin.Bounds.Height), page) is { } joinBottom
+                    && joinBottom.Y <= page.Bounds.Height + 1 && compactHost is not null && Visible("LobbyJoinButton") is null,
+                    $"join={compactJoin?.Bounds} host={compactHost?.Bounds} page={page.Bounds}");
+            }
             await ShotAsync($"联机大厅-{w}");
         }
         L.SetLanguage("en");
