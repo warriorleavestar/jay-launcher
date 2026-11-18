@@ -148,6 +148,15 @@ public final class SdlMenuBootstrap {
 
     public static boolean isBlockTarget() { return false; }
 
+    // SDLActivity owns these event types. The native host probes one common bridge surface for
+    // both GLFW and SDL, so explicit no-op methods avoid treating the intentional SDL routing as
+    // a missing-method error during startup.
+    public static boolean dispatchMouseButton(int button, int action) { return false; }
+    public static boolean dispatchKey(int key, int action) { return false; }
+    public static boolean dispatchScroll(double x, double y) { return false; }
+    public static boolean dispatchChar(int codepoint) { return false; }
+    public static boolean dispatchLook(float x, float y) { return false; }
+
     public static void main(String[] args) throws Exception {
         Class.forName(args[0]).getMethod("main", String[].class)
             .invoke(null, (Object)Arrays.copyOfRange(args, 1, args.length));
