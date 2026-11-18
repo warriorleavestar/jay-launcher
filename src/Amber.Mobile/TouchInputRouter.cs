@@ -156,6 +156,13 @@ public sealed class TouchInputRouter
                     };
                 }
             }
+            else if (pointer.DraggingStack || (pointer.MenuInteraction && pointer.ClickOnRelease && dragged &&
+                _inventoryStackCount(pointer.StartX, pointer.StartY) > 0))
+            {
+                // Take the stack on release. Both endpoints are independent of how many
+                // Android movement events the render thread processes during the gesture.
+                pointer = pointer with { DraggingStack = true, ClickOnRelease = false };
+            }
             else if (pointer.MenuInteraction && pointer.ClickOnRelease && dragged)
             {
                 var verticalScroll = Math.Abs(totalY) > Math.Abs(totalX) * 1.25;
@@ -230,7 +237,7 @@ public sealed class TouchInputRouter
         return true;
     }
 
-    public bool Release(int pointerId)
+    public bool Release(int pointerId, bool cancelled = false)
     {
         if (!_pointers.Remove(pointerId, out var pointer)) return false;
         if (pointer.Action == TouchControlAction.Move)
@@ -241,7 +248,16 @@ public sealed class TouchInputRouter
         }
         else if (pointer.Action is null)
         {
-            if (pointer.MenuInteraction && pointer.InventoryStackSize > 1)
+            if (pointer.DraggingStack)
+            {
+                var count = _inventoryStackCount(pointer.StartX, pointer.StartY);
+                if (!cancelled && count > 0 && _inventoryStackCount(pointer.X, pointer.Y) >= 0)
+                {
+                    _sink.SplitInventoryStack(pointer.StartX, pointer.StartY, count);
+                    _sink.SetPointer(pointer.X, pointer.Y, true);
+                }
+            }
+            else if (pointer.MenuInteraction && pointer.InventoryStackSize > 1)
                 _sink.SplitInventoryStack(pointer.StartX, pointer.StartY,
                     pointer.InventorySelectedCount);
             else if (pointer.PointerHeld && pointer.HeldAction is { } heldAction)
@@ -256,7 +272,7 @@ public sealed class TouchInputRouter
 
     public void ReleaseAll()
     {
-        foreach (var pointerId in _pointers.Keys.ToArray()) Release(pointerId);
+        foreach (var pointerId in _pointers.Keys.ToArray()) Release(pointerId, cancelled: true);
     }
 
     private void TapAction(TouchControlAction action)
@@ -267,6 +283,7 @@ public sealed class TouchInputRouter
 
     private void AddLook(double x, double y) =>
         _sink.AddLook(x * Profile.LookSensitivity, y * Profile.LookSensitivity);
+
 
     private void SetAutoSprint(bool active)
     {
@@ -295,7 +312,8 @@ public sealed class TouchInputRouter
         bool ToggleAction,
         bool LongPressAction,
         int InventoryStackSize,
-        int InventorySelectedCount)
+        int InventorySelectedCount,
+        bool DraggingStack = false)
     {
         public PointerState(TouchControlAction? action, double x, double y,
             bool clickOnRelease = true, bool pointerHeld = false,
