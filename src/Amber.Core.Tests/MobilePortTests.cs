@@ -421,6 +421,7 @@ public sealed class MobilePortTests
         var close = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Close);
         Assert.True(router.Press(22, close.CenterX, close.CenterY, controlsEnabled: false));
         Assert.Contains((TouchControlAction.Close, true), sink.Actions);
+    }
 
     [Fact]
     public void TouchInputRouterHoldsMenuPointerForSliders()
