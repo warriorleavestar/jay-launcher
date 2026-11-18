@@ -21,6 +21,19 @@ public final class SdlMenuBootstrap {
         final Method instance = client.getMethod("getInstance");
         final Field guiField = client.getField("gui");
         final Method current = gui.getMethod("screen");
+        final Field hitResult = client.getField("hitResult");
+        final Class<?> blockHit = Class.forName("net.minecraft.world.phys.BlockHitResult");
+        final Method attack = client.getDeclaredMethod("startAttack");
+        final Method use = client.getDeclaredMethod("startUseItem");
+        final Class<?> container = Class.forName("net.minecraft.client.gui.screens.inventory.AbstractContainerScreen");
+        final Class<?> slot = Class.forName("net.minecraft.world.inventory.Slot");
+        final Class<?> clickType = Class.forName("net.minecraft.world.inventory.ClickType");
+        final Field hoveredSlot = container.getDeclaredField("hoveredSlot");
+        final Method slotClicked = container.getDeclaredMethod("slotClicked", slot, int.class, int.class, clickType);
+        final Field slotIndex = slot.getField("index");
+        final Method slotItem = slot.getMethod("getItem");
+        final Method itemCount = Class.forName("net.minecraft.world.item.ItemStack").getMethod("getCount");
+        final Object pickup = clickType.getField("PICKUP").get(null);
         final Field width = screen.getField("width"), height = screen.getField("height");
         final Constructor<?> makeEvent = event.getConstructor(double.class, double.class, info);
         final Object left = info.getConstructor(int.class, int.class).newInstance(1, 0);
@@ -29,10 +42,47 @@ public final class SdlMenuBootstrap {
         final Method up = listener.getMethod("mouseReleased", event);
         final Method drag = listener.getMethod("mouseDragged", event, double.class, double.class);
 
-        Menu() throws ReflectiveOperationException {}
+        Menu() throws ReflectiveOperationException {
+            attack.setAccessible(true);
+            use.setAccessible(true);
+            hoveredSlot.setAccessible(true);
+            slotClicked.setAccessible(true);
+        }
+
+        int stackCount(Object game, float nx, float ny) throws ReflectiveOperationException {
+            Object active = current.invoke(guiField.get(game));
+            if (!container.isInstance(active)) return -1;
+            Object hovered = hoveredSlot.get(active);
+            if (hovered == null) return -1;
+            Object stack = slotItem.invoke(hovered);
+            return stack == null ? 0 : Math.max(0, (Integer)itemCount.invoke(stack));
+        }
+
+        boolean split(Object game, float nx, float ny, int requested) throws ReflectiveOperationException {
+            Object active = current.invoke(guiField.get(game));
+            if (!container.isInstance(active)) return false;
+            Object hovered = hoveredSlot.get(active);
+            if (hovered == null) return false;
+            Object stack = slotItem.invoke(hovered);
+            int total = stack == null ? 0 : Math.max(0, (Integer)itemCount.invoke(stack));
+            if (total == 0) return false;
+            int selected = Math.max(1, Math.min(total, requested));
+            int index = slotIndex.getInt(hovered);
+            slotClicked.invoke(active, hovered, index, 0, pickup);
+            for (int remaining = total; remaining > selected; remaining--)
+                slotClicked.invoke(active, hovered, index, 1, pickup);
+            return true;
+        }
 
         void deliver(Object game, float nx, float ny, int action) throws ReflectiveOperationException {
             Object active = current.invoke(guiField.get(game));
+            if (action == 3) {
+                if (active != null) return;
+                Object hit = hitResult.get(game);
+                if (hit != null && blockHit.isInstance(hit)) use.invoke(game);
+                else attack.invoke(game);
+                return;
+            }
             if (active != previousScreen) held = false;
             previousScreen = active;
             if (active == null) return;
@@ -68,6 +118,35 @@ public final class SdlMenuBootstrap {
             return false;
         }
     }
+
+    public static int inventoryStackCount(float x, float y) {
+        try {
+            if (menu == null) menu = new Menu();
+            Menu input = menu;
+            Object game = input.instance.invoke(null);
+            return game == null ? -1 : input.stackCount(game, x, y);
+        } catch (ReflectiveOperationException error) {
+            return -1;
+        }
+    }
+
+    public static boolean dispatchInventorySplit(float x, float y, int count) {
+        try {
+            if (menu == null) menu = new Menu();
+            Menu input = menu;
+            Object game = input.instance.invoke(null);
+            if (!(game instanceof Executor)) return false;
+            ((Executor)game).execute(() -> {
+                try { input.split(game, x, y, count); }
+                catch (ReflectiveOperationException error) { System.err.println("Jay inventory input: " + error); }
+            });
+            return true;
+        } catch (ReflectiveOperationException error) {
+            return false;
+        }
+    }
+
+    public static boolean isBlockTarget() { return false; }
 
     public static void main(String[] args) throws Exception {
         Class.forName(args[0]).getMethod("main", String[].class)
