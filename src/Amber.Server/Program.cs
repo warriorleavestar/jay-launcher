@@ -71,6 +71,8 @@ public static class Program
               --admin-port 47669 / --no-admin 本机管理接口（只听 127.0.0.1，口令在数据目录的 admin.token；/health 不用口令）
               --seed-only                     只当种子节点帮忙转发（分地区多开几台），不跑目录
               --no-volunteers                 不收志愿节点（玩家自愿帮忙转发的电脑；默认收，网络配置 policy.volunteers 为 false 时也不收）
+              --relay-limit-kbps 2048         经这台节点转发别的网络（房间）时，每个网络最多多少 KB/s（默认不限；公共网络本身不受限）
+              --relay-networks "<名字> ..."   只给这些 EasyTier 网络转发（空格分开，可用 * 通配；默认全部）
               --signed-volunteers             只收用 Jay 账户签名登记的志愿节点（每个节点都知道是谁在运行，可以按人封禁）
               --directory-index 2             备用目录节点（2–4，主目录是 1）：Jay 把房间发给每个在线的目录，一台挂了别的照常。
                                               备用节点要和主节点用同样的 --config、--blocked-words，开登录时复制 login.key 和 accounts.json
@@ -807,6 +809,8 @@ public static class Program
         }
         // The directory only speaks the authenticated channel now; the old flag is accepted so existing scripts keep running.
         if (options.Has("secure-directory-only")) log("--secure-directory-only is the default now and can be removed");
+        if (options.Has("no-rate-limit") && options.Has("rate-limit"))
+            throw new ArgumentException("--no-rate-limit 和 --rate-limit 不能同时用");
         if (options.Has("no-rate-limit")) builder.WithoutRateLimit();
         else if (options.Get("rate-limit") is { } rate)
         {
@@ -818,6 +822,17 @@ public static class Program
         }
         if (options.Has("no-volunteers")) builder.WithoutVolunteers();
         if (options.Has("signed-volunteers")) builder.RequireSignedVolunteers();
+        if (options.Get("relay-limit-kbps") is not null || options.Get("relay-networks") is not null)
+        {
+            var kbps = options.GetInt("relay-limit-kbps", 0);
+            if (kbps < 0) throw new ArgumentException("--relay-limit-kbps 不能是负数");
+            var networks = options.Get("relay-networks");
+            // EasyTier reads an empty whitelist as "relay nothing", which is easy to set by accident; ask for names instead.
+            if (networks is not null && string.IsNullOrWhiteSpace(networks))
+                throw new ArgumentException("--relay-networks 不能是空的：填要转发的网络名（空格分开，可用 *），不想限制就不要给这个选项");
+            builder.UseRelayLimits(kbps, networks);
+            log($"给别的网络转发：{(kbps > 0 ? $"每个网络最多 {kbps} KB/s" : "不限带宽")}，{networks ?? "所有网络"}");
+        }
         if (options.Has("no-admin")) builder.WithoutAdmin();
         else builder.UseAdmin(options.GetInt("admin-port", JayNetworkServer.DefaultAdminPort));
         if (!options.Has("seed-only") && LoginFor(root, options, networkId, output) is { } login) builder.UseLogin(login);
