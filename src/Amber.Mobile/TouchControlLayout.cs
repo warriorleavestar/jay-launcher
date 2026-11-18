@@ -74,16 +74,19 @@ public sealed class TouchControlProfile
 
     private TouchControlDefinition Apply(TouchControlDefinition control)
     {
+        var radius = Math.Clamp(control.Radius * Scale, 0.018, 0.15);
         var hasCustomPosition = _positions.TryGetValue((Mode, control.Action), out var position);
         var positioned = hasCustomPosition
             ? control with { CenterX = position.X, CenterY = position.Y }
             : control;
         if (!hasCustomPosition && control.Action == TouchControlAction.Inventory)
         {
-            var hud = TouchHudGeometry.ForAspectRatio(ViewportAspectRatio);
+            // The inventory key grows away from the hotbar. Using its scaled radius here keeps
+            // the left edge attached to slot 9 without letting the larger hit box steal slot taps.
+            var hud = TouchHudGeometry.ForAspectRatio(ViewportAspectRatio, radius);
             positioned = control with { CenterX = hud.InventoryX, CenterY = hud.CenterY };
         }
-        return positioned with { Radius = Math.Clamp(positioned.Radius * Scale, 0.018, 0.15) };
+        return positioned with { Radius = radius };
     }
 }
 
@@ -166,18 +169,19 @@ public readonly record struct TouchHudGeometry(
     double HotbarLeft, double HotbarRight, double HotbarTop, double HotbarBottom,
     double CenterY, double InventoryX)
 {
-    public static TouchHudGeometry ForAspectRatio(double aspectRatio)
+    public static TouchHudGeometry ForAspectRatio(double aspectRatio, double inventoryRadius = 0.024)
     {
         var safeAspect = Math.Clamp(aspectRatio, 1.2, 3.0);
         var halfWidth = 0.17 / safeAspect;
         // Action buttons are drawn from the shorter viewport edge. Convert the inventory
         // button's visible half-width back to normalised X so its left border meets the
         // ninth slot exactly instead of leaving a small tablet-dependent gap.
-        var inventoryHalfWidthX = 0.024 * 0.82 / safeAspect;
+        var inventoryHalfHeight = inventoryRadius * 0.82;
+        var inventoryHalfWidthX = inventoryHalfHeight / safeAspect;
         // Minecraft anchors the hotbar itself to the bottom edge. 0.953 was the centre of the
         // whole HUD band (hearts included), which left the inventory key visibly one slot too
         // high on 16:10 tablets. The slot centre is about 0.981 of the viewport height.
-        const double centerY = 0.981;
+        var centerY = Math.Min(0.981, 1 - inventoryHalfHeight);
         return new(0.5 - halfWidth, 0.5 + halfWidth, 0.875, 1,
             centerY, 0.5 + halfWidth + inventoryHalfWidthX);
     }

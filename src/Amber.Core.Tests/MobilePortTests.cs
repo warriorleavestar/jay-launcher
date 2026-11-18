@@ -220,6 +220,17 @@ public sealed class MobilePortTests
         Assert.Null(profile.HitTest(tablet.HotbarRight - 0.001, tablet.CenterY));
         Assert.Equal(TouchControlAction.Inventory,
             profile.HitTest(inventory.CenterX, inventory.CenterY)!.Action);
+
+        profile.Scale = 1.35;
+        inventory = profile.Controls.Single(control => control.Action == TouchControlAction.Inventory);
+        var enlarged = TouchHudGeometry.ForAspectRatio(1.6, inventory.Radius);
+        Assert.Equal(enlarged.InventoryX, inventory.CenterX, 6);
+        Assert.Equal(tablet.HotbarRight,
+            inventory.CenterX - inventory.Radius * 0.82 / 1.6, 6);
+        Assert.True(inventory.CenterY + inventory.Radius * 0.82 <= 1);
+        Assert.Null(profile.HitTest(tablet.HotbarRight - 0.001, enlarged.CenterY));
+        Assert.Equal(TouchControlAction.Inventory,
+            profile.HitTest(inventory.CenterX, inventory.CenterY)!.Action);
     }
 
     [Fact]
