@@ -27,7 +27,7 @@ public final class SdlMenuBootstrap {
         final Method use = client.getDeclaredMethod("startUseItem");
         final Class<?> container = Class.forName("net.minecraft.client.gui.screens.inventory.AbstractContainerScreen");
         final Class<?> slot = Class.forName("net.minecraft.world.inventory.Slot");
-        final Class<?> clickType = Class.forName("net.minecraft.world.inventory.ClickType");
+        final Class<?> clickType = Class.forName("net.minecraft.world.inventory.ContainerInput");
         final Field hoveredSlot = container.getDeclaredField("hoveredSlot");
         final Method slotClicked = container.getDeclaredMethod("slotClicked", slot, int.class, int.class, clickType);
         final Field slotIndex = slot.getField("index");
