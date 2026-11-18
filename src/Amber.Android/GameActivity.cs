@@ -629,6 +629,8 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
 
     private void UpdateViewportGeometry() => _profile.ViewportAspectRatio = CurrentAspectRatio();
 
+    private void DrawChevron(Canvas canvas, float x, float y, float size)
+    {
         var path = new global::Android.Graphics.Path();
         var direction = Math.Sign(size);
         var reach = Math.Abs(size) * 0.50f;
@@ -650,7 +652,548 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     private void LoadProfile()
     {
         var layoutVersion = _preferences.GetInt("layout-version", 1);
+        _profile.Mode = Enum.TryParse<TouchControlMode>(_preferences.GetString("mode", null), out var mode)
+            ? mode : TouchControlMode.DPadAndTap;
+        _profile.Scale = Math.Clamp(_preferences.GetFloat("scale", 1f), 0.70, 1.35);
         _profile.LookSensitivity = Math.Clamp(_preferences.GetFloat("look-sensitivity", 1.65f), 0.50, 3.00);
         _profile.AttackArea = Enum.TryParse<TouchAttackArea>(_preferences.GetString("attack-area", null), out var attackArea)
             ? attackArea : TouchAttackArea.Anywhere;
-diff3: invalid print range
+        _profile.ForcedSprint = _preferences.GetBoolean("forced-sprint", true);
+        _controlOpacity = Math.Clamp(_preferences.GetFloat("opacity", 0.74f), 0.30f, 1f);
+        foreach (var modeValue in Enum.GetValues<TouchControlMode>())
+        foreach (var action in Enum.GetValues<TouchControlAction>())
+        {
+            // v1 stored the inventory key against a fixed 16:9 coordinate. Dropping only that
+            // stale override lets the new aspect-aware anchor repair existing tablet installs.
+            if (layoutVersion < 2 && action == TouchControlAction.Inventory) continue;
+            var x = _preferences.GetFloat($"position-{modeValue}-{action}-x", float.NaN);
+            var y = _preferences.GetFloat($"position-{modeValue}-{action}-y", float.NaN);
+            if (!float.IsNaN(x) && !float.IsNaN(y)) _profile.SetPosition(modeValue, action, x, y);
+        }
+        if (layoutVersion < 2)
+        {
+            using var editor = _preferences.Edit()!;
+            foreach (var modeValue in Enum.GetValues<TouchControlMode>())
+            {
+                editor.Remove($"position-{modeValue}-{TouchControlAction.Inventory}-x");
+                editor.Remove($"position-{modeValue}-{TouchControlAction.Inventory}-y");
+            }
+            editor.PutInt("layout-version", 2);
+            editor.Apply();
+        }
+    }
+
+    private void SaveProfile()
+    {
+        using var editor = _preferences.Edit()!;
+        editor.PutString("mode", _profile.Mode.ToString());
+        editor.PutFloat("scale", (float)_profile.Scale);
+        editor.PutFloat("look-sensitivity", (float)_profile.LookSensitivity);
+        editor.PutString("attack-area", _profile.AttackArea.ToString());
+        editor.PutFloat("opacity", _controlOpacity);
+        editor.PutBoolean("forced-sprint", _profile.ForcedSprint);
+        editor.PutInt("layout-version", 2);
+        foreach (var modeValue in Enum.GetValues<TouchControlMode>())
+        foreach (var action in Enum.GetValues<TouchControlAction>())
+        {
+            if (!_profile.TryGetPosition(modeValue, action, out var position)) continue;
+            editor.PutFloat($"position-{modeValue}-{action}-x", (float)position.X);
+            editor.PutFloat($"position-{modeValue}-{action}-y", (float)position.Y);
+        }
+        editor.Apply();
+    }
+
+    private bool HandleSettingsTouch(MotionEvent e)
+    {
+        if (!_settingsOpen) return false;
+        if (e.ActionMasked is not (MotionEventActions.Down or MotionEventActions.PointerDown)) return true;
+        var x = e.GetX(e.ActionIndex) / Width;
+        var y = e.GetY(e.ActionIndex) / Height;
+        if (x < 0.60f) return true;
+        var previousMode = _profile.Mode;
+        if (y is > 0.145f and < 0.215f) _profile.Mode = TouchControlMode.JoystickAndTap;
+        else if (y is > 0.215f and < 0.285f) _profile.Mode = TouchControlMode.DPadAndTap;
+        else if (y is > 0.285f and < 0.355f) _profile.Mode = TouchControlMode.JoystickAndCrosshair;
+        else if (y is > 0.355f and < 0.425f) _profile.Mode = TouchControlMode.ExternalKeyboardMouse;
+        else if (y is > 0.43f and < 0.51f) _profile.AttackArea = NextAttackArea(_profile.AttackArea);
+        else if (y is > 0.51f and < 0.59f && x < 0.70f) _profile.LookSensitivity = Math.Max(0.50, _profile.LookSensitivity - 0.10);
+        else if (y is > 0.51f and < 0.59f && x > 0.87f) _profile.LookSensitivity = Math.Min(3.00, _profile.LookSensitivity + 0.10);
+        else if (y is > 0.59f and < 0.67f && x < 0.70f) _profile.Scale = Math.Max(0.70, _profile.Scale - 0.05);
+        else if (y is > 0.59f and < 0.67f && x > 0.87f) _profile.Scale = Math.Min(1.35, _profile.Scale + 0.05);
+        else if (y is > 0.67f and < 0.75f && x < 0.70f) _controlOpacity = Math.Max(0.30f, _controlOpacity - 0.05f);
+        else if (y is > 0.67f and < 0.75f && x > 0.87f) _controlOpacity = Math.Min(1f, _controlOpacity + 0.05f);
+        else if (y is > 0.75f and < 0.83f) _profile.ForcedSprint = !_profile.ForcedSprint;
+        else if (y is > 0.84f and < 0.90f && x < 0.78f)
+        {
+            _profile.ResetPositions();
+            _profile.Scale = 1;
+            _profile.LookSensitivity = 1.65;
+            _profile.AttackArea = TouchAttackArea.Anywhere;
+            _controlOpacity = 0.74f;
+            _profile.ForcedSprint = true;
+        }
+        else if (y is > 0.84f and < 0.90f && x > 0.78f)
+        {
+            _settingsOpen = false;
+            _layoutEditing = true;
+        }
+        else if (y > 0.90f)
+            _settingsOpen = false;
+        if (_profile.Mode != previousMode &&
+            (previousMode == TouchControlMode.ExternalKeyboardMouse ||
+             _profile.Mode == TouchControlMode.ExternalKeyboardMouse))
+        {
+            ReleaseHardwareInput();
+            UpdateHardwareCapture(HasWindowFocus);
+        }
+        SaveProfile();
+        Invalidate();
+        return true;
+    }
+
+    private static TouchAttackArea NextAttackArea(TouchAttackArea area) => area switch
+    {
+        TouchAttackArea.Anywhere => TouchAttackArea.RightSide,
+        TouchAttackArea.RightSide => TouchAttackArea.Crosshair,
+        _ => TouchAttackArea.Anywhere
+    };
+
+    private static string AttackAreaLabel(TouchAttackArea area) => area switch
+    {
+        TouchAttackArea.Anywhere => "全屏任意位置",
+        TouchAttackArea.RightSide => "右侧视角区",
+        TouchAttackArea.Crosshair => "准星附近",
+        _ => "全屏任意位置"
+    };
+
+    private bool HandleLayoutEditTouch(MotionEvent e)
+    {
+        if (!_layoutEditing) return false;
+        var index = e.ActionIndex;
+        var x = e.GetX(index) / Width;
+        var y = e.GetY(index) / Height;
+        switch (e.ActionMasked)
+        {
+            case MotionEventActions.Down:
+            case MotionEventActions.PointerDown:
+                if (x > 0.87 && y < 0.11)
+                {
+                    _layoutEditing = false;
+                    SaveProfile();
+                    Invalidate();
+                    return true;
+                }
+                var control = _profile.HitTest(x, y);
+                if (control is null) return true;
+                _editingPointer = e.GetPointerId(index);
+                _editingAction = control.Action;
+                return true;
+            case MotionEventActions.Move:
+                if (_editingPointer is not { } pointer || _editingAction is not { } action) return true;
+                var pointerIndex = e.FindPointerIndex(pointer);
+                if (pointerIndex < 0) return true;
+                _profile.SetPosition(action, e.GetX(pointerIndex) / Width, e.GetY(pointerIndex) / Height);
+                Invalidate();
+                return true;
+            case MotionEventActions.Up:
+            case MotionEventActions.PointerUp:
+            case MotionEventActions.Cancel:
+                _editingPointer = null;
+                _editingAction = null;
+                SaveProfile();
+                return true;
+            default:
+                return true;
+        }
+    }
+
+    public override bool OnTouchEvent(MotionEvent? e)
+    {
+        if (e is null) return false;
+        UpdateViewportGeometry();
+        // Real USB/Bluetooth mice are not consistent on Android: some vendors deliver mouse
+        // button and drag packets through the touch channel instead of generic motion.
+        if (IsHardwarePointer(e)) return HandleHardwareMotion(e);
+        if (HandleSettingsTouch(e) || HandleLayoutEditTouch(e)) return true;
+        var actionIndex = e.ActionIndex;
+        switch (e.ActionMasked)
+        {
+            case MotionEventActions.Down:
+            case MotionEventActions.PointerDown:
+                var pointerId = e.GetPointerId(actionIndex);
+                var x = e.GetX(actionIndex) / Width;
+                var y = e.GetY(actionIndex) / Height;
+                var gameplay = GameplayActive;
+                // Visible overlay controls are checked first. The inventory key's hit rectangle
+                // ends exactly where the ninth hotbar slot begins, so neither steals the other.
+                var control = _profile.HitTest(x, y, gameplay);
+                if (gameplay && control is null && TryGetHotbarSlot(x, y, out var slot))
+                {
+                    _hotbarPointers.Add(pointerId);
+                    if (_sdl is null) NativeJvmHost.AddKey(49 + slot);
+                    else _sdl.SelectSlot(slot);
+                    return true;
+                }
+                var handled = _router.Press(pointerId, x, y, gameplay);
+                if (handled && control is null)
+                {
+                    if (gameplay)
+                        _longPressIndicators[pointerId] = new(x, y, SystemClock.UptimeMillis());
+                    PostDelayed(() =>
+                    {
+                        if (!_router.BeginLongPress(pointerId))
+                            _longPressIndicators.Remove(pointerId);
+                        Invalidate();
+                    }, LongPressDelayMs);
+                }
+                return handled;
+            case MotionEventActions.Move:
+                var moved = false;
+                for (var i = 0; i < e.PointerCount; i++)
+                {
+                    var movingId = e.GetPointerId(i);
+                    if (_hotbarPointers.Contains(movingId))
+                    {
+                        moved = true;
+                        continue;
+                    }
+                    moved |= _router.Move(movingId, e.GetX(i) / Width, e.GetY(i) / Height);
+                    if (!_router.IsLongPressCandidate(movingId))
+                        _longPressIndicators.Remove(movingId);
+                }
+                return moved;
+            case MotionEventActions.Up:
+            case MotionEventActions.PointerUp:
+                var releasedId = e.GetPointerId(actionIndex);
+                if (_hotbarPointers.Remove(releasedId)) return true;
+                _longPressIndicators.Remove(releasedId);
+                return _router.Release(releasedId);
+            case MotionEventActions.Cancel:
+                _longPressIndicators.Clear();
+                _hotbarPointers.Clear();
+                _router.ReleaseAll();
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    public override bool OnGenericMotionEvent(MotionEvent? e) =>
+        HandleHardwareMotion(e) || base.OnGenericMotionEvent(e);
+
+    public override bool OnHoverEvent(MotionEvent? e) =>
+        HandleHardwareMotion(e) || base.OnHoverEvent(e);
+
+    public override bool OnCapturedPointerEvent(MotionEvent? e) =>
+        HandleHardwareMotion(e) || base.OnCapturedPointerEvent(e);
+
+    public override bool OnKeyPreIme(Keycode keyCode, KeyEvent? e) =>
+        HandleHardwareKey(e) || base.OnKeyPreIme(keyCode, e);
+
+    public override bool OnKeyDown(Keycode keyCode, KeyEvent? e) =>
+        HandleHardwareKey(e) || base.OnKeyDown(keyCode, e);
+
+    public override bool OnKeyUp(Keycode keyCode, KeyEvent? e) =>
+        HandleHardwareKey(e) || base.OnKeyUp(keyCode, e);
+
+    public void SetAction(TouchControlAction action, bool pressed)
+    {
+        if (action == TouchControlAction.Settings)
+        {
+            if (pressed)
+            {
+                _router.ReleaseAll();
+                _settingsOpen = !_settingsOpen;
+                _layoutEditing = false;
+                Invalidate();
+            }
+            return;
+        }
+        if (action == TouchControlAction.Close)
+            action = TouchControlAction.Menu;
+        if (_sdl is null) AndroidGameInputBridge.SetAction(action, pressed);
+        else _sdl.Action(action, pressed);
+        if (action == TouchControlAction.Keyboard && pressed)
+            PostDelayed(ShowKeyboard, 100);
+    }
+
+    public void SetMovement(double x, double y)
+    {
+        if (_sdl is null) AndroidGameInputBridge.SetMovement(x, y);
+        else _sdl.Move(x, y);
+    }
+
+    public void AddLook(double x, double y)
+    {
+        if (_sdl is null) AndroidGameInputBridge.AddLook(x, y);
+        else _sdl.Look(x, y);
+    }
+
+    public void SetPointer(double x, double y, bool click)
+    {
+        if (_sdl is null) AndroidGameInputBridge.SetPointer(x, y, click);
+        else _sdl.Pointer(x, y, click);
+    }
+
+    public void SplitInventoryStack(double x, double y, int count)
+        => NativeJvmHost.SplitInventoryStack(x, y, count);
+
+    public bool HandleHardwareKey(KeyEvent? e)
+    {
+        // Physical keys stay available in every touch layout. The dedicated external-input
+        // profile controls visibility of touch buttons; it must not gate keyboard events.
+        if (e is null || Visibility != ViewStates.Visible) return false;
+        var pressed = e.Action == KeyEventActions.Down;
+        if (e.Action is not (KeyEventActions.Down or KeyEventActions.Up)) return false;
+
+        // Menu and chat screens need ordinary key/character delivery before gameplay
+        // bindings. Otherwise W/A/S/D and E/Q/T disappear from typed text.
+        if (!GameplayActive)
+        {
+            if (!pressed) return GlfwKey(e.KeyCode) is not null || e.UnicodeChar > 0;
+            var handled = false;
+            if (GlfwKey(e.KeyCode) is { } menuKey)
+            {
+                NativeJvmHost.AddKey(menuKey);
+                handled = true;
+            }
+            if (e.UnicodeChar > 0)
+            {
+                NativeJvmHost.AddCodePoint(e.UnicodeChar);
+                handled = true;
+            }
+            return handled;
+        }
+
+        if (pressed) _hardwareKeys.Add(e.KeyCode); else _hardwareKeys.Remove(e.KeyCode);
+
+        if (IsMovementKey(e.KeyCode))
+        {
+            UpdateHardwareMovement();
+            return true;
+        }
+
+        if (HardwareAction(e.KeyCode) is { } action)
+        {
+            if (pressed) _hardwareActions.Add(action); else _hardwareActions.Remove(action);
+            if (_sdl is null) AndroidGameInputBridge.SetAction(action, pressed);
+        else _sdl.Action(action, pressed);
+            return true;
+        }
+
+        if (GlfwKey(e.KeyCode) is not { } glfw) return false;
+        if (pressed && e.RepeatCount == 0) NativeJvmHost.AddKey(glfw);
+        return true;
+    }
+
+    public bool HandleHardwareMotion(MotionEvent? e)
+    {
+        if (e is null || Visibility != ViewStates.Visible || !IsHardwarePointer(e)) return false;
+
+        if (e.ActionMasked == MotionEventActions.Scroll)
+        {
+            if (!GameplayActive) return false;
+            var scroll = e.GetAxisValue(Axis.Vscroll);
+            if (Math.Abs(scroll) > 0.01f)
+            {
+                var action = scroll > 0 ? TouchControlAction.PreviousSlot : TouchControlAction.NextSlot;
+                AndroidGameInputBridge.SetAction(action, true);
+                AndroidGameInputBridge.SetAction(action, false);
+            }
+            return true;
+        }
+
+        if (e.ActionMasked is MotionEventActions.ButtonPress or MotionEventActions.ButtonRelease or
+            MotionEventActions.Down or MotionEventActions.Up)
+        {
+            var pressed = e.ActionMasked is MotionEventActions.ButtonPress or MotionEventActions.Down;
+            // Several Android mouse drivers leave ActionButton empty for DOWN/UP. Those
+            // actions represent the primary button.
+            var actionButton = e.ActionMasked is MotionEventActions.Down or MotionEventActions.Up
+                ? MotionEventButtonState.Primary : e.ActionButton;
+            var action = actionButton switch
+            {
+                MotionEventButtonState.Primary => TouchControlAction.PrimaryAction,
+                MotionEventButtonState.Secondary => TouchControlAction.SecondaryAction,
+                MotionEventButtonState.Tertiary => TouchControlAction.Inventory,
+                _ => (TouchControlAction?)null
+            };
+            // DOWN/UP can arrive without a preceding HOVER_MOVE (trackpads and ADB both do
+            // this). Synchronize the menu cursor before delivering the click.
+            if (!GameplayActive && Width > 0 && Height > 0)
+                AndroidGameInputBridge.SetPointer(e.GetX() / Width, e.GetY() / Height, false);
+            if (action is { } mapped)
+            {
+                if (pressed) _hardwareActions.Add(mapped); else _hardwareActions.Remove(mapped);
+                AndroidGameInputBridge.SetAction(mapped, pressed);
+            }
+            return true;
+        }
+
+        if (e.ActionMasked is not (MotionEventActions.HoverMove or MotionEventActions.Move)) return true;
+        if (GameplayActive)
+        {
+            var dx = e.GetAxisValue(Axis.RelativeX);
+            var dy = e.GetAxisValue(Axis.RelativeY);
+            if (Math.Abs(dx) < 0.001f && Math.Abs(dy) < 0.001f && _hasMousePosition)
+            {
+                dx = e.GetX() - _lastMouseX;
+                dy = e.GetY() - _lastMouseY;
+            }
+            if (Width > 0 && Height > 0 && (Math.Abs(dx) > 0.001f || Math.Abs(dy) > 0.001f))
+                AndroidGameInputBridge.AddLook(dx / Width, dy / Height);
+        }
+        else if (Width > 0 && Height > 0)
+        {
+            AndroidGameInputBridge.SetPointer(e.GetX() / Width, e.GetY() / Height, false);
+        }
+        _lastMouseX = e.GetX();
+        _lastMouseY = e.GetY();
+        _hasMousePosition = true;
+        return true;
+    }
+
+    private static bool IsHardwarePointer(MotionEvent e) =>
+        e.IsFromSource(InputSourceType.Mouse) ||
+        e.IsFromSource(InputSourceType.MouseRelative) ||
+        e.IsFromSource(InputSourceType.Touchpad);
+
+    public void UpdateHardwareCapture(bool hasWindowFocus)
+    {
+        if (Build.VERSION.SdkInt < BuildVersionCodes.O) return;
+#pragma warning disable CA1416
+        if (hasWindowFocus && Visibility == ViewStates.Visible &&
+            _profile.Mode == TouchControlMode.ExternalKeyboardMouse &&
+            GameplayActive)
+        {
+            RequestFocus();
+            RequestPointerCapture();
+        }
+        else if (HasPointerCapture)
+            ReleasePointerCapture();
+#pragma warning restore CA1416
+    }
+
+    public void ReleaseHardwareInput()
+    {
+        _hardwareKeys.Clear();
+        AndroidGameInputBridge.SetMovement(0, 0);
+        foreach (var action in _hardwareActions.ToArray())
+            AndroidGameInputBridge.SetAction(action, false);
+        _hardwareActions.Clear();
+        _hasMousePosition = false;
+    }
+
+    private static bool IsMovementKey(Keycode key) => key is Keycode.W or Keycode.A or Keycode.S or Keycode.D
+        or Keycode.DpadUp or Keycode.DpadLeft or Keycode.DpadDown or Keycode.DpadRight;
+
+    private void UpdateHardwareMovement()
+    {
+        var left = _hardwareKeys.Contains(Keycode.A) || _hardwareKeys.Contains(Keycode.DpadLeft);
+        var right = _hardwareKeys.Contains(Keycode.D) || _hardwareKeys.Contains(Keycode.DpadRight);
+        var forward = _hardwareKeys.Contains(Keycode.W) || _hardwareKeys.Contains(Keycode.DpadUp);
+        var back = _hardwareKeys.Contains(Keycode.S) || _hardwareKeys.Contains(Keycode.DpadDown);
+        AndroidGameInputBridge.SetMovement((right ? 1 : 0) - (left ? 1 : 0),
+            (back ? 1 : 0) - (forward ? 1 : 0));
+    }
+
+    private static TouchControlAction? HardwareAction(Keycode key) => key switch
+    {
+        Keycode.Space => TouchControlAction.Jump,
+        Keycode.ShiftLeft or Keycode.ShiftRight => TouchControlAction.Sneak,
+        Keycode.CtrlLeft or Keycode.CtrlRight => TouchControlAction.Sprint,
+        Keycode.E => TouchControlAction.Inventory,
+        Keycode.Escape => TouchControlAction.Menu,
+        Keycode.T => TouchControlAction.Keyboard,
+        Keycode.Q => TouchControlAction.Drop,
+        _ => null
+    };
+
+    private static int? GlfwKey(Keycode key) => key switch
+    {
+        >= Keycode.Num0 and <= Keycode.Num9 => 48 + key - Keycode.Num0,
+        >= Keycode.A and <= Keycode.Z => 65 + key - Keycode.A,
+        Keycode.Enter => 257,
+        Keycode.Tab => 258,
+        Keycode.Del => 259,
+        Keycode.Insert => 260,
+        Keycode.ForwardDel => 261,
+        Keycode.DpadRight => 262,
+        Keycode.DpadLeft => 263,
+        Keycode.DpadDown => 264,
+        Keycode.DpadUp => 265,
+        Keycode.PageUp => 266,
+        Keycode.PageDown => 267,
+        Keycode.MoveHome => 268,
+        Keycode.MoveEnd => 269,
+        Keycode.F1 => 290,
+        Keycode.F2 => 291,
+        Keycode.F3 => 292,
+        Keycode.F4 => 293,
+        Keycode.F5 => 294,
+        Keycode.F6 => 295,
+        Keycode.F7 => 296,
+        Keycode.F8 => 297,
+        Keycode.F9 => 298,
+        Keycode.F10 => 299,
+        Keycode.F11 => 300,
+        Keycode.F12 => 301,
+        Keycode.Slash => 47,
+        Keycode.Minus => 45,
+        Keycode.Equals => 61,
+        Keycode.Comma => 44,
+        Keycode.Period => 46,
+        Keycode.Semicolon => 59,
+        Keycode.Apostrophe => 39,
+        Keycode.LeftBracket => 91,
+        Keycode.RightBracket => 93,
+        Keycode.Backslash => 92,
+        _ => null
+    };
+
+    private void ShowKeyboard()
+    {
+        RequestFocus();
+        var input = (InputMethodManager?)Context!.GetSystemService(Context.InputMethodService);
+        input?.RestartInput(this);
+        // A tablet or emulator can advertise a hardware keyboard even when the player expects
+        // touch input. The chat/command button must therefore request the soft keyboard explicitly.
+        input?.ShowSoftInput(this, ShowFlags.Forced);
+    }
+
+    private sealed class JayInputConnection(View target) : BaseInputConnection(target, false)
+    {
+        private const int GlfwKeyEnter = 257;
+        private const int GlfwKeyBackspace = 259;
+
+        public override bool CommitText(Java.Lang.ICharSequence? text, int newCursorPosition)
+        {
+            if (text?.ToString() is { } value)
+                foreach (var rune in value.EnumerateRunes()) NativeJvmHost.AddCodePoint(rune.Value);
+            return true;
+        }
+
+        public override bool DeleteSurroundingText(int beforeLength, int afterLength)
+        {
+            for (var i = 0; i < Math.Max(1, beforeLength); i++) NativeJvmHost.AddKey(GlfwKeyBackspace);
+            return true;
+        }
+
+        public override bool PerformEditorAction(ImeAction actionCode)
+        {
+            NativeJvmHost.AddKey(GlfwKeyEnter);
+            return true;
+        }
+
+        public override bool SendKeyEvent(KeyEvent? e)
+        {
+            if (e?.Action != KeyEventActions.Down) return true;
+            if (e.KeyCode == Keycode.Del) NativeJvmHost.AddKey(GlfwKeyBackspace);
+            else if (e.KeyCode == Keycode.Enter) NativeJvmHost.AddKey(GlfwKeyEnter);
+            else if (e.UnicodeChar > 0) NativeJvmHost.AddCodePoint(e.UnicodeChar);
+            return true;
+        }
+    }
+
+    private readonly record struct LongPressIndicator(double X, double Y, long DownAt);
+}
