@@ -3,10 +3,12 @@ namespace Amber.Mobile;
 public enum TouchControlAction
 {
     Move, PrimaryAction, SecondaryAction, Jump, Inventory, Menu, Keyboard,
-    Sneak, Sprint, Drop, PreviousSlot, NextSlot, Settings
+    Sneak, Sprint, Drop, PreviousSlot, NextSlot, Settings, Close
 }
 
 public enum TouchControlMode { JoystickAndTap, DPadAndTap, JoystickAndCrosshair, ExternalKeyboardMouse }
+
+public enum TouchAttackArea { Anywhere, RightSide, Crosshair }
 
 public sealed record TouchControlDefinition(
     TouchControlAction Action, double CenterX, double CenterY, double Radius, string Label,
@@ -18,8 +20,11 @@ public sealed class TouchControlProfile
     private readonly Dictionary<(TouchControlMode Mode, TouchControlAction Action), (double X, double Y)> _positions = [];
 
     public TouchControlMode Mode { get; set; } = TouchControlMode.DPadAndTap;
+    public TouchAttackArea AttackArea { get; set; } = TouchAttackArea.Anywhere;
     public double Scale { get; set; } = 1;
+    public double LookSensitivity { get; set; } = 1.65;
     public bool ForcedSprint { get; set; } = true;
+    public double ViewportAspectRatio { get; set; } = 16d / 9d;
 
     public IReadOnlyList<TouchControlDefinition> Controls => TouchControlLayout.For(Mode)
         .Select(Apply).ToArray();
@@ -28,6 +33,15 @@ public sealed class TouchControlProfile
         Controls.LastOrDefault(control =>
             (gameplayControlsActive ? control.GameplayVisible : control.MenuVisible) &&
             TouchControlLayout.Distance(control, x, y) <= control.Radius);
+
+    public bool AllowsAttackAt(double x, double y) => AttackArea switch
+    {
+        TouchAttackArea.Anywhere => true,
+        TouchAttackArea.RightSide => x >= 0.34,
+        TouchAttackArea.Crosshair => Math.Pow((x - 0.5) * ViewportAspectRatio, 2) +
+                                     Math.Pow(y - 0.5, 2) <= 0.12 * 0.12,
+        _ => true
+    };
 
     public (double X, double Y) MovementVector(double x, double y)
     {
@@ -60,9 +74,15 @@ public sealed class TouchControlProfile
 
     private TouchControlDefinition Apply(TouchControlDefinition control)
     {
-        var positioned = _positions.TryGetValue((Mode, control.Action), out var position)
+        var hasCustomPosition = _positions.TryGetValue((Mode, control.Action), out var position);
+        var positioned = hasCustomPosition
             ? control with { CenterX = position.X, CenterY = position.Y }
             : control;
+        if (!hasCustomPosition && control.Action == TouchControlAction.Inventory)
+        {
+            var hud = TouchHudGeometry.ForAspectRatio(ViewportAspectRatio);
+            positioned = control with { CenterX = hud.InventoryX, CenterY = hud.CenterY };
+        }
         return positioned with { Radius = Math.Clamp(positioned.Radius * Scale, 0.018, 0.15) };
     }
 }
@@ -73,8 +93,9 @@ public static class TouchControlLayout
     private static readonly TouchControlDefinition[] Shared =
     [
         new(TouchControlAction.Keyboard, 0.475, 0.050, 0.026, "聊天与指令", MenuVisible: true),
-        new(TouchControlAction.Menu, 0.525, 0.050, 0.026, "菜单", MenuVisible: true),
+        new(TouchControlAction.Menu, 0.525, 0.050, 0.026, "菜单"),
         new(TouchControlAction.Settings, 0.575, 0.050, 0.026, "触控设置", MenuVisible: true),
+        new(TouchControlAction.Close, 0.945, 0.075, 0.040, "关闭", GameplayVisible: false, MenuVisible: true),
         // Keep both actions low in the landscape right-thumb arc, using the same reach as the
         // familiar mobile Minecraft layouts instead of floating them near the top edge.
         new(TouchControlAction.Jump, 0.920, 0.805, 0.052, "跳跃"),
@@ -82,7 +103,7 @@ public static class TouchControlLayout
         // Match Bedrock mobile: one slot-sized key, flush with the hotbar's right edge and
         // vertically centred on the slots. The Android activity runs immersive fullscreen, so
         // lifting this for the system gesture area would visibly detach it from the hotbar.
-        new(TouchControlAction.Inventory, 0.620, 0.980, 0.024, "背包")
+        new(TouchControlAction.Inventory, 0.606, 0.953, 0.024, "背包")
     ];
 
     private static readonly IReadOnlyDictionary<TouchControlMode, IReadOnlyList<TouchControlDefinition>> Layouts =
@@ -95,10 +116,10 @@ public static class TouchControlLayout
                 new(TouchControlAction.Sneak, 0.130, 0.800, 0.036, "潜行")],
             [TouchControlMode.JoystickAndCrosshair] = [.. Shared,
                 new(TouchControlAction.Move, 0.130, 0.800, 0.105, "移动")],
-            // External keyboard/mouse mode intentionally keeps only the settings key visible.
-            // The player can switch back without disconnecting their peripherals.
+            // External keyboard/mouse mode keeps only settings during gameplay and the close
+            // affordance in menus, so players can switch back without disconnecting peripherals.
             [TouchControlMode.ExternalKeyboardMouse] = [.. Shared.Where(control =>
-                control.Action == TouchControlAction.Settings)]
+                control.Action is TouchControlAction.Settings or TouchControlAction.Close)]
         };
 
     public static IReadOnlyList<TouchControlDefinition> Default => For(TouchControlMode.DPadAndTap);
@@ -122,5 +143,32 @@ public static class TouchControlLayout
         var dx = x - control.CenterX;
         var dy = y - control.CenterY;
         return Math.Sqrt(dx * dx + dy * dy);
+    }
+}
+
+/// <summary>Aspect-ratio aware geometry shared by Android rendering and hit testing.</summary>
+public readonly record struct TouchHudGeometry(
+    double HotbarLeft, double HotbarRight, double HotbarTop, double HotbarBottom,
+    double CenterY, double InventoryX)
+{
+    public static TouchHudGeometry ForAspectRatio(double aspectRatio)
+    {
+        var safeAspect = Math.Clamp(aspectRatio, 1.2, 3.0);
+        var halfWidth = 0.17 / safeAspect;
+        var slotWidth = halfWidth * 2 / 9;
+        const double centerY = 0.953;
+        return new(0.5 - halfWidth, 0.5 + halfWidth, 0.875, 1,
+            centerY, 0.5 + halfWidth + slotWidth * 0.58);
+    }
+
+    public bool TryGetSlot(double x, double y, out int slot)
+    {
+        if (y < HotbarTop || y > HotbarBottom || x < HotbarLeft || x >= HotbarRight)
+        {
+            slot = -1;
+            return false;
+        }
+        slot = Math.Clamp((int)((x - HotbarLeft) / ((HotbarRight - HotbarLeft) / 9)), 0, 8);
+        return true;
     }
 }

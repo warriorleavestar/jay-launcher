@@ -45,8 +45,8 @@ public sealed class TouchInputRouter
     {
         Release(pointerId);
         var control = Profile.HitTest(x, y, controlsEnabled);
-        if (!controlsEnabled && control?.Action is not (TouchControlAction.Menu or TouchControlAction.Keyboard or
-            TouchControlAction.Settings))
+        if (!controlsEnabled && control?.Action is not (TouchControlAction.Menu or TouchControlAction.Close or
+            TouchControlAction.Keyboard or TouchControlAction.Settings))
             control = null;
         if (control is null)
         {
@@ -55,7 +55,7 @@ public sealed class TouchInputRouter
             // Menus defer the click so a drag can still become a held mouse gesture. A long
             // press is handled separately as Bedrock-style precise stack selection.
             // Deferring the menu button press is what keeps those gestures from fighting.
-            var clickOnRelease = true;
+            var clickOnRelease = !controlsEnabled || Profile.AllowsAttackAt(x, y);
             var pointerHeld = false;
             TouchControlAction? heldAction = null;
             _pointers[pointerId] = new(null, x, y, clickOnRelease, pointerHeld,
@@ -147,7 +147,7 @@ public sealed class TouchInputRouter
                 else if (dragged)
                 {
                     _sink.SetAction(TouchControlAction.PrimaryAction, false);
-                    _sink.AddLook(x - pointer.X, y - pointer.Y);
+                    AddLook(x - pointer.X, y - pointer.Y);
                     pointer = pointer with
                     {
                         PointerHeld = false,
@@ -218,13 +218,13 @@ public sealed class TouchInputRouter
             else
             {
                 _sink.SetPointer(x, y, false);
-                _sink.AddLook(x - pointer.X, y - pointer.Y);
+                AddLook(x - pointer.X, y - pointer.Y);
             }
             _pointers[pointerId] = pointer with { X = x, Y = y, HasDragged = dragged };
         }
         else if (CanDragLook(pointer.Action.Value))
         {
-            _sink.AddLook(x - pointer.X, y - pointer.Y);
+            AddLook(x - pointer.X, y - pointer.Y);
             _pointers[pointerId] = pointer with { X = x, Y = y, HasDragged = true };
         }
         return true;
@@ -264,6 +264,9 @@ public sealed class TouchInputRouter
         _sink.SetAction(action, true);
         _sink.SetAction(action, false);
     }
+
+    private void AddLook(double x, double y) =>
+        _sink.AddLook(x * Profile.LookSensitivity, y * Profile.LookSensitivity);
 
     private void SetAutoSprint(bool active)
     {
