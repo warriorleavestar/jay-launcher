@@ -23,6 +23,9 @@ public final class AndroidGameBootstrap {
     private static Method windowHeight;
     private static Method mouseMove;
     private static Method mouseButton;
+    private static Method legacyScreenClick;
+    private static Method legacyScreenRelease;
+    private static Method legacyOverlay;
     private static Constructor<?> mouseInput;
     private static Method mouseScroll;
     private static Method keyboardKey;
@@ -75,8 +78,8 @@ public final class AndroidGameBootstrap {
             mouseX = accessible(mouseType.getDeclaredField(legacy ? "e" : "h"));
             mouseY = accessible(mouseType.getDeclaredField(legacy ? "f" : "i"));
             windowHandle = accessible(windowType.getDeclaredMethod(legacy ? "i" : "h"));
-            windowWidth = accessible(windowType.getDeclaredMethod(legacy ? "k" : "m"));
-            windowHeight = accessible(windowType.getDeclaredMethod(legacy ? "l" : "n"));
+            windowWidth = accessible(windowType.getDeclaredMethod("m"));
+            windowHeight = accessible(windowType.getDeclaredMethod("n"));
             mouseMove = accessible(mouseType.getDeclaredMethod(
                 "b", long.class, double.class, double.class));
             mouseButton = legacy ? accessible(mouseType.getDeclaredMethod("a", long.class, int.class, int.class, int.class)) : accessible(mouseType.getDeclaredMethod(
@@ -92,6 +95,12 @@ public final class AndroidGameBootstrap {
             startUseItem = accessible(minecraftType.getDeclaredMethod(legacy ? "bs" : "bv"));
             blockHitType = Class.forName(legacy ? "eee" : "fti");
             Class<?> screenType = Class.forName(legacy ? "euq" : "gsb");
+            if (legacy) {
+                Class<?> listener = Class.forName("eqt");
+                legacyScreenClick = listener.getMethod("a", double.class, double.class, int.class);
+                legacyScreenRelease = listener.getMethod("b", double.class, double.class, int.class);
+                legacyOverlay = minecraftType.getMethod("aJ");
+            }
             containerScreenType = Class.forName(legacy ? "evp" : "gti");
             Class<?> slotType = Class.forName(legacy ? "ccx" : "dji");
             Class<?> itemStackType = Class.forName(legacy ? "cfz" : "dlt");
@@ -149,12 +158,21 @@ public final class AndroidGameBootstrap {
             mouseY.setDouble(mouse, y);
             mouseMove.invoke(mouse, handle, x, y);
             for (int index = 0; index < clicks; index++) {
-                if (minecraftScreen.get(minecraft) == null) {
+                Object screen = minecraftScreen.get(minecraft);
+                if (screen == null) {
                     Object hitResult = minecraftHitResult.get(minecraft);
                     if (hitResult != null && blockHitType.isInstance(hitResult))
                         startUseItem.invoke(minecraft);
                     else
                         startAttack.invoke(minecraft);
+                } else if (legacyScreenClick != null && !containerScreenType.isInstance(screen)
+                        && legacyOverlay.invoke(minecraft) == null) {
+                    // GUI events use scaled screen units, independently of framebuffer density.
+                    double guiX = normalizedX * screenWidth.getInt(screen);
+                    double guiY = normalizedY * screenHeight.getInt(screen);
+                    legacyScreenClick.invoke(screen, guiX, guiY, 0);
+                    if (minecraftScreen.get(minecraft) == screen)
+                        legacyScreenRelease.invoke(screen, guiX, guiY, 0);
                 } else {
                     pressMouse(mouse, handle, 0, 1);
                     pressMouse(mouse, handle, 0, 0);
