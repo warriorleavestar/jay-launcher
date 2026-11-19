@@ -122,4 +122,3 @@ diff --git a/src/null_window.c b/src/null_window.c
 +#endif
      if (window->monitor)
          return;
- 
