@@ -318,7 +318,7 @@ public static class Program
 
     /// <summary>
     /// Release signing for trustees (privacy plan items 2 and 3). Every trustee signs on their own offline machine with
-    /// their own release key (separate from the key that reviews networks); a release needs JayTrust.ReleaseNeed of them (currently 2 of 2). Nothing here can run in CI.
+    /// their own release key (separate from the key that reviews networks); a release needs JayTrust.ReleaseNeed of them (currently 2 of 3). Nothing here can run in CI.
     /// </summary>
     internal static int ReleaseCommand(Options options, TextWriter output, Func<IReadOnlyList<string>, string, string, bool>? confirm = null)
     {
