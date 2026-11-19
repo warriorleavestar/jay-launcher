@@ -54,11 +54,20 @@ internal sealed partial class SdlTouchInput(Activity activity)
     private void Key(Keycode code, bool down)
     {
         if (down ? !_held.Add(code) : !_held.Remove(code)) return;
+        SendKey(code, down);
+    }
+
+    private void SendKey(Keycode code, bool down)
+    {
         var method = JNIEnv.GetStaticMethodID(_sdlActivity.Handle, down ? "onNativeKeyDown" : "onNativeKeyUp", "(I)V");
         JNIEnv.CallStaticVoidMethod(_sdlActivity.Handle, method, new JValue((int)code));
     }
 
-    public void KeyEvent(Keycode code, bool pressed) => Key(code, pressed);
+    public void KeyEvent(Keycode code, bool pressed, bool repeat = false)
+    {
+        if (pressed && repeat) SendKey(code, true);
+        else Key(code, pressed);
+    }
 
     public void CommitText(string text)
     {
