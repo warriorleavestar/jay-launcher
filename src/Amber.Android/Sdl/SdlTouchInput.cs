@@ -9,6 +9,7 @@ namespace Amber.Android;
 internal sealed partial class SdlTouchInput(Activity activity)
 {
     private readonly Java.Lang.Class _sdlActivity = Java.Lang.Class.ForName("org.libsdl.app.SDLActivity", true, activity.ClassLoader)!;
+    private readonly Java.Lang.Class _sdlInputConnection = Java.Lang.Class.ForName("org.libsdl.app.SDLInputConnection", true, activity.ClassLoader)!;
     private readonly HashSet<Keycode> _held = [];
     private float _mouseX, _mouseY;
     private int _buttons;
@@ -16,8 +17,18 @@ internal sealed partial class SdlTouchInput(Activity activity)
     [LibraryImport("jayjvm", EntryPoint = "jay_java_pointer")]
     private static partial int DispatchMenuPointer(float x, float y, uint action);
 
+    [LibraryImport("jayjvm", EntryPoint = "jay_inventory_stack_count")]
+    private static partial int GetInventoryStackCount(float x, float y);
+
+    [LibraryImport("jayjvm", EntryPoint = "jay_java_inventory_split")]
+    private static partial int DispatchInventorySplit(float x, float y, int count);
+
     private bool MenuPointer(uint action) => GetFocus() != 0 &&
         DispatchMenuPointer(_mouseX / Math.Max(1, Width), _mouseY / Math.Max(1, Height), action) != 0;
+
+    public int InventoryStackCount(double x, double y) => GetInventoryStackCount((float)x, (float)y);
+    public void SplitInventoryStack(double x, double y, int count) =>
+        DispatchInventorySplit((float)x, (float)y, count);
 
     [LibraryImport("SDL3", EntryPoint = "SDL_SetHint", StringMarshalling = StringMarshalling.Utf8)]
     [return: MarshalAs(UnmanagedType.I1)]
@@ -43,9 +54,31 @@ internal sealed partial class SdlTouchInput(Activity activity)
     private void Key(Keycode code, bool down)
     {
         if (down ? !_held.Add(code) : !_held.Remove(code)) return;
+        SendKey(code, down);
+    }
+
+    private void SendKey(Keycode code, bool down)
+    {
         var method = JNIEnv.GetStaticMethodID(_sdlActivity.Handle, down ? "onNativeKeyDown" : "onNativeKeyUp", "(I)V");
         JNIEnv.CallStaticVoidMethod(_sdlActivity.Handle, method, new JValue((int)code));
     }
+
+    public void KeyEvent(Keycode code, bool pressed, bool repeat = false)
+    {
+        if (pressed && repeat) SendKey(code, true);
+        else Key(code, pressed);
+    }
+
+    public void CommitText(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return;
+        using var value = new Java.Lang.String(text);
+        var method = JNIEnv.GetStaticMethodID(_sdlInputConnection.Handle, "nativeCommitText", "(Ljava/lang/String;I)V");
+        JNIEnv.CallStaticVoidMethod(_sdlInputConnection.Handle, method, new JValue(value), new JValue(1));
+    }
+
+    public void Backspace() { Key(Keycode.Del, true); Key(Keycode.Del, false); }
+    public void Enter() { Key(Keycode.Enter, true); Key(Keycode.Enter, false); }
 
     private void Mouse(int button, MotionEventActions action, float x, float y, bool relative)
     {
@@ -66,6 +99,8 @@ internal sealed partial class SdlTouchInput(Activity activity)
         var playing = InWorld;
         if (!playing && !MenuPointer(0)) Mouse(_buttons, MotionEventActions.Move, _mouseX, _mouseY, false);
         if (!click) return;
+        // Mobile taps are contextual: use the targeted block, otherwise attack.
+        if (playing && MenuPointer(3)) return;
         var action = playing ? TouchControlAction.SecondaryAction : TouchControlAction.PrimaryAction;
         Action(action, true);
         Action(action, false);

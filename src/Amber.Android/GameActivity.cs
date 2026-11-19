@@ -208,7 +208,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         _preferences = context.GetSharedPreferences("jay-touch-controls", FileCreationMode.Private)!;
         LoadProfile();
         _router = new TouchInputRouter(this, _profile,
-            inventoryStackCount: NativeJvmHost.InventoryStackCount);
+            inventoryStackCount: sdl is null ? NativeJvmHost.InventoryStackCount : sdl.InventoryStackCount);
         Clickable = true;
         Focusable = true;
         FocusableInTouchMode = true;
@@ -935,8 +935,35 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         else _sdl.Pointer(x, y, click);
     }
 
+    private void DispatchAction(TouchControlAction action, bool pressed)
+    {
+        if (_sdl is null) AndroidGameInputBridge.SetAction(action, pressed);
+        else _sdl.Action(action, pressed);
+    }
+
+    private void DispatchMovement(double x, double y)
+    {
+        if (_sdl is null) AndroidGameInputBridge.SetMovement(x, y);
+        else _sdl.Move(x, y);
+    }
+
+    private void DispatchLook(double x, double y)
+    {
+        if (_sdl is null) AndroidGameInputBridge.AddLook(x, y);
+        else _sdl.Look(x, y);
+    }
+
+    private void DispatchPointer(double x, double y, bool click)
+    {
+        if (_sdl is null) AndroidGameInputBridge.SetPointer(x, y, click);
+        else _sdl.Pointer(x, y, click);
+    }
+
     public void SplitInventoryStack(double x, double y, int count)
-        => NativeJvmHost.SplitInventoryStack(x, y, count);
+    {
+        if (_sdl is null) NativeJvmHost.SplitInventoryStack(x, y, count);
+        else _sdl.SplitInventoryStack(x, y, count);
+    }
 
     public bool HandleHardwareKey(KeyEvent? e)
     {
@@ -950,6 +977,13 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         // bindings. Otherwise W/A/S/D and E/Q/T disappear from typed text.
         if (!GameplayActive)
         {
+            if (_sdl is not null)
+            {
+                _sdl.KeyEvent(e.KeyCode, pressed, pressed && e.RepeatCount > 0);
+                if (pressed && e.UnicodeChar > 0)
+                    _sdl.CommitText(char.ConvertFromUtf32(e.UnicodeChar));
+                return true;
+            }
             if (!pressed) return GlfwKey(e.KeyCode) is not null || e.UnicodeChar > 0;
             var handled = false;
             if (GlfwKey(e.KeyCode) is { } menuKey)
@@ -976,8 +1010,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         if (HardwareAction(e.KeyCode) is { } action)
         {
             if (pressed) _hardwareActions.Add(action); else _hardwareActions.Remove(action);
-            if (_sdl is null) AndroidGameInputBridge.SetAction(action, pressed);
-        else _sdl.Action(action, pressed);
+            DispatchAction(action, pressed);
             return true;
         }
 
@@ -997,8 +1030,8 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
             if (Math.Abs(scroll) > 0.01f)
             {
                 var action = scroll > 0 ? TouchControlAction.PreviousSlot : TouchControlAction.NextSlot;
-                AndroidGameInputBridge.SetAction(action, true);
-                AndroidGameInputBridge.SetAction(action, false);
+                DispatchAction(action, true);
+                DispatchAction(action, false);
             }
             return true;
         }
@@ -1021,11 +1054,11 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
             // DOWN/UP can arrive without a preceding HOVER_MOVE (trackpads and ADB both do
             // this). Synchronize the menu cursor before delivering the click.
             if (!GameplayActive && Width > 0 && Height > 0)
-                AndroidGameInputBridge.SetPointer(e.GetX() / Width, e.GetY() / Height, false);
+                DispatchPointer(e.GetX() / Width, e.GetY() / Height, false);
             if (action is { } mapped)
             {
                 if (pressed) _hardwareActions.Add(mapped); else _hardwareActions.Remove(mapped);
-                AndroidGameInputBridge.SetAction(mapped, pressed);
+                DispatchAction(mapped, pressed);
             }
             return true;
         }
@@ -1041,11 +1074,11 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
                 dy = e.GetY() - _lastMouseY;
             }
             if (Width > 0 && Height > 0 && (Math.Abs(dx) > 0.001f || Math.Abs(dy) > 0.001f))
-                AndroidGameInputBridge.AddLook(dx / Width, dy / Height);
+                DispatchLook(dx / Width, dy / Height);
         }
         else if (Width > 0 && Height > 0)
         {
-            AndroidGameInputBridge.SetPointer(e.GetX() / Width, e.GetY() / Height, false);
+            DispatchPointer(e.GetX() / Width, e.GetY() / Height, false);
         }
         _lastMouseX = e.GetX();
         _lastMouseY = e.GetY();
@@ -1077,9 +1110,9 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     public void ReleaseHardwareInput()
     {
         _hardwareKeys.Clear();
-        AndroidGameInputBridge.SetMovement(0, 0);
+        DispatchMovement(0, 0);
         foreach (var action in _hardwareActions.ToArray())
-            AndroidGameInputBridge.SetAction(action, false);
+            DispatchAction(action, false);
         _hardwareActions.Clear();
         _hasMousePosition = false;
     }
@@ -1093,7 +1126,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         var right = _hardwareKeys.Contains(Keycode.D) || _hardwareKeys.Contains(Keycode.DpadRight);
         var forward = _hardwareKeys.Contains(Keycode.W) || _hardwareKeys.Contains(Keycode.DpadUp);
         var back = _hardwareKeys.Contains(Keycode.S) || _hardwareKeys.Contains(Keycode.DpadDown);
-        AndroidGameInputBridge.SetMovement((right ? 1 : 0) - (left ? 1 : 0),
+        DispatchMovement((right ? 1 : 0) - (left ? 1 : 0),
             (back ? 1 : 0) - (forward ? 1 : 0));
     }
 
@@ -1161,7 +1194,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         input?.ShowSoftInput(this, ShowFlags.Forced);
     }
 
-    private sealed class JayInputConnection(View target) : BaseInputConnection(target, false)
+    private sealed class JayInputConnection(TouchControlOverlay target) : BaseInputConnection(target, false)
     {
         private const int GlfwKeyEnter = 257;
         private const int GlfwKeyBackspace = 259;
@@ -1169,26 +1202,36 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         public override bool CommitText(Java.Lang.ICharSequence? text, int newCursorPosition)
         {
             if (text?.ToString() is { } value)
-                foreach (var rune in value.EnumerateRunes()) NativeJvmHost.AddCodePoint(rune.Value);
+            {
+                if (target._sdl is not null) target._sdl.CommitText(value);
+                else foreach (var rune in value.EnumerateRunes()) NativeJvmHost.AddCodePoint(rune.Value);
+            }
             return true;
         }
 
         public override bool DeleteSurroundingText(int beforeLength, int afterLength)
         {
-            for (var i = 0; i < Math.Max(1, beforeLength); i++) NativeJvmHost.AddKey(GlfwKeyBackspace);
+            for (var i = 0; i < Math.Max(1, beforeLength); i++)
+                if (target._sdl is not null) target._sdl.Backspace(); else NativeJvmHost.AddKey(GlfwKeyBackspace);
             return true;
         }
 
         public override bool PerformEditorAction(ImeAction actionCode)
         {
-            NativeJvmHost.AddKey(GlfwKeyEnter);
+            if (target._sdl is not null) target._sdl.Enter(); else NativeJvmHost.AddKey(GlfwKeyEnter);
             return true;
         }
 
         public override bool SendKeyEvent(KeyEvent? e)
         {
             if (e?.Action != KeyEventActions.Down) return true;
-            if (e.KeyCode == Keycode.Del) NativeJvmHost.AddKey(GlfwKeyBackspace);
+            if (target._sdl is not null)
+            {
+                if (e.KeyCode == Keycode.Del) target._sdl.Backspace();
+                else if (e.KeyCode == Keycode.Enter) target._sdl.Enter();
+                else if (e.UnicodeChar > 0) target._sdl.CommitText(char.ConvertFromUtf32(e.UnicodeChar));
+            }
+            else if (e.KeyCode == Keycode.Del) NativeJvmHost.AddKey(GlfwKeyBackspace);
             else if (e.KeyCode == Keycode.Enter) NativeJvmHost.AddKey(GlfwKeyEnter);
             else if (e.UnicodeChar > 0) NativeJvmHost.AddCodePoint(e.UnicodeChar);
             return true;
