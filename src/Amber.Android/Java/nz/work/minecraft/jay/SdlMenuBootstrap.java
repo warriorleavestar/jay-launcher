@@ -28,7 +28,7 @@ public final class SdlMenuBootstrap {
         final Class<?> container = Class.forName("net.minecraft.client.gui.screens.inventory.AbstractContainerScreen");
         final Class<?> slot = Class.forName("net.minecraft.world.inventory.Slot");
         final Class<?> clickType = Class.forName("net.minecraft.world.inventory.ContainerInput");
-        final Field hoveredSlot = container.getDeclaredField("hoveredSlot");
+        final Method findSlot = container.getDeclaredMethod("getHoveredSlot", double.class, double.class);
         final Method slotClicked = container.getDeclaredMethod("slotClicked", slot, int.class, int.class, clickType);
         final Field slotIndex = slot.getField("index");
         final Method slotItem = slot.getMethod("getItem");
@@ -45,14 +45,14 @@ public final class SdlMenuBootstrap {
         Menu() throws ReflectiveOperationException {
             attack.setAccessible(true);
             use.setAccessible(true);
-            hoveredSlot.setAccessible(true);
+            findSlot.setAccessible(true);
             slotClicked.setAccessible(true);
         }
 
         int stackCount(Object game, float nx, float ny) throws ReflectiveOperationException {
             Object active = current.invoke(guiField.get(game));
             if (!container.isInstance(active)) return -1;
-            Object hovered = hoveredSlot.get(active);
+            Object hovered = findSlot.invoke(active, nx * width.getInt(active), ny * height.getInt(active));
             if (hovered == null) return -1;
             Object stack = slotItem.invoke(hovered);
             return stack == null ? 0 : Math.max(0, (Integer)itemCount.invoke(stack));
@@ -61,7 +61,7 @@ public final class SdlMenuBootstrap {
         boolean split(Object game, float nx, float ny, int requested) throws ReflectiveOperationException {
             Object active = current.invoke(guiField.get(game));
             if (!container.isInstance(active)) return false;
-            Object hovered = hoveredSlot.get(active);
+            Object hovered = findSlot.invoke(active, nx * width.getInt(active), ny * height.getInt(active));
             if (hovered == null) return false;
             Object stack = slotItem.invoke(hovered);
             int total = stack == null ? 0 : Math.max(0, (Integer)itemCount.invoke(stack));
