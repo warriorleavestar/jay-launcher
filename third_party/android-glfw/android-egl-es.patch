@@ -1,0 +1,125 @@
+diff --git a/src/egl_context.c b/src/egl_context.c
+--- a/src/egl_context.c
++++ b/src/egl_context.c
+@@ -95,7 +95,11 @@ static GLFWbool chooseEGLConfig(const _GLFWctxconfig* ctxconfig,
+             apiBit = EGL_OPENGL_ES2_BIT;
+     }
+     else
++#if defined(__ANDROID__)
++        apiBit = EGL_OPENGL_ES2_BIT;
++#else
+         apiBit = EGL_OPENGL_BIT;
++#endif
+ 
+     if (fbconfig->stereo)
+     {
+@@ -587,6 +591,21 @@ GLFWbool _glfwCreateContextEGL(_GLFWwindow* window,
+     if (!chooseEGLConfig(ctxconfig, fbconfig, &config))
+         return GLFW_FALSE;
+ 
++#if defined(__ANDROID__)
++    // Android EGL exposes OpenGL ES, while MobileGlues translates the client
++    // entry points loaded below.  Keep GLFW's public client type as desktop
++    // OpenGL but create the native context as GLES 3.
++    if (ctxconfig->client == GLFW_OPENGL_API)
++    {
++        if (!eglBindAPI(EGL_OPENGL_ES_API))
++        {
++            _glfwInputError(GLFW_API_UNAVAILABLE,
++                            "EGL: Failed to bind Android OpenGL ES: %s",
++                            getEGLErrorString(eglGetError()));
++            return GLFW_FALSE;
++        }
++    }
++    else
++#endif
+     if (ctxconfig->client == GLFW_OPENGL_ES_API)
+     {
+         if (!eglBindAPI(EGL_OPENGL_ES_API))
+@@ -611,6 +630,7 @@ GLFWbool _glfwCreateContextEGL(_GLFWwindow* window,
+ 
+         if (ctxconfig->client == GLFW_OPENGL_API)
+         {
++#if !defined(__ANDROID__)
+             if (ctxconfig->forward)
+                 flags |= EGL_CONTEXT_OPENGL_FORWARD_COMPATIBLE_BIT_KHR;
+ 
+@@ -619,6 +639,7 @@ GLFWbool _glfwCreateContextEGL(_GLFWwindow* window,
+                 mask |= EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT_KHR;
+             else if (ctxconfig->profile == GLFW_OPENGL_COMPAT_PROFILE)
+                 mask |= EGL_CONTEXT_OPENGL_COMPATIBILITY_PROFILE_BIT_KHR;
++#endif
+         }
+ 
+         if (ctxconfig->debug)
+@@ -641,8 +662,18 @@ GLFWbool _glfwCreateContextEGL(_GLFWwindow* window,
+ 
+         if (ctxconfig->major != 1 || ctxconfig->minor != 0)
+         {
++#if defined(__ANDROID__)
++            if (ctxconfig->client == GLFW_OPENGL_API)
++            {
++                SET_ATTRIB(EGL_CONTEXT_MAJOR_VERSION_KHR, 3);
++                SET_ATTRIB(EGL_CONTEXT_MINOR_VERSION_KHR, 0);
++            }
++            else
++#endif
++            {
+             SET_ATTRIB(EGL_CONTEXT_MAJOR_VERSION_KHR, ctxconfig->major);
+             SET_ATTRIB(EGL_CONTEXT_MINOR_VERSION_KHR, ctxconfig->minor);
++            }
+         }
+ 
+         if (ctxconfig->noerror)
+@@ -720,7 +751,11 @@ GLFWbool _glfwCreateContextEGL(_GLFWwindow* window,
+     window->context.egl.config = config;
+ 
+     // Load the appropriate client library
++#if defined(__ANDROID__)
++    if (GLFW_TRUE)
++#else
+     if (!_glfw.egl.KHR_get_all_proc_addresses)
++#endif
+     {
+         int i;
+         const char** sonames;
+diff --git a/src/context.c b/src/context.c
+--- a/src/context.c
++++ b/src/context.c
+@@ -426,6 +426,16 @@ GLFWbool _glfwRefreshContextAttribs(_GLFWwindow* window,
+         return GLFW_FALSE;
+     }
+ 
++#if defined(__ANDROID__)
++    // The native context reports its GLES version, but MobileGlues is the
++    // client library exposed to LWJGL and implements the requested desktop GL
++    // contract on top of it.  Preserve that public contract after verifying
++    // that the context and required query entry points are alive.
++    if (ctxconfig->client == GLFW_OPENGL_API &&
++        window->context.client == GLFW_OPENGL_ES_API)
++    {
++        window->context.client = GLFW_OPENGL_API;
++        window->context.major = ctxconfig->major;
++        window->context.minor = ctxconfig->minor;
++    }
++#endif
+     if (window->context.major < ctxconfig->major ||
+         (window->context.major == ctxconfig->major &&
+          window->context.minor < ctxconfig->minor))
+diff --git a/src/null_window.c b/src/null_window.c
+--- a/src/null_window.c
++++ b/src/null_window.c
+@@ -365,6 +365,12 @@ void _glfwGetWindowSizeNull(_GLFWwindow* window, int* width, int* height)
+ 
+ void _glfwSetWindowSizeNull(_GLFWwindow* window, int width, int height)
+ {
++#if defined(__ANDROID__)
++    // Minecraft reapplies its desktop launch size after creating the window.
++    // The Android Surface is fixed by the system, so keep GLFW coordinates,
++    // framebuffer dimensions and touch mapping aligned to that real Surface.
++    width = ANativeWindow_getWidth((ANativeWindow*) window->null.nativeWindow);
++    height = ANativeWindow_getHeight((ANativeWindow*) window->null.nativeWindow);
++#endif
+     if (window->monitor)
+         return;
+ 
