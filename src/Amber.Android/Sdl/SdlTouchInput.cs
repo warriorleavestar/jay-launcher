@@ -9,6 +9,7 @@ namespace Amber.Android;
 internal sealed partial class SdlTouchInput(Activity activity)
 {
     private readonly Java.Lang.Class _sdlActivity = Java.Lang.Class.ForName("org.libsdl.app.SDLActivity", true, activity.ClassLoader)!;
+    private readonly Java.Lang.Class _sdlInputConnection = Java.Lang.Class.ForName("org.libsdl.app.SDLInputConnection", true, activity.ClassLoader)!;
     private readonly HashSet<Keycode> _held = [];
     private float _mouseX, _mouseY;
     private int _buttons;
@@ -63,8 +64,8 @@ internal sealed partial class SdlTouchInput(Activity activity)
     {
         if (string.IsNullOrEmpty(text)) return;
         using var value = new Java.Lang.String(text);
-        var method = JNIEnv.GetStaticMethodID(_sdlActivity.Handle, "onNativeCommitText", "(Ljava/lang/String;I)V");
-        JNIEnv.CallStaticVoidMethod(_sdlActivity.Handle, method, new JValue(value), new JValue(1));
+        var method = JNIEnv.GetStaticMethodID(_sdlInputConnection.Handle, "nativeCommitText", "(Ljava/lang/String;I)V");
+        JNIEnv.CallStaticVoidMethod(_sdlInputConnection.Handle, method, new JValue(value), new JValue(1));
     }
 
     public void Backspace() { Key(Keycode.Del, true); Key(Keycode.Del, false); }
