@@ -50,6 +50,32 @@ internal static class TrustCommands
     /// <summary>Loads a trust key file, asking for its passphrase when it is sealed.</summary>
     internal static TrustSigner LoadKey(string path) => TrustKeyFile.Read(File.ReadAllText(path), () => AskSecret($"{Path.GetFileName(path)} 的口令："));
 
+    /// <summary>Like <see cref="LoadKey"/>, but asks again after a wrong passphrase (up to <paramref name="tries"/> times).</summary>
+    internal static TrustSigner LoadKeyWithRetry(string path, TextWriter output, int tries = 3)
+    {
+        var text = File.ReadAllText(path);
+        for (var attempt = 1; ; attempt++)
+        {
+            try { return TrustKeyFile.Read(text, () => AskSecret($"{Path.GetFileName(path)} 的口令：")); }
+            catch (InvalidDataException) when (attempt < tries)
+            {
+                output.WriteLine($"口令不对（或钥匙文件坏了），再试一次（还剩 {tries - attempt} 次）。");
+            }
+        }
+    }
+
+    /// <summary>Asks for the confirmation again after a typo, up to <paramref name="tries"/> times; any miss still signs nothing.</summary>
+    internal static bool ConfirmWithRetry(Func<IReadOnlyList<string>, string, string, bool> confirm, IReadOnlyList<string> lines, string what,
+        string expected, TextWriter output, int tries = 3)
+    {
+        for (var attempt = 1; attempt <= tries; attempt++)
+        {
+            if (confirm(lines, what, expected)) return true;
+            if (attempt < tries) output.WriteLine($"再试一次（还剩 {tries - attempt} 次）。");
+        }
+        return false;
+    }
+
     /// <summary>Writes a new key file; refuses to overwrite. Private to the user on Unix.</summary>
     internal static void WriteKey(string path, ReadOnlySpan<byte> seed, string? passphrase)
     {
