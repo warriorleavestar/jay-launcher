@@ -979,7 +979,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         {
             if (_sdl is not null)
             {
-                _sdl.KeyEvent(e.KeyCode, pressed);
+                _sdl.KeyEvent(e.KeyCode, pressed, pressed && e.RepeatCount > 0);
                 if (pressed && e.UnicodeChar > 0)
                     _sdl.CommitText(char.ConvertFromUtf32(e.UnicodeChar));
                 return true;
