@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# -ne 6 ]]; then
-  echo "usage: $0 <jre.tar.xz> <renderer-directory> <lwjgl-directory> <arm64-v8a|x86_64> <readelf> <output.tar.xz>" >&2
+if [[ $# -lt 6 || $# -gt 7 ]]; then
+  echo "usage: $0 <jre.tar.xz> <renderer-directory> <lwjgl-directory> <arm64-v8a|x86_64> <readelf> <output.tar.xz> [expected-java-major]" >&2
   exit 2
 fi
 
@@ -12,6 +12,7 @@ lwjgl_directory="$3"
 architecture="$4"
 elf_reader="$5"
 output_archive="$6"
+expected_java_major="${7:-}"
 
 test -f "$jre_archive"
 test -d "$renderer_directory"
@@ -39,6 +40,9 @@ test -f "$runtime/native/libmobileglues.so"
 test -f "$runtime/native/liblwjgl.so"
 test -f "$runtime/native/liblwjgl_opengl.so"
 test -f "$runtime/native/liblwjgl_stb.so"
+test -f "$runtime/native/liblwjgl_vma.so"
+test -f "$runtime/native/libshaderc.so"
+test -f "$runtime/native/libspirv-cross.so"
 test -f "$runtime/native/libfreetype.so"
 test -f "$runtime/native/libopenal.so"
 
@@ -46,8 +50,9 @@ mkdir -p "$(dirname "$output_archive")"
 # BSD tar otherwise serializes macOS extended attributes as `._*` AppleDouble
 # files, which Android would treat as untrusted extra runtime entries.
 COPYFILE_DISABLE=1 tar -C "$runtime" -cJf "$output_archive" .
-"$(cd "$(dirname "$0")" && pwd)/check-android-runtime.sh" \
-  "$output_archive" "$architecture" "$elf_reader"
+check_args=("$output_archive" "$architecture" "$elf_reader")
+if [[ -n "$expected_java_major" ]]; then check_args+=("$expected_java_major"); fi
+"$(cd "$(dirname "$0")" && pwd)/check-android-runtime.sh" "${check_args[@]}"
 
 if command -v sha256sum >/dev/null 2>&1; then
   sha256sum "$output_archive" > "$output_archive.sha256"
