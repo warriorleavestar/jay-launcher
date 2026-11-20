@@ -665,6 +665,29 @@ public sealed class MobilePortTests
         Assert.DoesNotContain(sink.Pointers, pointer => pointer.Click);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void DraggingAnOccupiedSlotMovesTheStackOnlyOnRelease(bool cancelled)
+    {
+        var sink = new RecordingTouchSink();
+        var router = new TouchInputRouter(sink, inventoryStackCount: (_, y) => y < 0.5 ? 5 : 0);
+        router.Press(1, 0.4, 0.4, controlsEnabled: false);
+        router.Move(1, 0.4, 0.6);
+        router.Release(1, cancelled);
+
+        if (cancelled)
+        {
+            Assert.Empty(sink.InventorySplits);
+            Assert.DoesNotContain(sink.Pointers, point => point.Click);
+        }
+        else
+        {
+            Assert.Equal([(0.4, 0.4, 5)], sink.InventorySplits);
+            Assert.Contains((0.4, 0.6, true), sink.Pointers);
+        }
+    }
+
     [Fact]
     public void TouchInputRouterCraftingDragHoldsOnePrimaryButton()
     {

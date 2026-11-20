@@ -562,12 +562,14 @@ public sealed class BakeTests : IDisposable
             VersionId = "1.21.1",
             JavaPath = "unused-when-embedded",
             Session = new GameSession("Tester", Guid.NewGuid(), "0", "legacy"),
-            ExtraJvmArgs = ["-Djay.test=true"],
+            ExtraJvmArgs = ["-Djay.test=true", "--add-exports", "java.base/jdk.internal.misc=ALL-UNNAMED"],
             ExtraGameArgs = ["--demo"],
         });
 
         Assert.Equal("net.minecraft.client.main.Main", invocation.MainClass);
         Assert.Contains("-Djay.test=true", invocation.VmOptions);
+        Assert.Contains("--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED", invocation.VmOptions);
+        Assert.DoesNotContain("java.base/jdk.internal.misc=ALL-UNNAMED", invocation.VmOptions);
         Assert.Contains(invocation.VmOptions, value => value.StartsWith("-Djava.class.path=", StringComparison.Ordinal));
         Assert.DoesNotContain("-cp", invocation.VmOptions);
         Assert.DoesNotContain(invocation.VmOptions, value => value.StartsWith("-Djay.embedded.marker=", StringComparison.Ordinal));

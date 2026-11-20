@@ -10,11 +10,13 @@ using System.Runtime.InteropServices;
 
 namespace Amber.Android;
 
-internal readonly record struct AndroidGameInstallProgress(InstallStage Stage, int Completed, int Total, long Bytes);
+internal readonly record struct AndroidGameInstallProgress(InstallStage Stage, int Completed, int Total, long Bytes, IReadOnlyList<string>? ActiveFiles);
 
 internal sealed record AndroidPreparedGame(
     string RuntimeRoot,
     string WorkingDirectory,
+    string NativeRoot,
+    bool Sdl,
     EmbeddedJavaInvocation Invocation);
 
 /// <summary>Installs Mojang files and prepares the same launch command used by desktop Jay for an embedded JVM.</summary>
@@ -39,7 +41,8 @@ internal static class AndroidEmbeddedGame
         playerName = playerName.Trim();
         if (playerName.Length is < 1 or > 16 || playerName.Any(c => !(char.IsAsciiLetterOrDigit(c) || c == '_')))
             throw new ArgumentException("Minecraft names must use 1-16 letters, numbers or underscores.");
-        if (!AndroidRuntimeStore.IsInstalled(context)) throw new InvalidOperationException("The Android runtime is not installed.");
+        var java25 = AndroidRuntimeStore.RequiresJava25(context, versionId);
+        if (!AndroidRuntimeStore.IsInstalled(context, java25)) throw new InvalidOperationException("The Android runtime is not installed.");
 
         var gameRoot = Path.Combine(context.FilesDir!.AbsolutePath, "minecraft");
         var gameDirectory = new GameDirectory(gameRoot);
@@ -48,8 +51,8 @@ internal static class AndroidEmbeddedGame
         var rules = AndroidRules();
         var installer = new VanillaInstaller(downloader, gameDirectory) { Rules = rules };
         var forwardedProgress = new Progress<InstallProgress>(value =>
-            progress?.Report(new(value.Stage, value.Files.CompletedFiles, value.Files.TotalFiles, value.Files.BytesDownloaded)));
-        var runtimeRoot = AndroidRuntimeStore.Root(context);
+            progress?.Report(new(value.Stage, value.Files.CompletedFiles, value.Files.TotalFiles, value.Files.BytesDownloaded, value.Files.ActiveFiles)));
+        var runtimeRoot = AndroidRuntimeStore.Root(context, java25);
         await installer.PrepareVersionAsync(versionId, forwardedProgress, ct);
         var requiredJava = gameDirectory.ResolveVersion(versionId).JavaVersion?.MajorVersion ?? 8;
         var installedJava = JavaRuntimeRelease.ReadMajor(runtimeRoot)
@@ -61,8 +64,11 @@ internal static class AndroidEmbeddedGame
         await installer.CompleteAsync(versionId, forwardedProgress, ct);
         await CreateMobileOptionsIfMissingAsync(gameRoot, ct);
 
-        var nativeRoot = Path.Combine(runtimeRoot, "native");
-        RequireNativeFiles(nativeRoot, AndroidNativeLibraries.RequiredForJava(requiredJava));
+        var sdl = UsesSdl(context, versionId);
+        var nativeRoot = sdl ? context.ApplicationInfo!.NativeLibraryDir! : Path.Combine(runtimeRoot, "native");
+        RequireNativeFiles(nativeRoot, sdl
+            ? ["liblwjgl.so", "liblwjgl_opengl.so", "liblwjgl_stb.so", "libfreetype.so", "libopenal.so", "libmobileglues.so"]
+            : AndroidNativeLibraries.RequiredForJava(requiredJava));
         var glfw = Path.Combine(nativeRoot, "libglfw.so");
         if (!File.Exists(glfw)) glfw = Path.Combine(context.ApplicationInfo!.NativeLibraryDir!, "libglfw.so");
         if (!File.Exists(glfw)) throw new FileNotFoundException("The Android GLFW bridge is missing.", glfw);
@@ -78,18 +84,22 @@ internal static class AndroidEmbeddedGame
             "-Dorg.lwjgl.librarypath=" + nativeRoot,
             "-Dorg.lwjgl.libname=" + Path.Combine(nativeRoot, "liblwjgl.so"),
             "-Dorg.lwjgl.glfw.libname=" + glfw,
-            "-Dorg.lwjgl.sdl.libname=" + Path.Combine(context.ApplicationInfo!.NativeLibraryDir!, "libSDL3.so"),
-            // Android exposes the Vulkan loader without Linux's SONAME suffix. LWJGL otherwise
-            // looks for libvulkan.so.1 because the embedded JVM reports a Linux platform, which
-            // makes Minecraft incorrectly fall back to the OpenGL compatibility renderer.
-            "-Dorg.lwjgl.vulkan.libname=libvulkan.so",
-            "-Dorg.lwjgl.opengl.explicitInit=true",
             "-Dorg.lwjgl.freetype.libname=" + Path.Combine(nativeRoot, "libfreetype.so"),
             "-Dorg.lwjgl.openal.libname=" + Path.Combine(nativeRoot, "libopenal.so"),
             "-Djay.gl.library=" + Path.Combine(nativeRoot, "libmobileglues.so"),
             "-Djay.minecraft.version=" + versionId,
         };
 
+        if (sdl)
+        {
+            extraJvm.Add("-Dorg.lwjgl.sdl.libname=" + Path.Combine(context.ApplicationInfo!.NativeLibraryDir!, "libSDL3.so"));
+            extraJvm.Add("-Dorg.lwjgl.vulkan.libname=/system/lib64/libvulkan.so");
+            extraJvm.Add("-Djna.boot.library.path=" + nativeRoot);
+            extraJvm.Add("-Dorg.lwjgl.spvc.libname=" + Path.Combine(nativeRoot, "libspirv-cross-c-shared.so"));
+            extraJvm.Add("-Dorg.lwjgl.shaderc.libname=" + Path.Combine(nativeRoot, "libshaderc_shared.so"));
+            extraJvm.Add("-Dorg.lwjgl.opengl.libname=" + Path.Combine(nativeRoot, "libmobileglues.so"));
+        }
+        else extraJvm.Add("-Dorg.lwjgl.opengl.explicitInit=true");
         var launcher = new GameLauncher(gameDirectory) { BaseRules = rules };
         var invocation = launcher.BuildEmbeddedInvocation(new LaunchOptions
         {
@@ -106,6 +116,8 @@ internal static class AndroidEmbeddedGame
             ExtraJvmArgs = extraJvm,
             LauncherName = "Jay Android",
         });
+        bool namedSdlInput = sdl && invocation.MainClass == "net.minecraft.client.main.Main" && versionId == "26.3";
+        if (sdl && !namedSdlInput) return new AndroidPreparedGame(runtimeRoot, gameRoot, nativeRoot, true, invocation);
         var bootstrap = Path.Combine(cache, "jay-runtime-probe.jar");
         await CopyAssetAsync(context, "jay-runtime-probe.jar", bootstrap, ct);
         var vmOptions = invocation.VmOptions.Select(value =>
@@ -114,22 +126,25 @@ internal static class AndroidEmbeddedGame
                 : value).ToArray();
         invocation = new EmbeddedJavaInvocation(
             vmOptions,
-            "nz.work.minecraft.jay.AndroidGameBootstrap",
+            namedSdlInput ? "nz.work.minecraft.jay.SdlMenuBootstrap" : "nz.work.minecraft.jay.AndroidGameBootstrap",
             [invocation.MainClass, .. invocation.Arguments],
             invocation.TransientDirectory);
-        return new AndroidPreparedGame(runtimeRoot, gameRoot, invocation);
+        return new AndroidPreparedGame(runtimeRoot, gameRoot, nativeRoot, sdl, invocation);
     }
 
     public static void Run(AndroidPreparedGame game)
     {
-        var nativeRoot = Path.Combine(game.RuntimeRoot, "native");
+        var nativeRoot = game.NativeRoot;
         var mobileGluesRoot = Path.Combine(game.WorkingDirectory, "mobileglues");
         Directory.CreateDirectory(mobileGluesRoot);
         var mobileGlues = Path.Combine(nativeRoot, "libmobileglues.so");
+        bool emulatorAngle = game.Sdl && global::Android.OS.Build.Hardware is ("ranchu" or "goldfish") &&
+            File.Exists(Path.Combine(nativeRoot, "libEGL_angle.so"));
         foreach (var (name, value) in new (string Name, string Value)[]
         {
             ("MG_DIR_PATH", mobileGluesRoot),
-            ("MG_ANGLE_DIR", ""),
+            ("MG_ANGLE_DIR", emulatorAngle ? nativeRoot : ""),
+            ("JAY_EMULATOR_ANGLE", emulatorAngle ? "1" : "0"),
             ("JAY_EGL_LIBRARY", mobileGlues),
             ("JAY_GL_LIBRARY", mobileGlues),
             ("SDL_OPENGL_LIBRARY", mobileGlues),
@@ -138,20 +153,17 @@ internal static class AndroidEmbeddedGame
             Environment.SetEnvironmentVariable(name, value);
             NativeJvmHost.SetEnvironmentVariable(name, value);
         }
+        if (game.Sdl)
+        {
+            // SDL and LWJGL must resolve GL entry points through the very same provider.
+            SdlTouchInput.SetHint("SDL_OPENGL_LIBRARY", mobileGlues);
+            SdlTouchInput.SetHint("SDL_EGL_LIBRARY", mobileGlues);
+        }
         Directory.SetCurrentDirectory(game.WorkingDirectory);
 
-        // OpenJDK 25 for Android is linked against the NDK C++ runtime. It is deliberately
-        // shipped beside the other verified runtime libraries instead of in the APK so runtime
-        // updates stay atomic. Android's class-loader namespace does not search this directory
-        // for transitive dependencies, therefore load it globally before libjvm.so.
-        var cxxRuntime = Path.Combine(nativeRoot, "libc++_shared.so");
-        if (File.Exists(cxxRuntime))
-        {
-            var preloadError = NativeJvmHost.Preload(cxxRuntime);
-            if (preloadError is not null)
-                throw new InvalidOperationException($"Could not load libc++_shared.so: {preloadError}");
-        }
-
+        var cpp = Path.Combine(game.RuntimeRoot, "lib", "libc++_shared.so");
+        if (File.Exists(cpp) && NativeJvmHost.Preload(cpp) is { } dependencyError)
+            throw new InvalidOperationException($"Could not load libc++_shared.so: {dependencyError}");
         var error = NativeJvmHost.LoadRuntime(Path.Combine(game.RuntimeRoot, "lib", "server", "libjvm.so"));
         if (error is not null) throw new InvalidOperationException(error);
         foreach (var library in new[] { "libjava.so", "libnet.so", "libnio.so" })

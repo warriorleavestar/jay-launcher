@@ -34,6 +34,8 @@ git -C "$work/source" submodule update --init --depth 1 \
 patch_file="$(cd "$(dirname "$0")/../third_party/android-mobileglues" && pwd)/jay-android.patch"
 git -C "$work/source" apply --check "$patch_file"
 git -C "$work/source" apply "$patch_file"
+git -C "$work/source" apply "$(dirname "$patch_file")/fragment-output-arrays.patch"
+git -C "$work/source" apply "$(dirname "$patch_file")/emulator-angle.patch"
 
 if [[ "${JAY_RUN_HOST_TESTS:-0}" == 1 ]]; then
   "${CXX:-c++}" -std=c++17 -O2 \

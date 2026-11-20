@@ -122,17 +122,12 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
     {
         try
         {
-            if (!AndroidRuntimeStore.IsInstalled(this))
-                throw new InvalidOperationException("Android runtime preparation did not finish in the launcher.");
             var versionId = Intent?.GetStringExtra(VersionIdExtra);
             if (string.IsNullOrWhiteSpace(versionId))
                 throw new InvalidOperationException("No Minecraft instance was selected.");
             var playerName = Intent?.GetStringExtra(PlayerNameExtra);
             if (string.IsNullOrWhiteSpace(playerName))
                 throw new InvalidOperationException("No Minecraft account was selected.");
-
-            if (_touchOverlay is not null)
-                _touchOverlay.UseSdlInput = AndroidEmbeddedGame.UsesSdl(this, versionId);
 
             // The launcher has already completed all network work. This second pass only rebuilds the invocation
             // inside the isolated game process, then switches directly to Minecraft without a setup screen.
@@ -253,7 +248,6 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     private readonly HashSet<Keycode> _hardwareKeys = [];
     private readonly HashSet<TouchControlAction> _hardwareActions = [];
     private readonly HardwareTextInputGate _hardwareTextInputGate = new();
-    private readonly SdlTouchInput _sdlInput;
     private bool _settingsOpen;
     private bool _layoutEditing;
     private int? _editingPointer;
@@ -266,24 +260,25 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     private bool? _lastTextInputFocused;
     private long _nextLongPressToken;
 
-    public TouchControlOverlay(Context context) : base(context)
+    private readonly SdlTouchInput? _sdl;
+    private bool GameplayActive => _sdl?.InWorld ?? NativeJvmHost.GameplayControlsActive;
+
+    public TouchControlOverlay(Context context, SdlTouchInput? sdl = null) : base(context)
     {
+        _sdl = sdl;
         // The game itself renders into the SurfaceView. Keep the transparent controls on a
         // software layer so Android's HWUI worker cannot race the JVM/EGL surface startup and
         // lock a RenderNode mutex after it has been destroyed (seen as a first-launch SIGABRT
         // on Android 15/emulator graphics drivers).
         SetLayerType(LayerType.Software, null);
         _preferences = context.GetSharedPreferences("jay-touch-controls", FileCreationMode.Private)!;
-        _sdlInput = new SdlTouchInput((Activity)context);
         LoadProfile();
         _router = new TouchInputRouter(this, _profile,
-            inventoryStackCount: NativeJvmHost.InventoryStackCount);
+            inventoryStackCount: sdl is null ? NativeJvmHost.InventoryStackCount : sdl.InventoryStackCount);
         Clickable = true;
         Focusable = true;
         FocusableInTouchMode = true;
     }
-
-    public bool UseSdlInput { get; set; }
 
     // Only advertise an Android text editor while Minecraft actually owns a text field.
     // Keeping this true during gameplay makes physical W/A/S/D key presses wake the IME
@@ -304,8 +299,8 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         // This view is composited over a SurfaceView. Clear its transparent layer on every frame;
         // otherwise some Android GPU drivers retain the previous joystick knob position.
         canvas.DrawColor(Color.Transparent, PorterDuff.Mode.Clear!);
-        var gameplayControlsActive = NativeJvmHost.GameplayControlsActive;
-        var textInputFocused = NativeJvmHost.TextInputFocused;
+        var gameplayControlsActive = GameplayActive;
+        var textInputFocused = _sdl is null && NativeJvmHost.TextInputFocused;
         if (_lastTextInputFocused != textInputFocused)
         {
             _lastTextInputFocused = textInputFocused;
@@ -906,7 +901,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
                 var pointerId = e.GetPointerId(actionIndex);
                 var x = e.GetX(actionIndex) / Width;
                 var y = e.GetY(actionIndex) / Height;
-                var gameplay = NativeJvmHost.GameplayControlsActive;
+                var gameplay = GameplayActive;
                 // Visible overlay controls are checked first. The inventory key's hit rectangle
                 // ends exactly where the ninth hotbar slot begins, so neither steals the other.
                 var control = _profile.HitTest(x, y, gameplay);
@@ -919,8 +914,8 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
                     _longPressIndicators.Remove(pointerId);
                     _router.Cancel(pointerId);
                     _hotbarPointers.Add(pointerId);
-                    if (UseSdlInput) _sdlInput.SelectSlot(slot);
-                    else NativeJvmHost.AddKey(49 + slot);
+                    if (_sdl is null) NativeJvmHost.AddKey(49 + slot);
+                    else _sdl.SelectSlot(slot);
                     return true;
                 }
                 var handled = _router.Press(pointerId, x, y, gameplay);
@@ -1028,8 +1023,8 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
             action = TouchControlAction.Menu;
         // SDL receives button edges immediately, so it still needs the matching release. The
         // GLFW snapshot bridge has a distinct cancellation edge that suppresses an unconsumed tap.
-        if (UseSdlInput) _sdlInput.Action(action, false);
-        else AndroidGameInputBridge.CancelAction(action);
+        if (_sdl is null) AndroidGameInputBridge.CancelAction(action);
+        else _sdl.Action(action, false);
     }
 
     public void SetMovement(double x, double y) => DispatchMovement(x, y);
@@ -1041,30 +1036,33 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
 
     private void DispatchAction(TouchControlAction action, bool pressed)
     {
-        if (UseSdlInput) _sdlInput.Action(action, pressed);
-        else AndroidGameInputBridge.SetAction(action, pressed);
+        if (_sdl is null) AndroidGameInputBridge.SetAction(action, pressed);
+        else _sdl.Action(action, pressed);
     }
 
     private void DispatchMovement(double x, double y)
     {
-        if (UseSdlInput) _sdlInput.Move(x, y);
-        else AndroidGameInputBridge.SetMovement(x, y);
+        if (_sdl is null) AndroidGameInputBridge.SetMovement(x, y);
+        else _sdl.Move(x, y);
     }
 
     private void DispatchLook(double x, double y)
     {
-        if (UseSdlInput) _sdlInput.Look(x, y);
-        else AndroidGameInputBridge.AddLook(x, y);
+        if (_sdl is null) AndroidGameInputBridge.AddLook(x, y);
+        else _sdl.Look(x, y);
     }
 
     private void DispatchPointer(double x, double y, bool click)
     {
-        if (UseSdlInput) _sdlInput.Pointer(x, y, click);
-        else AndroidGameInputBridge.SetPointer(x, y, click);
+        if (_sdl is null) AndroidGameInputBridge.SetPointer(x, y, click);
+        else _sdl.Pointer(x, y, click);
     }
 
     public void SplitInventoryStack(double x, double y, int count)
-        => NativeJvmHost.SplitInventoryStack(x, y, count);
+    {
+        if (_sdl is null) NativeJvmHost.SplitInventoryStack(x, y, count);
+        else _sdl.SplitInventoryStack(x, y, count);
+    }
 
     public bool HandleHardwareKey(KeyEvent? e)
     {
@@ -1077,19 +1075,19 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         // Minecraft 26.3 owns an SDL window. Its keyboard queue must receive both the key-down
         // and key-up events; sending the old GLFW/JVM callbacks makes text appear to work while
         // leaving gameplay keys stuck or completely ignored.
-        if (UseSdlInput)
+        if (_sdl is not null)
         {
-            _sdlInput.KeyEvent(e.KeyCode, pressed, pressed && e.RepeatCount > 0);
+            _sdl.KeyEvent(e.KeyCode, pressed, pressed && e.RepeatCount > 0);
             if (pressed && e.UnicodeChar > 0 &&
                 _hardwareTextInputGate.AcceptHardwareCodePoint((int)e.KeyCode,
                     e.UnicodeChar, e.DownTime, SystemClock.UptimeMillis(), e.RepeatCount))
-                _sdlInput.CommitText(char.ConvertFromUtf32(e.UnicodeChar));
+                _sdl.CommitText(char.ConvertFromUtf32(e.UnicodeChar));
             return true;
         }
 
         // Menu and chat screens need ordinary key/character delivery before gameplay
         // bindings. Otherwise W/A/S/D and E/Q/T disappear from typed text.
-        if (!NativeJvmHost.GameplayControlsActive)
+        if (!GameplayActive)
         {
             if (!pressed) return GlfwKey(e.KeyCode) is not null || e.UnicodeChar > 0;
             // A physical key can be delivered both through Activity.DispatchKeyEvent and a
@@ -1132,7 +1130,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
 
         if (e.ActionMasked == MotionEventActions.Scroll)
         {
-            if (!NativeJvmHost.GameplayControlsActive) return false;
+            if (!GameplayActive) return false;
             var scroll = e.GetAxisValue(Axis.Vscroll);
             if (Math.Abs(scroll) > 0.01f)
             {
@@ -1160,7 +1158,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
             };
             // DOWN/UP can arrive without a preceding HOVER_MOVE (trackpads and ADB both do
             // this). Synchronize the menu cursor before delivering the click.
-            if (!NativeJvmHost.GameplayControlsActive && Width > 0 && Height > 0)
+            if (!GameplayActive && Width > 0 && Height > 0)
                 DispatchPointer(e.GetX() / Width, e.GetY() / Height, false);
             if (action is { } mapped)
                 DispatchHardwareActionTransition(mapped, pressed);
@@ -1168,7 +1166,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         }
 
         if (e.ActionMasked is not (MotionEventActions.HoverMove or MotionEventActions.Move)) return true;
-        if (NativeJvmHost.GameplayControlsActive)
+        if (GameplayActive)
         {
             var dx = e.GetAxisValue(Axis.RelativeX);
             var dy = e.GetAxisValue(Axis.RelativeY);
@@ -1201,7 +1199,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
 #pragma warning disable CA1416
         if (hasWindowFocus && Visibility == ViewStates.Visible &&
             _profile.Mode == TouchControlMode.ExternalKeyboardMouse &&
-            NativeJvmHost.GameplayControlsActive)
+            GameplayActive)
         {
             RequestFocus();
             RequestPointerCapture();
@@ -1218,7 +1216,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         foreach (var action in _hardwareActions.ToArray())
             DispatchAction(action, false);
         _hardwareActions.Clear();
-        if (UseSdlInput) _sdlInput.ReleaseAll();
+        _sdl?.ReleaseAll();
         _hasMousePosition = false;
     }
 
@@ -1354,9 +1352,9 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         {
             if (text?.ToString() is { } value)
             {
-                if (_owner.UseSdlInput)
+                if (_owner._sdl is not null)
                 {
-                    _owner._sdlInput.CommitText(value);
+                    _owner._sdl.CommitText(value);
                     return true;
                 }
                 var runes = value.EnumerateRunes().ToArray();
@@ -1377,9 +1375,9 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
 
         public override bool DeleteSurroundingText(int beforeLength, int afterLength)
         {
-            if (_owner.UseSdlInput)
+            if (_owner._sdl is not null)
             {
-                for (var i = 0; i < Math.Max(1, beforeLength); i++) _owner._sdlInput.Backspace();
+                for (var i = 0; i < Math.Max(1, beforeLength); i++) _owner._sdl.Backspace();
                 return true;
             }
             for (var i = 0; i < Math.Max(1, beforeLength); i++) NativeJvmHost.AddKey(GlfwKeyBackspace);
@@ -1388,9 +1386,9 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
 
         public override bool PerformEditorAction(ImeAction actionCode)
         {
-            if (_owner.UseSdlInput)
+            if (_owner._sdl is not null)
             {
-                _owner._sdlInput.Enter();
+                _owner._sdl.Enter();
                 return true;
             }
             NativeJvmHost.AddKey(GlfwKeyEnter);
@@ -1400,10 +1398,10 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         public override bool SendKeyEvent(KeyEvent? e)
         {
             if (e is null) return true;
-            if (_owner.UseSdlInput)
+            if (_owner._sdl is not null)
             {
                 if (e.Action is KeyEventActions.Down or KeyEventActions.Up)
-                    _owner._sdlInput.KeyEvent(e.KeyCode, e.Action == KeyEventActions.Down,
+                    _owner._sdl.KeyEvent(e.KeyCode, e.Action == KeyEventActions.Down,
                         e.Action == KeyEventActions.Down && e.RepeatCount > 0);
                 return true;
             }

@@ -113,7 +113,8 @@ public sealed class GameLauncher(GameDirectory dir)
                 // invocation API receives one JavaVMOption at a time and requires the = form;
                 // passing the value as a second option makes JNI_CreateJavaVM return JNI_ERR.
                 var option = arguments[i];
-                if (++i >= markerIndex) throw new InvalidDataException($"The Java VM option {option} has no value.");
+                if (++i >= markerIndex || arguments[i].StartsWith('-'))
+                    throw new InvalidDataException($"Missing value for embedded Java option {option}.");
                 vmOptions.Add(option + "=" + arguments[i]);
             }
             else

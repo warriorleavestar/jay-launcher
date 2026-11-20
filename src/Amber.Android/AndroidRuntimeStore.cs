@@ -16,17 +16,33 @@ internal static class AndroidRuntimeStore
     private const string ManifestName = "runtime-manifest.json";
     private static readonly HttpClient RuntimeClient = CreateRuntimeClient();
 
-    public static string Root(Context context) => Path.Combine(context.FilesDir!.AbsolutePath, "game-runtime");
+    public static string Root(Context context, bool java25 = false) =>
+        Path.Combine(context.FilesDir!.AbsolutePath, java25 ? "game-runtime-25" : "game-runtime");
 
-    public static bool IsInstalled(Context context)
+    public static bool RequiresJava25(Context context, string versionId)
     {
-        var root = Root(context);
+        var directory = new Amber.Core.Game.GameDirectory(Path.Combine(context.FilesDir!.AbsolutePath, "minecraft"));
+        return File.Exists(directory.VersionJsonPath(versionId)) && directory.ResolveVersion(versionId).JavaVersion?.MajorVersion >= 25;
+    }
+
+    public static RuntimeArchiveDescriptor? Descriptor(Context context, bool java25)
+    {
+        if (!java25) return AndroidRuntimeCatalog.ForCurrentProcess();
+        if (RuntimeInformation.ProcessArchitecture != Architecture.Arm64 || Environment.SystemPageSize > 4096) return null;
+        if (context.Assets?.List("")?.Contains("jre25.json") != true) return null;
+        using var metadata = context.Assets.Open("jre25.json");
+        return JsonSerializer.Deserialize(metadata, AndroidDescriptorContext.Default.RuntimeArchiveDescriptor);
+    }
+
+    public static bool IsInstalled(Context context, bool java25 = false)
+    {
+        var root = Root(context, java25);
         var manifestPath = Path.Combine(root, ManifestName);
         if (!File.Exists(manifestPath)) return false;
         try
         {
             var manifest = RuntimeBundleManifest.Read(manifestPath);
-            var descriptor = AndroidRuntimeCatalog.ForCurrentProcess();
+            var descriptor = Descriptor(context, java25);
             // Installation already verifies every SHA-256 before activation. Startup only checks
             // the immutable app-private layout so opening the game never hashes the full JRE on
             // Android's UI thread.
@@ -43,6 +59,7 @@ internal static class AndroidRuntimeStore
     public static async Task<RuntimeBundleManifest> InstallAsync(
         Context context,
         RuntimeArchiveDescriptor descriptor,
+        bool java25,
         IProgress<RuntimeInstallProgress>? progress = null,
         CancellationToken ct = default)
     {
@@ -50,10 +67,11 @@ internal static class AndroidRuntimeStore
         try
         {
             var manifest = await RuntimeArchiveInstaller.InstallAsync(
-                Root(context),
+                Root(context, java25),
                 descriptor,
                 async (archive, token) =>
                 {
+                    if (java25) return context.Assets!.Open("jre25-arm64-v8a.tar.xz");
                     response = await RuntimeClient.GetAsync(archive.DownloadUrl, HttpCompletionOption.ResponseHeadersRead, token);
                     response.EnsureSuccessStatusCode();
                     if (response.RequestMessage?.RequestUri?.Scheme != Uri.UriSchemeHttps)
@@ -64,7 +82,7 @@ internal static class AndroidRuntimeStore
                 },
                 progress,
                 ct);
-            MakeRuntimeCodeReadOnly(context, manifest);
+            MakeRuntimeCodeReadOnly(context, manifest, java25);
             return manifest;
         }
         finally
@@ -83,9 +101,9 @@ internal static class AndroidRuntimeStore
     private static HttpClient CreateRuntimeClient() =>
         Downloader.CreateHttpClient(category: NetworkCategory.Download);
 
-    private static void MakeRuntimeCodeReadOnly(Context context, RuntimeBundleManifest manifest)
+    private static void MakeRuntimeCodeReadOnly(Context context, RuntimeBundleManifest manifest, bool java25)
     {
-        var root = Root(context);
+        var root = Root(context, java25);
         foreach (var file in manifest.Files)
         {
             var mode = UnixFileMode.UserRead | UnixFileMode.GroupRead | UnixFileMode.OtherRead;
@@ -95,3 +113,6 @@ internal static class AndroidRuntimeStore
         }
     }
 }
+
+[System.Text.Json.Serialization.JsonSerializable(typeof(RuntimeArchiveDescriptor))]
+internal sealed partial class AndroidDescriptorContext : System.Text.Json.Serialization.JsonSerializerContext;
