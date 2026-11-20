@@ -106,7 +106,7 @@ new file mode 100644
 index 0000000..bb4739d
 --- /dev/null
 +++ b/MobileGlues-cpp/gl/glsl/fragment_output_indices.cpp
-@@ -0,0 +1,163 @@
+@@ -0,0 +1,166 @@
 +#include "fragment_output_indices.h"
 +
 +#include <algorithm>
@@ -278,7 +278,7 @@ new file mode 100644
 index 0000000..fc1a733
 --- /dev/null
 +++ b/MobileGlues-cpp/tests/fragment_output_indices_test.cpp
-@@ -0,0 +1,60 @@
+@@ -0,0 +1,65 @@
 +#include "../gl/glsl/fragment_output_indices.h"
 +
 +#include <cstdio>
