@@ -65,10 +65,15 @@ internal static class AndroidEmbeddedGame
         await CreateMobileOptionsIfMissingAsync(gameRoot, ct);
 
         var sdl = UsesSdl(context, versionId);
-        var nativeRoot = sdl ? context.ApplicationInfo!.NativeLibraryDir! : Path.Combine(runtimeRoot, "native");
-        RequireNativeFiles(nativeRoot, sdl
-            ? ["liblwjgl.so", "liblwjgl_opengl.so", "liblwjgl_stb.so", "libfreetype.so", "libopenal.so", "libmobileglues.so"]
-            : AndroidNativeLibraries.RequiredForJava(requiredJava));
+        var packagedNativeRoot = context.ApplicationInfo!.NativeLibraryDir!;
+        var nativeRoot = AndroidNativeLibraries.ResolveRoot(runtimeRoot, packagedNativeRoot,
+            requiredJava, allowPackagedFallback: sdl);
+        RequireNativeFiles(nativeRoot, AndroidNativeLibraries.RequiredForJava(requiredJava));
+        var sdlLibrary = sdl
+            ? AndroidNativeLibraries.ResolveLibrary("libSDL3.so", nativeRoot, packagedNativeRoot)
+            : null;
+        if (sdlLibrary is not null && !File.Exists(sdlLibrary))
+            throw new FileNotFoundException("The Android SDL bridge is missing.", sdlLibrary);
         var glfw = Path.Combine(nativeRoot, "libglfw.so");
         if (!File.Exists(glfw)) glfw = Path.Combine(context.ApplicationInfo!.NativeLibraryDir!, "libglfw.so");
         if (!File.Exists(glfw)) throw new FileNotFoundException("The Android GLFW bridge is missing.", glfw);
@@ -92,7 +97,7 @@ internal static class AndroidEmbeddedGame
 
         if (sdl)
         {
-            extraJvm.Add("-Dorg.lwjgl.sdl.libname=" + Path.Combine(context.ApplicationInfo!.NativeLibraryDir!, "libSDL3.so"));
+            extraJvm.Add("-Dorg.lwjgl.sdl.libname=" + sdlLibrary);
             extraJvm.Add("-Dorg.lwjgl.vulkan.libname=/system/lib64/libvulkan.so");
             extraJvm.Add("-Djna.boot.library.path=" + nativeRoot);
             extraJvm.Add("-Dorg.lwjgl.spvc.libname=" + Path.Combine(nativeRoot, "libspirv-cross-c-shared.so"));

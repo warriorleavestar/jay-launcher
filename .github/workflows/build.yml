@@ -233,6 +233,14 @@ jobs:
             "${{ runner.temp }}/android-sdk" \
             Amber.Android/obj/jay-glfw
 
+      - name: Build pinned SDL Android bridge
+        shell: bash
+        run: |
+          bash ../scripts/build-android-sdl.sh \
+            "${{ runner.temp }}/android-sdk" \
+            "${{ runner.temp }}/jdk" \
+            Amber.Android/obj/jay-sdl
+
       - name: Prepare stable preview signing key
         if: env.RELEASE_SIGNED_ANDROID == 'true'
         shell: bash
@@ -248,6 +256,7 @@ jobs:
           dotnet publish Amber.Android/Amber.Android.csproj -c Release -m:1
           -p:AndroidSdkDirectory=${{ runner.temp }}/android-sdk
           -p:JavaSdkDirectory=${{ runner.temp }}/jdk
+          -p:JaySdlRuntimeDir=${{ github.workspace }}/src/Amber.Android/obj/jay-sdl
           -p:AndroidPackageFormats=apk
 
       - name: Publish release-signed preview APK
@@ -260,6 +269,7 @@ jobs:
           dotnet publish Amber.Android/Amber.Android.csproj -c Release -m:1
           -p:AndroidSdkDirectory=${{ runner.temp }}/android-sdk
           -p:JavaSdkDirectory=${{ runner.temp }}/jdk
+          -p:JaySdlRuntimeDir=${{ github.workspace }}/src/Amber.Android/obj/jay-sdl
           -p:AndroidPackageFormats=apk
           -p:AndroidKeyStore=true
           -p:AndroidSigningKeyStore=${{ runner.temp }}/jay-android-preview.p12

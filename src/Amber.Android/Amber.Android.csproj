@@ -31,15 +31,24 @@
     <AndroidJavaSource Remove="Sdl/JaySdlActivity.java" />
   </ItemGroup>
 
-  <ItemGroup Condition="'$(JayModernRuntimeDir)' != ''">
+  <ItemGroup Condition="'$(JaySdlRuntimeDir)' != ''">
     <AndroidJavaSource Include="Sdl/JaySdlActivity.java" />
+    <AndroidLibrary Include="$(JaySdlRuntimeDir)/sdl-classes.jar" Bind="false" />
+    <AndroidNativeLibrary Include="$(JaySdlRuntimeDir)/arm64-v8a/libSDL3.so" Abi="arm64-v8a" />
+    <AndroidNativeLibrary Include="$(JaySdlRuntimeDir)/x86_64/libSDL3.so" Abi="x86_64" />
+    <AndroidAsset Include="$(JaySdlRuntimeDir)/SDL-LICENSE.txt" LogicalName="licenses/SDL-LICENSE.txt" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(JayModernRuntimeDir)' != ''">
     <AndroidAsset Include="$(JayModernRuntimeDir)/licenses/*" LogicalName="licenses/%(Filename)%(Extension)" />
-    <AndroidLibrary Include="$(JayModernRuntimeDir)/sdl-classes.jar" Bind="false" />
     <AndroidNativeLibrary Include="$(JayModernRuntimeDir)/lwjgl/*.so" Abi="arm64-v8a" />
-    <AndroidNativeLibrary Include="$(JayModernRuntimeDir)/libSDL3.so" Abi="arm64-v8a" />
-    <AndroidAsset Include="$(JayModernRuntimeDir)/SDL-LICENSE.txt" LogicalName="licenses/SDL-LICENSE.txt" />
     <AndroidAsset Include="$(JayModernRuntimeDir)/jre25-arm64-v8a.tar.xz" LogicalName="jre25-arm64-v8a.tar.xz" />
     <AndroidAsset Include="$(JayModernRuntimeDir)/jre25.json" LogicalName="jre25.json" />
+    <!-- Keep the old one-directory experimental input working for local bisects. -->
+    <AndroidJavaSource Include="Sdl/JaySdlActivity.java" Condition="'$(JaySdlRuntimeDir)' == ''" />
+    <AndroidLibrary Include="$(JayModernRuntimeDir)/sdl-classes.jar" Bind="false" Condition="'$(JaySdlRuntimeDir)' == ''" />
+    <AndroidNativeLibrary Include="$(JayModernRuntimeDir)/libSDL3.so" Abi="arm64-v8a" Condition="'$(JaySdlRuntimeDir)' == ''" />
+    <AndroidAsset Include="$(JayModernRuntimeDir)/SDL-LICENSE.txt" LogicalName="licenses/SDL-LICENSE.txt" Condition="'$(JaySdlRuntimeDir)' == ''" />
   </ItemGroup>
 
   <Target Name="BuildJayRuntimeProbe" AfterTargets="_ResolveAndroidTooling" BeforeTargets="_BuildApkEmbed">

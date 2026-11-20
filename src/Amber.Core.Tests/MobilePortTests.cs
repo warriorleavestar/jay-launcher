@@ -57,6 +57,37 @@ public sealed class MobilePortTests
     }
 
     [Fact]
+    public void AndroidSdlUsesCompleteDownloadedNativesAndOnlyFallsBackForLegacyPackages()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "jay-native-layout-" + Guid.NewGuid().ToString("N"));
+        var runtime = Path.Combine(root, "runtime");
+        var native = Path.Combine(runtime, "native");
+        var packaged = Path.Combine(root, "packaged");
+        Directory.CreateDirectory(native);
+        Directory.CreateDirectory(packaged);
+        try
+        {
+            Assert.Equal(packaged, AndroidNativeLibraries.ResolveRoot(runtime, packaged, 25, true));
+            foreach (var name in AndroidNativeLibraries.RequiredForJava(25))
+                File.WriteAllBytes(Path.Combine(native, name), [1]);
+
+            Assert.Equal(native, AndroidNativeLibraries.ResolveRoot(runtime, packaged, 25, true));
+            Assert.Equal(native, AndroidNativeLibraries.ResolveRoot(runtime, packaged, 25, false));
+
+            var packagedSdl = Path.Combine(packaged, "libSDL3.so");
+            File.WriteAllBytes(packagedSdl, [1]);
+            Assert.Equal(packagedSdl, AndroidNativeLibraries.ResolveLibrary("libSDL3.so", native, packaged));
+            var runtimeSdl = Path.Combine(native, "libSDL3.so");
+            File.WriteAllBytes(runtimeSdl, [1]);
+            Assert.Equal(runtimeSdl, AndroidNativeLibraries.ResolveLibrary("libSDL3.so", native, packaged));
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
     public void AndroidRuntimeReleaseReadsTheStandardReleaseFile()
     {
         var root = Path.Combine(Path.GetTempPath(), "jay-java-release-" + Guid.NewGuid().ToString("N"));
