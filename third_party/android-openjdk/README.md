@@ -3,12 +3,13 @@
 Jay needs a relocatable Android build of OpenJDK; it does not call or require another
 launcher. The reproducible runtime workflow starts from these pinned sources:
 
-- OpenJDK 25: `openjdk/jdk25u`, fetched by the pinned Android build scripts.
+- OpenJDK 25: `openjdk/jdk25u` commit
+  `5ee4eed9f7a7f3bca99a662cfe7f2642ec4e22be`.
 - Android cross-build patches and scripts: `FCL-Team/Android-OpenJDK-Build`, commit
   `7a0266e745d9b4acf400afa189b58e672900f710` from its JRE 25 line.
-- Jay's small overlay script: `scripts/prepare-android-openjdk.sh`, which verifies and
-  changes only the linker maximum page size so the resulting native libraries work on
-  16 KiB Android devices.
+- Jay's small overlay script and patch: `scripts/prepare-android-openjdk.sh` pins the
+  OpenJDK checkout, enables 16 KiB linker alignment, and disables the optional HotSpot
+  network-utilization counter on Android API 21 where `getifaddrs` is unavailable.
 
 The produced JRE includes OpenJDK's `legal/` tree, including GPL-2.0 with the Classpath
 Exception and third-party notices. Before adding the renderer, the workflow verifies that

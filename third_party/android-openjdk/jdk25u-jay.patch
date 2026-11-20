@@ -1,0 +1,35 @@
+diff --git a/src/hotspot/os/linux/os_perf_linux.cpp b/src/hotspot/os/linux/os_perf_linux.cpp
+index ff9a82bae..4d0f11660 100644
+--- a/src/hotspot/os/linux/os_perf_linux.cpp
++++ b/src/hotspot/os/linux/os_perf_linux.cpp
+@@ -35,7 +35,9 @@
+ #include <dlfcn.h>
+ #include <errno.h>
+ #include <fcntl.h>
++#ifndef __ANDROID__
+ #include <ifaddrs.h>
++#endif
+ #include <limits.h>
+ #include <pthread.h>
+ #include <stdarg.h>
+@@ -1009,6 +1011,12 @@ int64_t NetworkPerformanceInterface::NetworkPerformance::read_counter(const char
+ 
+ int NetworkPerformanceInterface::NetworkPerformance::network_utilization(NetworkInterface** network_interfaces) const
+ {
++#ifdef __ANDROID__
++  // Android API 21 has no getifaddrs/freeifaddrs. Network utilization is an
++  // optional management counter and Minecraft does not depend on it.
++  *network_interfaces = nullptr;
++  return OS_ERR;
++#else
+   ifaddrs* addresses;
+   ifaddrs* cur_address;
+ 
+@@ -1033,6 +1041,7 @@ int NetworkPerformanceInterface::NetworkPerformance::network_utilization(Network
+   *network_interfaces = ret;
+ 
+   return OS_OK;
++#endif
+ }
+ 
+ NetworkPerformanceInterface::NetworkPerformanceInterface() {

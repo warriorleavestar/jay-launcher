@@ -8,6 +8,14 @@ fi
 
 settings="$1/set_devkit_path.sh"
 test -f "$settings"
+source_commit='5ee4eed9f7a7f3bca99a662cfe7f2642ec4e22be'
+clone_script="$1/clone_jdk.sh"
+build_script="$1/build_jdk.sh"
+overlay_source="$(cd "$(dirname "$0")/.." && pwd)/third_party/android-openjdk/jdk25u-jay.patch"
+overlay_target="$1/patches/jdk25u-jay.patch"
+test -f "$clone_script"
+test -f "$build_script"
+test -f "$overlay_source"
 old_jdk21='export LDFLAGS="-L$NDK/platforms/android-$API/arch-$TARGET_SHORT/usr/lib"'
 new_jdk21='export LDFLAGS="-L$NDK/platforms/android-$API/arch-$TARGET_SHORT/usr/lib -Wl,-z,max-page-size=16384"'
 old_jdk25='export LDFLAGS="-L$NDK/platforms/android-$API/arch-$TARGET_SHORT/usr/lib -lstdc++ -lc++abi"'
@@ -33,3 +41,37 @@ if [[ "$(grep -Fc -- '-Wl,-z,max-page-size=16384' "$settings")" -ne 1 ]]; then
   echo "Failed to enable 16 KiB OpenJDK linking" >&2
   exit 1
 fi
+
+# The upstream FCL script used a shallow clone of the moving jdk25u head. That
+# made an otherwise pinned runtime stop building when OpenJDK changed around its
+# Android patch. Pin the official OpenJDK tree too, then apply Jay's small API-21
+# overlay after the upstream Android patch set.
+old_clone='git clone --depth 1 https://github.com/openjdk/jdk25u openjdk'
+if [[ "$(grep -Fxc "$old_clone" "$clone_script" || true)" -ne 1 ]]; then
+  echo "Pinned OpenJDK build source no longer has the expected clone command" >&2
+  exit 1
+fi
+OPENJDK_COMMIT="$source_commit" perl -pi -e '
+  if ($_ eq "git clone --depth 1 https://github.com/openjdk/jdk25u openjdk\n") {
+    $_ = "git init openjdk\n" .
+         "git -C openjdk remote add origin https://github.com/openjdk/jdk25u.git\n" .
+         "git -C openjdk fetch --depth 1 origin $ENV{OPENJDK_COMMIT}\n" .
+         "git -C openjdk checkout --detach FETCH_HEAD\n";
+  }
+' "$clone_script"
+
+cp "$overlay_source" "$overlay_target"
+old_apply='git apply --reject --whitespace=fix ../patches/jdk25u_android.diff || echo "git apply failed (Android patch set)"'
+if [[ "$(grep -Fxc "$old_apply" "$build_script" || true)" -ne 1 ]]; then
+  echo "Pinned OpenJDK build source no longer has the expected patch command" >&2
+  exit 1
+fi
+perl -pi -e '
+    if ($_ eq "git apply --reject --whitespace=fix ../patches/jdk25u_android.diff || echo \"git apply failed (Android patch set)\"\n") {
+      $_ .= "git apply --check ../patches/jdk25u-jay.patch\n";
+      $_ .= "git apply --whitespace=fix ../patches/jdk25u-jay.patch\n";
+    }
+  ' "$build_script"
+
+grep -Fqx "git -C openjdk fetch --depth 1 origin $source_commit" "$clone_script"
+grep -Fqx 'git apply --check ../patches/jdk25u-jay.patch' "$build_script"
