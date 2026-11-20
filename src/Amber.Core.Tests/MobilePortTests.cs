@@ -899,6 +899,19 @@ public sealed class MobilePortTests
     }
 
     [Fact]
+    public void GameActivityHandlesPhysicalKeyboardChangesWithoutKillingTheWorld()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var activity = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "GameActivity.cs"));
+
+        Assert.Contains("ConfigChanges.Keyboard", activity, StringComparison.Ordinal);
+        Assert.Contains("ConfigChanges.KeyboardHidden", activity, StringComparison.Ordinal);
+        Assert.Contains("ConfigChanges.Navigation", activity, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task AndroidRuntimeManifestRequiresSafeLicensedVerifiedFiles()
     {
         var root = Path.Combine(Path.GetTempPath(), "jay-runtime-" + Guid.NewGuid().ToString("N"));
