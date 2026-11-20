@@ -17,6 +17,9 @@ on:
       - 'third_party/android-shader-tools/**'
       - 'third_party/android-lwjgl/**'
       - 'src/Amber.Android/Java/**'
+      - 'src/Amber.Android/NativeJvmHost.cs'
+      - 'src/Amber.Android.Native/**'
+      - 'scripts/build-android-native.sh'
   workflow_dispatch:
     inputs:
       architecture:
@@ -33,6 +36,21 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  native-host:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Android NDK
+        shell: bash
+        run: (yes || true) | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;28.2.13676358"
+
+      - name: Build embedded JVM host
+        shell: bash
+        run: bash scripts/build-android-native.sh "$ANDROID_HOME" native-host
+
   build:
     timeout-minutes: 180
     strategy:

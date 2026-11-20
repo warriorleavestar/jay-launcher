@@ -65,18 +65,27 @@ public final class AndroidGameBootstrap {
 
     private AndroidGameBootstrap() {}
 
-    /** Routes the embedded JVM's console to logcat without a compile-time Android API dependency. */
-    private static final class LogcatOutputStream extends OutputStream {
+    /** Routes the embedded HotSpot JVM's console through Jay's native Android host. */
+    static final class LogcatOutputStream extends OutputStream {
         private static final int MAX_CHUNK = 3500;
-        private final Method println;
         private final int priority;
+        private final Sink sink;
         private final ByteArrayOutputStream line = new ByteArrayOutputStream();
 
-        LogcatOutputStream(int priority) throws ReflectiveOperationException {
-            this.priority = priority;
-            println = Class.forName("android.util.Log").getMethod(
-                "println", int.class, String.class, String.class);
+        interface Sink {
+            void write(int priority, byte[] message);
         }
+
+        LogcatOutputStream(int priority) {
+            this(priority, LogcatOutputStream::writeLogcat);
+        }
+
+        LogcatOutputStream(int priority, Sink sink) {
+            this.priority = priority;
+            this.sink = sink;
+        }
+
+        private static native void writeLogcat(int priority, byte[] message);
 
         @Override public synchronized void write(int value) throws IOException {
             int byteValue = value & 0xff;
@@ -95,24 +104,20 @@ public final class AndroidGameBootstrap {
         private void flushLine() throws IOException {
             if (line.size() == 0) return;
             String text = new String(line.toByteArray(), StandardCharsets.UTF_8);
-            try {
-                for (int start = 0; start < text.length();) {
-                    int end = start;
-                    int encodedLength = 0;
-                    while (end < text.length()) {
-                        int codePoint = text.codePointAt(end);
-                        int nextLength = utf8Length(codePoint);
-                        if (end > start && encodedLength + nextLength > MAX_CHUNK) break;
-                        encodedLength += nextLength;
-                        end += Character.charCount(codePoint);
-                    }
-                    println.invoke(null, priority, "JayMinecraft", text.substring(start, end));
-                    start = end;
+            for (int start = 0; start < text.length();) {
+                int end = start;
+                int encodedLength = 0;
+                while (end < text.length()) {
+                    int codePoint = text.codePointAt(end);
+                    int nextLength = utf8Length(codePoint);
+                    if (end > start && encodedLength + nextLength > MAX_CHUNK) break;
+                    encodedLength += nextLength;
+                    end += Character.charCount(codePoint);
                 }
-                line.reset();
-            } catch (ReflectiveOperationException error) {
-                throw new IOException("Could not write Minecraft output to logcat", error);
+                sink.write(priority, text.substring(start, end).getBytes(StandardCharsets.UTF_8));
+                start = end;
             }
+            line.reset();
         }
 
         private static int utf8Length(int codePoint) {
@@ -123,11 +128,11 @@ public final class AndroidGameBootstrap {
         }
     }
 
-    private static void routeConsoleToLogcat() {
+    static void routeConsoleToLogcat() {
         try {
             System.setOut(new PrintStream(new LogcatOutputStream(4), true, "UTF-8"));
             System.setErr(new PrintStream(new LogcatOutputStream(6), true, "UTF-8"));
-        } catch (ReflectiveOperationException | IOException unavailable) {
+        } catch (IOException unavailable) {
             System.err.println("Jay could not attach the embedded console to logcat: " + unavailable);
         }
     }

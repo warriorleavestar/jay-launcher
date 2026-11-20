@@ -158,6 +158,7 @@ public final class SdlMenuBootstrap {
     public static boolean dispatchLook(float x, float y) { return false; }
 
     public static void main(String[] args) throws Exception {
+        AndroidGameBootstrap.routeConsoleToLogcat();
         Class.forName(args[0]).getMethod("main", String[].class)
             .invoke(null, (Object)Arrays.copyOfRange(args, 1, args.length));
     }

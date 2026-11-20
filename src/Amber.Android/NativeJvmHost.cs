@@ -7,7 +7,7 @@ namespace Amber.Android;
 
 internal static partial class NativeJvmHost
 {
-    private const int ExpectedAbiVersion = 14;
+    private const int ExpectedAbiVersion = 15;
     public static bool GameplayControlsActive => IsAvailable && GetNativeGameplayMode() != 0;
 
     public static bool HasBlockTarget

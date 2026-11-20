@@ -10,7 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define JAY_JVM_ABI_VERSION 14
+#define JAY_JVM_ABI_VERSION 15
 #define JAY_ACTION_COUNT 12
 #define JAY_TEXT_CAPACITY 64
 #define JAY_KEY_CAPACITY 16
@@ -85,6 +85,23 @@ static uint32_t g_key_count;
 
 static int jay_query_gameplay_mode(void);
 static void jay_refresh_block_target(void);
+
+static void jay_logcat_write(JNIEnv *env, jclass owner, jint priority, jbyteArray message) {
+    (void)owner;
+    if (message == NULL) return;
+    jsize length = (*env)->GetArrayLength(env, message);
+    if (length <= 0) return;
+    jbyte *bytes = (*env)->GetByteArrayElements(env, message, NULL);
+    if (bytes == NULL) return;
+    char *text = malloc((size_t)length + 1);
+    if (text != NULL) {
+        memcpy(text, bytes, (size_t)length);
+        text[length] = '\0';
+        __android_log_write(priority, "JayMinecraft", text);
+        free(text);
+    }
+    (*env)->ReleaseByteArrayElements(env, message, bytes, JNI_ABORT);
+}
 
 __attribute__((visibility("default")))
 int jay_jvm_abi_version(void) {
@@ -221,6 +238,21 @@ int jay_jvm_run_main(JNIEnv *env, const char *class_name, int argc, const char *
         jay_capture_exception(env, "FindClass(main)");
         return JNI_ERR;
     }
+    jclass log_class = (*env)->FindClass(
+        env, "nz/work/minecraft/jay/AndroidGameBootstrap$LogcatOutputStream");
+    if (log_class == NULL) {
+        jay_capture_exception(env, "FindClass(LogcatOutputStream)");
+        return JNI_ERR;
+    }
+    JNINativeMethod log_methods[] = {
+        { "writeLogcat", "(I[B)V", (void *)jay_logcat_write },
+    };
+    if ((*env)->RegisterNatives(env, log_class, log_methods, 1) != JNI_OK) {
+        jay_capture_exception(env, "RegisterNatives(LogcatOutputStream)");
+        (*env)->DeleteLocalRef(env, log_class);
+        return JNI_ERR;
+    }
+    (*env)->DeleteLocalRef(env, log_class);
     jmethodID main_method = (*env)->GetStaticMethodID(env, main_class, "main", "([Ljava/lang/String;)V");
     if (main_method == NULL) {
         jay_capture_exception(env, "GetStaticMethodID(main)");
