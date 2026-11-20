@@ -48,7 +48,6 @@ public final class AndroidGameBootstrap {
     private static Class<?> blockHitType;
     private static Class<?> containerScreenType;
     private static Method containerHoveredSlot;
-    private static Field containerHoveredSlotField;
     private static Method containerSlotClicked;
     private static Field screenWidth;
     private static Field screenHeight;
@@ -234,7 +233,7 @@ public final class AndroidGameBootstrap {
             screenWidth = accessible(screenType.getDeclaredField("width"));
             screenHeight = accessible(screenType.getDeclaredField("height"));
             screenFocused = accessible(eventHandlerType.getDeclaredField("focused"));
-            containerHoveredSlotField = accessible(containerScreenType.getDeclaredField("hoveredSlot"));
+            containerHoveredSlot = slotAtMethod(containerScreenType, slotType);
             slotGetItem = accessible(slotType.getDeclaredMethod("getItem"));
             itemStackGetCount = accessible(itemStackType.getDeclaredMethod("getCount"));
         } catch (ReflectiveOperationException optionalInventoryApiUnavailable) {
@@ -360,7 +359,7 @@ public final class AndroidGameBootstrap {
             screenWidth = accessible(screenType.getDeclaredField("g"));
             screenHeight = accessible(screenType.getDeclaredField("h"));
             screenFocused = accessible(eventHandlerType.getDeclaredField("a"));
-            containerHoveredSlotField = accessible(containerScreenType.getDeclaredField("r"));
+            containerHoveredSlot = slotAtMethod(containerScreenType, slotType);
             containerSlotClicked = accessible(containerScreenType.getDeclaredMethod(
                 "a", slotType, int.class, int.class, clickType));
             slotId = accessible(slotType.getDeclaredField("a"));
@@ -372,6 +371,18 @@ public final class AndroidGameBootstrap {
     private static <T extends java.lang.reflect.AccessibleObject> T accessible(T value) {
         value.setAccessible(true);
         return value;
+    }
+
+    private static Method slotAtMethod(Class<?> containerType, Class<?> slotType)
+        throws NoSuchMethodException {
+        for (Method method : containerType.getDeclaredMethods()) {
+            Class<?>[] parameters = method.getParameterTypes();
+            if (!Modifier.isStatic(method.getModifiers()) && parameters.length == 2 &&
+                parameters[0] == double.class && parameters[1] == double.class &&
+                slotType.isAssignableFrom(method.getReturnType()))
+                return accessible(method);
+        }
+        throw new NoSuchMethodException("container slot at coordinates");
     }
 
     private static Field focusedListenerField(Class<?> screenType) throws NoSuchFieldException {
@@ -514,9 +525,7 @@ public final class AndroidGameBootstrap {
             if (containerScreenType == null || !containerScreenType.isInstance(screen)) return 0;
             double x = Math.max(0.0, Math.min(1.0, normalizedX)) * screenWidth.getInt(screen);
             double y = Math.max(0.0, Math.min(1.0, normalizedY)) * screenHeight.getInt(screen);
-            Object slot = containerHoveredSlotField != null
-                ? containerHoveredSlotField.get(screen)
-                : containerHoveredSlot.invoke(screen, x, y);
+            Object slot = containerHoveredSlot.invoke(screen, x, y);
             if (slot == null) return 0;
             Object stack = slotGetItem.invoke(slot);
             if (stack == null) return 0;
@@ -540,9 +549,7 @@ public final class AndroidGameBootstrap {
             if (containerScreenType == null || !containerScreenType.isInstance(screen)) return false;
             double x = Math.max(0.0, Math.min(1.0, normalizedX)) * screenWidth.getInt(screen);
             double y = Math.max(0.0, Math.min(1.0, normalizedY)) * screenHeight.getInt(screen);
-            Object slot = containerHoveredSlotField != null
-                ? containerHoveredSlotField.get(screen)
-                : containerHoveredSlot.invoke(screen, x, y);
+            Object slot = containerHoveredSlot.invoke(screen, x, y);
             if (slot == null) return false;
             Object stack = slotGetItem.invoke(slot);
             int total = stack == null ? 0 : Math.max(0, itemStackGetCount != null

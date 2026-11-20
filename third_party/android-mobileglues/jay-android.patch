@@ -194,6 +194,9 @@ index 0000000..bb4739d
 +            const size_t occurrence = search;
 +            search += needle.size();
 +            if (occurrence >= output.declaration_begin && occurrence < output.declaration_end) continue;
++            if (occurrence > 0 &&
++                (std::isalnum(static_cast<unsigned char>(essl[occurrence - 1])) ||
++                 essl[occurrence - 1] == '_')) continue;
 +
 +            const size_t open = occurrence + output.name.size();
 +            const size_t close = matching_bracket(essl, open);
@@ -334,5 +337,10 @@ index 0000000..fc1a733
 +
 +    const std::string local = "void f() { vec4 values[2]; values[i] = vec4(0.0); }";
 +    expect_equal("local array untouched", legalize_fragment_output_array_indices(local), local);
++
++    const std::string suffix_collision = R"(layout(location = 0) out vec4 color[2];
++void main() { vec4 local_color[2]; local_color[index] = vec4(1.0); })";
++    expect_equal("output name suffix does not match a local identifier",
++                 legalize_fragment_output_array_indices(suffix_collision), suffix_collision);
 +    std::puts("fragment output index tests passed");
 +}

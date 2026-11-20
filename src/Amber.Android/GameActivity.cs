@@ -39,7 +39,6 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
 
         var root = new FrameLayout(this);
         var surface = new SurfaceView(this);
-        AndroidSdlBridge.Load();
         surface.Holder!.AddCallback(this);
         root.AddView(surface, MatchParent());
         _touchOverlay = new TouchControlOverlay(this)
@@ -170,8 +169,6 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
     public void SurfaceCreated(ISurfaceHolder holder)
     {
         NativeJvmHost.SetSurface(holder.Surface);
-        AndroidSdlBridge.Initialize(this, holder.Surface!, holder.SurfaceFrame?.Width() ?? 1,
-            holder.SurfaceFrame?.Height() ?? 1);
         lock (_surfaceSync)
         {
             _surfaceAvailable = true;
@@ -182,7 +179,6 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
     public void SurfaceChanged(ISurfaceHolder holder, Format format, int width, int height)
     {
         NativeJvmHost.SetSurface(holder.Surface);
-        AndroidSdlBridge.Update(this, holder.Surface!, width, height);
     }
 
     public void SurfaceDestroyed(ISurfaceHolder holder)
@@ -193,7 +189,6 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
             if (_surfaceReady.Task.IsCompleted)
                 _surfaceReady = NewSurfaceReadySource();
         }
-        AndroidSdlBridge.Clear();
         NativeJvmHost.SetSurface(null);
     }
 
@@ -1096,16 +1091,16 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
             // freshly-created InputConnection. Feed it through the view-lifetime gate here and
             // consume the Activity event; soft keyboards still use CommitText directly.
             var menuKey = GlfwKey(e.KeyCode);
+            if (e.KeyCode is Keycode.Enter or Keycode.Tab && menuKey is { } controlKey)
+            {
+                NativeJvmHost.AddKey(controlKey);
+                return true;
+            }
             if (e.UnicodeChar > 0)
             {
                 if (_hardwareTextInputGate.AcceptHardwareCodePoint((int)e.KeyCode,
                         e.UnicodeChar, e.DownTime, SystemClock.UptimeMillis(), e.RepeatCount))
                     NativeJvmHost.AddCodePoint(e.UnicodeChar);
-                // Enter and Tab can expose a control character through UnicodeChar, but their
-                // Minecraft behavior is driven by the GLFW key callback (send chat / advance
-                // focus). Do not let the character path swallow that key edge.
-                if (e.KeyCode is Keycode.Enter or Keycode.Tab && menuKey is { } controlKey)
-                    NativeJvmHost.AddKey(controlKey);
                 return true;
             }
             if (menuKey is not { } mappedMenuKey) return false;
