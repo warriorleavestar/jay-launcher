@@ -1790,6 +1790,8 @@
   "mobile.runtime.ready": "已安裝並驗證 Java 執行環境。",
   "mobile.runtime.failed": "Java 執行環境安裝失敗：{0}",
   "mobile.runtime.unsupported": "暫不支援此裝置的處理器架構。",
+  "mobile.runtime.invalid_release": "已安裝的 Android Java 執行環境缺少有效版本資訊，請重新安裝遊戲執行環境。",
+  "mobile.runtime.too_old": "Minecraft {0} 需要 Java {1}，但目前 Android 執行環境是 Java {2}。請更新 Jay 的遊戲執行環境後再試。",
   "mobile.gateway.notification.channel": "Jay 網關",
   "mobile.gateway.notification.title": "Jay 網關正在執行",
   "mobile.gateway.notification.body": "Minecraft 在前景時仍可使用 Jay 本機位址。",

@@ -220,13 +220,16 @@ public sealed class GameSandboxTests : IDisposable
         var profile = MacSandbox.Profile(grants, "/Users/p");
         Assert.StartsWith("(version 1)", profile);
         Assert.Contains("(allow default)", profile);
-        Assert.Contains("(deny file-read* file-write* (subpath \"/Users/p/Library/Application Support/Amber\"))", profile);
-        Assert.Contains("(deny file-read* file-write* (subpath \"/Users/p/Library/Keychains\"))", profile);
-        Assert.Contains("(deny file-read* file-write* (subpath \"/Users/p/Library/Application Support/Google/Chrome\"))", profile);
+        Assert.Contains("(deny file-read* (require-all (subpath \"/Users/p/Library/Application Support/Amber\")", profile);
+        Assert.Contains("(deny file-write* (subpath \"/Users/p/Library/Application Support/Amber\"))", profile);
+        Assert.Contains("(deny file-read* (subpath \"/Users/p/Library/Keychains\"))", profile);
+        Assert.Contains("(deny file-write* (subpath \"/Users/p/Library/Keychains\"))", profile);
+        Assert.Contains("(deny file-read* (subpath \"/Users/p/Library/Application Support/Google/Chrome\"))", profile);
         Assert.Contains("com.apple.SecurityServer", profile);
-        // The jar inside the data folder comes after the deny (last match wins); the instance is not inside a denied folder.
-        var allow = profile.IndexOf("/Users/p/Library/Application Support/Amber/authlib-injector/a.jar", StringComparison.Ordinal);
-        Assert.True(allow > profile.IndexOf("(subpath \"/Users/p/Library/Application Support/Amber\")", StringComparison.Ordinal));
+        // sandbox-exec denies cannot be overridden by a later allow. The deny filter therefore excludes the
+        // handed-over file and its traversal parent while the write deny still covers the whole data folder.
+        Assert.Contains("(require-not (literal \"/Users/p/Library/Application Support/Amber/authlib-injector\"))", profile);
+        Assert.Contains("(require-not (literal \"/Users/p/Library/Application Support/Amber/authlib-injector/a.jar\"))", profile);
         Assert.DoesNotContain("minecraft/versions", profile);
         Assert.Equal(["-p", profile, "java", "-version"], MacSandbox.Arguments(profile, ["java", "-version"]));
     }

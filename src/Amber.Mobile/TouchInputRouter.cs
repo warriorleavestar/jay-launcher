@@ -3,6 +3,11 @@ namespace Amber.Mobile;
 public interface ITouchInputSink
 {
     void SetAction(TouchControlAction action, bool pressed);
+    /// <summary>
+    /// Releases an action because Android cancelled the gesture. Unlike a normal finger-up this
+    /// must not synthesize a tap when both edges arrive between two native input polls.
+    /// </summary>
+    void CancelAction(TouchControlAction action);
     void SetMovement(double x, double y);
     void AddLook(double x, double y);
     void SetPointer(double x, double y, bool click);
@@ -43,7 +48,12 @@ public sealed class TouchInputRouter
 
     public bool Press(int pointerId, double x, double y, bool controlsEnabled = true)
     {
-        Release(pointerId);
+        // A few Android touch drivers can repeat DOWN for an ID whose UP packet was
+        // lost while the window was being resized or an IME was opening.  Releasing
+        // the stale gesture here would turn it into a click or commit an inventory
+        // split even though the player never lifted that finger.  Abandon it with
+        // the same no-side-effect semantics as ACTION_CANCEL instead.
+        Cancel(pointerId);
         var control = Profile.HitTest(x, y, controlsEnabled);
         if (!controlsEnabled && control?.Action is not (TouchControlAction.Menu or TouchControlAction.Close or
             TouchControlAction.Keyboard or TouchControlAction.Settings))
@@ -124,6 +134,7 @@ public sealed class TouchInputRouter
         if (pointer.Action == TouchControlAction.Move)
         {
             var vector = Profile.MovementVector(x, y);
+            _pointers[pointerId] = pointer with { X = x, Y = y };
             Movement = vector;
             _sink.SetMovement(vector.X, vector.Y);
             SetAutoSprint(Profile.ForcedSprint && vector.Y <= -0.88);
@@ -132,21 +143,22 @@ public sealed class TouchInputRouter
         {
             var totalX = x - pointer.StartX;
             var totalY = y - pointer.StartY;
+            var physicalTotalX = totalX * Math.Clamp(Profile.ViewportAspectRatio, 1.2, 3.0);
             var dragged = pointer.HasDragged ||
-                totalX * totalX + totalY * totalY >= DragThreshold * DragThreshold;
+                physicalTotalX * physicalTotalX + totalY * totalY >= DragThreshold * DragThreshold;
             if (pointer.LongPressAction)
             {
                 if (pointer.MenuInteraction)
                 {
                     // Like Bedrock mobile, the finger starts at one item and a rightward swipe
                     // selects progressively more of the source stack. Sliding left returns to 1.
-                    var progress = Math.Clamp((x - pointer.StartX) / InventorySplitTravel, 0, 1);
+                    var progress = Math.Clamp(physicalTotalX / InventorySplitTravel, 0, 1);
                     var selected = 1 + (int)Math.Round(progress * (pointer.InventoryStackSize - 1));
                     pointer = pointer with { InventorySelectedCount = selected };
                 }
                 else if (dragged)
                 {
-                    _sink.SetAction(TouchControlAction.PrimaryAction, false);
+                    _sink.CancelAction(TouchControlAction.PrimaryAction);
                     AddLook(x - pointer.X, y - pointer.Y);
                     pointer = pointer with
                     {
@@ -158,7 +170,7 @@ public sealed class TouchInputRouter
             }
             else if (pointer.MenuInteraction && pointer.ClickOnRelease && dragged)
             {
-                var verticalScroll = Math.Abs(totalY) > Math.Abs(totalX) * 1.25;
+                var verticalScroll = Math.Abs(totalY) > Math.Abs(physicalTotalX) * 1.25;
                 if (verticalScroll)
                 {
                     var remainder = pointer.ScrollRemainder + (y - pointer.Y);
@@ -197,11 +209,11 @@ public sealed class TouchInputRouter
             {
                 _sink.SetPointer(x, y, false);
                 var verticalScroll = pointer.Scrolling ||
-                    (dragged && Math.Abs(totalY) > Math.Abs(totalX) * 1.25);
+                    (dragged && Math.Abs(totalY) > Math.Abs(physicalTotalX) * 1.25);
                 if (verticalScroll)
                 {
                     if (!pointer.Scrolling)
-                        if (pointer.HeldAction is { } heldAction) _sink.SetAction(heldAction, false);
+                        if (pointer.HeldAction is { } heldAction) _sink.CancelAction(heldAction);
                     var remainder = pointer.ScrollRemainder + (y - pointer.Y);
                     while (Math.Abs(remainder) >= ScrollStep)
                     {
@@ -235,9 +247,7 @@ public sealed class TouchInputRouter
         if (!_pointers.Remove(pointerId, out var pointer)) return false;
         if (pointer.Action == TouchControlAction.Move)
         {
-            Movement = (0, 0);
-            _sink.SetMovement(0, 0);
-            SetAutoSprint(false);
+            RestoreRemainingMovement();
         }
         else if (pointer.Action is null)
         {
@@ -259,6 +269,37 @@ public sealed class TouchInputRouter
         foreach (var pointerId in _pointers.Keys.ToArray()) Release(pointerId);
     }
 
+    /// <summary>
+    /// Abandons every active gesture without producing release-time clicks or
+    /// inventory transfers. Android sends CANCEL when the Activity loses the
+    /// gesture to the system; treating it as UP can interact with the game at a
+    /// location the player never released.
+    /// </summary>
+    public void CancelAll()
+    {
+        foreach (var pointerId in _pointers.Keys.ToArray()) Cancel(pointerId);
+    }
+
+    /// <summary>Abandons one recycled or system-cancelled pointer without release-time effects.</summary>
+    public bool Cancel(int pointerId)
+    {
+        if (!_pointers.Remove(pointerId, out var pointer)) return false;
+        if (pointer.Action == TouchControlAction.Move)
+        {
+            RestoreRemainingMovement(cancelAction: true);
+        }
+        else if (pointer.Action is null)
+        {
+            if (pointer.PointerHeld && pointer.HeldAction is { } heldAction)
+                _sink.CancelAction(heldAction);
+        }
+        else if (!pointer.ToggleAction)
+        {
+            _sink.CancelAction(pointer.Action.Value);
+        }
+        return true;
+    }
+
     private void TapAction(TouchControlAction action)
     {
         _sink.SetAction(action, true);
@@ -268,11 +309,26 @@ public sealed class TouchInputRouter
     private void AddLook(double x, double y) =>
         _sink.AddLook(x * Profile.LookSensitivity, y * Profile.LookSensitivity);
 
-    private void SetAutoSprint(bool active)
+    private void RestoreRemainingMovement(bool cancelAction = false)
+    {
+        var remaining = _pointers.Values.LastOrDefault(pointer =>
+            pointer.Action == TouchControlAction.Move);
+        var vector = remaining.Action == TouchControlAction.Move
+            ? Profile.MovementVector(remaining.X, remaining.Y)
+            : (0d, 0d);
+        Movement = vector;
+        _sink.SetMovement(vector.Item1, vector.Item2);
+        SetAutoSprint(Profile.ForcedSprint && vector.Item2 <= -0.88, cancelAction);
+    }
+
+    private void SetAutoSprint(bool active, bool cancelAction = false)
     {
         if (SprintLocked == active) return;
         SprintLocked = active;
-        _sink.SetAction(TouchControlAction.Sprint, active);
+        if (!active && cancelAction)
+            _sink.CancelAction(TouchControlAction.Sprint);
+        else
+            _sink.SetAction(TouchControlAction.Sprint, active);
     }
 
     private static bool CanDragLook(TouchControlAction action) => action is

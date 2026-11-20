@@ -162,6 +162,8 @@ jobs:
     timeout-minutes: 45
     env:
       RELEASE_SIGNED_ANDROID: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.publish_android_preview) }}
+      MINECRAFT_LEGACY_INPUT_VERSION: '1.21.11'
+      MINECRAFT_NAMED_INPUT_VERSION: '26.3'
     defaults:
       run:
         working-directory: src
@@ -184,6 +186,31 @@ jobs:
           -p:AndroidSdkDirectory=${{ runner.temp }}/android-sdk
           -p:JavaSdkDirectory=${{ runner.temp }}/jdk
           -p:AcceptAndroidSdkLicenses=true
+
+      - name: Verify Minecraft touch bridge signatures
+        shell: bash
+        run: |
+          set -euo pipefail
+          manifest="$(curl --fail --silent --show-error \
+            https://piston-meta.mojang.com/mc/game/version_manifest_v2.json)"
+          javap_path="$(find "${{ runner.temp }}/jdk" -type f -name javap -print -quit)"
+          test -n "$javap_path"
+          check_version() {
+            local version_id=$1
+            local version_url version_json client_url client_sha1 client_jar
+            version_url="$(jq --raw-output --arg id "$version_id" \
+              '.versions[] | select(.id == $id) | .url' <<<"$manifest" | head -n 1)"
+            test -n "$version_url"
+            version_json="$(curl --fail --silent --show-error "$version_url")"
+            client_url="$(jq --raw-output '.downloads.client.url' <<<"$version_json")"
+            client_sha1="$(jq --raw-output '.downloads.client.sha1' <<<"$version_json")"
+            client_jar="${{ runner.temp }}/minecraft-$version_id-client.jar"
+            curl --fail --location --retry 2 --output "$client_jar" "$client_url"
+            echo "$client_sha1  $client_jar" | sha1sum --check --strict
+            JAVAP_BIN="$javap_path" bash ../scripts/check-android-input-bridge.sh "$client_jar"
+          }
+          check_version "$MINECRAFT_LEGACY_INPUT_VERSION"
+          check_version "$MINECRAFT_NAMED_INPUT_VERSION"
 
       - name: Install Android NDK and CMake
         shell: bash
@@ -437,6 +464,99 @@ jobs:
           name: jay-ios-simulator
           path: packages/Jay-ios-simulator-arm64-experimental.tar.gz
           if-no-files-found: error
+
+  publish-experimental:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [publish, android]
+    # Never let an older main build overwrite a newer rolling download.
+    concurrency:
+      group: experimental-publish
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          pattern: 'jay-*'
+          path: release-assets
+          merge-multiple: true
+
+      - name: Validate rolling download assets
+        shell: bash
+        run: |
+          cd release-assets
+          for asset in \
+            Jay-win-x64.zip \
+            Jay-osx-arm64.dmg \
+            Jay-osx-x64.dmg \
+            Jay-linux-x64.tar.gz \
+            Jay-linux-arm64.tar.gz \
+            Jay-android-experimental.apk
+          do
+            test -s "$asset"
+          done
+          sha256sum \
+            Jay-win-x64.zip \
+            Jay-osx-arm64.dmg \
+            Jay-osx-x64.dmg \
+            Jay-linux-x64.tar.gz \
+            Jay-linux-arm64.tar.gz \
+            Jay-android-experimental.apk \
+            > SHA256SUMS.txt
+
+      - name: Publish rolling website downloads
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          current=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/experimental" --jq .object.sha 2>/dev/null || true)
+          if [ -n "$current" ] && [ "$current" != "$GITHUB_SHA" ]; then
+            status=$(gh api "repos/$GITHUB_REPOSITORY/compare/$current...$GITHUB_SHA" --jq .status)
+            case "$status" in
+              ahead) ;;
+              behind)
+                echo "experimental is already newer than $GITHUB_SHA; skipping."
+                exit 0 ;;
+              *)
+                echo "::warning::experimental and $GITHUB_SHA diverged ($status); skipping."
+                exit 0 ;;
+            esac
+          fi
+
+          cat > release-notes.md <<'NOTES'
+          Jay 0.8.0 滚动实验版。此下载通道随 main 构建自动更新，供网站访客直接下载。
+
+          包含 Windows x64、macOS Apple 芯片、macOS Intel、Linux x64、Linux ARM64 与 Android。
+          NOTES
+
+          assets=(
+            release-assets/Jay-win-x64.zip
+            release-assets/Jay-osx-arm64.dmg
+            release-assets/Jay-osx-x64.dmg
+            release-assets/Jay-linux-x64.tar.gz
+            release-assets/Jay-linux-arm64.tar.gz
+            release-assets/Jay-android-experimental.apk
+            release-assets/SHA256SUMS.txt
+          )
+          if gh release view experimental --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/experimental" \
+              -f sha="$GITHUB_SHA" -F force=true >/dev/null
+            gh release upload experimental "${assets[@]}" \
+              --repo "$GITHUB_REPOSITORY" --clobber
+            gh release edit experimental \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "Jay 0.8.0 滚动实验版" \
+              --notes-file release-notes.md \
+              --prerelease
+          else
+            gh release create experimental "${assets[@]}" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "Jay 0.8.0 滚动实验版" \
+              --notes-file release-notes.md \
+              --prerelease
+          fi
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')

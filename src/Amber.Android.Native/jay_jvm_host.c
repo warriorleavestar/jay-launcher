@@ -10,7 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define JAY_JVM_ABI_VERSION 11
+#define JAY_JVM_ABI_VERSION 14
 #define JAY_ACTION_COUNT 12
 #define JAY_TEXT_CAPACITY 64
 #define JAY_KEY_CAPACITY 16
@@ -49,7 +49,10 @@ static jmethodID g_dispatch_key;
 static jmethodID g_dispatch_scroll;
 static jmethodID g_dispatch_char;
 static jmethodID g_dispatch_look;
+static jmethodID g_is_gameplay_controls_active;
 static jmethodID g_is_block_target;
+static jmethodID g_is_text_input_focused;
+static jmethodID g_is_text_input_at;
 static jmethodID g_inventory_stack_count;
 static jmethodID g_dispatch_inventory_split;
 static _Atomic int g_input_bridge_error_logged;
@@ -80,6 +83,9 @@ static uint32_t g_text_count;
 static int32_t g_keys[JAY_KEY_CAPACITY];
 static uint32_t g_key_count;
 
+static int jay_query_gameplay_mode(void);
+static void jay_refresh_block_target(void);
+
 __attribute__((visibility("default")))
 int jay_jvm_abi_version(void) {
     return JAY_JVM_ABI_VERSION;
@@ -92,7 +98,7 @@ void jay_gameplay_mode_set(int active) {
 
 __attribute__((visibility("default")))
 int jay_gameplay_mode_get(void) {
-    return atomic_load(&g_gameplay_mode);
+    return jay_query_gameplay_mode();
 }
 
 __attribute__((visibility("default")))
@@ -243,7 +249,10 @@ int jay_jvm_run_main(JNIEnv *env, const char *class_name, int argc, const char *
         JAY_INPUT_METHOD(g_dispatch_scroll, "dispatchScroll", "(DD)Z");
         JAY_INPUT_METHOD(g_dispatch_char, "dispatchChar", "(I)Z");
         JAY_INPUT_METHOD(g_dispatch_look, "dispatchLook", "(FF)Z");
+        JAY_INPUT_METHOD(g_is_gameplay_controls_active, "isGameplayControlsActive", "()Z");
         JAY_INPUT_METHOD(g_is_block_target, "isBlockTarget", "()Z");
+        JAY_INPUT_METHOD(g_is_text_input_focused, "isTextInputFocused", "()Z");
+        JAY_INPUT_METHOD(g_is_text_input_at, "isTextInputAt", "(FF)Z");
         JAY_INPUT_METHOD(g_inventory_stack_count, "inventoryStackCount", "(FF)I");
         JAY_INPUT_METHOD(g_dispatch_inventory_split, "dispatchInventorySplit", "(FFI)Z");
 #undef JAY_INPUT_METHOD
@@ -291,6 +300,18 @@ static int jay_finish_input_call(JNIEnv *env, int attached, jboolean delivered) 
     return success;
 }
 
+static int jay_query_gameplay_mode(void) {
+    int attached;
+    JNIEnv *env = jay_input_environment(&attached);
+    if (env == NULL || g_is_gameplay_controls_active == NULL)
+        return atomic_load(&g_gameplay_mode);
+    jboolean active = (*env)->CallStaticBooleanMethod(env, g_input_bridge_class,
+        g_is_gameplay_controls_active);
+    int result = jay_finish_input_call(env, attached, active);
+    atomic_store(&g_gameplay_mode, result);
+    return result;
+}
+
 __attribute__((visibility("default")))
 int jay_java_pointer(float x, float y, uint32_t clicks) {
     int attached;
@@ -329,7 +350,28 @@ int jay_java_inventory_split(float x, float y, int count) {
 
 __attribute__((visibility("default")))
 int jay_block_target_get(void) {
+    jay_refresh_block_target();
     return atomic_load(&g_block_target);
+}
+
+__attribute__((visibility("default")))
+int jay_text_input_focused_get(void) {
+    int attached;
+    JNIEnv *env = jay_input_environment(&attached);
+    if (env == NULL || g_is_text_input_focused == NULL) return 0;
+    jboolean focused = (*env)->CallStaticBooleanMethod(env, g_input_bridge_class,
+        g_is_text_input_focused);
+    return jay_finish_input_call(env, attached, focused);
+}
+
+__attribute__((visibility("default")))
+int jay_text_input_at_get(float x, float y) {
+    int attached;
+    JNIEnv *env = jay_input_environment(&attached);
+    if (env == NULL || g_is_text_input_at == NULL) return 0;
+    jboolean targeted = (*env)->CallStaticBooleanMethod(env, g_input_bridge_class,
+        g_is_text_input_at, (jfloat)x, (jfloat)y);
+    return jay_finish_input_call(env, attached, targeted);
 }
 
 static void jay_refresh_block_target(void) {
@@ -435,6 +477,17 @@ void jay_input_set_action(int action, int pressed) {
         atomic_fetch_and(&g_actions, ~bit);
         atomic_fetch_or(&g_action_taps, bit);
     }
+    atomic_fetch_add(&g_generation, 1);
+}
+
+__attribute__((visibility("default")))
+void jay_input_cancel_action(int action) {
+    if (action < 0 || action >= JAY_ACTION_COUNT) return;
+    uint32_t bit = 1u << (uint32_t)action;
+    // A cancelled Android gesture is not a short tap. Clear both the held state and any tap that
+    // has not yet been consumed so ACTION_CANCEL cannot produce an attack, jump or menu action.
+    atomic_fetch_and(&g_actions, ~bit);
+    atomic_fetch_and(&g_action_taps, ~bit);
     atomic_fetch_add(&g_generation, 1);
 }
 

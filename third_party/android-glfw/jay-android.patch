@@ -10,7 +10,7 @@ index 1057a6f..b0e5483 100644
 +    target_link_libraries(glfw PRIVATE android log)
 +    target_link_options(glfw PRIVATE "-Wl,-z,max-page-size=16384")
 +endif()
-
+ 
  # Workaround for CMake not knowing about .m files before version 3.16
  if (CMAKE_VERSION VERSION_LESS "3.16" AND APPLE)
 diff --git a/src/null_platform.h b/src/null_platform.h
@@ -29,16 +29,16 @@ index 4843a76..baa02ca 100644
 +    uint64_t        jayInputGeneration;
 +#endif
  } _GLFWwindowNull;
-
+ 
  // Null-specific per-monitor data
 diff --git a/src/null_window.c b/src/null_window.c
 index 1db0811..b84b668 100644
 --- a/src/null_window.c
 +++ b/src/null_window.c
 @@ -29,6 +29,92 @@
-
+ 
  #include <stdlib.h>
-
+ 
 +#if defined(__ANDROID__)
 +#include <android/native_window.h>
 +#include <dlfcn.h>
@@ -128,7 +128,7 @@ index 1db0811..b84b668 100644
  static void applySizeLimits(_GLFWwindow* window, int* width, int* height)
  {
      if (window->numer != GLFW_DONT_CARE && window->denom != GLFW_DONT_CARE)
-@@ -46,9 +79,15 @@ static void applySizeLimits(_GLFWwindow* window, int* width, int* height)
+@@ -46,10 +79,17 @@ static void applySizeLimits(_GLFWwindow* window, int* width, int* height)
      else if (window->maxwidth != GLFW_DONT_CARE)
          *width = _glfw_min(*width, window->maxwidth);
  
@@ -213,7 +213,7 @@ index 1db0811..b84b668 100644
  }
  
  void _glfwSetWindowTitleNull(_GLFWwindow* window, const char* title)
-@@ -486,6 +544,168 @@ GLFWbool _glfwWindowVisibleNull(_GLFWwindow* window)
+@@ -486,6 +544,166 @@ GLFWbool _glfwWindowVisibleNull(_GLFWwindow* window)
  
 +#if defined(__ANDROID__)
 +static void inputMouseButton(_GLFWwindow* window, int button, int action)
@@ -248,12 +248,10 @@ index 1db0811..b84b668 100644
 +
 +static void inputChar(_GLFWwindow* window, uint32_t codepoint)
 +{
-+    GLFWcharfun callback = window->callbacks.character;
-+    const int delivered = jayJavaChar(codepoint);
-+    if (delivered)
-+        window->callbacks.character = NULL;
-+    _glfwInputChar(window, codepoint, 0, GLFW_TRUE);
-+    window->callbacks.character = callback;
++    // Reflection invokes Minecraft's keyboard handler directly. Calling GLFW's fallback
++    // as well duplicates every character on current game versions.
++    if (!jayJavaChar(codepoint))
++        _glfwInputChar(window, codepoint, 0, GLFW_TRUE);
 +}
 +#endif
 +
@@ -415,7 +413,7 @@ diff --git a/src/egl_context.c b/src/egl_context.c
 index ef65dd3..e3b8d6d 100644
 --- a/src/egl_context.c
 +++ b/src/egl_context.c
-@@ -383,8 +383,15 @@ GLFWbool _glfwInitEGL(void)
+@@ -383,8 +383,17 @@ GLFWbool _glfwInitEGL(void)
      if (_glfw.egl.handle)
          return GLFW_TRUE;
  
@@ -445,7 +443,7 @@ index ef65dd3..e3b8d6d 100644
  
      _glfw.egl.GetConfigAttrib = (PFN_eglGetConfigAttrib)
          _glfwPlatformGetModuleSymbol(_glfw.egl.handle, "eglGetConfigAttrib");
-@@ -799,8 +810,18 @@ GLFWbool _glfwCreateContextEGL(_GLFWwindow* window,
+@@ -799,8 +810,20 @@ GLFWbool _glfwCreateContextEGL(_GLFWwindow* window,
          else
              sonames = glsonames;
  

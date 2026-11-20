@@ -14,6 +14,65 @@ namespace Amber.Core.Tests;
 
 public sealed class MobilePortTests
 {
+    [Theory]
+    [InlineData("25.0.5-internal", 25)]
+    [InlineData("21.0.7+6-LTS", 21)]
+    [InlineData("1.8.0_462", 8)]
+    [InlineData("17", 17)]
+    public void AndroidRuntimeReleaseParsesModernAndLegacyJavaVersions(string version, int expected)
+    {
+        Assert.Equal(expected, JavaRuntimeRelease.ParseMajor(version));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("not-java")]
+    [InlineData("1")]
+    [InlineData("0.0")]
+    public void AndroidRuntimeReleaseRejectsInvalidVersions(string version)
+    {
+        Assert.Null(JavaRuntimeRelease.ParseMajor(version));
+    }
+
+    [Fact]
+    public void AndroidJava21RuntimeDoesNotRequireJava25GraphicsLibraries()
+    {
+        var required = AndroidNativeLibraries.RequiredForJava(21);
+
+        Assert.Contains("libmobileglues.so", required);
+        Assert.Contains("liblwjgl_opengl.so", required);
+        Assert.DoesNotContain("liblwjgl_vma.so", required);
+        Assert.DoesNotContain("libshaderc.so", required);
+        Assert.DoesNotContain("libspirv-cross.so", required);
+    }
+
+    [Fact]
+    public void AndroidJava25RuntimeRequiresExperimentalGraphicsLibraries()
+    {
+        var required = AndroidNativeLibraries.RequiredForJava(25);
+
+        Assert.Contains("liblwjgl_vma.so", required);
+        Assert.Contains("libshaderc.so", required);
+        Assert.Contains("libspirv-cross.so", required);
+    }
+
+    [Fact]
+    public void AndroidRuntimeReleaseReadsTheStandardReleaseFile()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "jay-java-release-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            File.WriteAllText(Path.Combine(root, "release"),
+                "IMPLEMENTOR=\"Jay test\"\nJAVA_VERSION=\"25.0.5-internal\"\n");
+            Assert.Equal(25, JavaRuntimeRelease.ReadMajor(root));
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
     [Fact]
     public async Task FreshMobileProfileCreatesPrivateIdentityAndEmptyServerList()
     {
@@ -108,7 +167,7 @@ public sealed class MobilePortTests
         {
             var halfWidth = control.Action == TouchControlAction.Inventory
                 ? control.Radius * 0.82 / profile.ViewportAspectRatio
-                : control.Radius;
+                : control.Radius / profile.ViewportAspectRatio;
             var halfHeight = control.Action == TouchControlAction.Inventory
                 ? control.Radius * 0.82
                 : control.Radius;
@@ -120,7 +179,8 @@ public sealed class MobilePortTests
             {
                 if (control.Action == TouchControlAction.Move)
                     Assert.Equal(TouchControlAction.Move,
-                        TouchControlLayout.HitTest(control.CenterX + control.Radius * 0.65, control.CenterY)!.Action);
+                        TouchControlLayout.HitTest(control.CenterX +
+                            control.Radius * 0.65 / profile.ViewportAspectRatio, control.CenterY)!.Action);
                 else
                     Assert.Equal(control.Action, TouchControlLayout.HitTest(control.CenterX, control.CenterY)!.Action);
             }
@@ -130,7 +190,8 @@ public sealed class MobilePortTests
         }
 
         var move = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Move);
-        var right = TouchControlLayout.JoystickVector(move.CenterX + move.Radius * 2, move.CenterY);
+        var right = TouchControlLayout.JoystickVector(move.CenterX +
+            move.Radius * 2 / profile.ViewportAspectRatio, move.CenterY);
         Assert.Equal(1, right.X, 6);
         Assert.Equal(0, right.Y, 6);
         Assert.DoesNotContain(TouchControlLayout.Default, control => control.Label is "Q" or "E" or "Run" or "Use");
@@ -166,7 +227,8 @@ public sealed class MobilePortTests
         var move = profile.Controls.Single(control => control.Action == TouchControlAction.Move);
         Assert.Equal(TouchControlAction.Sneak,
             profile.HitTest(move.CenterX, move.CenterY)!.Action);
-        var direction = profile.MovementVector(move.CenterX + move.Radius, move.CenterY + move.Radius * 0.15);
+        var direction = profile.MovementVector(move.CenterX +
+            move.Radius / profile.ViewportAspectRatio, move.CenterY + move.Radius * 0.15);
         Assert.Equal(1, direction.X, 6);
         Assert.Equal(0, direction.Y, 6);
 
@@ -181,6 +243,71 @@ public sealed class MobilePortTests
             control.Action == TouchControlAction.Settings && control.GameplayVisible && control.MenuVisible);
         Assert.Contains(profile.Controls, control =>
             control.Action == TouchControlAction.Close && !control.GameplayVisible && control.MenuVisible);
+    }
+
+    [Fact]
+    public void TouchControlsUseSquarePixelGeometryOnLandscapeTablets()
+    {
+        var profile = new TouchControlProfile
+        {
+            Mode = TouchControlMode.JoystickAndTap,
+            ViewportAspectRatio = 1.6
+        };
+        var move = profile.Controls.Single(control => control.Action == TouchControlAction.Move);
+        var jump = profile.Controls.Single(control => control.Action == TouchControlAction.Jump);
+
+        // One rendered radius is radius/aspect in normalised X but radius in normalised Y.
+        Assert.Equal(TouchControlAction.Move, profile.HitTest(
+            move.CenterX + move.Radius * 0.99 / profile.ViewportAspectRatio,
+            move.CenterY)!.Action);
+        Assert.Null(profile.HitTest(
+            move.CenterX + move.Radius * 1.01 / profile.ViewportAspectRatio,
+            move.CenterY));
+        Assert.Equal(TouchControlAction.Jump, profile.HitTest(
+            jump.CenterX + jump.Radius * 0.99 / profile.ViewportAspectRatio,
+            jump.CenterY)!.Action);
+        Assert.Null(profile.HitTest(
+            jump.CenterX + jump.Radius * 1.01 / profile.ViewportAspectRatio,
+            jump.CenterY));
+
+        var rightEdge = profile.MovementVector(
+            move.CenterX + move.Radius / profile.ViewportAspectRatio, move.CenterY);
+        Assert.Equal(1, rightEdge.X, 6);
+        Assert.Equal(0, rightEdge.Y, 6);
+    }
+
+    [Fact]
+    public void TouchGestureThresholdsUseSquarePixelGeometryOnLandscapeTablets()
+    {
+        var profile = new TouchControlProfile { ViewportAspectRatio = 1.6 };
+        var sink = new RecordingTouchSink();
+        var router = new TouchInputRouter(sink, profile);
+
+        Assert.True(router.Press(1, 0.50, 0.40));
+        Assert.True(router.Move(1, 0.50 + 0.014 / profile.ViewportAspectRatio, 0.40));
+        Assert.True(router.Release(1));
+        Assert.Single(sink.Pointers, pointer => pointer.Click);
+
+        Assert.True(router.Press(2, 0.50, 0.40));
+        Assert.True(router.Move(2, 0.50 + 0.016 / profile.ViewportAspectRatio, 0.40));
+        Assert.True(router.Release(2));
+        Assert.Single(sink.Pointers, pointer => pointer.Click);
+    }
+
+    [Fact]
+    public void TouchMenuClassifiesDragDirectionInPhysicalPixels()
+    {
+        var profile = new TouchControlProfile { ViewportAspectRatio = 1.6 };
+        var sink = new RecordingTouchSink();
+        var router = new TouchInputRouter(sink, profile);
+
+        Assert.True(router.Press(1, 0.35, 0.45, controlsEnabled: false));
+        Assert.True(router.Move(1, 0.40, 0.52));
+        Assert.Contains((TouchControlAction.PrimaryAction, true), sink.Actions);
+        Assert.DoesNotContain(sink.Actions,
+            action => action.Action is TouchControlAction.PreviousSlot or TouchControlAction.NextSlot);
+        Assert.True(router.Release(1));
+        Assert.Contains((TouchControlAction.PrimaryAction, false), sink.Actions);
     }
 
     [Fact]
@@ -264,12 +391,13 @@ public sealed class MobilePortTests
     public void TouchInputRouterKeepsSimultaneousMovementAndJumpIndependent()
     {
         var sink = new RecordingTouchSink();
-        var router = new TouchInputRouter(sink);
-        var move = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Move);
-        var jump = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Jump);
+        var profile = new TouchControlProfile();
+        var router = new TouchInputRouter(sink, profile);
+        var move = profile.Controls.Single(control => control.Action == TouchControlAction.Move);
+        var jump = profile.Controls.Single(control => control.Action == TouchControlAction.Jump);
 
-        Assert.True(router.Press(10, move.CenterX + move.Radius * 0.65, move.CenterY));
-        Assert.True(router.Move(10, move.CenterX + move.Radius, move.CenterY));
+        Assert.True(router.Press(10, move.CenterX + move.Radius * 0.65 / profile.ViewportAspectRatio, move.CenterY));
+        Assert.True(router.Move(10, move.CenterX + move.Radius / profile.ViewportAspectRatio, move.CenterY));
         Assert.True(router.Press(11, jump.CenterX, jump.CenterY));
         Assert.Contains((TouchControlAction.Jump, true), sink.Actions);
         Assert.Equal(1, sink.LastMovement.X, 6);
@@ -278,6 +406,25 @@ public sealed class MobilePortTests
         Assert.Contains((TouchControlAction.Jump, false), sink.Actions);
         Assert.Equal(1, sink.LastMovement.X, 6);
         Assert.True(router.Release(10));
+        Assert.Equal((0d, 0d), sink.LastMovement);
+    }
+
+    [Fact]
+    public void TouchInputRouterRestoresFirstMovementFingerWhenSecondOneEnds()
+    {
+        var sink = new RecordingTouchSink();
+        var profile = new TouchControlProfile { Mode = TouchControlMode.JoystickAndTap };
+        var router = new TouchInputRouter(sink, profile);
+        var move = profile.Controls.Single(control => control.Action == TouchControlAction.Move);
+
+        Assert.True(router.Press(101, move.CenterX + move.Radius * 0.8 / profile.ViewportAspectRatio, move.CenterY));
+        Assert.Equal(0.8, sink.LastMovement.X, 6);
+        Assert.True(router.Press(102, move.CenterX - move.Radius * 0.8 / profile.ViewportAspectRatio, move.CenterY));
+        Assert.Equal(-0.8, sink.LastMovement.X, 6);
+
+        Assert.True(router.Release(102));
+        Assert.Equal(0.8, sink.LastMovement.X, 6);
+        Assert.True(router.Release(101));
         Assert.Equal((0d, 0d), sink.LastMovement);
     }
 
@@ -323,7 +470,7 @@ public sealed class MobilePortTests
         Assert.True(router.Press(15, 0.55, 0.42));
         Assert.True(router.BeginLongPress(15));
         Assert.True(router.Move(15, 0.62, 0.37));
-        Assert.Contains((TouchControlAction.PrimaryAction, false), sink.Actions);
+        Assert.Contains(TouchControlAction.PrimaryAction, sink.CanceledActions);
         Assert.False(router.IsLongPress(15));
         Assert.Equal(0.07 * 1.65, sink.LastLook.X, 6);
         Assert.Equal(-0.05 * 1.65, sink.LastLook.Y, 6);
@@ -334,11 +481,14 @@ public sealed class MobilePortTests
     public void TouchInputRouterLetsSecondFingerAimWhileMovementStaysHeld()
     {
         var sink = new RecordingTouchSink();
-        var router = new TouchInputRouter(sink);
-        var move = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Move);
+        var profile = new TouchControlProfile();
+        var router = new TouchInputRouter(sink, profile);
+        var move = profile.Controls.Single(control => control.Action == TouchControlAction.Move);
 
-        Assert.True(router.Press(13, move.CenterX + move.Radius * 0.65, move.CenterY));
-        Assert.True(router.Move(13, move.CenterX + move.Radius, move.CenterY));
+        Assert.True(router.Press(13, move.CenterX +
+            move.Radius * 0.65 / profile.ViewportAspectRatio, move.CenterY));
+        Assert.True(router.Move(13, move.CenterX +
+            move.Radius / profile.ViewportAspectRatio, move.CenterY));
         Assert.Equal(1, sink.LastMovement.X, 6);
 
         Assert.True(router.Press(14, 0.55, 0.38));
@@ -508,7 +658,7 @@ public sealed class MobilePortTests
 
         Assert.True(router.Press(44, 0.42, 0.40, controlsEnabled: false));
         Assert.True(router.BeginLongPress(44));
-        Assert.True(router.Move(44, 0.42 + 0.24 * 31 / 63, 0.40));
+        Assert.True(router.Move(44, 0.42 + 0.24 * 31 / 63 / router.Profile.ViewportAspectRatio, 0.40));
         Assert.Equal(32, Assert.Single(router.InventorySplitSelections).Count);
         Assert.True(router.Release(44));
         Assert.Equal([(0.42, 0.40, 32)], sink.InventorySplits);
@@ -531,6 +681,128 @@ public sealed class MobilePortTests
         Assert.Equal(1, sink.Actions.Count(action =>
             action == (TouchControlAction.PrimaryAction, false)));
         Assert.DoesNotContain(sink.Pointers, pointer => pointer.Click);
+    }
+
+    [Fact]
+    public void TouchInputRouterCancelDoesNotTurnPendingTapIntoClick()
+    {
+        var sink = new RecordingTouchSink();
+        var router = new TouchInputRouter(sink);
+
+        Assert.True(router.Press(80, 0.52, 0.45));
+        router.CancelAll();
+
+        Assert.DoesNotContain(sink.Pointers, pointer => pointer.Click);
+        Assert.False(router.Release(80));
+    }
+
+    [Fact]
+    public void TouchInputRouterCancelDoesNotTransferSelectedInventoryItems()
+    {
+        var sink = new RecordingTouchSink();
+        var router = new TouchInputRouter(sink, inventoryStackCount: (_, _) => 64);
+
+        Assert.True(router.Press(81, 0.42, 0.40, controlsEnabled: false));
+        Assert.True(router.BeginLongPress(81));
+        Assert.True(router.Move(81, 0.42 + 0.24 * 31 / 63 / router.Profile.ViewportAspectRatio, 0.40));
+        Assert.Equal(32, Assert.Single(router.InventorySplitSelections).Count);
+
+        router.CancelAll();
+
+        Assert.Empty(sink.InventorySplits);
+        Assert.Empty(router.InventorySplitSelections);
+        Assert.False(router.Release(81));
+    }
+
+    [Fact]
+    public void TouchInputRouterCancelReleasesMovementAndMining()
+    {
+        var sink = new RecordingTouchSink();
+        var profile = new TouchControlProfile();
+        var router = new TouchInputRouter(sink, profile);
+        var move = profile.Controls.Single(control => control.Action == TouchControlAction.Move);
+
+        Assert.True(router.Press(82, move.CenterX +
+            move.Radius * 0.65 / profile.ViewportAspectRatio, move.CenterY));
+        Assert.True(router.Move(82, move.CenterX +
+            move.Radius / profile.ViewportAspectRatio, move.CenterY));
+        Assert.True(router.Press(83, 0.55, 0.42));
+        Assert.True(router.BeginLongPress(83));
+        Assert.Equal(1, sink.LastMovement.X, 6);
+        Assert.True(router.IsPressed(TouchControlAction.PrimaryAction));
+
+        router.CancelAll();
+
+        Assert.Equal((0d, 0d), sink.LastMovement);
+        Assert.False(router.IsPressed(TouchControlAction.PrimaryAction));
+        Assert.Contains(TouchControlAction.PrimaryAction, sink.CanceledActions);
+        Assert.False(router.Release(82));
+        Assert.False(router.Release(83));
+    }
+
+    [Fact]
+    public void TouchInputRouterCancelUsesNonTappingActionEdge()
+    {
+        var sink = new RecordingTouchSink();
+        var profile = new TouchControlProfile { Mode = TouchControlMode.JoystickAndTap };
+        var router = new TouchInputRouter(sink, profile);
+        var jump = profile.Controls.Single(control => control.Action == TouchControlAction.Jump);
+
+        Assert.True(router.Press(85, jump.CenterX, jump.CenterY));
+        router.CancelAll();
+
+        Assert.Contains((TouchControlAction.Jump, true), sink.Actions);
+        Assert.DoesNotContain((TouchControlAction.Jump, false), sink.Actions);
+        Assert.Contains(TouchControlAction.Jump, sink.CanceledActions);
+    }
+
+    [Fact]
+    public void TouchInputRouterRepeatedPointerDownCancelsTheStaleGestureWithoutClicking()
+    {
+        var sink = new RecordingTouchSink();
+        var router = new TouchInputRouter(sink, inventoryStackCount: (_, _) => 64);
+
+        Assert.True(router.Press(84, 0.42, 0.40, controlsEnabled: false));
+        Assert.True(router.BeginLongPress(84));
+        Assert.True(router.Move(84, 0.42 + 0.24 * 31 / 63 / router.Profile.ViewportAspectRatio, 0.40));
+        Assert.Equal(32, Assert.Single(router.InventorySplitSelections).Count);
+
+        Assert.True(router.Press(84, 0.70, 0.55, controlsEnabled: false));
+
+        Assert.Empty(sink.InventorySplits);
+        Assert.DoesNotContain(sink.Pointers, pointer => pointer.Click);
+        Assert.Empty(router.InventorySplitSelections);
+        Assert.True(router.Release(84));
+        Assert.Single(sink.Pointers, pointer => pointer.Click);
+    }
+
+    [Fact]
+    public void HardwareTextInputGateSurvivesRecreatedInputConnections()
+    {
+        var gate = new HardwareTextInputGate();
+
+        Assert.True(gate.Accept(45, downTime: 1000, deliveredAt: 1010, repeatCount: 0));
+        Assert.False(gate.Accept(45, downTime: 1000, deliveredAt: 1011, repeatCount: 0));
+        Assert.False(gate.Accept(45, downTime: 1002, deliveredAt: 1060, repeatCount: 0));
+        Assert.True(gate.Accept(45, downTime: 1200, deliveredAt: 1200, repeatCount: 0));
+        Assert.True(gate.Accept(45, downTime: 1200, deliveredAt: 1250, repeatCount: 1));
+        Assert.False(gate.Accept(45, downTime: 1200, deliveredAt: 1251, repeatCount: 1));
+        Assert.True(gate.Accept(46, downTime: 1252, deliveredAt: 1252, repeatCount: 0));
+    }
+
+    [Fact]
+    public void HardwareTextInputGateSuppressesImeCommitForPhysicalKeyOnly()
+    {
+        var gate = new HardwareTextInputGate();
+
+        Assert.True(gate.AcceptHardwareCodePoint(45, 'q', 500, 1_000, 0));
+        Assert.False(gate.AcceptCommittedCodePoint('q', 1_030));
+        Assert.False(gate.AcceptCommittedCodePoint('q', 1_040));
+        Assert.True(gate.AcceptCommittedCodePoint('q', 1_501));
+        Assert.True(gate.AcceptHardwareCodePoint(51, 'w', 700, 2_000, 0));
+        Assert.True(gate.AcceptCommittedCodePoint('e', 2_020));
+        Assert.False(gate.AcceptCommittedCodePoint('e', 2_021));
+        Assert.True(gate.AcceptCommittedCodePoint('e', 2_142));
     }
 
     [Fact]
@@ -938,6 +1210,7 @@ public sealed class MobilePortTests
     private sealed class RecordingTouchSink : ITouchInputSink
     {
         public List<(TouchControlAction Action, bool Pressed)> Actions { get; } = [];
+        public List<TouchControlAction> CanceledActions { get; } = [];
         public (double X, double Y) LastMovement { get; private set; }
         public (double X, double Y) LastLook { get; private set; }
         public (double X, double Y, bool Click) LastPointer { get; private set; }
@@ -945,6 +1218,7 @@ public sealed class MobilePortTests
         public List<(double X, double Y, int Count)> InventorySplits { get; } = [];
 
         public void SetAction(TouchControlAction action, bool pressed) => Actions.Add((action, pressed));
+        public void CancelAction(TouchControlAction action) => CanceledActions.Add(action);
         public void SetMovement(double x, double y) => LastMovement = (x, y);
         public void AddLook(double x, double y) => LastLook = (x, y);
         public void SetPointer(double x, double y, bool click)

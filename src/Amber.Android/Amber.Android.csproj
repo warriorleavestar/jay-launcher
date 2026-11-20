@@ -18,10 +18,13 @@
     <AndroidResource Include="..\Amber.App\Assets\jay.png">
       <Link>Resources\drawable\jay.png</Link>
     </AndroidResource>
-    <AndroidNativeLibrary Include="$(BaseIntermediateOutputPath)jay-native/arm64-v8a/libjayjvm.so" Abi="arm64-v8a" />
-    <AndroidNativeLibrary Include="$(BaseIntermediateOutputPath)jay-native/x86_64/libjayjvm.so" Abi="x86_64" />
-    <AndroidNativeLibrary Include="$(BaseIntermediateOutputPath)jay-glfw/arm64-v8a/libglfw.so" Abi="arm64-v8a" />
-    <AndroidNativeLibrary Include="$(BaseIntermediateOutputPath)jay-glfw/x86_64/libglfw.so" Abi="x86_64" />
+    <AndroidNativeLibrary Include="$(BaseIntermediateOutputPath)jay-native/arm64-v8a/libjayjvm.so" Abi="arm64-v8a" Condition="Exists('$(BaseIntermediateOutputPath)jay-native/arm64-v8a/libjayjvm.so')" />
+    <AndroidNativeLibrary Include="$(BaseIntermediateOutputPath)jay-native/x86_64/libjayjvm.so" Abi="x86_64" Condition="Exists('$(BaseIntermediateOutputPath)jay-native/x86_64/libjayjvm.so')" />
+    <AndroidNativeLibrary Include="$(BaseIntermediateOutputPath)jay-glfw/arm64-v8a/libglfw.so" Abi="arm64-v8a" Condition="Exists('$(BaseIntermediateOutputPath)jay-glfw/arm64-v8a/libglfw.so')" />
+    <AndroidNativeLibrary Include="$(BaseIntermediateOutputPath)jay-glfw/x86_64/libglfw.so" Abi="x86_64" Condition="Exists('$(BaseIntermediateOutputPath)jay-glfw/x86_64/libglfw.so')" />
+    <AndroidNativeLibrary Include="$(BaseIntermediateOutputPath)jay-sdl/arm64-v8a/libSDL3.so" Abi="arm64-v8a" Condition="Exists('$(BaseIntermediateOutputPath)jay-sdl/arm64-v8a/libSDL3.so')" />
+    <AndroidNativeLibrary Include="$(BaseIntermediateOutputPath)jay-sdl/x86_64/libSDL3.so" Abi="x86_64" Condition="Exists('$(BaseIntermediateOutputPath)jay-sdl/x86_64/libSDL3.so')" />
+    <AndroidJavaSource Include="Java/org/libsdl/app/SDLActivity.java" />
     <AndroidAsset Include="$(IntermediateOutputPath)jay-runtime-probe.jar" LogicalName="jay-runtime-probe.jar" />
     <AndroidAsset Include="..\..\third_party\android-glfw\LICENSE.md" LogicalName="licenses/GLFW-LICENSE.md" />
   </ItemGroup>
@@ -37,10 +40,12 @@
   </Target>
 
   <Target Name="RequireJayJvmHost" BeforeTargets="Build" Condition="'$(Configuration)' == 'Release'">
-    <Error Condition="!Exists('$(BaseIntermediateOutputPath)jay-native/arm64-v8a/libjayjvm.so')" Text="Build the Jay Android native host with scripts/build-android-native.sh before a Release build." />
-    <Error Condition="!Exists('$(BaseIntermediateOutputPath)jay-native/x86_64/libjayjvm.so')" Text="Build the Jay Android native host with scripts/build-android-native.sh before a Release build." />
-    <Error Condition="!Exists('$(BaseIntermediateOutputPath)jay-glfw/arm64-v8a/libglfw.so')" Text="Build the Jay Android GLFW bridge with scripts/build-android-glfw.sh before a Release build." />
-    <Error Condition="!Exists('$(BaseIntermediateOutputPath)jay-glfw/x86_64/libglfw.so')" Text="Build the Jay Android GLFW bridge with scripts/build-android-glfw.sh before a Release build." />
+    <Error Condition="('$(RuntimeIdentifier)' == '' Or '$(RuntimeIdentifier)' == 'android-arm64') And !Exists('$(BaseIntermediateOutputPath)jay-native/arm64-v8a/libjayjvm.so')" Text="Build the arm64 Jay Android native host with scripts/build-android-native.sh before a Release build." />
+    <Error Condition="('$(RuntimeIdentifier)' == '' Or '$(RuntimeIdentifier)' == 'android-x64') And !Exists('$(BaseIntermediateOutputPath)jay-native/x86_64/libjayjvm.so')" Text="Build the x86_64 Jay Android native host with scripts/build-android-native.sh before a Release build." />
+    <Error Condition="('$(RuntimeIdentifier)' == '' Or '$(RuntimeIdentifier)' == 'android-arm64') And !Exists('$(BaseIntermediateOutputPath)jay-glfw/arm64-v8a/libglfw.so')" Text="Build the arm64 Jay Android GLFW bridge with scripts/build-android-glfw.sh before a Release build." />
+    <Error Condition="('$(RuntimeIdentifier)' == '' Or '$(RuntimeIdentifier)' == 'android-x64') And !Exists('$(BaseIntermediateOutputPath)jay-glfw/x86_64/libglfw.so')" Text="Build the x86_64 Jay Android GLFW bridge with scripts/build-android-glfw.sh before a Release build." />
+    <Error Condition="('$(RuntimeIdentifier)' == '' Or '$(RuntimeIdentifier)' == 'android-arm64') And !Exists('$(BaseIntermediateOutputPath)jay-sdl/arm64-v8a/libSDL3.so')" Text="Build the arm64 Jay Android SDL bridge with scripts/build-android-sdl.sh before a Release build." />
+    <Error Condition="('$(RuntimeIdentifier)' == '' Or '$(RuntimeIdentifier)' == 'android-x64') And !Exists('$(BaseIntermediateOutputPath)jay-sdl/x86_64/libSDL3.so')" Text="Build the x86_64 Jay Android SDL bridge with scripts/build-android-sdl.sh before a Release build." />
   </Target>
 
   <ItemGroup>

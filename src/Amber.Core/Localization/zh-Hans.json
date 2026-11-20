@@ -1790,6 +1790,8 @@
   "mobile.runtime.ready": "已安装并校验 Java 运行环境。",
   "mobile.runtime.failed": "Java 运行环境安装失败：{0}",
   "mobile.runtime.unsupported": "暂不支持这台设备的处理器架构。",
+  "mobile.runtime.invalid_release": "已安装的 Android Java 运行环境缺少有效版本信息，请重新安装游戏运行环境。",
+  "mobile.runtime.too_old": "Minecraft {0} 需要 Java {1}，但当前 Android 运行环境是 Java {2}。请更新 Jay 的游戏运行环境后再试。",
   "mobile.gateway.notification.channel": "Jay 网关",
   "mobile.gateway.notification.title": "Jay 网关正在运行",
   "mobile.gateway.notification.body": "Minecraft 在前台时仍可使用 Jay 本机地址。",

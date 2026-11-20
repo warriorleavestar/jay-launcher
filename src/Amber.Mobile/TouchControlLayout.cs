@@ -46,7 +46,7 @@ public sealed class TouchControlProfile
     public (double X, double Y) MovementVector(double x, double y)
     {
         var move = Controls.Single(control => control.Action == TouchControlAction.Move);
-        var vector = TouchControlLayout.MovementVector(move, x, y);
+        var vector = TouchControlLayout.MovementVector(move, x, y, ViewportAspectRatio);
         if (Mode != TouchControlMode.DPadAndTap) return vector;
         var length = Math.Sqrt(vector.X * vector.X + vector.Y * vector.Y);
         if (length < 0.20) return (0, 0);
@@ -132,18 +132,23 @@ public static class TouchControlLayout
     public static (double X, double Y) JoystickVector(double x, double y) =>
         new TouchControlProfile().MovementVector(x, y);
 
-    internal static (double X, double Y) MovementVector(TouchControlDefinition move, double x, double y)
+    internal static (double X, double Y) MovementVector(TouchControlDefinition move, double x, double y,
+        double aspectRatio)
     {
-        var dx = (x - move.CenterX) / move.Radius;
+        // Controls are drawn with a pixel radius based on the viewport's short edge. Normalised
+        // X therefore covers aspectRatio times as many pixels as normalised Y in landscape.
+        // Measure both hit testing and joystick travel in the same square pixel space as the UI.
+        var dx = (x - move.CenterX) * Math.Clamp(aspectRatio, 1.2, 3.0) / move.Radius;
         var dy = (y - move.CenterY) / move.Radius;
         var length = Math.Sqrt(dx * dx + dy * dy);
         if (length > 1) { dx /= length; dy /= length; }
         return (dx, dy);
     }
 
-    internal static double Distance(TouchControlDefinition control, double x, double y)
+    internal static double Distance(TouchControlDefinition control, double x, double y,
+        double aspectRatio)
     {
-        var dx = x - control.CenterX;
+        var dx = (x - control.CenterX) * Math.Clamp(aspectRatio, 1.2, 3.0);
         var dy = y - control.CenterY;
         return Math.Sqrt(dx * dx + dy * dy);
     }
@@ -152,7 +157,7 @@ public static class TouchControlLayout
         double aspectRatio)
     {
         if (control.Action != TouchControlAction.Inventory)
-            return Distance(control, x, y) <= control.Radius;
+            return Distance(control, x, y, aspectRatio) <= control.Radius;
 
         // The inventory key is flush with the ninth hotbar slot. Match its rendered rectangular
         // face exactly so its larger circular accessibility target cannot steal taps from slot 9.
