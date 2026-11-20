@@ -10,7 +10,9 @@ import java.lang.reflect.InvocationTargetException;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.PrintStream;
+import java.io.ByteArrayOutputStream;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 
 /** Supplies LWJGL OpenGL entry points through Jay's EGL-backed GLFW bridge before Minecraft starts. */
@@ -68,7 +70,7 @@ public final class AndroidGameBootstrap {
         private static final int MAX_CHUNK = 3500;
         private final Method println;
         private final int priority;
-        private final StringBuilder line = new StringBuilder();
+        private final ByteArrayOutputStream line = new ByteArrayOutputStream();
 
         LogcatOutputStream(int priority) throws ReflectiveOperationException {
             this.priority = priority;
@@ -77,8 +79,9 @@ public final class AndroidGameBootstrap {
         }
 
         @Override public synchronized void write(int value) throws IOException {
-            if (value == '\n') flushLine();
-            else if (value != '\r') line.append((char)(value & 0xff));
+            int byteValue = value & 0xff;
+            if (byteValue == '\n') flushLine();
+            else if (byteValue != '\r') line.write(byteValue);
         }
 
         @Override public synchronized void write(byte[] bytes, int offset, int length) throws IOException {
@@ -90,16 +93,33 @@ public final class AndroidGameBootstrap {
         }
 
         private void flushLine() throws IOException {
-            if (line.length() == 0) return;
+            if (line.size() == 0) return;
+            String text = new String(line.toByteArray(), StandardCharsets.UTF_8);
             try {
-                for (int start = 0; start < line.length(); start += MAX_CHUNK) {
-                    int end = Math.min(line.length(), start + MAX_CHUNK);
-                    println.invoke(null, priority, "JayMinecraft", line.substring(start, end));
+                for (int start = 0; start < text.length();) {
+                    int end = start;
+                    int encodedLength = 0;
+                    while (end < text.length()) {
+                        int codePoint = text.codePointAt(end);
+                        int nextLength = utf8Length(codePoint);
+                        if (end > start && encodedLength + nextLength > MAX_CHUNK) break;
+                        encodedLength += nextLength;
+                        end += Character.charCount(codePoint);
+                    }
+                    println.invoke(null, priority, "JayMinecraft", text.substring(start, end));
+                    start = end;
                 }
-                line.setLength(0);
+                line.reset();
             } catch (ReflectiveOperationException error) {
                 throw new IOException("Could not write Minecraft output to logcat", error);
             }
+        }
+
+        private static int utf8Length(int codePoint) {
+            if (codePoint <= 0x7f) return 1;
+            if (codePoint <= 0x7ff) return 2;
+            if (codePoint <= 0xffff) return 3;
+            return 4;
         }
     }
 

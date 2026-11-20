@@ -5,6 +5,7 @@ on:
     paths:
       - '.github/workflows/android-runtime.yml'
       - 'scripts/check-android-runtime.sh'
+      - 'scripts/check-android-console-log.sh'
       - 'scripts/assemble-android-runtime.sh'
       - 'scripts/prepare-android-openjdk.sh'
       - 'scripts/build-android-mobileglues.sh'
@@ -15,6 +16,7 @@ on:
       - 'third_party/android-mobileglues/**'
       - 'third_party/android-shader-tools/**'
       - 'third_party/android-lwjgl/**'
+      - 'src/Amber.Android/Java/**'
   workflow_dispatch:
     inputs:
       architecture:
@@ -42,6 +44,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      - name: Test Android console bridge
+        shell: bash
+        run: bash scripts/check-android-console-log.sh
 
       - name: Fetch pinned Android OpenJDK 25 build source
         shell: bash
