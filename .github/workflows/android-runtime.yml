@@ -99,7 +99,10 @@ jobs:
           readelf_path="runtime-source/android-ndk-r28/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
           bash scripts/check-android-runtime.sh \
             "$archive" "${{ matrix.architecture }}" "$readelf_path" 25 jre-only
-          sha256sum "$archive" > "$archive.sha256"
+          archive_directory="$(dirname "$archive")"
+          archive_name="$(basename "$archive")"
+          (cd "$archive_directory" && sha256sum "$archive_name" > "$archive_name.sha256")
+          grep -Eq "^[0-9a-f]{64}  ${archive_name}$" "$archive.sha256"
 
       - name: Install native build tools
         shell: bash

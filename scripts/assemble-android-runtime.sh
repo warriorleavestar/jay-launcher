@@ -54,10 +54,12 @@ check_args=("$output_archive" "$architecture" "$elf_reader")
 if [[ -n "$expected_java_major" ]]; then check_args+=("$expected_java_major"); fi
 "$(cd "$(dirname "$0")" && pwd)/check-android-runtime.sh" "${check_args[@]}"
 
+checksum_directory="$(cd "$(dirname "$output_archive")" && pwd)"
+checksum_name="$(basename "$output_archive")"
 if command -v sha256sum >/dev/null 2>&1; then
-  sha256sum "$output_archive" > "$output_archive.sha256"
+  (cd "$checksum_directory" && sha256sum "$checksum_name" > "$checksum_name.sha256")
 else
-  shasum -a 256 "$output_archive" > "$output_archive.sha256"
+  (cd "$checksum_directory" && shasum -a 256 "$checksum_name" > "$checksum_name.sha256")
 fi
 
 archive_size="$(wc -c < "$output_archive" | tr -d ' ')"
