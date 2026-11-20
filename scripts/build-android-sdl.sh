@@ -22,6 +22,14 @@ test -x "$ninja"
 test -x "$java_sdk/bin/javac"
 test -x "$java_sdk/bin/jar"
 
+case "$(uname -s)" in
+  Darwin) host="darwin-x86_64" ;;
+  Linux) host="linux-x86_64" ;;
+  *) echo "unsupported build host" >&2; exit 2 ;;
+esac
+strip="$ndk/toolchains/llvm/prebuilt/$host/bin/llvm-strip"
+readelf="$ndk/toolchains/llvm/prebuilt/$host/bin/llvm-readelf"
+
 verify_sha() {
   local expected="$1" file="$2" actual
   if command -v sha256sum >/dev/null 2>&1; then
@@ -59,6 +67,7 @@ for abi in arm64-v8a x86_64; do
   test -n "$library"
   mkdir -p "$output/$abi"
   cp "$library" "$output/$abi/libSDL3.so"
+  "$strip" --strip-unneeded "$output/$abi/libSDL3.so"
 done
 
 android_jar="$(find "$sdk/platforms" -maxdepth 2 -type f -name android.jar -print | sort -V | tail -n 1)"
@@ -71,12 +80,6 @@ java_sources=("$work/source/android-project/app/src/main/java/org/libsdl/app/"*.
 "$java_sdk/bin/jar" --create --file "$output/sdl-classes.jar" -C "$classes" .
 cp "$work/source/LICENSE.txt" "$output/SDL-LICENSE.txt"
 
-case "$(uname -s)" in
-  Darwin) host="darwin-x86_64" ;;
-  Linux) host="linux-x86_64" ;;
-  *) echo "unsupported build host" >&2; exit 2 ;;
-esac
-readelf="$ndk/toolchains/llvm/prebuilt/$host/bin/llvm-readelf"
 for library in "$output"/*/libSDL3.so; do
   headers="$("$readelf" -h -lW "$library")"
   symbols="$("$readelf" -Ws "$library")"
