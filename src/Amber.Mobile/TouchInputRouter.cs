@@ -46,6 +46,13 @@ public sealed class TouchInputRouter
         (action == TouchControlAction.Sprint && SprintLocked) ||
         _pointers.Values.Any(pointer => pointer.Action == action || pointer.HeldAction == action);
 
+    /// <summary>
+    /// True when this gesture belongs to the rendered game surface rather than a touch-overlay
+    /// control. Only surface taps may update Minecraft text-field focus on release.
+    /// </summary>
+    public bool TargetsGameSurface(int pointerId) =>
+        _pointers.TryGetValue(pointerId, out var pointer) && pointer.Action is null;
+
     public bool Press(int pointerId, double x, double y, bool controlsEnabled = true)
     {
         // A few Android touch drivers can repeat DOWN for an ID whose UP packet was

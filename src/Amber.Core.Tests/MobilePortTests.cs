@@ -880,6 +880,25 @@ public sealed class MobilePortTests
     }
 
     [Fact]
+    public void KeyboardOverlayReleaseDoesNotResyncTextFocusAtItsButtonCoordinates()
+    {
+        var sink = new RecordingTouchSink();
+        var profile = new TouchControlProfile();
+        var router = new TouchInputRouter(sink, profile);
+        var keyboard = profile.Controls.Single(control =>
+            control.Action == TouchControlAction.Keyboard);
+
+        Assert.True(router.Press(90, keyboard.CenterX, keyboard.CenterY,
+            controlsEnabled: false));
+        Assert.False(router.TargetsGameSurface(90));
+        Assert.True(router.Release(90));
+
+        Assert.True(router.Press(91, 0.5, 0.5, controlsEnabled: false));
+        Assert.True(router.TargetsGameSurface(91));
+        Assert.True(router.Release(91));
+    }
+
+    [Fact]
     public async Task AndroidRuntimeManifestRequiresSafeLicensedVerifiedFiles()
     {
         var root = Path.Combine(Path.GetTempPath(), "jay-runtime-" + Guid.NewGuid().ToString("N"));

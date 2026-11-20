@@ -984,8 +984,11 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
                 _longPressTokens.Remove(releasedId);
                 _longPressIndicators.Remove(releasedId);
                 if (_hotbarPointers.Remove(releasedId)) return true;
+                // Capture this before Release removes the pointer. Overlay controls (especially
+                // the keyboard button) must not be mistaken for taps on a Minecraft text field.
+                var syncTextInput = _router.TargetsGameSurface(releasedId);
                 var released = _router.Release(releasedId);
-                if (released && !NativeJvmHost.GameplayControlsActive)
+                if (released && syncTextInput && !GameplayActive)
                     PostDelayed(() => SyncSoftKeyboardAfterTap(releasedX, releasedY), 140);
                 return released;
             case MotionEventActions.Cancel:
