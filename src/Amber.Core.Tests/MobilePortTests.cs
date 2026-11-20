@@ -867,6 +867,18 @@ public sealed class MobilePortTests
         Assert.True(gate.AcceptCommittedCodePoint('a', 5_021));
     }
 
+    [Theory]
+    [InlineData(1, false, true)]
+    [InlineData(0, true, false)]
+    [InlineData(-1, false, false)]
+    [InlineData(-1, true, true)]
+    public void SoftKeyboardInputPolicyKeepsManualFallbackForUnknownMappings(
+        int focusState, bool manuallyRequested, bool expected)
+    {
+        Assert.Equal(expected,
+            SoftKeyboardInputPolicy.AcceptsConnection(focusState, manuallyRequested));
+    }
+
     [Fact]
     public async Task AndroidRuntimeManifestRequiresSafeLicensedVerifiedFiles()
     {

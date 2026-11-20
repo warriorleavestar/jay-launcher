@@ -24,6 +24,8 @@ public final class ConsoleLogTest {
     public static void main(String[] args) throws Exception {
         require(AndroidGameBootstrap.gameplayControlsState() == -1,
             "unknown Minecraft mappings must preserve native GLFW gameplay state");
+        require(AndroidGameBootstrap.textInputFocusState() == -1,
+            "unknown Minecraft mappings must preserve manual soft-keyboard fallback");
 
         List<byte[]> messages = new ArrayList<>();
         OutputStream output = new AndroidGameBootstrap.LogcatOutputStream(

@@ -270,6 +270,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     private long _nextLongPressToken;
 
     private readonly SdlTouchInput? _sdl;
+    private bool _manualKeyboardRequested;
     private bool GameplayActive => _sdl?.InWorld ?? NativeJvmHost.GameplayControlsActive;
 
     public TouchControlOverlay(Context context, SdlTouchInput? sdl = null) : base(context)
@@ -292,7 +293,11 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     // Only advertise an Android text editor while Minecraft actually owns a text field.
     // Keeping this true during gameplay makes physical W/A/S/D key presses wake the IME
     // on tablets, which covers half the screen and prevents keyboard/mouse play.
-    private bool TextInputFocused => _sdl?.TextInputActive ?? NativeJvmHost.TextInputFocused;
+    private int TextInputFocusState => _sdl is not null
+        ? (_sdl.TextInputActive ? 1 : 0)
+        : NativeJvmHost.TextInputFocusState;
+    private bool TextInputFocused => SoftKeyboardInputPolicy.AcceptsConnection(
+        TextInputFocusState, _manualKeyboardRequested);
 
     public override bool OnCheckIsTextEditor() => TextInputFocused;
 
@@ -1338,6 +1343,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
 
     private void ShowKeyboard()
     {
+        _manualKeyboardRequested = true;
         RequestFocus();
         var input = (InputMethodManager?)Context!.GetSystemService(Context.InputMethodService);
         input?.RestartInput(this);
@@ -1370,6 +1376,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
 
     private void HideKeyboard()
     {
+        _manualKeyboardRequested = false;
         var input = (InputMethodManager?)Context!.GetSystemService(Context.InputMethodService);
         input?.HideSoftInputFromWindow(WindowToken, HideSoftInputFlags.None);
         // ShowFlags.Forced is needed on tablets that report a hardware keyboard, but it also

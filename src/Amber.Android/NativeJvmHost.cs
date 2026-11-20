@@ -7,7 +7,7 @@ namespace Amber.Android;
 
 internal static partial class NativeJvmHost
 {
-    private const int ExpectedAbiVersion = 15;
+    private const int ExpectedAbiVersion = 16;
     public static bool GameplayControlsActive => IsAvailable && GetNativeGameplayMode() != 0;
 
     public static bool HasBlockTarget
@@ -20,13 +20,13 @@ internal static partial class NativeJvmHost
         }
     }
 
-    public static bool TextInputFocused
+    public static int TextInputFocusState
     {
         get
         {
-            if (!IsAvailable) return false;
-            try { return GetNativeTextInputFocused() != 0; }
-            catch (EntryPointNotFoundException) { return false; }
+            if (!IsAvailable) return -1;
+            try { return Math.Clamp(GetNativeTextInputFocused(), -1, 1); }
+            catch (EntryPointNotFoundException) { return -1; }
         }
     }
 

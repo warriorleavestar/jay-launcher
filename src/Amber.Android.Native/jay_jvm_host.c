@@ -10,7 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define JAY_JVM_ABI_VERSION 15
+#define JAY_JVM_ABI_VERSION 16
 #define JAY_ACTION_COUNT 12
 #define JAY_TEXT_CAPACITY 64
 #define JAY_KEY_CAPACITY 16
@@ -290,7 +290,7 @@ int jay_jvm_run_main(JNIEnv *env, const char *class_name, int argc, const char *
         JAY_INPUT_METHOD(g_dispatch_look, "dispatchLook", "(FF)Z");
         JAY_INPUT_METHOD(g_is_gameplay_controls_active, "gameplayControlsState", "()I");
         JAY_INPUT_METHOD(g_is_block_target, "isBlockTarget", "()Z");
-        JAY_INPUT_METHOD(g_is_text_input_focused, "isTextInputFocused", "()Z");
+        JAY_INPUT_METHOD(g_is_text_input_focused, "textInputFocusState", "()I");
         JAY_INPUT_METHOD(g_is_text_input_at, "isTextInputAt", "(FF)Z");
         JAY_INPUT_METHOD(g_inventory_stack_count, "inventoryStackCount", "(FF)I");
         JAY_INPUT_METHOD(g_dispatch_inventory_split, "dispatchInventorySplit", "(FFI)Z");
@@ -405,10 +405,17 @@ __attribute__((visibility("default")))
 int jay_text_input_focused_get(void) {
     int attached;
     JNIEnv *env = jay_input_environment(&attached);
-    if (env == NULL || g_is_text_input_focused == NULL) return 0;
-    jboolean focused = (*env)->CallStaticBooleanMethod(env, g_input_bridge_class,
+    if (env == NULL || g_is_text_input_focused == NULL) return -1;
+    jint state = (*env)->CallStaticIntMethod(env, g_input_bridge_class,
         g_is_text_input_focused);
-    return jay_finish_input_call(env, attached, focused);
+    if ((*env)->ExceptionCheck(env)) {
+        if (!atomic_exchange(&g_input_bridge_error_logged, 1))
+            (*env)->ExceptionDescribe(env);
+        (*env)->ExceptionClear(env);
+        state = -1;
+    }
+    if (attached && g_vm != NULL) (*g_vm)->DetachCurrentThread(g_vm);
+    return state < 0 ? -1 : (state > 0 ? 1 : 0);
 }
 
 __attribute__((visibility("default")))

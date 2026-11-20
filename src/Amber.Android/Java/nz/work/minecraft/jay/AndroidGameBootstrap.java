@@ -652,15 +652,15 @@ public final class AndroidGameBootstrap {
      * stored by Screen's event-handler base class instead of naming EditBox. Edit widgets keep
      * their editable value in a String field; ordinary focused buttons do not.
      */
-    public static boolean isTextInputFocused() {
-        if (!prepareInputBridge()) return false;
+    public static int textInputFocusState() {
+        if (!prepareInputBridge()) return -1;
         try {
             Object minecraft = minecraft();
-            if (minecraft == null) return false;
+            if (minecraft == null) return 0;
             Object screen = screen(minecraft);
-            return screen != null && focusedTextInput(screen) != null;
+            return screen != null && focusedTextInput(screen) != null ? 1 : 0;
         } catch (ReflectiveOperationException | RuntimeException error) {
-            return false;
+            return -1;
         }
     }
 
