@@ -39,6 +39,10 @@
     <AndroidAsset Include="$(JaySdlRuntimeDir)/SDL-LICENSE.txt" LogicalName="licenses/SDL-LICENSE.txt" />
   </ItemGroup>
 
+  <ItemGroup Condition="'$(JayAndroidRuntimeCatalogDir)' != ''">
+    <AndroidAsset Include="$(JayAndroidRuntimeCatalogDir)/runtime25-*.json" LogicalName="%(Filename)%(Extension)" />
+  </ItemGroup>
+
   <ItemGroup Condition="'$(JayModernRuntimeDir)' != ''">
     <AndroidAsset Include="$(JayModernRuntimeDir)/licenses/*" LogicalName="licenses/%(Filename)%(Extension)" />
     <AndroidNativeLibrary Include="$(JayModernRuntimeDir)/lwjgl/*.so" Abi="arm64-v8a" />

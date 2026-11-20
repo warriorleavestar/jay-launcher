@@ -90,6 +90,29 @@ public sealed class MobilePortTests
     }
 
     [Fact]
+    public void AndroidJava25CatalogSelectsBothModernAbisAndQuarantinesTheLegacyBundle()
+    {
+        var armDescriptor = "runtime25-arm64-v8a.json";
+        var armArchive = "jay-android-runtime25-arm64-v8a.tar.xz";
+        var arm = AndroidRuntimeAssetCatalog.SelectJava25("arm64-v8a", 16_384,
+            [armDescriptor, armArchive]);
+        Assert.Equal(new AndroidRuntimeAssets(armDescriptor, armArchive), arm);
+
+        var x64Descriptor = "runtime25-x86_64.json";
+        var x64 = AndroidRuntimeAssetCatalog.SelectJava25("x86_64", 16_384,
+            [x64Descriptor]);
+        Assert.Equal(new AndroidRuntimeAssets(x64Descriptor, null), x64);
+
+        Assert.Null(AndroidRuntimeAssetCatalog.SelectJava25("x86_64", 4096,
+            ["jre25.json", "jre25-arm64-v8a.tar.xz"]));
+        Assert.Null(AndroidRuntimeAssetCatalog.SelectJava25("arm64-v8a", 16_384,
+            ["jre25.json", "jre25-arm64-v8a.tar.xz"]));
+        Assert.Equal(new AndroidRuntimeAssets("jre25.json", "jre25-arm64-v8a.tar.xz"),
+            AndroidRuntimeAssetCatalog.SelectJava25("arm64-v8a", 4096,
+                ["jre25.json", "jre25-arm64-v8a.tar.xz"]));
+    }
+
+    [Fact]
     public void AndroidRuntimeReleaseReadsTheStandardReleaseFile()
     {
         var root = Path.Combine(Path.GetTempPath(), "jay-java-release-" + Guid.NewGuid().ToString("N"));
