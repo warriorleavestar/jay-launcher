@@ -1320,6 +1320,16 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
 
     private void SyncSoftKeyboardAfterTap(double x, double y)
     {
+        // SDL owns text-field focus for the 26.3 client and its Java bridge deliberately has no
+        // coordinate hit-test. Once SDL reports active text input, keep/restart the IME; when it
+        // does not, let the normal focus transition hide it rather than treating every tap as an
+        // authoritative miss and closing a keyboard that SDL has just opened asynchronously.
+        if (_sdl is not null)
+        {
+            if (_sdl.TextInputActive) ShowKeyboard();
+            return;
+        }
+
         var targeted = NativeJvmHost.TextInputAt(x, y);
         if (targeted)
         {

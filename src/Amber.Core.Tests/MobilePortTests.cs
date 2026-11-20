@@ -689,6 +689,21 @@ public sealed class MobilePortTests
     }
 
     [Fact]
+    public void DraggingAnOccupiedSlotOutsideTheInventoryDoesNotDropTheStack()
+    {
+        var sink = new RecordingTouchSink();
+        var router = new TouchInputRouter(sink,
+            inventoryStackCount: (_, y) => y < 0.5 ? 5 : -1);
+
+        Assert.True(router.Press(2, 0.4, 0.4, controlsEnabled: false));
+        Assert.True(router.Move(2, 0.4, 0.7));
+        Assert.True(router.Release(2));
+
+        Assert.Empty(sink.InventorySplits);
+        Assert.DoesNotContain(sink.Pointers, point => point.Click);
+    }
+
+    [Fact]
     public void TouchInputRouterCraftingDragHoldsOnePrimaryButton()
     {
         var sink = new RecordingTouchSink();

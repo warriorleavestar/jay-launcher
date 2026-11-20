@@ -515,18 +515,18 @@ public final class AndroidGameBootstrap {
             }
     }
 
-    /** Returns the live count under a normalized pointer, or zero outside a container slot. */
+    /** Returns the live count under a normalized pointer, or -1 outside a container slot. */
     public static int inventoryStackCount(float normalizedX, float normalizedY) {
-        if (!prepareInputBridge()) return 0;
+        if (!prepareInputBridge()) return -1;
         try {
             Object minecraft = minecraft();
-            if (minecraft == null) return 0;
+            if (minecraft == null) return -1;
             Object screen = screen(minecraft);
-            if (containerScreenType == null || !containerScreenType.isInstance(screen)) return 0;
+            if (containerScreenType == null || !containerScreenType.isInstance(screen)) return -1;
             double x = Math.max(0.0, Math.min(1.0, normalizedX)) * screenWidth.getInt(screen);
             double y = Math.max(0.0, Math.min(1.0, normalizedY)) * screenHeight.getInt(screen);
             Object slot = containerHoveredSlot.invoke(screen, x, y);
-            if (slot == null) return 0;
+            if (slot == null) return -1;
             Object stack = slotGetItem.invoke(slot);
             if (stack == null) return 0;
             int count = itemStackGetCount != null
@@ -535,7 +535,7 @@ public final class AndroidGameBootstrap {
             return Math.max(0, count);
         } catch (ReflectiveOperationException | RuntimeException error) {
             reportInputError(error);
-            return 0;
+            return -1;
         }
     }
 
