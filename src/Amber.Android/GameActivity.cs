@@ -1444,6 +1444,13 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
                 if (e.Action is KeyEventActions.Down or KeyEventActions.Up)
                     _owner._sdl.KeyEvent(e.KeyCode, e.Action == KeyEventActions.Down,
                         e.Action == KeyEventActions.Down && e.RepeatCount > 0);
+                // Some IMEs express printable text only as SendKeyEvent and never follow it
+                // with CommitText. Preserve that character for SDL while the view-lifetime
+                // gate suppresses a duplicate Activity delivery or a correlated CommitText.
+                if (e.Action == KeyEventActions.Down && e.UnicodeChar > 0 &&
+                    _owner._hardwareTextInputGate.AcceptHardwareCodePoint((int)e.KeyCode,
+                        e.UnicodeChar, e.DownTime, SystemClock.UptimeMillis(), e.RepeatCount))
+                    _owner._sdl.CommitText(char.ConvertFromUtf32(e.UnicodeChar));
                 return true;
             }
             if (e.Action != KeyEventActions.Down) return true;

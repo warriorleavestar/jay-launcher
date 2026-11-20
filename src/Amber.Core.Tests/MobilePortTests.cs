@@ -855,6 +855,19 @@ public sealed class MobilePortTests
     }
 
     [Fact]
+    public void HardwareTextInputGateKeepsSdlSendKeyTextExactlyOnce()
+    {
+        var gate = new HardwareTextInputGate();
+
+        // The same Android key can arrive through Activity.DispatchKeyEvent and the active
+        // InputConnection. SDL still receives its printable character, but only once.
+        Assert.True(gate.AcceptHardwareCodePoint(29, 'a', 4_000, 5_000, 0));
+        Assert.False(gate.AcceptHardwareCodePoint(29, 'a', 4_000, 5_001, 0));
+        Assert.False(gate.AcceptCommittedCodePoint('a', 5_020));
+        Assert.True(gate.AcceptCommittedCodePoint('a', 5_021));
+    }
+
+    [Fact]
     public async Task AndroidRuntimeManifestRequiresSafeLicensedVerifiedFiles()
     {
         var root = Path.Combine(Path.GetTempPath(), "jay-runtime-" + Guid.NewGuid().ToString("N"));

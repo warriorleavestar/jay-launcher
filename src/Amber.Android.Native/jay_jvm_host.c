@@ -238,21 +238,28 @@ int jay_jvm_run_main(JNIEnv *env, const char *class_name, int argc, const char *
         jay_capture_exception(env, "FindClass(main)");
         return JNI_ERR;
     }
-    jclass log_class = (*env)->FindClass(
-        env, "nz/work/minecraft/jay/AndroidGameBootstrap$LogcatOutputStream");
-    if (log_class == NULL) {
-        jay_capture_exception(env, "FindClass(LogcatOutputStream)");
-        return JNI_ERR;
-    }
-    JNINativeMethod log_methods[] = {
-        { "writeLogcat", "(I[B)V", (void *)jay_logcat_write },
-    };
-    if ((*env)->RegisterNatives(env, log_class, log_methods, 1) != JNI_OK) {
-        jay_capture_exception(env, "RegisterNatives(LogcatOutputStream)");
+    // Loader-based SDL instances run their original main class without the bootstrap jar.
+    // Register console logging only for the two launchers that install that jar.
+    int uses_bootstrap =
+        strcmp(class_name, "nz/work/minecraft/jay/AndroidGameBootstrap") == 0 ||
+        strcmp(class_name, "nz/work/minecraft/jay/SdlMenuBootstrap") == 0;
+    if (uses_bootstrap) {
+        jclass log_class = (*env)->FindClass(
+            env, "nz/work/minecraft/jay/AndroidGameBootstrap$LogcatOutputStream");
+        if (log_class == NULL) {
+            jay_capture_exception(env, "FindClass(LogcatOutputStream)");
+            return JNI_ERR;
+        }
+        JNINativeMethod log_methods[] = {
+            { "writeLogcat", "(I[B)V", (void *)jay_logcat_write },
+        };
+        if ((*env)->RegisterNatives(env, log_class, log_methods, 1) != JNI_OK) {
+            jay_capture_exception(env, "RegisterNatives(LogcatOutputStream)");
+            (*env)->DeleteLocalRef(env, log_class);
+            return JNI_ERR;
+        }
         (*env)->DeleteLocalRef(env, log_class);
-        return JNI_ERR;
     }
-    (*env)->DeleteLocalRef(env, log_class);
     jmethodID main_method = (*env)->GetStaticMethodID(env, main_class, "main", "([Ljava/lang/String;)V");
     if (main_method == NULL) {
         jay_capture_exception(env, "GetStaticMethodID(main)");
