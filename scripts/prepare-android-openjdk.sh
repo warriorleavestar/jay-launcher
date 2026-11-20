@@ -11,10 +11,12 @@ test -f "$settings"
 source_commit='5ee4eed9f7a7f3bca99a662cfe7f2642ec4e22be'
 clone_script="$1/clone_jdk.sh"
 build_script="$1/build_jdk.sh"
+strip_script="$1/remove_jdk_debug_info.sh"
 overlay_source="$(cd "$(dirname "$0")/.." && pwd)/third_party/android-openjdk/jdk25u-jay.patch"
 overlay_target="$1/patches/jdk25u-jay.patch"
 test -f "$clone_script"
 test -f "$build_script"
+test -f "$strip_script"
 test -f "$overlay_source"
 old_jdk21='export LDFLAGS="-L$NDK/platforms/android-$API/arch-$TARGET_SHORT/usr/lib"'
 new_jdk21='export LDFLAGS="-L$NDK/platforms/android-$API/arch-$TARGET_SHORT/usr/lib -Wl,-z,max-page-size=16384"'
@@ -75,3 +77,20 @@ perl -pi -e '
 
 grep -Fqx "git -C openjdk fetch --depth 1 origin $source_commit" "$clone_script"
 grep -Fqx 'git apply --check ../patches/jdk25u-jay.patch' "$build_script"
+
+# FCL ships one prebuilt Xawt bridge, and it is AArch64. Copying it into the x86_64
+# runtime silently creates a mixed-architecture archive. Minecraft renders through
+# GLFW/MobileGlues, so the x86_64 headless runtime must simply omit this optional bridge.
+old_xawt='cp awt_xawt/libawt_xawt.so jreout/lib/'
+if [[ "$(grep -Fxc "$old_xawt" "$strip_script" || true)" -ne 1 ]]; then
+  echo "Pinned OpenJDK build source no longer has the expected Xawt copy" >&2
+  exit 1
+fi
+OLD_XAWT="$old_xawt" perl -pi -e '
+  if ($_ eq "$ENV{OLD_XAWT}\n") {
+    $_ = "if [[ \"\$TARGET_JDK\" == \"aarch64\" ]]; then\n" .
+         "  cp awt_xawt/libawt_xawt.so jreout/lib/\n" .
+         "fi\n";
+  }
+' "$strip_script"
+grep -Fqx 'if [[ "$TARGET_JDK" == "aarch64" ]]; then' "$strip_script"
