@@ -30,6 +30,10 @@ on:
         type: choice
         options: [all, arm64-v8a, x86_64]
         default: all
+      publish_runtime:
+        description: Publish the verified android-runtime-v2 assets (main + all architectures only)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -37,6 +41,11 @@ permissions:
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# pull_request runs execute a synthetic merge commit. Record the durable branch
+# head instead so published descriptors keep pointing at an auditable source.
+env:
+  JAY_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
 
 jobs:
   sdl:
@@ -179,7 +188,7 @@ jobs:
           bash scripts/create-android-runtime-descriptor.sh \
             "$output" \
             "${{ matrix.architecture }}" \
-            "${{ github.server_url }}/${{ github.repository }}/tree/${{ github.sha }}" \
+            "${{ github.server_url }}/${{ github.repository }}/tree/$JAY_SOURCE_SHA" \
             "${{ github.server_url }}/${{ github.repository }}/releases/download/android-runtime-v2/$(basename "$output")" \
             "runtime-artifact/runtime25-${{ matrix.architecture }}.json"
 
@@ -189,3 +198,78 @@ jobs:
           path: runtime-artifact/*
           if-no-files-found: error
           retention-days: 14
+
+  publish-runtime:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' &&
+      inputs.architecture == 'all' &&
+      inputs.publish_runtime
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          pattern: jay-android-runtime25-*
+          path: runtime-artifacts
+          merge-multiple: true
+
+      - name: Verify release files and descriptors
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir release-assets
+          for architecture in arm64-v8a x86_64; do
+            archive="runtime-artifacts/jay-android-runtime25-$architecture.tar.xz"
+            checksum="$archive.sha256"
+            metadata="$archive.metadata"
+            descriptor="runtime-artifacts/runtime25-$architecture.json"
+            test -f "$archive"
+            test -f "$checksum"
+            test -f "$metadata"
+            test -f "$descriptor"
+            (cd runtime-artifacts && sha256sum --check --strict "$(basename "$checksum")")
+            archive_size="$(wc -c < "$archive" | tr -d ' ')"
+            archive_hash="$(sha256sum "$archive" | cut -d' ' -f1)"
+            metadata_archive="$(sed -n 's/^archive-bytes=//p' "$metadata")"
+            extracted_size="$(sed -n 's/^extracted-bytes=//p' "$metadata")"
+            expected_id="jay-android-runtime25-v2-$architecture"
+            expected_source="${{ github.server_url }}/${{ github.repository }}/tree/$JAY_SOURCE_SHA"
+            expected_download="${{ github.server_url }}/${{ github.repository }}/releases/download/android-runtime-v2/$(basename "$archive")"
+            test "$metadata_archive" = "$archive_size"
+            [[ "$extracted_size" =~ ^[0-9]+$ ]]
+            jq -e \
+              --arg architecture "$architecture" \
+              --arg id "$expected_id" \
+              --argjson archiveSize "$archive_size" \
+              --arg archiveHash "$archive_hash" \
+              --argjson extractedSize "$extracted_size" \
+              --arg sourceUrl "$expected_source" \
+              --arg downloadUrl "$expected_download" \
+              '.Format == 1 and .Id == $id and .Architecture == $architecture and
+               .ArchiveSize == $archiveSize and .ArchiveSha256 == $archiveHash and
+               .MaximumExtractedSize == $extractedSize and (.License | length) > 0 and
+               .SourceUrl == $sourceUrl and .DownloadUrl == $downloadUrl' \
+              "$descriptor" >/dev/null
+            cp "$archive" "$checksum" "$metadata" "$descriptor" release-assets/
+          done
+          test "$(find release-assets -maxdepth 1 -type f | wc -l | tr -d ' ')" = 8
+
+      - name: Publish immutable Android runtime release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag=android-runtime-v2
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::Release $tag already exists; refusing to replace immutable runtime assets."
+            exit 1
+          fi
+          gh release create "$tag" release-assets/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Jay Android Java 25 runtime v2" \
+            --notes "Verified Java 25 game runtimes for ARM64 and x86_64. Built from $JAY_SOURCE_SHA; includes exact checksums, extracted-size limits and source/license metadata."

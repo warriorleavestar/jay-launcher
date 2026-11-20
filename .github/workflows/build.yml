@@ -241,6 +241,45 @@ jobs:
             "${{ runner.temp }}/jdk" \
             Amber.Android/obj/jay-sdl
 
+      - name: Fetch pinned Java 25 runtime catalog
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          catalog="Amber.Android/obj/jay-runtime-catalog"
+          rm -rf "$catalog"
+          mkdir -p "$catalog"
+          if ! gh release download android-runtime-v2 \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern 'runtime25-*.json' \
+            --dir "$catalog"; then
+            rm -f "$catalog"/*
+            if [[ "${{ github.event_name }}" == pull_request ]]; then
+              echo "::notice::android-runtime-v2 is not published yet; PR APK omits the Java 25 catalog."
+              exit 0
+            fi
+            echo "::error::android-runtime-v2 descriptors are required for downloadable Android builds."
+            exit 1
+          fi
+          for architecture in arm64-v8a x86_64; do
+            descriptor="$catalog/runtime25-$architecture.json"
+            archive="jay-android-runtime25-$architecture.tar.xz"
+            expected_download="${{ github.server_url }}/${{ github.repository }}/releases/download/android-runtime-v2/$archive"
+            test -f "$descriptor"
+            jq -e \
+              --arg architecture "$architecture" \
+              --arg id "jay-android-runtime25-v2-$architecture" \
+              --arg downloadUrl "$expected_download" \
+              '.Format == 1 and .Id == $id and .Architecture == $architecture and
+               .ArchiveSize > 0 and (.ArchiveSha256 | test("^[0-9a-f]{64}$")) and
+               .MaximumExtractedSize >= .ArchiveSize and .MaximumExtractedSize <= 1073741824 and
+               (.License | length) > 0 and (.SourceUrl | startswith("https://")) and
+               .DownloadUrl == $downloadUrl' \
+              "$descriptor" >/dev/null
+          done
+          test "$(find "$catalog" -maxdepth 1 -type f | wc -l | tr -d ' ')" = 2
+
       - name: Prepare stable preview signing key
         if: env.RELEASE_SIGNED_ANDROID == 'true'
         shell: bash
@@ -257,6 +296,7 @@ jobs:
           -p:AndroidSdkDirectory=${{ runner.temp }}/android-sdk
           -p:JavaSdkDirectory=${{ runner.temp }}/jdk
           -p:JaySdlRuntimeDir=${{ github.workspace }}/src/Amber.Android/obj/jay-sdl
+          -p:JayAndroidRuntimeCatalogDir=${{ github.workspace }}/src/Amber.Android/obj/jay-runtime-catalog
           -p:AndroidPackageFormats=apk
 
       - name: Publish release-signed preview APK
@@ -270,6 +310,7 @@ jobs:
           -p:AndroidSdkDirectory=${{ runner.temp }}/android-sdk
           -p:JavaSdkDirectory=${{ runner.temp }}/jdk
           -p:JaySdlRuntimeDir=${{ github.workspace }}/src/Amber.Android/obj/jay-sdl
+          -p:JayAndroidRuntimeCatalogDir=${{ github.workspace }}/src/Amber.Android/obj/jay-runtime-catalog
           -p:AndroidPackageFormats=apk
           -p:AndroidKeyStore=true
           -p:AndroidSigningKeyStore=${{ runner.temp }}/jay-android-preview.p12
@@ -291,6 +332,10 @@ jobs:
           [[ "$BADGING" == *"versionName='$DISPLAY_VERSION'"* ]]
           [[ "$BADGING" == *"versionCode='$BUILD_VERSION'"* ]]
           "$APKSIGNER_PATH" verify "$APK_PATH"
+          if compgen -G 'Amber.Android/obj/jay-runtime-catalog/runtime25-*.json' >/dev/null; then
+            unzip -Z1 "$APK_PATH" | grep -Fx 'assets/runtime25-arm64-v8a.json'
+            unzip -Z1 "$APK_PATH" | grep -Fx 'assets/runtime25-x86_64.json'
+          fi
           if [[ "$RELEASE_SIGNED_ANDROID" == true ]]; then
             CERT_SHA256="$("$APKSIGNER_PATH" verify --print-certs "$APK_PATH" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')"
             test "$CERT_SHA256" = "595779309affcfebd61f591c3127a75c5471fbcd0f192539fbe5f52b951808e0"

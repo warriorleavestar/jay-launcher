@@ -41,6 +41,9 @@
 
   <ItemGroup Condition="'$(JayAndroidRuntimeCatalogDir)' != ''">
     <AndroidAsset Include="$(JayAndroidRuntimeCatalogDir)/runtime25-*.json" LogicalName="%(Filename)%(Extension)" />
+    <!-- Local/emulator verification may place the matching archives beside the descriptors.
+         Release APKs fetch only the descriptors, so they continue downloading the verified archive on demand. -->
+    <AndroidAsset Include="$(JayAndroidRuntimeCatalogDir)/jay-android-runtime25-*.tar.xz" LogicalName="%(Filename)%(Extension)" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(JayModernRuntimeDir)' != ''">
