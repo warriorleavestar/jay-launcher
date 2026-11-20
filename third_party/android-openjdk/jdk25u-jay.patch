@@ -33,3 +33,16 @@ index ff9a82bae..4d0f11660 100644
  }
  
  NetworkPerformanceInterface::NetworkPerformanceInterface() {
+diff --git a/make/modules/java.desktop/Lib.gmk b/make/modules/java.desktop/Lib.gmk
+index 817953ea8..75497e74a 100644
+--- a/make/modules/java.desktop/Lib.gmk
++++ b/make/modules/java.desktop/Lib.gmk
+@@ -77,5 +77,7 @@ ifeq ($(ENABLE_JSOUND), true)
+     ))
+ 
+-    TARGETS += $(BUILD_LIBJSOUND)
++    # Android's headless runtime has no ALSA ABI. Keep the Java sound classes,
++    # but do not compile the Linux libjsound backend against host ALSA headers.
++    # TARGETS += $(BUILD_LIBJSOUND)
+   endif
+ endif
