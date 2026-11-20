@@ -22,6 +22,9 @@ import java.util.List;
 
 public final class ConsoleLogTest {
     public static void main(String[] args) throws Exception {
+        require(AndroidGameBootstrap.gameplayControlsState() == -1,
+            "unknown Minecraft mappings must preserve native GLFW gameplay state");
+
         List<byte[]> messages = new ArrayList<>();
         OutputStream output = new AndroidGameBootstrap.LogcatOutputStream(
             4, (priority, message) -> messages.add(message));

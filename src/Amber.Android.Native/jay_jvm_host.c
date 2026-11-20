@@ -288,7 +288,7 @@ int jay_jvm_run_main(JNIEnv *env, const char *class_name, int argc, const char *
         JAY_INPUT_METHOD(g_dispatch_scroll, "dispatchScroll", "(DD)Z");
         JAY_INPUT_METHOD(g_dispatch_char, "dispatchChar", "(I)Z");
         JAY_INPUT_METHOD(g_dispatch_look, "dispatchLook", "(FF)Z");
-        JAY_INPUT_METHOD(g_is_gameplay_controls_active, "isGameplayControlsActive", "()Z");
+        JAY_INPUT_METHOD(g_is_gameplay_controls_active, "gameplayControlsState", "()I");
         JAY_INPUT_METHOD(g_is_block_target, "isBlockTarget", "()Z");
         JAY_INPUT_METHOD(g_is_text_input_focused, "isTextInputFocused", "()Z");
         JAY_INPUT_METHOD(g_is_text_input_at, "isTextInputAt", "(FF)Z");
@@ -344,11 +344,19 @@ static int jay_query_gameplay_mode(void) {
     JNIEnv *env = jay_input_environment(&attached);
     if (env == NULL || g_is_gameplay_controls_active == NULL)
         return atomic_load(&g_gameplay_mode);
-    jboolean active = (*env)->CallStaticBooleanMethod(env, g_input_bridge_class,
+    jint state = (*env)->CallStaticIntMethod(env, g_input_bridge_class,
         g_is_gameplay_controls_active);
-    int result = jay_finish_input_call(env, attached, active);
-    atomic_store(&g_gameplay_mode, result);
-    return result;
+    if ((*env)->ExceptionCheck(env)) {
+        if (!atomic_exchange(&g_input_bridge_error_logged, 1))
+            (*env)->ExceptionDescribe(env);
+        (*env)->ExceptionClear(env);
+        state = -1;
+    }
+    if (attached && g_vm != NULL) (*g_vm)->DetachCurrentThread(g_vm);
+    if (state < 0) return atomic_load(&g_gameplay_mode);
+    int active = state > 0 ? 1 : 0;
+    atomic_store(&g_gameplay_mode, active);
+    return active;
 }
 
 __attribute__((visibility("default")))

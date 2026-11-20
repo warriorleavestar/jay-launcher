@@ -630,14 +630,18 @@ public final class AndroidGameBootstrap {
         }
     }
 
-    /** True while the client has captured the pointer for ordinary first-person play. */
-    public static boolean isGameplayControlsActive() {
-        if (!prepareInputBridge()) return false;
+    /**
+     * Returns 1 while ordinary first-person controls are active, 0 while a menu is open, and
+     * -1 when this client version cannot be inspected. The native GLFW host must keep its
+     * cursor-capture fallback in the last case instead of treating an unknown client as a menu.
+     */
+    public static int gameplayControlsState() {
+        if (!prepareInputBridge()) return -1;
         try {
             Object minecraft = minecraft();
-            return minecraft != null && screen(minecraft) == null;
+            return minecraft != null && screen(minecraft) == null ? 1 : 0;
         } catch (ReflectiveOperationException | RuntimeException error) {
-            return false;
+            return -1;
         }
     }
 
