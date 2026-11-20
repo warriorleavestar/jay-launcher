@@ -61,8 +61,21 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
         _touchOverlay?.UpdateHardwareCapture(hasFocus);
     }
 
-    public override bool DispatchKeyEvent(KeyEvent? e) =>
-        _touchOverlay?.HandleHardwareKey(e) == true || base.DispatchKeyEvent(e);
+    public override bool DispatchKeyEvent(KeyEvent? e)
+    {
+        // Android's default Back handling finishes this Activity. In the dedicated game process
+        // that immediately reaches OnDestroy and kills HotSpot, including an integrated server
+        // that may still be saving. Treat Back as Minecraft Escape once the game owns the view:
+        // the pause/menu flow can then save and quit normally before main() returns.
+        if (e?.KeyCode == Keycode.Back && _touchOverlay?.Visibility == ViewStates.Visible)
+        {
+            if (e.Action == KeyEventActions.Down && e.RepeatCount == 0)
+                _touchOverlay.HandleSystemBack();
+            return true;
+        }
+
+        return _touchOverlay?.HandleHardwareKey(e) == true || base.DispatchKeyEvent(e);
+    }
 
     public override bool DispatchGenericMotionEvent(MotionEvent? e) =>
         _touchOverlay?.HandleHardwareMotion(e) == true || base.DispatchGenericMotionEvent(e);
@@ -217,6 +230,7 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
 /// <summary>Touch and hardware input overlay shown only after Minecraft owns the game surface.</summary>
 internal sealed class TouchControlOverlay : View, ITouchInputSink
 {
+    private const int GlfwKeyEscape = 256;
     private const long LongPressDelayMs = 340;
     private const long LongPressRingMs = 1150;
     private readonly Paint _fill = new() { AntiAlias = true, Color = Color.Argb(142, 48, 53, 59) };
@@ -1061,6 +1075,19 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         else _sdl.SplitInventoryStack(x, y, count);
     }
 
+    public void HandleSystemBack()
+    {
+        CancelAllInput();
+        if (_sdl is not null)
+        {
+            _sdl.KeyEvent(Keycode.Escape, true);
+            _sdl.KeyEvent(Keycode.Escape, false);
+            return;
+        }
+
+        NativeJvmHost.AddKey(GlfwKeyEscape);
+    }
+
     public bool HandleHardwareKey(KeyEvent? e)
     {
         // Physical keys stay available in every touch layout. The dedicated external-input
@@ -1091,20 +1118,21 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
             // freshly-created InputConnection. Feed it through the view-lifetime gate here and
             // consume the Activity event; soft keyboards still use CommitText directly.
             var menuKey = GlfwKey(e.KeyCode);
-            if (e.KeyCode is Keycode.Enter or Keycode.Tab && menuKey is { } controlKey)
-            {
-                NativeJvmHost.AddKey(controlKey);
-                return true;
-            }
             if (e.UnicodeChar > 0)
             {
-                if (_hardwareTextInputGate.AcceptHardwareCodePoint((int)e.KeyCode,
+                if (!_hardwareTextInputGate.AcceptHardwareCodePoint((int)e.KeyCode,
                         e.UnicodeChar, e.DownTime, SystemClock.UptimeMillis(), e.RepeatCount))
-                    NativeJvmHost.AddCodePoint(e.UnicodeChar);
+                    return true;
+                // Printable keys still carry menu bindings. Minecraft needs E to close an
+                // inventory and number keys to swap a hovered stack into the hotbar, while the
+                // character callback is independently needed by chat and text fields.
+                if (menuKey is { } mappedTextKey) NativeJvmHost.AddKey(mappedTextKey);
+                NativeJvmHost.AddCodePoint(e.UnicodeChar);
                 return true;
             }
             if (menuKey is not { } mappedMenuKey) return false;
-            NativeJvmHost.AddKey(mappedMenuKey);
+            if (_hardwareTextInputGate.Accept((int)e.KeyCode, e.DownTime, e.RepeatCount))
+                NativeJvmHost.AddKey(mappedMenuKey);
             return true;
         }
 
