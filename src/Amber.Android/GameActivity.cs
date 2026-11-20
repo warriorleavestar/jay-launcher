@@ -283,11 +283,13 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     // Only advertise an Android text editor while Minecraft actually owns a text field.
     // Keeping this true during gameplay makes physical W/A/S/D key presses wake the IME
     // on tablets, which covers half the screen and prevents keyboard/mouse play.
-    public override bool OnCheckIsTextEditor() => NativeJvmHost.TextInputFocused;
+    private bool TextInputFocused => _sdl?.TextInputActive ?? NativeJvmHost.TextInputFocused;
+
+    public override bool OnCheckIsTextEditor() => TextInputFocused;
 
     public override IInputConnection? OnCreateInputConnection(EditorInfo? outAttrs)
     {
-        if (outAttrs is null || !NativeJvmHost.TextInputFocused) return null;
+        if (outAttrs is null || !TextInputFocused) return null;
         outAttrs.InputType = InputTypes.ClassText | InputTypes.TextFlagNoSuggestions;
         outAttrs.ImeOptions = ImeFlags.NoExtractUi;
         return new JayInputConnection(this);
@@ -300,7 +302,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         // otherwise some Android GPU drivers retain the previous joystick knob position.
         canvas.DrawColor(Color.Transparent, PorterDuff.Mode.Clear!);
         var gameplayControlsActive = GameplayActive;
-        var textInputFocused = _sdl is null && NativeJvmHost.TextInputFocused;
+        var textInputFocused = TextInputFocused;
         if (_lastTextInputFocused != textInputFocused)
         {
             _lastTextInputFocused = textInputFocused;
@@ -1093,15 +1095,21 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
             // A physical key can be delivered both through Activity.DispatchKeyEvent and a
             // freshly-created InputConnection. Feed it through the view-lifetime gate here and
             // consume the Activity event; soft keyboards still use CommitText directly.
+            var menuKey = GlfwKey(e.KeyCode);
             if (e.UnicodeChar > 0)
             {
                 if (_hardwareTextInputGate.AcceptHardwareCodePoint((int)e.KeyCode,
                         e.UnicodeChar, e.DownTime, SystemClock.UptimeMillis(), e.RepeatCount))
                     NativeJvmHost.AddCodePoint(e.UnicodeChar);
+                // Enter and Tab can expose a control character through UnicodeChar, but their
+                // Minecraft behavior is driven by the GLFW key callback (send chat / advance
+                // focus). Do not let the character path swallow that key edge.
+                if (e.KeyCode is Keycode.Enter or Keycode.Tab && menuKey is { } controlKey)
+                    NativeJvmHost.AddKey(controlKey);
                 return true;
             }
-            if (GlfwKey(e.KeyCode) is not { } menuKey) return false;
-            NativeJvmHost.AddKey(menuKey);
+            if (menuKey is not { } mappedMenuKey) return false;
+            NativeJvmHost.AddKey(mappedMenuKey);
             return true;
         }
 

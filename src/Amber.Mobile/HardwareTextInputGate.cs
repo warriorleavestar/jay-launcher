@@ -5,35 +5,27 @@ namespace Amber.Mobile;
 /// The gate belongs to the view lifetime because Android may recreate input connections between
 /// two deliveries of the same physical key.
 /// </summary>
-internal sealed class HardwareTextInputGate(long duplicateWindowMs = 120)
+internal sealed class HardwareTextInputGate
 {
     private const long ImeCommitSuppressionWindowMs = 500;
     private bool _hasLast;
     private int _lastKeyCode;
     private long _lastDownTime;
-    private long _lastDeliveredAt;
     private int _lastRepeatCount;
     private bool _hasPendingCommittedDuplicate;
     private int _lastHardwareCodePoint;
     private long _lastHardwareDeliveredAt;
-    private bool _hasLastCommittedCodePoint;
-    private int _lastCommittedCodePoint;
-    private long _lastCommittedAt;
 
-    public bool Accept(int keyCode, long downTime, long deliveredAt, int repeatCount)
+    public bool Accept(int keyCode, long downTime, int repeatCount)
     {
         var sameKey = _hasLast && _lastKeyCode == keyCode;
         var duplicateRepeat = sameKey && _lastDownTime == downTime &&
                               _lastRepeatCount == repeatCount;
-        var clonedInitialPress = sameKey && repeatCount == 0 && _lastRepeatCount == 0 &&
-                                 deliveredAt >= _lastDeliveredAt &&
-                                 deliveredAt - _lastDeliveredAt <= duplicateWindowMs;
-        if (duplicateRepeat || clonedInitialPress) return false;
+        if (duplicateRepeat) return false;
 
         _hasLast = true;
         _lastKeyCode = keyCode;
         _lastDownTime = downTime;
-        _lastDeliveredAt = deliveredAt;
         _lastRepeatCount = repeatCount;
         return true;
     }
@@ -41,7 +33,7 @@ internal sealed class HardwareTextInputGate(long duplicateWindowMs = 120)
     public bool AcceptHardwareCodePoint(int keyCode, int codePoint, long downTime,
         long deliveredAt, int repeatCount)
     {
-        if (!Accept(keyCode, downTime, deliveredAt, repeatCount)) return false;
+        if (!Accept(keyCode, downTime, repeatCount)) return false;
         _hasPendingCommittedDuplicate = true;
         _lastHardwareCodePoint = codePoint;
         _lastHardwareDeliveredAt = deliveredAt;
@@ -54,18 +46,12 @@ internal sealed class HardwareTextInputGate(long duplicateWindowMs = 120)
                                 _lastHardwareCodePoint == codePoint &&
                                 deliveredAt >= _lastHardwareDeliveredAt &&
                                 deliveredAt - _lastHardwareDeliveredAt <= ImeCommitSuppressionWindowMs;
-        if (hardwareDuplicate) return false;
+        // A physical key may be echoed once through CommitText by a recreated input
+        // connection. Consume only that one correlated echo. Keeping the pending marker set
+        // would also discard a legitimate second copy of the same character (for example the
+        // two 'o' characters in "book").
         _hasPendingCommittedDuplicate = false;
-
-        var clonedCommit = _hasLastCommittedCodePoint &&
-                           _lastCommittedCodePoint == codePoint &&
-                           deliveredAt >= _lastCommittedAt &&
-                           deliveredAt - _lastCommittedAt <= duplicateWindowMs;
-        if (clonedCommit) return false;
-        _hasLastCommittedCodePoint = true;
-        _lastCommittedCodePoint = codePoint;
-        _lastCommittedAt = deliveredAt;
-        return true;
+        return !hardwareDuplicate;
     }
 
 }

@@ -67,7 +67,6 @@ public sealed class Application : AvaloniaAndroidApplication<Amber.App.App>
             intent.PutExtra(GameActivity.PlayerNameExtra, playerName);
             if (!string.IsNullOrWhiteSpace(serverAddress))
                 intent.PutExtra(GameActivity.ServerAddressExtra, serverAddress);
-            AndroidGameRetry.Arm(intent);
             StartActivity(intent);
         };
         base.OnCreate();

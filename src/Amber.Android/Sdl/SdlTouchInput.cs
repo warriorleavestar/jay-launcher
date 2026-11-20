@@ -41,7 +41,12 @@ internal sealed partial class SdlTouchInput(Activity activity)
     [return: MarshalAs(UnmanagedType.I1)]
     private static partial bool IsRelative(nint window);
 
+    [LibraryImport("SDL3", EntryPoint = "SDL_TextInputActive")]
+    [return: MarshalAs(UnmanagedType.I1)]
+    private static partial bool IsTextInputActive(nint window);
+
     public bool InWorld => GetFocus() is var window && window != 0 && IsRelative(window);
+    public bool TextInputActive => GetFocus() is var window && window != 0 && IsTextInputActive(window);
 
     public void Move(double x, double y)
     {

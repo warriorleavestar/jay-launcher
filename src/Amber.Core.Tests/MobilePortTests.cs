@@ -804,13 +804,13 @@ public sealed class MobilePortTests
     {
         var gate = new HardwareTextInputGate();
 
-        Assert.True(gate.Accept(45, downTime: 1000, deliveredAt: 1010, repeatCount: 0));
-        Assert.False(gate.Accept(45, downTime: 1000, deliveredAt: 1011, repeatCount: 0));
-        Assert.False(gate.Accept(45, downTime: 1002, deliveredAt: 1060, repeatCount: 0));
-        Assert.True(gate.Accept(45, downTime: 1200, deliveredAt: 1200, repeatCount: 0));
-        Assert.True(gate.Accept(45, downTime: 1200, deliveredAt: 1250, repeatCount: 1));
-        Assert.False(gate.Accept(45, downTime: 1200, deliveredAt: 1251, repeatCount: 1));
-        Assert.True(gate.Accept(46, downTime: 1252, deliveredAt: 1252, repeatCount: 0));
+        Assert.True(gate.Accept(45, downTime: 1000, repeatCount: 0));
+        Assert.False(gate.Accept(45, downTime: 1000, repeatCount: 0));
+        Assert.True(gate.Accept(45, downTime: 1002, repeatCount: 0));
+        Assert.True(gate.Accept(45, downTime: 1200, repeatCount: 0));
+        Assert.True(gate.Accept(45, downTime: 1200, repeatCount: 1));
+        Assert.False(gate.Accept(45, downTime: 1200, repeatCount: 1));
+        Assert.True(gate.Accept(46, downTime: 1252, repeatCount: 0));
     }
 
     [Fact]
@@ -820,12 +820,23 @@ public sealed class MobilePortTests
 
         Assert.True(gate.AcceptHardwareCodePoint(45, 'q', 500, 1_000, 0));
         Assert.False(gate.AcceptCommittedCodePoint('q', 1_030));
-        Assert.False(gate.AcceptCommittedCodePoint('q', 1_040));
+        Assert.True(gate.AcceptCommittedCodePoint('q', 1_040));
         Assert.True(gate.AcceptCommittedCodePoint('q', 1_501));
         Assert.True(gate.AcceptHardwareCodePoint(51, 'w', 700, 2_000, 0));
         Assert.True(gate.AcceptCommittedCodePoint('e', 2_020));
-        Assert.False(gate.AcceptCommittedCodePoint('e', 2_021));
+        Assert.True(gate.AcceptCommittedCodePoint('e', 2_021));
         Assert.True(gate.AcceptCommittedCodePoint('e', 2_142));
+    }
+
+    [Fact]
+    public void HardwareTextInputGateAllowsRapidRepeatedCharacters()
+    {
+        var gate = new HardwareTextInputGate();
+
+        Assert.True(gate.AcceptCommittedCodePoint('o', 1_000));
+        Assert.True(gate.AcceptCommittedCodePoint('o', 1_015));
+        Assert.True(gate.Accept(43, downTime: 2_000, repeatCount: 0));
+        Assert.True(gate.Accept(43, downTime: 2_030, repeatCount: 0));
     }
 
     [Fact]
