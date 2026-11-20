@@ -100,8 +100,8 @@ internal static class AndroidEmbeddedGame
             extraJvm.Add("-Dorg.lwjgl.sdl.libname=" + sdlLibrary);
             extraJvm.Add("-Dorg.lwjgl.vulkan.libname=/system/lib64/libvulkan.so");
             extraJvm.Add("-Djna.boot.library.path=" + nativeRoot);
-            extraJvm.Add("-Dorg.lwjgl.spvc.libname=" + Path.Combine(nativeRoot, "libspirv-cross-c-shared.so"));
-            extraJvm.Add("-Dorg.lwjgl.shaderc.libname=" + Path.Combine(nativeRoot, "libshaderc_shared.so"));
+            extraJvm.Add("-Dorg.lwjgl.spvc.libname=" + Path.Combine(nativeRoot, AndroidNativeLibraries.SpirvCross));
+            extraJvm.Add("-Dorg.lwjgl.shaderc.libname=" + Path.Combine(nativeRoot, AndroidNativeLibraries.Shaderc));
             extraJvm.Add("-Dorg.lwjgl.opengl.libname=" + Path.Combine(nativeRoot, "libmobileglues.so"));
         }
         else extraJvm.Add("-Dorg.lwjgl.opengl.explicitInit=true");

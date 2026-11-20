@@ -2,6 +2,9 @@ namespace Amber.Mobile;
 
 internal static class AndroidNativeLibraries
 {
+    public const string Shaderc = "libshaderc.so";
+    public const string SpirvCross = "libspirv-cross.so";
+
     private static readonly string[] Java21 =
     [
         "liblwjgl.so",
@@ -16,8 +19,8 @@ internal static class AndroidNativeLibraries
     [
         .. Java21,
         "liblwjgl_vma.so",
-        "libshaderc.so",
-        "libspirv-cross.so",
+        Shaderc,
+        SpirvCross,
     ];
 
     public static IReadOnlyList<string> RequiredForJava(int javaMajor) =>

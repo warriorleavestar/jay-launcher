@@ -52,8 +52,10 @@ public sealed class MobilePortTests
         var required = AndroidNativeLibraries.RequiredForJava(25);
 
         Assert.Contains("liblwjgl_vma.so", required);
-        Assert.Contains("libshaderc.so", required);
-        Assert.Contains("libspirv-cross.so", required);
+        Assert.Contains(AndroidNativeLibraries.Shaderc, required);
+        Assert.Contains(AndroidNativeLibraries.SpirvCross, required);
+        Assert.Equal("libshaderc.so", AndroidNativeLibraries.Shaderc);
+        Assert.Equal("libspirv-cross.so", AndroidNativeLibraries.SpirvCross);
     }
 
     [Fact]
