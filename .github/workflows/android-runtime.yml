@@ -7,6 +7,7 @@ on:
       - 'scripts/check-android-runtime.sh'
       - 'scripts/check-android-console-log.sh'
       - 'scripts/assemble-android-runtime.sh'
+      - 'scripts/create-android-runtime-descriptor.sh'
       - 'scripts/prepare-android-openjdk.sh'
       - 'scripts/build-android-mobileglues.sh'
       - 'scripts/build-android-shader-tools.sh'
@@ -175,6 +176,12 @@ jobs:
             "$readelf" \
             "$output" \
             25
+          bash scripts/create-android-runtime-descriptor.sh \
+            "$output" \
+            "${{ matrix.architecture }}" \
+            "${{ github.server_url }}/${{ github.repository }}/tree/${{ github.sha }}" \
+            "${{ github.server_url }}/${{ github.repository }}/releases/download/android-runtime-v2/$(basename "$output")" \
+            "runtime-artifact/runtime25-${{ matrix.architecture }}.json"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
