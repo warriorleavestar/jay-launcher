@@ -215,9 +215,22 @@ jobs:
       - name: Install Android NDK and CMake
         shell: bash
         run: |
+          set -euo pipefail
+          sdk_root="${{ runner.temp }}/android-sdk"
+          sdkmanager="$(find "$sdk_root" -type f -name sdkmanager -print -quit 2>/dev/null || true)"
+          if [ -z "$sdkmanager" ] && command -v sdkmanager >/dev/null 2>&1; then
+            sdkmanager="$(command -v sdkmanager)"
+          fi
+          if [ -z "$sdkmanager" ] && [ -n "${ANDROID_HOME:-}" ] && [ -d "$ANDROID_HOME" ]; then
+            sdkmanager="$(find "$ANDROID_HOME" -type f -name sdkmanager -print -quit 2>/dev/null || true)"
+          fi
+          if [ -z "$sdkmanager" ] || [ ! -x "$sdkmanager" ]; then
+            echo "::error::Android sdkmanager was not installed by the .NET workload or runner image."
+            exit 1
+          fi
           # yes exits non-zero (EPIPE) once sdkmanager stops reading; pipefail would fail the step.
-          (yes || true) | "${{ runner.temp }}/android-sdk/cmdline-tools/latest/bin/sdkmanager" \
-            --sdk_root="${{ runner.temp }}/android-sdk" "ndk;28.2.13676358" "cmake;3.22.1"
+          (yes || true) | "$sdkmanager" \
+            --sdk_root="$sdk_root" "ndk;28.2.13676358" "cmake;3.22.1"
 
       - name: Build Jay native JVM host
         shell: bash
