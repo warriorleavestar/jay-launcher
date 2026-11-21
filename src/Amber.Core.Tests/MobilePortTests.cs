@@ -1114,6 +1114,19 @@ public sealed class MobilePortTests
     }
 
     [Fact]
+    public void SdlGameActivitySurvivesExternalKeyboardAndMouseChanges()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var manifest = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "Properties", "AndroidManifest.xml"));
+
+        Assert.Contains(
+            "android:configChanges=\"orientation|screenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode\"",
+            manifest, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void DownloadableAndroidBuildsRequireBuiltInCurseForgeKeyButPullRequestsStayKeyless()
     {
         var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
