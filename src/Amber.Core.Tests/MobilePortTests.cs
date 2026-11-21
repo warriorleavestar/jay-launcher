@@ -1201,6 +1201,20 @@ public sealed class MobilePortTests
     }
 
     [Fact]
+    public void FocusedSdlOverlayRoutesExternalKeyboardEvents()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var overlay = File.ReadAllText(Path.Combine(repository, "src", "Amber.Android",
+            "GameActivity.cs"));
+        var focusRoute = JavaMethod(overlay, "public override bool OnKeyDown", "public override void OnWindowFocusChanged");
+
+        Assert.Contains("HandleHardwareKey(e) || base.OnKeyDown", focusRoute, StringComparison.Ordinal);
+        Assert.Contains("public override bool OnKeyUp", focusRoute, StringComparison.Ordinal);
+        Assert.Contains("HandleHardwareKey(e) || base.OnKeyUp", focusRoute, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void DownloadableAndroidBuildsRequireBuiltInCurseForgeKeyButPullRequestsStayKeyless()
     {
         var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,

@@ -302,6 +302,17 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
 
     public override bool OnCheckIsTextEditor() => TextInputFocused;
 
+    // GameActivity forwards keys from Activity.DispatchKeyEvent before View dispatch. The SDL
+    // host cannot call this managed overlay directly; once external-input mode requests focus
+    // for pointer capture, Android sends physical keys here instead of to SDL's SurfaceView.
+    // Handling the focused-view path keeps W/A/S/D and menu keys working without duplicating
+    // GameActivity delivery (an Activity-consumed event never reaches these overrides).
+    public override bool OnKeyDown(Keycode keyCode, KeyEvent? e) =>
+        HandleHardwareKey(e) || base.OnKeyDown(keyCode, e);
+
+    public override bool OnKeyUp(Keycode keyCode, KeyEvent? e) =>
+        HandleHardwareKey(e) || base.OnKeyUp(keyCode, e);
+
     public override void OnWindowFocusChanged(bool hasWindowFocus)
     {
         base.OnWindowFocusChanged(hasWindowFocus);
