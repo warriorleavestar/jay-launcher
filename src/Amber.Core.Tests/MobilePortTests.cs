@@ -487,6 +487,23 @@ public sealed class MobilePortTests
     }
 
     [Fact]
+    public void AndroidReadsGuiScaleFromTheWindowWithoutRequiringAnOpenScreen()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var bootstrap = File.ReadAllText(Path.Combine(repository, "src", "Amber.Android", "Java",
+            "nz", "work", "minecraft", "jay", "AndroidGameBootstrap.java"));
+
+        Assert.Contains("windowGuiScale = optionalMethod(windowType, \"getGuiScale\")", bootstrap,
+            StringComparison.Ordinal);
+        Assert.Equal(2, bootstrap.Split(
+            "windowGuiScale = optionalMethod(windowType, \"s\")", StringSplitOptions.None).Length - 1);
+        Assert.Contains("windowGuiScale.invoke(liveWindow)", bootstrap, StringComparison.Ordinal);
+        Assert.Contains("if (liveWindow != null && windowGuiScale != null)", bootstrap,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AndroidDropsLegacyInventoryOverridesAndKeepsTheButtonOutOfLayoutEditing()
     {
         var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
