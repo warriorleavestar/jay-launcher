@@ -35,6 +35,7 @@ public final class AndroidGameBootstrap {
     private static Method windowHandle;
     private static Method windowWidth;
     private static Method windowHeight;
+    private static Method windowGuiScale;
     private static Method mouseMove;
     private static boolean mouseMoveHasDeltas;
     private static Method mouseButton;
@@ -201,6 +202,7 @@ public final class AndroidGameBootstrap {
         }
         windowWidth = accessible(windowType.getDeclaredMethod("getScreenWidth"));
         windowHeight = accessible(windowType.getDeclaredMethod("getScreenHeight"));
+        windowGuiScale = optionalMethod(windowType, "getGuiScale");
         try {
             mouseMove = accessible(mouseType.getDeclaredMethod(
                 "onMove", long.class, double.class, double.class));
@@ -316,6 +318,7 @@ public final class AndroidGameBootstrap {
             windowHandle = accessible(windowType.getDeclaredMethod("h"));
             windowWidth = accessible(windowType.getDeclaredMethod("m"));
             windowHeight = accessible(windowType.getDeclaredMethod("n"));
+            windowGuiScale = optionalMethod(windowType, "s");
             mouseMove = accessible(mouseType.getDeclaredMethod(
                 "b", long.class, double.class, double.class));
             mouseButton = accessible(mouseType.getDeclaredMethod(
@@ -366,6 +369,7 @@ public final class AndroidGameBootstrap {
             windowHandle = accessible(windowType.getDeclaredMethod("i"));
             windowWidth = accessible(windowType.getDeclaredMethod("m"));
             windowHeight = accessible(windowType.getDeclaredMethod("n"));
+            windowGuiScale = optionalMethod(windowType, "s");
             mouseMove = accessible(mouseType.getDeclaredMethod(
                 "b", long.class, double.class, double.class));
             mouseButton = accessible(mouseType.getDeclaredMethod(
@@ -401,6 +405,14 @@ public final class AndroidGameBootstrap {
     private static <T extends java.lang.reflect.AccessibleObject> T accessible(T value) {
         value.setAccessible(true);
         return value;
+    }
+
+    private static Method optionalMethod(Class<?> type, String name, Class<?>... parameters) {
+        try {
+            return accessible(type.getDeclaredMethod(name, parameters));
+        } catch (NoSuchMethodException unavailable) {
+            return null;
+        }
     }
 
     private static Method slotAtMethod(Class<?> containerType, Class<?> slotType)
@@ -591,6 +603,21 @@ public final class AndroidGameBootstrap {
             Object minecraft = minecraft();
             Object active = minecraft == null ? null : screen(minecraft);
             Object liveWindow = minecraft == null ? null : window(minecraft);
+            // Window exposes the scale even when no Screen is open. This is required by the
+            // legacy GameActivity path, whose touch overlay becomes visible only after the
+            // title menu has closed and therefore cannot rely on a cached Screen width.
+            if (liveWindow != null && windowGuiScale != null) {
+                try {
+                    Object rawScale = windowGuiScale.invoke(liveWindow);
+                    if (rawScale instanceof Number) {
+                        double scale = ((Number)rawScale).doubleValue();
+                        if (Double.isFinite(scale) && scale >= 1.0)
+                            lastGuiScale = Math.max(1, (int)Math.round(scale));
+                    }
+                } catch (ReflectiveOperationException | RuntimeException unavailable) {
+                    // Fall through to the Screen/physical-width ratio used by older clients.
+                }
+            }
             if (active != null && liveWindow != null) {
                 int logicalWidth = screenWidth.getInt(active);
                 int physicalWidth = (Integer)windowWidth.invoke(liveWindow);
