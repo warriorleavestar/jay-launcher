@@ -104,8 +104,10 @@ public sealed class TouchControlProfile
             // Minecraft's automatic GUI scale can make the hotbar more than twice as wide as
             // scale 3 on a tablet. Anchor to the live framebuffer/GUI scale rather than a fixed
             // aspect-ratio estimate, and make this face exactly one Minecraft slot high.
-            var hud = TouchHudGeometry.ForViewport(
-                ViewportWidthPixels, ViewportHeightPixels, MinecraftGuiScale, radius);
+            var hud = ViewportWidthPixels > 0 && ViewportHeightPixels > 0 && MinecraftGuiScale > 0
+                ? TouchHudGeometry.ForViewport(
+                    ViewportWidthPixels, ViewportHeightPixels, MinecraftGuiScale, radius)
+                : TouchHudGeometry.ForAspectRatio(ViewportAspectRatio, radius);
             return control with
             {
                 CenterX = hud.InventoryX,
