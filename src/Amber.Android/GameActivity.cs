@@ -1237,7 +1237,9 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
             {
                 HardwareMouseButtonTracker.Primary => TouchControlAction.PrimaryAction,
                 HardwareMouseButtonTracker.Secondary => TouchControlAction.SecondaryAction,
-                HardwareMouseButtonTracker.Tertiary => TouchControlAction.Inventory,
+                // Match desktop Minecraft: the middle button is pick-block. Opening the
+                // inventory remains E / the dedicated hotbar-adjacent touch button.
+                HardwareMouseButtonTracker.Tertiary => TouchControlAction.PickBlock,
                 _ => (TouchControlAction?)null
             };
             // DOWN/UP can arrive without a preceding HOVER_MOVE (trackpads and ADB both do

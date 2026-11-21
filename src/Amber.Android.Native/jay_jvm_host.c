@@ -10,8 +10,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define JAY_JVM_ABI_VERSION 16
-#define JAY_ACTION_COUNT 12
+#define JAY_JVM_ABI_VERSION 17
+#define JAY_ACTION_COUNT 13
 #define JAY_TEXT_CAPACITY 64
 #define JAY_KEY_CAPACITY 16
 

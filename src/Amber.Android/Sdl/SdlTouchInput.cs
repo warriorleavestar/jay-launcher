@@ -92,6 +92,7 @@ internal sealed partial class SdlTouchInput(Activity activity)
         foreach (var code in _held.ToArray()) Key(code, false);
         if ((_buttons & 1) != 0) Action(TouchControlAction.PrimaryAction, false);
         if ((_buttons & 2) != 0) Action(TouchControlAction.SecondaryAction, false);
+        if ((_buttons & 4) != 0) Action(TouchControlAction.PickBlock, false);
     }
 
     private void Mouse(int button, MotionEventActions action, float x, float y, bool relative)
@@ -129,9 +130,15 @@ internal sealed partial class SdlTouchInput(Activity activity)
 
     public void Action(TouchControlAction action, bool pressed)
     {
-        if (action is TouchControlAction.PrimaryAction or TouchControlAction.SecondaryAction)
+        if (action is TouchControlAction.PrimaryAction or TouchControlAction.SecondaryAction or
+            TouchControlAction.PickBlock)
         {
-            int mask = action == TouchControlAction.PrimaryAction ? 1 : 2;
+            int mask = action switch
+            {
+                TouchControlAction.PrimaryAction => 1,
+                TouchControlAction.SecondaryAction => 2,
+                _ => 4
+            };
             _buttons = pressed ? _buttons | mask : _buttons & ~mask;
             var relative = InWorld;
             if (!relative && mask == 1 && MenuPointer(pressed ? 1u : 2u)) return;

@@ -3,7 +3,7 @@ namespace Amber.Mobile;
 public enum TouchControlAction
 {
     Move, PrimaryAction, SecondaryAction, Jump, Inventory, Menu, Keyboard,
-    Sneak, Sprint, Drop, PreviousSlot, NextSlot, Settings, Close
+    Sneak, Sprint, Drop, PreviousSlot, NextSlot, PickBlock, Settings, Close
 }
 
 public enum TouchControlMode { JoystickAndTap, DPadAndTap, JoystickAndCrosshair, ExternalKeyboardMouse }

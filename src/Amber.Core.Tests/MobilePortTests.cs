@@ -1185,6 +1185,32 @@ public sealed class MobilePortTests
     }
 
     [Fact]
+    public void AndroidMiddleMouseKeepsDesktopPickBlockSemantics()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var activity = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "GameActivity.cs"));
+        var sdl = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "Sdl", "SdlTouchInput.cs"));
+        var native = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android.Native", "jay_jvm_host.c"));
+        var glfw = File.ReadAllText(Path.Combine(repository,
+            "third_party", "android-glfw", "jay-android.patch"));
+
+        Assert.Equal(12, (int)TouchControlAction.PickBlock);
+        Assert.Contains("HardwareMouseButtonTracker.Tertiary => TouchControlAction.PickBlock", activity,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("HardwareMouseButtonTracker.Tertiary => TouchControlAction.Inventory", activity,
+            StringComparison.Ordinal);
+        Assert.Contains("TouchControlAction.PickBlock, false", sdl, StringComparison.Ordinal);
+        Assert.Contains("TouchControlAction.PickBlock)", sdl, StringComparison.Ordinal);
+        Assert.Contains("#define JAY_ACTION_COUNT 13", native, StringComparison.Ordinal);
+        Assert.Contains("GLFW_MOUSE_BUTTON_MIDDLE", glfw, StringComparison.Ordinal);
+        Assert.Contains("action <= 2 || action == 12", glfw, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void TouchOverlayReleasesHeldInputAcrossBothGlfwAndSdlWindowFocusChanges()
     {
         var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,

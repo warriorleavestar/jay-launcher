@@ -310,11 +310,11 @@ index 1db0811..b84b668 100644
 +    const int keys[] = { GLFW_KEY_UNKNOWN, GLFW_MOUSE_BUTTON_LEFT, GLFW_MOUSE_BUTTON_RIGHT,
 +                         GLFW_KEY_SPACE, GLFW_KEY_E, GLFW_KEY_ESCAPE, GLFW_KEY_T,
 +                         GLFW_KEY_LEFT_SHIFT, GLFW_KEY_LEFT_CONTROL, GLFW_KEY_Q,
-+                         GLFW_KEY_UNKNOWN, GLFW_KEY_UNKNOWN };
-+    for (int action = 1; action <= 11; action++)
++                         GLFW_KEY_UNKNOWN, GLFW_KEY_UNKNOWN, GLFW_MOUSE_BUTTON_MIDDLE };
++    for (int action = 1; action <= 12; action++)
 +    {
 +        const uint32_t bit = 1u << action;
-+        if (action >= 10)
++        if (action == 10 || action == 11)
 +        {
 +            const GLFWbool pressed = !(previous & bit) && (input.actions & bit);
 +            const GLFWbool tapped = (input.actionTaps & bit) && !(input.actions & bit);
@@ -324,14 +324,14 @@ index 1db0811..b84b668 100644
 +        }
 +        if ((previous & bit) != (input.actions & bit))
 +        {
-+            if (action <= 2)
++            if (action <= 2 || action == 12)
 +                inputMouseButton(window, keys[action], (input.actions & bit) ? GLFW_PRESS : GLFW_RELEASE);
 +            else
 +                inputKey(window, keys[action], (input.actions & bit) ? GLFW_PRESS : GLFW_RELEASE);
 +        }
 +        else if ((input.actionTaps & bit) && !(input.actions & bit))
 +        {
-+            if (action <= 2)
++            if (action <= 2 || action == 12)
 +            {
 +                inputMouseButton(window, keys[action], GLFW_PRESS);
 +                inputMouseButton(window, keys[action], GLFW_RELEASE);
