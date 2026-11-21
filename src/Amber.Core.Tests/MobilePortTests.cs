@@ -978,6 +978,22 @@ public sealed class MobilePortTests
         Assert.True(gate.AcceptCommittedCodePoint('b', 7_030));
     }
 
+    [Fact]
+    public void AndroidImeCommitNormalizesSubmitAndTabKeysWithoutLosingText()
+    {
+        var plan = AndroidTextCommitPlan.Create("say 👋\r\nnext\tfield\n".EnumerateRunes());
+
+        Assert.Equal(
+        [
+            new(AndroidTextCommitKind.Text, "say 👋"),
+            new(AndroidTextCommitKind.Enter),
+            new(AndroidTextCommitKind.Text, "next"),
+            new(AndroidTextCommitKind.Tab),
+            new(AndroidTextCommitKind.Text, "field"),
+            new(AndroidTextCommitKind.Enter)
+        ], plan);
+    }
+
     [Theory]
     [InlineData(0, 0, 0, 0)]
     [InlineData(2, 0, 2, 0)]

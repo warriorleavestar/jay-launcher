@@ -1421,6 +1421,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     private sealed class JayInputConnection : BaseInputConnection
     {
         private const int GlfwKeyEnter = 257;
+        private const int GlfwKeyTab = 258;
         private const int GlfwKeyBackspace = 259;
         private const int GlfwKeyDelete = 261;
         private readonly TouchControlOverlay _owner;
@@ -1439,13 +1440,30 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
                     .Where(rune => _owner._hardwareTextInputGate.AcceptCommittedCodePoint(
                         rune.Value, deliveredAt))
                     .ToArray();
+                var plan = AndroidTextCommitPlan.Create(accepted);
                 if (_owner._sdl is not null)
                 {
-                    if (accepted.Length > 0)
-                        _owner._sdl.CommitText(string.Concat(accepted.Select(rune => rune.ToString())));
+                    foreach (var action in plan)
+                    {
+                        if (action.Kind == AndroidTextCommitKind.Text)
+                            _owner._sdl.CommitText(action.Text);
+                        else if (action.Kind == AndroidTextCommitKind.Enter)
+                            _owner._sdl.Enter();
+                        else
+                            _owner._sdl.Tab();
+                    }
                     return true;
                 }
-                foreach (var rune in accepted) NativeJvmHost.AddCodePoint(rune.Value);
+                foreach (var action in plan)
+                {
+                    if (action.Kind == AndroidTextCommitKind.Enter)
+                        NativeJvmHost.AddKey(GlfwKeyEnter);
+                    else if (action.Kind == AndroidTextCommitKind.Tab)
+                        NativeJvmHost.AddKey(GlfwKeyTab);
+                    else
+                        foreach (var rune in action.Text.EnumerateRunes())
+                            NativeJvmHost.AddCodePoint(rune.Value);
+                }
             }
             return true;
         }
