@@ -14,6 +14,7 @@ namespace Amber.Android;
 [Activity(
     Label = "Jay Game",
     Process = ":game",
+    LaunchMode = LaunchMode.SingleTask,
     Theme = "@style/MyTheme.NoActionBar",
     // Minecraft owns an independent OpenGL SurfaceView. Disabling Android HWUI for the
     // surrounding Activity avoids an Android 15 RenderThread teardown race during the first

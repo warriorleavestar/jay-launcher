@@ -1127,6 +1127,25 @@ public sealed class MobilePortTests
     }
 
     [Fact]
+    public void AndroidGameLaunchIsSingleInstanceAndPreparationIsDeduplicated()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var manifest = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "Properties", "AndroidManifest.xml"));
+        var gameActivity = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "GameActivity.cs"));
+        var home = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.App", "ViewModels", "HomeViewModel.cs"));
+
+        Assert.Contains("android:launchMode=\"singleTask\"", manifest, StringComparison.Ordinal);
+        Assert.Contains("LaunchMode = LaunchMode.SingleTask", gameActivity, StringComparison.Ordinal);
+        Assert.Contains("Interlocked.CompareExchange(ref _mobileLaunchInProgress, 1, 0)", home,
+            StringComparison.Ordinal);
+        Assert.Contains("Volatile.Write(ref _mobileLaunchInProgress, 0)", home, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void DownloadableAndroidBuildsRequireBuiltInCurseForgeKeyButPullRequestsStayKeyless()
     {
         var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
