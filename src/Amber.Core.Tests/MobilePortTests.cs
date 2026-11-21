@@ -1082,7 +1082,7 @@ public sealed class MobilePortTests
         var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", ".."));
         var workflow = File.ReadAllText(Path.Combine(repository,
-            ".github", "workflows", "build.yml"));
+            ".github", "workflows", "build.yml")).Replace("\r\n", "\n", StringComparison.Ordinal);
         var androidStart = workflow.IndexOf("  android:\n", StringComparison.Ordinal);
         var androidEnd = workflow.IndexOf("\n  android-smoke:\n", androidStart, StringComparison.Ordinal);
 
