@@ -1171,6 +1171,21 @@ public sealed class MobilePortTests
     }
 
     [Fact]
+    public void SdlMiningProgressDetectsTheLiveBlockTarget()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var sdl = File.ReadAllText(Path.Combine(repository, "src", "Amber.Android", "Java",
+            "nz", "work", "minecraft", "jay", "SdlMenuBootstrap.java"));
+        var blockTarget = JavaMethod(sdl, "public static boolean isBlockTarget", "// SDLActivity owns");
+
+        Assert.Contains("input.current.invoke", blockTarget, StringComparison.Ordinal);
+        Assert.Contains("input.hitResult.get", blockTarget, StringComparison.Ordinal);
+        Assert.Contains("input.blockHit.isInstance", blockTarget, StringComparison.Ordinal);
+        Assert.DoesNotContain("return false; }", blockTarget, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void DownloadableAndroidBuildsRequireBuiltInCurseForgeKeyButPullRequestsStayKeyless()
     {
         var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,

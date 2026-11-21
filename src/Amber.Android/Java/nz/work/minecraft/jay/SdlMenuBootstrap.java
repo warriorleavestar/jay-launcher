@@ -169,7 +169,20 @@ public final class SdlMenuBootstrap {
         }
     }
 
-    public static boolean isBlockTarget() { return false; }
+    /** True only while ordinary gameplay is aiming at a block that can be mined. */
+    public static boolean isBlockTarget() {
+        try {
+            if (menu == null) menu = new Menu();
+            Menu input = menu;
+            Object game = input.instance.invoke(null);
+            if (game == null) return false;
+            Object active = input.current.invoke(input.guiField.get(game));
+            Object hit = input.hitResult.get(game);
+            return active == null && hit != null && input.blockHit.isInstance(hit);
+        } catch (ReflectiveOperationException | RuntimeException error) {
+            return false;
+        }
+    }
 
     // SDLActivity owns these event types. The native host probes one common bridge surface for
     // both GLFW and SDL, so explicit no-op methods avoid treating the intentional SDL routing as
