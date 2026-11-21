@@ -239,40 +239,12 @@ internal static class AndroidEmbeddedGame
     private static async Task CreateMobileOptionsIfMissingAsync(string gameRoot, CancellationToken ct)
     {
         var path = Path.Combine(gameRoot, "options.txt");
-        if (File.Exists(path))
-        {
-            var existing = await File.ReadAllTextAsync(path, ct);
-            if (existing.Split('\n').Any(line =>
-                    line.Trim().StartsWith("lang:", StringComparison.Ordinal) &&
-                    line.Trim().Length > "lang:".Length)) return;
-            await File.AppendAllTextAsync(path,
-                (existing.Length > 0 && !existing.EndsWith('\n') ? Environment.NewLine : "") +
-                "lang:zh_cn" + Environment.NewLine, ct);
-            return;
-        }
-
-        const string defaults = """
-            version:4671
-            ao:true
-            autoJump:true
-            biomeBlendRadius:0
-            enableVsync:true
-            entityDistanceScaling:0.75
-            entityShadows:false
-            graphicsPreset:"fast"
-            guiScale:3
-            lang:zh_cn
-            maxFps:60
-            mipmapLevels:2
-            onboardAccessibility:false
-            particles:1
-            pauseOnLostFocus:false
-            rawMouseInput:false
-            renderClouds:"false"
-            renderDistance:8
-            simulationDistance:6
-            touchscreen:false
-            """;
-        await File.WriteAllTextAsync(path, defaults + Environment.NewLine, ct);
+        var marker = Path.Combine(gameRoot, MobileGameOptions.MigrationMarkerName);
+        var existing = File.Exists(path) ? await File.ReadAllTextAsync(path, ct) : null;
+        var prepared = MobileGameOptions.Prepare(existing, migrateLegacyScale: !File.Exists(marker));
+        if (!string.Equals(existing, prepared, StringComparison.Ordinal))
+            await File.WriteAllTextAsync(path, prepared, ct);
+        if (!File.Exists(marker))
+            await File.WriteAllTextAsync(marker, "2" + Environment.NewLine, ct);
     }
 }

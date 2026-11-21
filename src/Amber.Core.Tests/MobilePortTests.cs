@@ -1617,6 +1617,33 @@ public sealed class MobilePortTests
     }
 
     [Fact]
+    public void FreshAndroidOptionsUseTouchFriendlyAutomaticGuiScale()
+    {
+        var options = MobileGameOptions.Prepare(existing: null, migrateLegacyScale: true);
+
+        Assert.Contains("guiScale:0", options, StringComparison.Ordinal);
+        Assert.Contains("lang:zh_cn", options, StringComparison.Ordinal);
+        Assert.DoesNotContain("guiScale:3", options, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AndroidGuiScaleMigrationRunsOnceAndPreservesPlayerChoices()
+    {
+        const string legacy = "version:4671\r\nguiScale:3\r\nlang:en_us\r\nmaxFps:90\r\n";
+        var migrated = MobileGameOptions.Prepare(legacy, migrateLegacyScale: true);
+
+        Assert.Contains("guiScale:0\r\n", migrated, StringComparison.Ordinal);
+        Assert.Contains("lang:en_us\r\n", migrated, StringComparison.Ordinal);
+        Assert.Contains("maxFps:90\r\n", migrated, StringComparison.Ordinal);
+        Assert.DoesNotContain("lang:zh_cn", migrated, StringComparison.Ordinal);
+
+        var playerSelectedThree = MobileGameOptions.Prepare(
+            migrated.Replace("guiScale:0", "guiScale:3", StringComparison.Ordinal),
+            migrateLegacyScale: false);
+        Assert.Contains("guiScale:3", playerSelectedThree, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void SdlMenuBridgeExposesFocusedEditorHitTestingToAndroid()
     {
         var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
