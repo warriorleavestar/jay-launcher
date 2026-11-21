@@ -108,7 +108,7 @@ public sealed class TouchInputRouter
         _pointers[pointerId] = new(control.Action, x, y);
         if (control.Action == TouchControlAction.Move)
             Move(pointerId, x, y);
-        else
+        else if (!HasOtherActiveAction(control.Action, pointerId))
             _sink.SetAction(control.Action, true);
         return true;
     }
@@ -135,7 +135,8 @@ public sealed class TouchInputRouter
             return true;
         }
 
-        _sink.SetAction(TouchControlAction.PrimaryAction, true);
+        if (!HasOtherActiveAction(TouchControlAction.PrimaryAction, pointerId))
+            _sink.SetAction(TouchControlAction.PrimaryAction, true);
         _pointers[pointerId] = pointer with
         {
             ClickOnRelease = false,
@@ -304,8 +305,11 @@ public sealed class TouchInputRouter
             }
             else if (pointer.PointerHeld && pointer.HeldAction is { } heldAction)
             {
-                if (cancelled) _sink.CancelAction(heldAction);
-                else _sink.SetAction(heldAction, false);
+                if (!HasActiveAction(heldAction))
+                {
+                    if (cancelled) _sink.CancelAction(heldAction);
+                    else _sink.SetAction(heldAction, false);
+                }
             }
             else if (!cancelled && pointer.ClickOnRelease && !pointer.HasDragged)
             {
@@ -315,8 +319,11 @@ public sealed class TouchInputRouter
         }
         else if (!pointer.ToggleAction && pointer.Action is { } action)
         {
-            if (cancelled) _sink.CancelAction(action);
-            else _sink.SetAction(action, false);
+            if (!HasActiveAction(action))
+            {
+                if (cancelled) _sink.CancelAction(action);
+                else _sink.SetAction(action, false);
+            }
         }
         return true;
     }
@@ -351,14 +358,22 @@ public sealed class TouchInputRouter
         {
             if (pointer.MenuInteraction) _lastMenuTap = null;
             if (pointer.PointerHeld && pointer.HeldAction is { } heldAction)
-                _sink.CancelAction(heldAction);
+                if (!HasActiveAction(heldAction)) _sink.CancelAction(heldAction);
         }
         else if (!pointer.ToggleAction)
         {
-            _sink.CancelAction(pointer.Action.Value);
+            if (!HasActiveAction(pointer.Action.Value))
+                _sink.CancelAction(pointer.Action.Value);
         }
         return true;
     }
+
+    private bool HasActiveAction(TouchControlAction action) =>
+        _pointers.Values.Any(pointer => pointer.Action == action || pointer.HeldAction == action);
+
+    private bool HasOtherActiveAction(TouchControlAction action, int pointerId) =>
+        _pointers.Any(entry => entry.Key != pointerId &&
+            (entry.Value.Action == action || entry.Value.HeldAction == action));
 
     private void TapAction(TouchControlAction action)
     {

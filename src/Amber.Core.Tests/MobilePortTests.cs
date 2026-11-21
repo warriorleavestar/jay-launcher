@@ -513,6 +513,50 @@ public sealed class MobilePortTests
     }
 
     [Fact]
+    public void TouchInputRouterKeepsSharedActionPressedUntilTheLastFingerEnds()
+    {
+        var sink = new RecordingTouchSink();
+        var profile = new TouchControlProfile();
+        var router = new TouchInputRouter(sink, profile);
+        var jump = profile.Controls.Single(control => control.Action == TouchControlAction.Jump);
+
+        Assert.True(router.Press(20, jump.CenterX, jump.CenterY));
+        Assert.True(router.Press(21, jump.CenterX, jump.CenterY));
+        Assert.Single(sink.Actions, action => action == (TouchControlAction.Jump, true));
+
+        Assert.True(router.Release(20));
+        Assert.DoesNotContain((TouchControlAction.Jump, false), sink.Actions);
+        Assert.True(router.IsPressed(TouchControlAction.Jump));
+
+        Assert.True(router.Release(21));
+        Assert.Single(sink.Actions, action => action == (TouchControlAction.Jump, false));
+        Assert.False(router.IsPressed(TouchControlAction.Jump));
+    }
+
+    [Fact]
+    public void TouchInputRouterKeepsMiningPressedUntilTheLastLongPressEnds()
+    {
+        var sink = new RecordingTouchSink();
+        var router = new TouchInputRouter(sink);
+
+        Assert.True(router.Press(30, 0.60, 0.40));
+        Assert.True(router.BeginLongPress(30));
+        Assert.True(router.Press(31, 0.70, 0.40));
+        Assert.True(router.BeginLongPress(31));
+        Assert.Single(sink.Actions,
+            action => action == (TouchControlAction.PrimaryAction, true));
+
+        Assert.True(router.Release(30));
+        Assert.DoesNotContain((TouchControlAction.PrimaryAction, false), sink.Actions);
+        Assert.True(router.IsPressed(TouchControlAction.PrimaryAction));
+
+        Assert.True(router.Release(31));
+        Assert.Single(sink.Actions,
+            action => action == (TouchControlAction.PrimaryAction, false));
+        Assert.False(router.IsPressed(TouchControlAction.PrimaryAction));
+    }
+
+    [Fact]
     public void TouchInputRouterRestoresFirstMovementFingerWhenSecondOneEnds()
     {
         var sink = new RecordingTouchSink();
