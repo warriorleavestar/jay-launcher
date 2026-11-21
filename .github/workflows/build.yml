@@ -289,6 +289,18 @@ jobs:
           test -n "$ANDROID_RELEASE_KEYSTORE_BASE64"
           printf '%s' "$ANDROID_RELEASE_KEYSTORE_BASE64" | base64 --decode > "${{ runner.temp }}/jay-android-preview.p12"
 
+      - name: Require CurseForge key for downloadable Android builds
+        if: env.RELEASE_SIGNED_ANDROID == 'true'
+        shell: bash
+        env:
+          # Keep the key out of PRs, ordinary manual CI and every unrelated Android build step.
+          JAY_CURSEFORGE_API_KEY: ${{ secrets.CURSEFORGE_API_KEY }}
+        run: |
+          if [ -z "$JAY_CURSEFORGE_API_KEY" ]; then
+            echo "::error::CURSEFORGE_API_KEY secret is empty; downloadable Android builds must include the CurseForge key."
+            exit 1
+          fi
+
       - name: Publish CI APK
         if: env.RELEASE_SIGNED_ANDROID != 'true'
         run: >-
@@ -302,6 +314,7 @@ jobs:
       - name: Publish release-signed preview APK
         if: env.RELEASE_SIGNED_ANDROID == 'true'
         env:
+          JAY_CURSEFORGE_API_KEY: ${{ secrets.CURSEFORGE_API_KEY }}
           ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
           ANDROID_RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_STORE_PASSWORD }}
           ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}

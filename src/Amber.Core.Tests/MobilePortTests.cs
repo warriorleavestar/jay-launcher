@@ -1077,6 +1077,35 @@ public sealed class MobilePortTests
     }
 
     [Fact]
+    public void DownloadableAndroidBuildsRequireBuiltInCurseForgeKeyButPullRequestsStayKeyless()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var workflow = File.ReadAllText(Path.Combine(repository,
+            ".github", "workflows", "build.yml"));
+        var androidStart = workflow.IndexOf("  android:\n", StringComparison.Ordinal);
+        var androidEnd = workflow.IndexOf("\n  android-smoke:\n", androidStart, StringComparison.Ordinal);
+
+        Assert.True(androidStart >= 0 && androidEnd > androidStart);
+        var android = workflow[androidStart..androidEnd];
+        Assert.Contains("JAY_CURSEFORGE_API_KEY:", android, StringComparison.Ordinal);
+        Assert.Contains("secrets.CURSEFORGE_API_KEY", android, StringComparison.Ordinal);
+        Assert.Contains("github.event_name == 'push' && github.ref == 'refs/heads/main'", android,
+            StringComparison.Ordinal);
+        Assert.Contains("if: env.RELEASE_SIGNED_ANDROID == 'true'", android, StringComparison.Ordinal);
+        Assert.Contains("test -n \"$ANDROID_RELEASE_KEYSTORE_BASE64\"", android, StringComparison.Ordinal);
+        Assert.Contains("if [ -z \"$JAY_CURSEFORGE_API_KEY\" ]", android, StringComparison.Ordinal);
+        var ciPublishStart = android.IndexOf("      - name: Publish CI APK", StringComparison.Ordinal);
+        var signedPublishStart = android.IndexOf("      - name: Publish release-signed preview APK",
+            StringComparison.Ordinal);
+        Assert.True(ciPublishStart >= 0 && signedPublishStart > ciPublishStart);
+        Assert.DoesNotContain("secrets.CURSEFORGE_API_KEY", android[ciPublishStart..signedPublishStart],
+            StringComparison.Ordinal);
+        Assert.Contains("JAY_CURSEFORGE_API_KEY: ${{ secrets.CURSEFORGE_API_KEY }}",
+            android[signedPublishStart..], StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task AndroidRuntimeManifestRequiresSafeLicensedVerifiedFiles()
     {
         var root = Path.Combine(Path.GetTempPath(), "jay-runtime-" + Guid.NewGuid().ToString("N"));
