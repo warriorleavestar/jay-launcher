@@ -1097,6 +1097,23 @@ public sealed class MobilePortTests
     }
 
     [Fact]
+    public void SdlGameProcessIsReclaimedAfterItsEmbeddedJvmReturns()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var manifest = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "Properties", "AndroidManifest.xml"));
+        var entry = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "Sdl", "SdlEntry.cs"));
+
+        Assert.Contains("android:process=\":sdlgame\"", manifest, StringComparison.Ordinal);
+        Assert.Contains("finally", entry, StringComparison.Ordinal);
+        Assert.Contains("activity.Finish();", entry, StringComparison.Ordinal);
+        Assert.Contains("Process.KillProcess", entry, StringComparison.Ordinal);
+        Assert.Contains("Process.MyPid()", entry, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void DownloadableAndroidBuildsRequireBuiltInCurseForgeKeyButPullRequestsStayKeyless()
     {
         var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
