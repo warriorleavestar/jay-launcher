@@ -477,3 +477,49 @@ public readonly record struct InventorySlotState(int SlotId, int Count)
         ? new(-1, -1)
         : new((packed >> 8) - 1, packed & 0xff);
 }
+
+/// <summary>
+/// Keeps one logical game action active while any independent input source still owns it.
+/// Android can combine touch, two physical modifier keys and mouse packets in the same frame;
+/// forwarding every individual release would clear the shared native/SDL key too early.
+/// </summary>
+public sealed class InputActionLatch
+{
+    private readonly Dictionary<TouchControlAction, HashSet<int>> _sources = [];
+
+    public InputActionChange? Set(TouchControlAction action, int source, bool pressed,
+        bool cancelled = false)
+    {
+        if (pressed)
+        {
+            if (!_sources.TryGetValue(action, out var sources))
+                _sources[action] = sources = [];
+            if (!sources.Add(source) || sources.Count > 1) return null;
+            return new(action, Pressed: true, Cancelled: false);
+        }
+
+        if (!_sources.TryGetValue(action, out var active) || !active.Remove(source))
+            return null;
+        if (active.Count > 0) return null;
+        _sources.Remove(action);
+        return new(action, Pressed: false, Cancelled: cancelled);
+    }
+
+    public IReadOnlyList<InputActionChange> ClearSources(Predicate<int> predicate,
+        bool cancelled = false)
+    {
+        var changes = new List<InputActionChange>();
+        foreach (var (action, sources) in _sources.ToArray())
+        {
+            if (sources.RemoveWhere(predicate) == 0 || sources.Count > 0) continue;
+            _sources.Remove(action);
+            changes.Add(new(action, Pressed: false, Cancelled: cancelled));
+        }
+        return changes;
+    }
+
+    public bool IsActive(TouchControlAction action) => _sources.ContainsKey(action);
+}
+
+public readonly record struct InputActionChange(
+    TouchControlAction Action, bool Pressed, bool Cancelled);

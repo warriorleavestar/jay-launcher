@@ -10,7 +10,8 @@ internal sealed partial class SdlTouchInput(Activity activity)
 {
     private readonly Java.Lang.Class _sdlActivity = Java.Lang.Class.ForName("org.libsdl.app.SDLActivity", true, activity.ClassLoader)!;
     private readonly Java.Lang.Class _sdlInputConnection = Java.Lang.Class.ForName("org.libsdl.app.SDLInputConnection", true, activity.ClassLoader)!;
-    private readonly HashSet<Keycode> _held = [];
+    private readonly HashSet<Keycode> _managedHeld = [];
+    private readonly HashSet<Keycode> _hardwareHeld = [];
     private float _mouseX, _mouseY;
     private int _buttons;
 
@@ -62,10 +63,16 @@ internal sealed partial class SdlTouchInput(Activity activity)
         Key(Keycode.S, y > 0.22);
     }
 
-    private void Key(Keycode code, bool down)
+    private void Key(Keycode code, bool down) => SetKey(_managedHeld, code, down);
+
+    private void HardwareKey(Keycode code, bool down) => SetKey(_hardwareHeld, code, down);
+
+    private void SetKey(HashSet<Keycode> source, Keycode code, bool down)
     {
-        if (down ? !_held.Add(code) : !_held.Remove(code)) return;
-        SendKey(code, down);
+        var wasHeld = _managedHeld.Contains(code) || _hardwareHeld.Contains(code);
+        if (down ? !source.Add(code) : !source.Remove(code)) return;
+        var isHeld = _managedHeld.Contains(code) || _hardwareHeld.Contains(code);
+        if (wasHeld != isHeld) SendKey(code, isHeld);
     }
 
     private void SendKey(Keycode code, bool down)
@@ -77,7 +84,7 @@ internal sealed partial class SdlTouchInput(Activity activity)
     public void KeyEvent(Keycode code, bool pressed, bool repeat = false)
     {
         if (pressed && repeat) SendKey(code, true);
-        else Key(code, pressed);
+        else HardwareKey(code, pressed);
     }
 
     public void CommitText(string text)
@@ -93,9 +100,15 @@ internal sealed partial class SdlTouchInput(Activity activity)
     public void Enter() { Key(Keycode.Enter, true); Key(Keycode.Enter, false); }
     public void Tab() { Key(Keycode.Tab, true); Key(Keycode.Tab, false); }
 
+    public void ReleaseHardware()
+    {
+        foreach (var code in _hardwareHeld.ToArray()) HardwareKey(code, false);
+    }
+
     public void ReleaseAll()
     {
-        foreach (var code in _held.ToArray()) Key(code, false);
+        ReleaseHardware();
+        foreach (var code in _managedHeld.ToArray()) Key(code, false);
         if ((_buttons & 1) != 0) Action(TouchControlAction.PrimaryAction, false);
         if ((_buttons & 2) != 0) Action(TouchControlAction.SecondaryAction, false);
         if ((_buttons & 4) != 0) Action(TouchControlAction.PickBlock, false);

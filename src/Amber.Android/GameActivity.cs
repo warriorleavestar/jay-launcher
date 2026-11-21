@@ -260,7 +260,10 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     private readonly HashSet<int> _hotbarPointers = [];
     private readonly HashSet<int> _textInputPointers = [];
     private readonly HashSet<Keycode> _hardwareKeys = [];
-    private readonly HashSet<TouchControlAction> _hardwareActions = [];
+    private const int TouchActionSource = 0;
+    private const int HardwareKeyboardSourceBase = 0x10000;
+    private const int HardwarePointerSourceBase = 0x20000;
+    private readonly InputActionLatch _actionLatch = new();
     private readonly HardwareTextInputGate _hardwareTextInputGate = new();
     private readonly HardwareMouseButtonTracker _hardwareMouseButtons = new();
     private bool _settingsOpen;
@@ -271,6 +274,8 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     private float _lastMouseX;
     private float _lastMouseY;
     private bool _hasMousePosition;
+    private (double X, double Y) _touchMovement;
+    private (double X, double Y) _hardwareMovement;
     private bool? _lastGameplayControlsActive;
     private bool? _lastTextInputFocused;
     private long _nextLongPressToken;
@@ -1128,7 +1133,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         }
         if (action == TouchControlAction.Close)
             action = TouchControlAction.Menu;
-        DispatchAction(action, pressed);
+        ApplyActionChange(_actionLatch.Set(action, TouchActionSource, pressed));
         if (action == TouchControlAction.Keyboard && pressed)
             PostDelayed(ShowKeyboard, 100);
     }
@@ -1137,13 +1142,15 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     {
         if (action == TouchControlAction.Close)
             action = TouchControlAction.Menu;
-        // SDL receives button edges immediately, so it still needs the matching release. The
-        // GLFW snapshot bridge has a distinct cancellation edge that suppresses an unconsumed tap.
-        if (_sdl is null) AndroidGameInputBridge.CancelAction(action);
-        else _sdl.Action(action, false);
+        ApplyActionChange(_actionLatch.Set(action, TouchActionSource, pressed: false,
+            cancelled: true));
     }
 
-    public void SetMovement(double x, double y) => DispatchMovement(x, y);
+    public void SetMovement(double x, double y)
+    {
+        _touchMovement = (x, y);
+        DispatchCombinedMovement();
+    }
 
     public void AddLook(double x, double y) => DispatchLook(x, y);
 
@@ -1156,11 +1163,34 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         else _sdl.Action(action, pressed);
     }
 
+    private void ApplyActionChange(InputActionChange? change)
+    {
+        if (change is not { } edge) return;
+        if (edge.Pressed)
+        {
+            DispatchAction(edge.Action, true);
+            return;
+        }
+        if (!edge.Cancelled)
+        {
+            DispatchAction(edge.Action, false);
+            return;
+        }
+        // SDL receives button edges immediately, so it still needs the matching release. The
+        // GLFW snapshot bridge has a distinct cancellation edge that suppresses an unconsumed tap.
+        if (_sdl is null) AndroidGameInputBridge.CancelAction(edge.Action);
+        else _sdl.Action(edge.Action, false);
+    }
+
     private void DispatchMovement(double x, double y)
     {
         if (_sdl is null) AndroidGameInputBridge.SetMovement(x, y);
         else _sdl.Move(x, y);
     }
+
+    private void DispatchCombinedMovement() => DispatchMovement(
+        Math.Clamp(_touchMovement.X + _hardwareMovement.X, -1, 1),
+        Math.Clamp(_touchMovement.Y + _hardwareMovement.Y, -1, 1));
 
     private void DispatchLook(double x, double y)
     {
@@ -1216,9 +1246,27 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         // Back is handled by each host Activity before view dispatch and remains Minecraft Escape.
         if (e.IsSystem) return false;
 
-        // Modern Minecraft owns an SDL window. Its keyboard queue must receive both the key-down
-        // and key-up events; sending the old GLFW/JVM callbacks makes text appear to work while
-        // leaving gameplay keys stuck or completely ignored.
+        // Gameplay bindings are combined with touch so releasing one input source cannot clear
+        // another. Menus still receive the original key and character stream below.
+        if (GameplayActive && IsMovementKey(e.KeyCode))
+        {
+            // Keep SDL's physical-key source separate from the combined touch movement source.
+            // Its source-aware key latch suppresses duplicate edges while preserving either one.
+            _sdl?.KeyEvent(e.KeyCode, pressed, pressed && e.RepeatCount > 0);
+            if (pressed) _hardwareKeys.Add(e.KeyCode); else _hardwareKeys.Remove(e.KeyCode);
+            UpdateHardwareMovement();
+            return true;
+        }
+        if (GameplayActive && HardwareAction(e.KeyCode) is { } gameplayAction)
+        {
+            _sdl?.KeyEvent(e.KeyCode, pressed, pressed && e.RepeatCount > 0);
+            DispatchHardwareActionTransition(gameplayAction,
+                HardwareKeyboardSourceBase + (int)e.KeyCode, pressed);
+            return true;
+        }
+
+        // Modern Minecraft owns an SDL window. Its remaining keyboard queue receives both the
+        // key-down and key-up events; printable characters are delivered separately.
         if (_sdl is not null)
         {
             _sdl.KeyEvent(e.KeyCode, pressed, pressed && e.RepeatCount > 0);
@@ -1253,20 +1301,6 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
             if (menuKey is not { } mappedMenuKey) return false;
             if (_hardwareTextInputGate.Accept((int)e.KeyCode, e.DownTime, e.RepeatCount))
                 NativeJvmHost.AddKey(mappedMenuKey);
-            return true;
-        }
-
-        if (pressed) _hardwareKeys.Add(e.KeyCode); else _hardwareKeys.Remove(e.KeyCode);
-
-        if (IsMovementKey(e.KeyCode))
-        {
-            UpdateHardwareMovement();
-            return true;
-        }
-
-        if (HardwareAction(e.KeyCode) is { } action)
-        {
-            DispatchHardwareActionTransition(action, pressed);
             return true;
         }
 
@@ -1316,7 +1350,8 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
             if (!GameplayActive && Width > 0 && Height > 0)
                 DispatchPointer(e.GetX() / Width, e.GetY() / Height, false);
             if (action is { } mapped)
-                DispatchHardwareActionTransition(mapped, pressed);
+                DispatchHardwareActionTransition(mapped,
+                    HardwarePointerSourceBase + (int)mapped, pressed);
             return true;
         }
 
@@ -1364,25 +1399,26 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
 #pragma warning restore CA1416
     }
 
-    public void ReleaseHardwareInput()
+    public void ReleaseHardwareInput(bool cancelled = false)
     {
         _hardwareKeys.Clear();
-        DispatchMovement(0, 0);
-        foreach (var action in _hardwareActions.ToArray())
-            DispatchAction(action, false);
-        _hardwareActions.Clear();
-        _sdl?.ReleaseAll();
+        _hardwareMovement = (0, 0);
+        DispatchCombinedMovement();
+        foreach (var change in _actionLatch.ClearSources(
+                     source => source >= HardwareKeyboardSourceBase, cancelled))
+            ApplyActionChange(change);
+        _sdl?.ReleaseHardware();
         _hardwareMouseButtons.Reset();
         _hasMousePosition = false;
     }
 
-    private void DispatchHardwareActionTransition(TouchControlAction action, bool pressed)
+    private void DispatchHardwareActionTransition(TouchControlAction action, int source,
+        bool pressed)
     {
         // Some Android mouse stacks report one physical click as both DOWN/UP and
         // BUTTON_PRESS/BUTTON_RELEASE. Only forward state transitions; forwarding the duplicate
         // release becomes a second click in both the GLFW and SDL bridges.
-        var changed = pressed ? _hardwareActions.Add(action) : _hardwareActions.Remove(action);
-        if (changed) DispatchAction(action, pressed);
+        ApplyActionChange(_actionLatch.Set(action, source, pressed));
     }
 
     public void CancelAllInput()
@@ -1392,7 +1428,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         _hotbarPointers.Clear();
         _textInputPointers.Clear();
         _router.CancelAll();
-        ReleaseHardwareInput();
+        ReleaseHardwareInput(cancelled: true);
     }
 
     private static bool IsMovementKey(Keycode key) => key is Keycode.W or Keycode.A or Keycode.S or Keycode.D
@@ -1404,8 +1440,9 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         var right = _hardwareKeys.Contains(Keycode.D) || _hardwareKeys.Contains(Keycode.DpadRight);
         var forward = _hardwareKeys.Contains(Keycode.W) || _hardwareKeys.Contains(Keycode.DpadUp);
         var back = _hardwareKeys.Contains(Keycode.S) || _hardwareKeys.Contains(Keycode.DpadDown);
-        DispatchMovement((right ? 1 : 0) - (left ? 1 : 0),
+        _hardwareMovement = ((right ? 1 : 0) - (left ? 1 : 0),
             (back ? 1 : 0) - (forward ? 1 : 0));
+        DispatchCombinedMovement();
     }
 
     private static TouchControlAction? HardwareAction(Keycode key) => key switch

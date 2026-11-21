@@ -557,6 +557,54 @@ public sealed class MobilePortTests
     }
 
     [Fact]
+    public void InputActionLatchCombinesTouchKeyboardAndMouseSources()
+    {
+        var latch = new InputActionLatch();
+
+        Assert.Equal(new(TouchControlAction.Jump, true, false),
+            latch.Set(TouchControlAction.Jump, source: 0, pressed: true));
+        Assert.Null(latch.Set(TouchControlAction.Jump, source: 100, pressed: true));
+        Assert.Null(latch.Set(TouchControlAction.Jump, source: 200, pressed: true));
+        Assert.Null(latch.Set(TouchControlAction.Jump, source: 100, pressed: false));
+        Assert.Null(latch.Set(TouchControlAction.Jump, source: 0, pressed: false,
+            cancelled: true));
+        Assert.Equal(new(TouchControlAction.Jump, false, false),
+            latch.Set(TouchControlAction.Jump, source: 200, pressed: false));
+        Assert.False(latch.IsActive(TouchControlAction.Jump));
+    }
+
+    [Fact]
+    public void InputActionLatchClearsHardwareWithoutReleasingTouch()
+    {
+        var latch = new InputActionLatch();
+        Assert.NotNull(latch.Set(TouchControlAction.PrimaryAction, 0, pressed: true));
+        Assert.Null(latch.Set(TouchControlAction.PrimaryAction, 0x10001, pressed: true));
+        Assert.NotNull(latch.Set(TouchControlAction.Sneak, 0x10002, pressed: true));
+
+        var changes = latch.ClearSources(source => source >= 0x10000);
+
+        Assert.Single(changes);
+        Assert.Equal(new(TouchControlAction.Sneak, false, false), changes[0]);
+        Assert.True(latch.IsActive(TouchControlAction.PrimaryAction));
+        Assert.False(latch.IsActive(TouchControlAction.Sneak));
+    }
+
+    [Fact]
+    public void InputActionLatchCancelsTheLastSourceOnWindowFocusLoss()
+    {
+        var latch = new InputActionLatch();
+        Assert.NotNull(latch.Set(TouchControlAction.PrimaryAction, 0, pressed: true));
+        Assert.Null(latch.Set(TouchControlAction.PrimaryAction, 0x20001, pressed: true));
+        Assert.Null(latch.Set(TouchControlAction.PrimaryAction, 0, pressed: false,
+            cancelled: true));
+
+        var changes = latch.ClearSources(source => source >= 0x10000,
+            cancelled: true);
+
+        Assert.Equal([new(TouchControlAction.PrimaryAction, false, true)], changes);
+    }
+
+    [Fact]
     public void TouchInputRouterRestoresFirstMovementFingerWhenSecondOneEnds()
     {
         var sink = new RecordingTouchSink();
