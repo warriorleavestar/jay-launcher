@@ -274,12 +274,12 @@ public sealed class TouchInputRouter
                     _sink.SetPointer(pointer.X, pointer.Y, true);
                 }
             }
-            else if (pointer.MenuInteraction && pointer.InventoryStackSize > 1)
+            else if (!cancelled && pointer.MenuInteraction && pointer.InventoryStackSize > 1)
                 _sink.SplitInventoryStack(pointer.StartX, pointer.StartY,
                     pointer.InventorySelectedCount);
             else if (pointer.PointerHeld && pointer.HeldAction is { } heldAction)
                 _sink.SetAction(heldAction, false);
-            else if (pointer.ClickOnRelease && !pointer.HasDragged)
+            else if (!cancelled && pointer.ClickOnRelease && !pointer.HasDragged)
                 _sink.SetPointer(pointer.X, pointer.Y, true);
         }
         else if (!pointer.ToggleAction && pointer.Action is { } action)

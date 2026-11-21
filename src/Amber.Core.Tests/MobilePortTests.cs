@@ -810,6 +810,26 @@ public sealed class MobilePortTests
     }
 
     [Fact]
+    public void CancelledReleaseDoesNotCommitDeferredMenuGestures()
+    {
+        var tapSink = new RecordingTouchSink();
+        var tapRouter = new TouchInputRouter(tapSink);
+        Assert.True(tapRouter.Press(86, 0.52, 0.45, controlsEnabled: false));
+        Assert.True(tapRouter.Release(86, cancelled: true));
+        Assert.DoesNotContain(tapSink.Pointers, pointer => pointer.Click);
+
+        var splitSink = new RecordingTouchSink();
+        var splitRouter = new TouchInputRouter(splitSink, inventoryStackCount: (_, _) => 64);
+        Assert.True(splitRouter.Press(87, 0.42, 0.40, controlsEnabled: false));
+        Assert.True(splitRouter.BeginLongPress(87));
+        Assert.True(splitRouter.Move(87,
+            0.42 + 0.24 * 31 / 63 / splitRouter.Profile.ViewportAspectRatio, 0.40));
+        Assert.Equal(32, Assert.Single(splitRouter.InventorySplitSelections).Count);
+        Assert.True(splitRouter.Release(87, cancelled: true));
+        Assert.Empty(splitSink.InventorySplits);
+    }
+
+    [Fact]
     public void TouchInputRouterCancelReleasesMovementAndMining()
     {
         var sink = new RecordingTouchSink();
