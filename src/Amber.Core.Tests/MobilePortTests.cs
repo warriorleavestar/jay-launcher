@@ -1171,6 +1171,20 @@ public sealed class MobilePortTests
         Assert.True(split > pointer);
     }
 
+    [Fact]
+    public void AndroidHeldTouchIndicatorsAnimateAtDisplayRefreshRate()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var activity = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "GameActivity.cs"));
+
+        Assert.Contains("_longPressIndicators.Count > 0 || _router.InventorySplitSelections.Count > 0",
+            activity, StringComparison.Ordinal);
+        Assert.Contains("PostInvalidateOnAnimation()", activity, StringComparison.Ordinal);
+        Assert.Contains("PostInvalidateDelayed(100)", activity, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData(0, 0, 0, 0)]
     [InlineData(2, 0, 2, 0)]

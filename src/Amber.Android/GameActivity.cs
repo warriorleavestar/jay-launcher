@@ -383,7 +383,13 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
             DrawSettings(canvas);
         else if (_layoutEditing)
             DrawEditGuide(canvas);
-        PostInvalidateDelayed(100);
+        // Mining progress and inventory quantity selection must animate continuously under the
+        // finger. Keep the idle overlay on its low-power poll, but follow display vsync while a
+        // surface gesture is active so the progress ring does not advance in visible 100 ms jumps.
+        if (_longPressIndicators.Count > 0 || _router.InventorySplitSelections.Count > 0)
+            PostInvalidateOnAnimation();
+        else
+            PostInvalidateDelayed(100);
     }
 
     private void DrawMovementPad(Canvas canvas, float x, float y, float radius)
