@@ -22,6 +22,29 @@ internal sealed record AndroidPreparedGame(
 /// <summary>Installs Mojang files and prepares the same launch command used by desktop Jay for an embedded JVM.</summary>
 internal static class AndroidEmbeddedGame
 {
+    /// <summary>
+    /// Fetches the small Mojang version metadata before Android chooses which embedded Java
+    /// runtime to install. A fresh profile has no local version JSON yet, so treating a missing
+    /// file as Java 21 would install the wrong runtime for Java 25 clients.
+    /// </summary>
+    public static async Task<int> PrepareVersionMetadataAsync(
+        Context context,
+        string versionId,
+        IProgress<AndroidGameInstallProgress>? progress,
+        CancellationToken ct)
+    {
+        versionId = GameDirectory.CheckId(versionId);
+        var gameDirectory = new GameDirectory(Path.Combine(context.FilesDir!.AbsolutePath, "minecraft"));
+        using var http = Downloader.CreateHttpClient();
+        var downloader = new Downloader(http, SourceChain.Default()) { MaxConcurrency = 8, MaxChunksPerFile = 4 };
+        var installer = new VanillaInstaller(downloader, gameDirectory) { Rules = AndroidRules() };
+        var forwardedProgress = new Progress<InstallProgress>(value =>
+            progress?.Report(new(value.Stage, value.Files.CompletedFiles, value.Files.TotalFiles,
+                value.Files.BytesDownloaded, value.Files.ActiveFiles)));
+        await installer.PrepareVersionAsync(versionId, forwardedProgress, ct);
+        return gameDirectory.ResolveVersion(versionId).JavaVersion?.MajorVersion ?? 8;
+    }
+
     public static bool UsesSdl(Context context, string versionId)
     {
         var directory = new GameDirectory(Path.Combine(context.FilesDir!.AbsolutePath, "minecraft"));

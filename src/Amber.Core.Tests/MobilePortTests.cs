@@ -1106,6 +1106,29 @@ public sealed class MobilePortTests
     }
 
     [Fact]
+    public void FreshAndroidLaunchFetchesVersionMetadataBeforeChoosingItsJavaRuntime()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var application = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "Application.cs"));
+        var embeddedGame = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "AndroidEmbeddedGame.cs"));
+
+        var metadataFetch = application.IndexOf("PrepareVersionMetadataAsync(", StringComparison.Ordinal);
+        var runtimeChoice = application.IndexOf("var java25 = requiredJava >= 25;", StringComparison.Ordinal);
+        var runtimeInstall = application.IndexOf("AndroidRuntimeStore.InstallAsync", StringComparison.Ordinal);
+        Assert.True(metadataFetch >= 0 && runtimeChoice > metadataFetch && runtimeInstall > runtimeChoice);
+
+        var prepareMethod = embeddedGame.IndexOf("PrepareVersionMetadataAsync(", StringComparison.Ordinal);
+        var prepareVersion = embeddedGame.IndexOf("installer.PrepareVersionAsync", prepareMethod,
+            StringComparison.Ordinal);
+        var resolveVersion = embeddedGame.IndexOf("gameDirectory.ResolveVersion(versionId)", prepareMethod,
+            StringComparison.Ordinal);
+        Assert.True(prepareMethod >= 0 && prepareVersion > prepareMethod && resolveVersion > prepareVersion);
+    }
+
+    [Fact]
     public async Task AndroidRuntimeManifestRequiresSafeLicensedVerifiedFiles()
     {
         var root = Path.Combine(Path.GetTempPath(), "jay-runtime-" + Guid.NewGuid().ToString("N"));
