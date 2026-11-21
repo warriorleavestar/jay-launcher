@@ -375,7 +375,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
                         ? "拆分"
                         : control.Label);
         }
-        DrawLongPressIndicators(canvas);
+        var animatingHoldFeedback = DrawLongPressIndicators(canvas);
         DrawInventorySplitSelection(canvas);
         if (_profile.Mode == TouchControlMode.JoystickAndCrosshair && gameplayControlsActive)
             DrawCrosshair(canvas);
@@ -386,7 +386,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         // Mining progress and inventory quantity selection must animate continuously under the
         // finger. Keep the idle overlay on its low-power poll, but follow display vsync while a
         // surface gesture is active so the progress ring does not advance in visible 100 ms jumps.
-        if (_longPressIndicators.Count > 0 || _router.InventorySplitSelections.Count > 0)
+        if (animatingHoldFeedback || _router.InventorySplitSelections.Count > 0)
             PostInvalidateOnAnimation();
         else
             PostInvalidateDelayed(100);
@@ -537,9 +537,10 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         _joystickMark.Color = WithAlpha(Color.Argb(145, 235, 238, 242), Math.Max(0.45f, _controlOpacity));
     }
 
-    private void DrawLongPressIndicators(Canvas canvas)
+    private bool DrawLongPressIndicators(Canvas canvas)
     {
         var now = SystemClock.UptimeMillis();
+        var drewAnimatedFeedback = false;
         var scale = Math.Min(Width, Height);
         // The indicator must remain visible around a resting fingertip on a tablet.
         var radius = scale * 0.058f;
@@ -553,6 +554,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
             // Match the mobile interaction: an ordinary touch has no decoration. The ring starts
             // only after the gesture has become a mining hold and the crosshair is on a block.
             if (!_router.IsLongPress(pointerId) || !NativeJvmHost.HasBlockTarget) continue;
+            drewAnimatedFeedback = true;
             var miningElapsed = now - indicator.DownAt - LongPressDelayMs;
             var x = (float)(indicator.X * Width);
             var y = (float)(indicator.Y * Height);
@@ -563,6 +565,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
             canvas.DrawCircle(x, y, radius * 0.16f,
                 _router.IsLongPress(pointerId) ? _activeFill : _fill);
         }
+        return drewAnimatedFeedback;
     }
 
     private void DrawInventorySplitSelection(Canvas canvas)

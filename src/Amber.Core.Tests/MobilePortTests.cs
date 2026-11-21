@@ -1179,8 +1179,11 @@ public sealed class MobilePortTests
         var activity = File.ReadAllText(Path.Combine(repository,
             "src", "Amber.Android", "GameActivity.cs"));
 
-        Assert.Contains("_longPressIndicators.Count > 0 || _router.InventorySplitSelections.Count > 0",
+        Assert.Contains("var animatingHoldFeedback = DrawLongPressIndicators(canvas)",
             activity, StringComparison.Ordinal);
+        Assert.Contains("if (animatingHoldFeedback || _router.InventorySplitSelections.Count > 0)",
+            activity, StringComparison.Ordinal);
+        Assert.Contains("return drewAnimatedFeedback", activity, StringComparison.Ordinal);
         Assert.Contains("PostInvalidateOnAnimation()", activity, StringComparison.Ordinal);
         Assert.Contains("PostInvalidateDelayed(100)", activity, StringComparison.Ordinal);
     }
