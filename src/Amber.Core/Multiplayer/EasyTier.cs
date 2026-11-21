@@ -8,6 +8,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using Amber.Core.Launch;
+using Amber.Core.Multiplayer.Public;
 using Amber.Core.Net;
 
 namespace Amber.Core.Multiplayer;
@@ -80,9 +81,15 @@ public static class EasyTierRelease
     /// </summary>
     public static ReleaseCheck Signature => SignatureCheck.Value;
 
+    // This immutable EasyTier build was signed before the third release key was added. Keep verifying it against the
+    // exact 2-of-2 list named by its signed statement; Jay releases and future component builds still use TrustList.Jay
+    // (currently 2-of-3). The two keys remain in JayTrust.ReleaseKeys, so this grants no trust to a retired or unknown key.
+    internal static TrustList EmbeddedTrust => new(
+        [.. JayTrust.ReleaseKeys.Take(2).Select(Convert.FromBase64String)], 2);
+
     private static readonly Lazy<ReleaseCheck> SignatureCheck = new(() =>
         CheckSignature(Embedded(ReleaseSignature.SignatureFileName) is { } m ? Encoding.UTF8.GetString(m) : null,
-            Embedded(ReleaseSignature.SumsFileName) ?? [], TrustList.Jay, All));
+            Embedded(ReleaseSignature.SumsFileName) ?? [], EmbeddedTrust, All));
 
     /// <summary>
     /// Whether a package may be installed: always when this Jay has no release keys built in yet
