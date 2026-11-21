@@ -1146,6 +1146,23 @@ public sealed class MobilePortTests
     }
 
     [Fact]
+    public void AndroidInventorySplitsRunOnTheMinecraftClientThread()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var glfw = File.ReadAllText(Path.Combine(repository, "src", "Amber.Android", "Java",
+            "nz", "work", "minecraft", "jay", "AndroidGameBootstrap.java"));
+        var sdl = File.ReadAllText(Path.Combine(repository, "src", "Amber.Android", "Java",
+            "nz", "work", "minecraft", "jay", "SdlMenuBootstrap.java"));
+
+        var glfwSplit = JavaMethod(glfw, "public static boolean dispatchInventorySplit", "/** True only");
+        var sdlSplit = JavaMethod(sdl, "public static boolean dispatchInventorySplit", "public static boolean isBlockTarget");
+        Assert.Contains("minecraftExecute.invoke", glfwSplit, StringComparison.Ordinal);
+        Assert.Contains("dispatchInventorySplitNow", glfwSplit, StringComparison.Ordinal);
+        Assert.Contains("((Executor)game).execute", sdlSplit, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void DownloadableAndroidBuildsRequireBuiltInCurseForgeKeyButPullRequestsStayKeyless()
     {
         var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
@@ -1526,6 +1543,15 @@ public sealed class MobilePortTests
                     DataStream = new MemoryStream(data, writable: false)
                 });
         return archive.ToArray();
+    }
+
+    private static string JavaMethod(string source, string startMarker, string endMarker)
+    {
+        var start = source.IndexOf(startMarker, StringComparison.Ordinal);
+        Assert.True(start >= 0, $"Missing Java method marker: {startMarker}");
+        var end = source.IndexOf(endMarker, start + startMarker.Length, StringComparison.Ordinal);
+        Assert.True(end > start, $"Missing Java method end marker: {endMarker}");
+        return source[start..end];
     }
 
     private const string RuntimeXzFixture = """

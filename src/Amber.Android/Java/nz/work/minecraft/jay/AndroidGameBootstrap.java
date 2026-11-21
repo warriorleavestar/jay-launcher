@@ -568,53 +568,78 @@ public final class AndroidGameBootstrap {
     public static boolean dispatchInventorySplit(float normalizedX, float normalizedY, int requested) {
         if (!prepareInputBridge()) return false;
         try {
-            Object minecraft = minecraft();
+            final Object minecraft = minecraft();
             if (minecraft == null) return false;
-            Object screen = screen(minecraft);
-            if (containerScreenType == null || !containerScreenType.isInstance(screen)) return false;
-            double x = Math.max(0.0, Math.min(1.0, normalizedX)) * screenWidth.getInt(screen);
-            double y = Math.max(0.0, Math.min(1.0, normalizedY)) * screenHeight.getInt(screen);
-            Object slot = containerHoveredSlot.invoke(screen, x, y);
-            if (slot == null) return false;
-            Object stack = slotGetItem.invoke(slot);
-            int total = stack == null ? 0 : Math.max(0, itemStackGetCount != null
-                ? (Integer)itemStackGetCount.invoke(stack)
-                : itemStackCount.getInt(stack));
-            int selected = Math.max(1, Math.min(total, requested));
-            if (total <= 0) return false;
-            if (containerSlotClicked == null || pickupClickType == null) {
-                // Newer clients removed the old ClickType API. Route the exact same sequence
-                // through the normal screen input path: left pickup, then return one item per
-                // right click until the requested quantity remains on the cursor.
-                Object window = window(minecraft);
-                Object mouse = minecraftMouse.get(minecraft);
-                if (window == null || mouse == null) return false;
-                double windowX = Math.max(0.0, Math.min(1.0, normalizedX)) *
-                    (Integer)windowWidth.invoke(window);
-                double windowY = Math.max(0.0, Math.min(1.0, normalizedY)) *
-                    (Integer)windowHeight.invoke(window);
-                long handle = handle(window);
-                mouseX.setDouble(mouse, windowX);
-                mouseY.setDouble(mouse, windowY);
-                moveMouse(mouse, handle, windowX, windowY, 0.0, 0.0);
-                pressMouse(mouse, handle, 0, 1);
-                pressMouse(mouse, handle, 0, 0);
-                for (int index = selected; index < total; index++) {
-                    pressMouse(mouse, handle, 1, 1);
-                    pressMouse(mouse, handle, 1, 0);
-                }
+            if (minecraftExecute == null) {
+                minecraftExecute = accessible(minecraft.getClass().getMethod(
+                    "execute", Runnable.class));
+            }
+            if (minecraftExecute != null) {
+                final float queuedX = normalizedX;
+                final float queuedY = normalizedY;
+                final int queuedRequested = requested;
+                minecraftExecute.invoke(minecraft, new Runnable() {
+                    @Override public void run() {
+                        try {
+                            dispatchInventorySplitNow(minecraft, queuedX, queuedY, queuedRequested);
+                        } catch (ReflectiveOperationException | RuntimeException error) {
+                            reportInputError(error);
+                        }
+                    }
+                });
                 return true;
             }
-            int id = slotId.getInt(slot);
-            // Left pickup takes the whole stack. Each right pickup on the source returns one,
-            // leaving precisely "selected" items on the cursor for the next finger tap.
-            containerSlotClicked.invoke(screen, slot, id, 0, pickupClickType);
-            for (int index = selected; index < total; index++)
-                containerSlotClicked.invoke(screen, slot, id, 1, pickupClickType);
-            return true;
+            return dispatchInventorySplitNow(minecraft, normalizedX, normalizedY, requested);
         } catch (ReflectiveOperationException | RuntimeException error) {
             return reportInputError(error);
         }
+    }
+
+    private static boolean dispatchInventorySplitNow(Object minecraft, float normalizedX,
+                                                     float normalizedY, int requested)
+        throws ReflectiveOperationException {
+        Object screen = screen(minecraft);
+        if (containerScreenType == null || !containerScreenType.isInstance(screen)) return false;
+        double x = Math.max(0.0, Math.min(1.0, normalizedX)) * screenWidth.getInt(screen);
+        double y = Math.max(0.0, Math.min(1.0, normalizedY)) * screenHeight.getInt(screen);
+        Object slot = containerHoveredSlot.invoke(screen, x, y);
+        if (slot == null) return false;
+        Object stack = slotGetItem.invoke(slot);
+        int total = stack == null ? 0 : Math.max(0, itemStackGetCount != null
+            ? (Integer)itemStackGetCount.invoke(stack)
+            : itemStackCount.getInt(stack));
+        int selected = Math.max(1, Math.min(total, requested));
+        if (total <= 0) return false;
+        if (containerSlotClicked == null || pickupClickType == null) {
+            // Newer clients removed the old ClickType API. Route the exact same sequence
+            // through the normal screen input path: left pickup, then return one item per
+            // right click until the requested quantity remains on the cursor.
+            Object window = window(minecraft);
+            Object mouse = minecraftMouse.get(minecraft);
+            if (window == null || mouse == null) return false;
+            double windowX = Math.max(0.0, Math.min(1.0, normalizedX)) *
+                (Integer)windowWidth.invoke(window);
+            double windowY = Math.max(0.0, Math.min(1.0, normalizedY)) *
+                (Integer)windowHeight.invoke(window);
+            long handle = handle(window);
+            mouseX.setDouble(mouse, windowX);
+            mouseY.setDouble(mouse, windowY);
+            moveMouse(mouse, handle, windowX, windowY, 0.0, 0.0);
+            pressMouse(mouse, handle, 0, 1);
+            pressMouse(mouse, handle, 0, 0);
+            for (int index = selected; index < total; index++) {
+                pressMouse(mouse, handle, 1, 1);
+                pressMouse(mouse, handle, 1, 0);
+            }
+            return true;
+        }
+        int id = slotId.getInt(slot);
+        // Left pickup takes the whole stack. Each right pickup on the source returns one,
+        // leaving precisely "selected" items on the cursor for the next finger tap.
+        containerSlotClicked.invoke(screen, slot, id, 0, pickupClickType);
+        for (int index = selected; index < total; index++)
+            containerSlotClicked.invoke(screen, slot, id, 1, pickupClickType);
+        return true;
     }
 
     /** True only while normal gameplay is aiming at a block that can be mined. */
