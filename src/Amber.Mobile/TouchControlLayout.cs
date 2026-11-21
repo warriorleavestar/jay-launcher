@@ -58,14 +58,29 @@ public sealed class TouchControlProfile
     public void SetPosition(TouchControlAction action, double x, double y) =>
         SetPosition(Mode, action, x, y);
 
-    public void SetPosition(TouchControlMode mode, TouchControlAction action, double x, double y) =>
+    public void SetPosition(TouchControlMode mode, TouchControlAction action, double x, double y)
+    {
+        // Inventory is part of the Minecraft HUD, not a free-floating action button. Keeping a
+        // saved coordinate here detaches it from slot 9 whenever aspect ratio or scale changes.
+        if (action == TouchControlAction.Inventory)
+        {
+            _positions.Remove((mode, action));
+            return;
+        }
         _positions[(mode, action)] = (Math.Clamp(x, 0.04, 0.96), Math.Clamp(y, 0.04, 0.96));
+    }
 
     public bool TryGetPosition(TouchControlAction action, out (double X, double Y) position) =>
         TryGetPosition(Mode, action, out position);
 
     public bool TryGetPosition(TouchControlMode mode, TouchControlAction action,
-        out (double X, double Y) position) => _positions.TryGetValue((mode, action), out position);
+        out (double X, double Y) position)
+    {
+        if (action != TouchControlAction.Inventory)
+            return _positions.TryGetValue((mode, action), out position);
+        position = default;
+        return false;
+    }
 
     public void ResetPositions()
     {
@@ -75,11 +90,13 @@ public sealed class TouchControlProfile
     private TouchControlDefinition Apply(TouchControlDefinition control)
     {
         var radius = Math.Clamp(control.Radius * Scale, 0.018, 0.15);
-        var hasCustomPosition = _positions.TryGetValue((Mode, control.Action), out var position);
+        var position = default((double X, double Y));
+        var hasCustomPosition = control.Action != TouchControlAction.Inventory &&
+            _positions.TryGetValue((Mode, control.Action), out position);
         var positioned = hasCustomPosition
             ? control with { CenterX = position.X, CenterY = position.Y }
             : control;
-        if (!hasCustomPosition && control.Action == TouchControlAction.Inventory)
+        if (control.Action == TouchControlAction.Inventory)
         {
             // The inventory key grows away from the hotbar. Using its scaled radius here keeps
             // the left edge attached to slot 9 without letting the larger hit box steal slot taps.

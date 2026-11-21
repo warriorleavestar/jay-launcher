@@ -782,14 +782,14 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         foreach (var modeValue in Enum.GetValues<TouchControlMode>())
         foreach (var action in Enum.GetValues<TouchControlAction>())
         {
-            // v1 stored the inventory key against a fixed 16:9 coordinate. Dropping only that
-            // stale override lets the new aspect-aware anchor repair existing tablet installs.
-            if (layoutVersion < 2 && action == TouchControlAction.Inventory) continue;
+            // Inventory is permanently attached to the hotbar. Ignore every historical custom
+            // coordinate, including v2 values created by the old layout editor.
+            if (action == TouchControlAction.Inventory) continue;
             var x = _preferences.GetFloat($"position-{modeValue}-{action}-x", float.NaN);
             var y = _preferences.GetFloat($"position-{modeValue}-{action}-y", float.NaN);
             if (!float.IsNaN(x) && !float.IsNaN(y)) _profile.SetPosition(modeValue, action, x, y);
         }
-        if (layoutVersion < 2)
+        if (layoutVersion < 3)
         {
             using var editor = _preferences.Edit()!;
             foreach (var modeValue in Enum.GetValues<TouchControlMode>())
@@ -797,7 +797,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
                 editor.Remove($"position-{modeValue}-{TouchControlAction.Inventory}-x");
                 editor.Remove($"position-{modeValue}-{TouchControlAction.Inventory}-y");
             }
-            editor.PutInt("layout-version", 2);
+            editor.PutInt("layout-version", 3);
             editor.Apply();
         }
     }
@@ -811,7 +811,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         editor.PutString("attack-area", _profile.AttackArea.ToString());
         editor.PutFloat("opacity", _controlOpacity);
         editor.PutBoolean("forced-sprint", _profile.ForcedSprint);
-        editor.PutInt("layout-version", 2);
+        editor.PutInt("layout-version", 3);
         foreach (var modeValue in Enum.GetValues<TouchControlMode>())
         foreach (var action in Enum.GetValues<TouchControlAction>())
         {
@@ -904,6 +904,9 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
                 }
                 var control = _profile.HitTest(x, y);
                 if (control is null) return true;
+                // The inventory face belongs to the hotbar and follows its aspect-aware anchor;
+                // moving it would recreate the detached/overlapping button this editor replaced.
+                if (control.Action == TouchControlAction.Inventory) return true;
                 _editingPointer = e.GetPointerId(index);
                 _editingAction = control.Action;
                 return true;

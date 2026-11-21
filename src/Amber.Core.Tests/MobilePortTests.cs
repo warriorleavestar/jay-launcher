@@ -415,6 +415,29 @@ public sealed class MobilePortTests
         Assert.Null(profile.HitTest(tablet.HotbarRight - 0.001, enlarged.CenterY));
         Assert.Equal(TouchControlAction.Inventory,
             profile.HitTest(inventory.CenterX, inventory.CenterY)!.Action);
+
+        profile.SetPosition(TouchControlAction.Inventory, 0.25, 0.25);
+        Assert.False(profile.TryGetPosition(TouchControlAction.Inventory, out _));
+        inventory = profile.Controls.Single(control => control.Action == TouchControlAction.Inventory);
+        Assert.Equal(enlarged.InventoryX, inventory.CenterX, 6);
+        Assert.Equal(enlarged.CenterY, inventory.CenterY, 6);
+    }
+
+    [Fact]
+    public void AndroidDropsLegacyInventoryOverridesAndKeepsTheButtonOutOfLayoutEditing()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var activity = File.ReadAllText(Path.Combine(repository, "src", "Amber.Android",
+            "GameActivity.cs"));
+
+        Assert.Contains("if (layoutVersion < 3)", activity, StringComparison.Ordinal);
+        Assert.Contains("editor.PutInt(\"layout-version\", 3)", activity,
+            StringComparison.Ordinal);
+        Assert.Contains("if (action == TouchControlAction.Inventory) continue;", activity,
+            StringComparison.Ordinal);
+        Assert.Contains("if (control.Action == TouchControlAction.Inventory) return true;", activity,
+            StringComparison.Ordinal);
     }
 
     [Fact]
