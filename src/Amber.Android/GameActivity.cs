@@ -1107,6 +1107,15 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         else _sdl.SplitInventoryStack(x, y, count);
     }
 
+    public void ReturnCarriedInventoryItems(double x, double y, int count)
+    {
+        if (count < 1) return;
+        // A negative operation is internal to the native/Java bridge: it means that the
+        // first tap already carries the stack and this many right-clicks must return items.
+        if (_sdl is null) NativeJvmHost.SplitInventoryStack(x, y, -count);
+        else _sdl.SplitInventoryStack(x, y, -count);
+    }
+
     public void HandleSystemBack()
     {
         CancelAllInput();

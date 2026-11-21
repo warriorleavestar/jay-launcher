@@ -69,9 +69,16 @@ public final class SdlMenuBootstrap {
             if (hovered == null) return false;
             Object stack = slotItem.invoke(hovered);
             int total = stack == null ? 0 : Math.max(0, (Integer)itemCount.invoke(stack));
+            int index = slotIndex.getInt(hovered);
+            if (requested < 0) {
+                // A preceding tap already carries the whole stack. Right-clicking the empty
+                // source slot returns one item at a time, leaving exactly half on the cursor.
+                for (int returned = 0; returned < -requested; returned++)
+                    slotClicked.invoke(active, hovered, index, 1, pickup);
+                return true;
+            }
             if (total == 0) return false;
             int selected = Math.max(1, Math.min(total, requested));
-            int index = slotIndex.getInt(hovered);
             slotClicked.invoke(active, hovered, index, 0, pickup);
             for (int remaining = total; remaining > selected; remaining--)
                 slotClicked.invoke(active, hovered, index, 1, pickup);

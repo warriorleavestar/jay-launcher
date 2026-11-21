@@ -640,6 +640,31 @@ public final class AndroidGameBootstrap {
         double y = Math.max(0.0, Math.min(1.0, normalizedY)) * screenHeight.getInt(screen);
         Object slot = containerHoveredSlot.invoke(screen, x, y);
         if (slot == null) return false;
+        if (requested < 0) {
+            int returned = -requested;
+            if (containerSlotClicked == null || pickupClickType == null) {
+                Object window = window(minecraft);
+                Object mouse = minecraftMouse.get(minecraft);
+                if (window == null || mouse == null) return false;
+                double windowX = Math.max(0.0, Math.min(1.0, normalizedX)) *
+                    (Integer)windowWidth.invoke(window);
+                double windowY = Math.max(0.0, Math.min(1.0, normalizedY)) *
+                    (Integer)windowHeight.invoke(window);
+                long handle = handle(window);
+                mouseX.setDouble(mouse, windowX);
+                mouseY.setDouble(mouse, windowY);
+                moveMouse(mouse, handle, windowX, windowY, 0.0, 0.0);
+                for (int index = 0; index < returned; index++) {
+                    pressMouse(mouse, handle, 1, 1);
+                    pressMouse(mouse, handle, 1, 0);
+                }
+                return true;
+            }
+            int id = slotId.getInt(slot);
+            for (int index = 0; index < returned; index++)
+                containerSlotClicked.invoke(screen, slot, id, 1, pickupClickType);
+            return true;
+        }
         Object stack = slotGetItem.invoke(slot);
         int total = stack == null ? 0 : Math.max(0, itemStackGetCount != null
             ? (Integer)itemStackGetCount.invoke(stack)

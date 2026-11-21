@@ -674,23 +674,45 @@ public sealed class MobilePortTests
     }
 
     [Fact]
-    public void TouchInputRouterDoubleTapUsesMinecraftsNativeDoubleClick()
+    public void TouchInputRouterDoubleTapSplitsTheCarriedStackInHalf()
     {
         var sink = new RecordingTouchSink();
-        var router = new TouchInputRouter(sink);
+        var count = 64;
+        var router = new TouchInputRouter(sink, inventoryStackCount: (_, _) => count);
 
         Assert.True(router.Press(40, 0.48, 0.36, controlsEnabled: false));
         Assert.True(router.Release(40));
         Assert.Single(sink.Pointers, pointer => pointer.Click);
+        count = 0; // The first click now carries the full stack and leaves the slot empty.
         Assert.Empty(sink.Actions);
 
         Assert.True(router.Press(41, 0.48, 0.36, controlsEnabled: false));
         Assert.Empty(sink.Actions);
         Assert.True(router.Release(41));
         Assert.Empty(sink.Actions);
-        Assert.Equal(2, sink.Pointers.Count(pointer => pointer.Click));
+        Assert.Single(sink.Pointers, pointer => pointer.Click);
+        Assert.Equal([(0.48, 0.36, 32)], sink.ReturnedInventoryItems);
         Assert.DoesNotContain(TouchControlLayout.Default,
             control => control.Action == TouchControlAction.SecondaryAction);
+    }
+
+    [Fact]
+    public void CancelledSecondInventoryTapDoesNotSplitTheEarlierStack()
+    {
+        var sink = new RecordingTouchSink();
+        var count = 64;
+        var router = new TouchInputRouter(sink, inventoryStackCount: (_, _) => count);
+
+        router.Press(45, 0.48, 0.36, controlsEnabled: false);
+        router.Release(45);
+        count = 0;
+        router.Press(46, 0.48, 0.36, controlsEnabled: false);
+        router.Release(46, cancelled: true);
+        router.Press(47, 0.48, 0.36, controlsEnabled: false);
+        router.Release(47);
+
+        Assert.Empty(sink.ReturnedInventoryItems);
+        Assert.Equal(2, sink.Pointers.Count(pointer => pointer.Click));
     }
 
     [Fact]
@@ -1261,6 +1283,25 @@ public sealed class MobilePortTests
     }
 
     [Fact]
+    public void AndroidInventoryBridgesPreserveTheCarriedStackReturnOperation()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var native = File.ReadAllText(Path.Combine(repository, "src", "Amber.Android.Native",
+            "jay_jvm_host.c"));
+        var glfw = File.ReadAllText(Path.Combine(repository, "src", "Amber.Android", "Java",
+            "nz", "work", "minecraft", "jay", "AndroidGameBootstrap.java"));
+        var sdl = File.ReadAllText(Path.Combine(repository, "src", "Amber.Android", "Java",
+            "nz", "work", "minecraft", "jay", "SdlMenuBootstrap.java"));
+
+        Assert.Contains("if (count == 0) return;", native, StringComparison.Ordinal);
+        Assert.Contains("if (requested < 0)", glfw, StringComparison.Ordinal);
+        Assert.Contains("if (requested < 0)", sdl, StringComparison.Ordinal);
+        Assert.Contains("for (int returned = 0; returned < -requested; returned++)", sdl,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void DownloadableAndroidBuildsRequireBuiltInCurseForgeKeyButPullRequestsStayKeyless()
     {
         var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
@@ -1732,6 +1773,7 @@ public sealed class MobilePortTests
         public (double X, double Y, bool Click) LastPointer { get; private set; }
         public List<(double X, double Y, bool Click)> Pointers { get; } = [];
         public List<(double X, double Y, int Count)> InventorySplits { get; } = [];
+        public List<(double X, double Y, int Count)> ReturnedInventoryItems { get; } = [];
 
         public void SetAction(TouchControlAction action, bool pressed) => Actions.Add((action, pressed));
         public void CancelAction(TouchControlAction action) => CanceledActions.Add(action);
@@ -1744,6 +1786,8 @@ public sealed class MobilePortTests
         }
         public void SplitInventoryStack(double x, double y, int count) =>
             InventorySplits.Add((x, y, count));
+        public void ReturnCarriedInventoryItems(double x, double y, int count) =>
+            ReturnedInventoryItems.Add((x, y, count));
     }
 
 }

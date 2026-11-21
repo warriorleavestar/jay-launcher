@@ -581,7 +581,7 @@ void jay_input_set_pointer(float x, float y, int click) {
 
 __attribute__((visibility("default")))
 void jay_input_split_inventory(float x, float y, int count) {
-    if (count < 1) return;
+    if (count == 0) return;
     atomic_store(&g_inventory_split_x, x);
     atomic_store(&g_inventory_split_y, y);
     atomic_store(&g_inventory_split_count, count);
