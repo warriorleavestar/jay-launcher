@@ -10,6 +10,15 @@ internal static class SoftKeyboardInputPolicy
 {
     public static bool AcceptsConnection(int focusState, bool manuallyRequested) =>
         focusState > 0 || manuallyRequested;
+
+    /// <summary>
+    /// SDL starts text input when Minecraft focuses an editor, including editors that screens
+    /// focus automatically while opening. Android should only show its IME after the player's
+    /// touch actually landed on that editor; otherwise opening the world list covers it with a
+    /// keyboard even though the player tapped the Singleplayer button on the preceding screen.
+    /// </summary>
+    public static bool ShouldOpenAfterTouch(bool textInputActive, bool touchedFocusedEditor) =>
+        textInputActive && touchedFocusedEditor;
 }
 
 /// <summary>

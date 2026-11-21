@@ -789,6 +789,18 @@ public final class AndroidGameBootstrap {
                 }
             }
         }
+        // Official client jars are obfuscated independently for each release. The editor's
+        // inherited hit-test name therefore is not stable, but its signature is: one instance
+        // method taking the pointer's two double coordinates and returning boolean. Menu input
+        // widgets do not expose another method with that signature in their hierarchy.
+        for (Class<?> type = candidateType; type != null; type = type.getSuperclass()) {
+            for (Method method : type.getDeclaredMethods()) {
+                Class<?>[] parameters = method.getParameterTypes();
+                if (method.getReturnType() == boolean.class && parameters.length == 2 &&
+                        parameters[0] == double.class && parameters[1] == double.class)
+                    return accessible(method);
+            }
+        }
         return null;
     }
 

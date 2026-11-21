@@ -256,6 +256,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     private readonly Dictionary<int, LongPressIndicator> _longPressIndicators = [];
     private readonly Dictionary<int, long> _longPressTokens = [];
     private readonly HashSet<int> _hotbarPointers = [];
+    private readonly HashSet<int> _textInputPointers = [];
     private readonly HashSet<Keycode> _hardwareKeys = [];
     private readonly HashSet<TouchControlAction> _hardwareActions = [];
     private readonly HardwareTextInputGate _hardwareTextInputGate = new();
@@ -959,6 +960,16 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
                 // Visible overlay controls are checked first. The inventory key's hit rectangle
                 // ends exactly where the ninth hotbar slot begins, so neither steals the other.
                 var control = _profile.HitTest(x, y, gameplay);
+                // Remember the editor under the finger before Minecraft handles the click.
+                // Some menu buttons replace the whole screen on release; querying afterwards
+                // would mistake an automatically focused search box on the new screen for the
+                // button the player actually touched.
+                var touchedEditor = !gameplay && control is null &&
+                    (_sdl?.TextInputAt(x, y) ?? NativeJvmHost.TextInputAt(x, y));
+                if (touchedEditor)
+                    _textInputPointers.Add(pointerId);
+                else
+                    _textInputPointers.Remove(pointerId);
                 if (gameplay && control is null && TryGetHotbarSlot(x, y, out var slot))
                 {
                     // A lost UP during an IME/window transition can leave the recycled ID in
@@ -1019,6 +1030,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
                 var releasedId = e.GetPointerId(actionIndex);
                 var releasedX = e.GetX(actionIndex) / Width;
                 var releasedY = e.GetY(actionIndex) / Height;
+                var touchedTextInput = _textInputPointers.Remove(releasedId);
                 _longPressTokens.Remove(releasedId);
                 _longPressIndicators.Remove(releasedId);
                 if (_hotbarPointers.Remove(releasedId)) return true;
@@ -1027,12 +1039,13 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
                 var syncTextInput = _router.TargetsGameSurface(releasedId);
                 var released = _router.Release(releasedId);
                 if (released && syncTextInput && !GameplayActive)
-                    PostDelayed(() => SyncSoftKeyboardAfterTap(releasedX, releasedY), 140);
+                    PostDelayed(() => SyncSoftKeyboardAfterTap(releasedX, releasedY, touchedTextInput), 140);
                 return released;
             case MotionEventActions.Cancel:
                 _longPressTokens.Clear();
                 _longPressIndicators.Clear();
                 _hotbarPointers.Clear();
+                _textInputPointers.Clear();
                 _router.CancelAll();
                 return true;
             default:
@@ -1331,6 +1344,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         _longPressTokens.Clear();
         _longPressIndicators.Clear();
         _hotbarPointers.Clear();
+        _textInputPointers.Clear();
         _router.CancelAll();
         ReleaseHardwareInput();
     }
@@ -1413,15 +1427,18 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         input?.ShowSoftInput(this, ShowFlags.Forced);
     }
 
-    private void SyncSoftKeyboardAfterTap(double x, double y)
+    private void SyncSoftKeyboardAfterTap(double x, double y, bool touchedTextInput)
     {
-        // SDL owns text-field focus for the modern client and its Java bridge deliberately has no
-        // coordinate hit-test. Once SDL reports active text input, keep/restart the IME; when it
-        // does not, let the normal focus transition hide it rather than treating every tap as an
-        // authoritative miss and closing a keyboard that SDL has just opened asynchronously.
+        // SDL starts text input for automatically focused widgets too. Require both active text
+        // input and a hit on the focused editor, otherwise tapping Singleplayer and opening the
+        // world list immediately covers it with the IME because its search box auto-focuses.
         if (_sdl is not null)
         {
-            if (_sdl.TextInputActive) ShowKeyboard();
+            if (SoftKeyboardInputPolicy.ShouldOpenAfterTouch(
+                    _sdl.TextInputActive, touchedTextInput))
+                ShowKeyboard();
+            else
+                HideKeyboard();
             return;
         }
 

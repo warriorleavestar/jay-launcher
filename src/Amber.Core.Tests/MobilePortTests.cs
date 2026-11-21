@@ -1214,6 +1214,18 @@ public sealed class MobilePortTests
             SoftKeyboardInputPolicy.AcceptsConnection(focusState, manuallyRequested));
     }
 
+    [Theory]
+    [InlineData(true, true, true)]
+    [InlineData(true, false, false)]
+    [InlineData(false, true, false)]
+    [InlineData(false, false, false)]
+    public void SoftKeyboardOnlyOpensAfterTouchingTheFocusedEditor(
+        bool textInputActive, bool touchedFocusedEditor, bool expected)
+    {
+        Assert.Equal(expected,
+            SoftKeyboardInputPolicy.ShouldOpenAfterTouch(textInputActive, touchedFocusedEditor));
+    }
+
     [Fact]
     public void OrdinarySignEditorCanOpenKeyboardWithoutAFocusedWidget()
     {
@@ -1466,6 +1478,21 @@ public sealed class MobilePortTests
         Assert.Contains("input.hitResult.get", blockTarget, StringComparison.Ordinal);
         Assert.Contains("input.blockHit.isInstance", blockTarget, StringComparison.Ordinal);
         Assert.DoesNotContain("return false; }", blockTarget, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SdlMenuBridgeExposesFocusedEditorHitTestingToAndroid()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var sdl = File.ReadAllText(Path.Combine(repository, "src", "Amber.Android", "Java",
+            "nz", "work", "minecraft", "jay", "SdlMenuBootstrap.java"));
+
+        Assert.Contains("public static int textInputFocusState()", sdl, StringComparison.Ordinal);
+        Assert.Contains("AndroidGameBootstrap.textInputFocusState()", sdl, StringComparison.Ordinal);
+        Assert.Contains("public static boolean isTextInputAt(float x, float y)", sdl,
+            StringComparison.Ordinal);
+        Assert.Contains("AndroidGameBootstrap.isTextInputAt(x, y)", sdl, StringComparison.Ordinal);
     }
 
     [Fact]

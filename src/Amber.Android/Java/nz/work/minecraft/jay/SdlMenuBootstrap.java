@@ -194,6 +194,16 @@ public final class SdlMenuBootstrap {
         }
     }
 
+    /** Keep the SDL/Java 25 menu path on the same editor-focus bridge as GLFW. */
+    public static int textInputFocusState() {
+        return AndroidGameBootstrap.textInputFocusState();
+    }
+
+    /** True only when this touch began over the focused Minecraft editor. */
+    public static boolean isTextInputAt(float x, float y) {
+        return AndroidGameBootstrap.isTextInputAt(x, y);
+    }
+
     // SDLActivity owns these event types. The native host probes one common bridge surface for
     // both GLFW and SDL, so explicit no-op methods avoid treating the intentional SDL routing as
     // a missing-method error during startup.
