@@ -271,7 +271,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     private long _nextLongPressToken;
 
     private readonly SdlTouchInput? _sdl;
-    private bool _manualKeyboardRequested;
+    private readonly SoftKeyboardInputSession _softKeyboardSession = new();
     private bool GameplayActive => _sdl?.InWorld ?? NativeJvmHost.GameplayControlsActive;
 
     public TouchControlOverlay(Context context, SdlTouchInput? sdl = null) : base(context)
@@ -297,8 +297,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     private int TextInputFocusState => _sdl is not null
         ? (_sdl.TextInputActive ? 1 : 0)
         : NativeJvmHost.TextInputFocusState;
-    private bool TextInputFocused => SoftKeyboardInputPolicy.AcceptsConnection(
-        TextInputFocusState, _manualKeyboardRequested);
+    private bool TextInputFocused => _softKeyboardSession.AcceptsConnection(TextInputFocusState);
 
     public override bool OnCheckIsTextEditor() => TextInputFocused;
 
@@ -317,7 +316,9 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         // otherwise some Android GPU drivers retain the previous joystick knob position.
         canvas.DrawColor(Color.Transparent, PorterDuff.Mode.Clear!);
         var gameplayControlsActive = GameplayActive;
-        var textInputFocused = TextInputFocused;
+        var textInputFocusState = TextInputFocusState;
+        _softKeyboardSession.Observe(gameplayControlsActive, textInputFocusState);
+        var textInputFocused = _softKeyboardSession.AcceptsConnection(textInputFocusState);
         if (_lastTextInputFocused != textInputFocused)
         {
             _lastTextInputFocused = textInputFocused;
@@ -1347,7 +1348,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
 
     private void ShowKeyboard()
     {
-        _manualKeyboardRequested = true;
+        _softKeyboardSession.Request(GameplayActive, TextInputFocusState);
         RequestFocus();
         var input = (InputMethodManager?)Context!.GetSystemService(Context.InputMethodService);
         input?.RestartInput(this);
@@ -1380,7 +1381,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
 
     private void HideKeyboard()
     {
-        _manualKeyboardRequested = false;
+        _softKeyboardSession.Clear();
         var input = (InputMethodManager?)Context!.GetSystemService(Context.InputMethodService);
         input?.HideSoftInputFromWindow(WindowToken, HideSoftInputFlags.None);
         // ShowFlags.Forced is needed on tablets that report a hardware keyboard, but it also

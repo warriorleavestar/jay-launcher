@@ -1007,15 +1007,41 @@ public sealed class MobilePortTests
     [Fact]
     public void OrdinarySignEditorCanOpenKeyboardWithoutAFocusedWidget()
     {
-        Assert.True(SoftKeyboardInputPolicy.AcceptsConnection(
-            focusState: 0, manuallyRequested: true));
+        var session = new SoftKeyboardInputSession();
+        session.Request(gameplayActive: false, focusState: 0);
+
+        Assert.True(session.AcceptsConnection(focusState: 0));
+
+        session.Observe(gameplayActive: true, focusState: 0);
+        Assert.False(session.AcceptsConnection(focusState: 0));
     }
 
     [Fact]
     public void HangingSignEditorCanOpenKeyboardWithoutAFocusedWidget()
     {
-        Assert.True(SoftKeyboardInputPolicy.AcceptsConnection(
-            focusState: 0, manuallyRequested: true));
+        var session = new SoftKeyboardInputSession();
+        session.Request(gameplayActive: false, focusState: 0);
+
+        Assert.True(session.AcceptsConnection(focusState: 0));
+
+        session.Observe(gameplayActive: true, focusState: 0);
+        Assert.False(session.AcceptsConnection(focusState: 0));
+    }
+
+    [Fact]
+    public void ChatKeyboardFallbackSurvivesOpeningTransitionThenEndsOnGameplayReturn()
+    {
+        var session = new SoftKeyboardInputSession();
+        session.Request(gameplayActive: true, focusState: 0);
+
+        session.Observe(gameplayActive: true, focusState: 0);
+        Assert.True(session.AcceptsConnection(focusState: 0));
+
+        session.Observe(gameplayActive: false, focusState: 1);
+        Assert.True(session.AcceptsConnection(focusState: 1));
+
+        session.Observe(gameplayActive: true, focusState: 0);
+        Assert.False(session.AcceptsConnection(focusState: 0));
     }
 
     [Fact]

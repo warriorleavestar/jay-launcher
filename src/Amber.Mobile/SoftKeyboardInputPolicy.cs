@@ -11,3 +11,41 @@ internal static class SoftKeyboardInputPolicy
     public static bool AcceptsConnection(int focusState, bool manuallyRequested) =>
         focusState > 0 || manuallyRequested;
 }
+
+/// <summary>
+/// Tracks one explicit soft-keyboard request across the short transition from gameplay into a
+/// Minecraft text screen. Once that screen has actually been observed, returning to gameplay
+/// ends the fallback so hardware movement keys cannot reopen the IME.
+/// </summary>
+internal sealed class SoftKeyboardInputSession
+{
+    private bool _manuallyRequested;
+    private bool _enteredTextScreen;
+
+    public bool AcceptsConnection(int focusState) =>
+        SoftKeyboardInputPolicy.AcceptsConnection(focusState, _manuallyRequested);
+
+    public void Request(bool gameplayActive, int focusState)
+    {
+        _manuallyRequested = true;
+        _enteredTextScreen = !gameplayActive || focusState > 0;
+    }
+
+    public void Observe(bool gameplayActive, int focusState)
+    {
+        if (!_manuallyRequested) return;
+        if (!gameplayActive || focusState > 0)
+        {
+            _enteredTextScreen = true;
+            return;
+        }
+
+        if (_enteredTextScreen) Clear();
+    }
+
+    public void Clear()
+    {
+        _manuallyRequested = false;
+        _enteredTextScreen = false;
+    }
+}
