@@ -279,6 +279,8 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     private bool? _lastGameplayControlsActive;
     private bool? _lastTextInputFocused;
     private long _nextLongPressToken;
+    private long _nextGuiScalePoll;
+    private int _minecraftGuiScale;
 
     private readonly SdlTouchInput? _sdl;
     private readonly SoftKeyboardInputSession _softKeyboardSession = new();
@@ -804,11 +806,24 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     }
 
     private bool TryGetHotbarSlot(double x, double y, out int slot) =>
-        TouchHudGeometry.ForAspectRatio(CurrentAspectRatio()).TryGetSlot(x, y, out slot);
+        TouchHudGeometry.ForViewport(Width, Height, _minecraftGuiScale).TryGetSlot(x, y, out slot);
 
     private double CurrentAspectRatio() => Height > 0 ? Width / (double)Height : 16d / 9d;
 
-    private void UpdateViewportGeometry() => _profile.ViewportAspectRatio = CurrentAspectRatio();
+    private void UpdateViewportGeometry()
+    {
+        _profile.ViewportAspectRatio = CurrentAspectRatio();
+        _profile.ViewportWidthPixels = Width;
+        _profile.ViewportHeightPixels = Height;
+        var now = SystemClock.UptimeMillis();
+        if (now >= _nextGuiScalePoll)
+        {
+            var liveScale = _sdl?.GuiScale ?? NativeJvmHost.GuiScale;
+            if (liveScale > 0) _minecraftGuiScale = liveScale;
+            _nextGuiScalePoll = now + 1000;
+        }
+        _profile.MinecraftGuiScale = _minecraftGuiScale;
+    }
 
     private void DrawChevron(Canvas canvas, float x, float y, float size)
     {

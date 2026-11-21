@@ -460,6 +460,33 @@ public sealed class MobilePortTests
     }
 
     [Fact]
+    public void LiveMinecraftGuiScaleDrivesHotbarHitTestingAndInventoryAnchor()
+    {
+        var hud = TouchHudGeometry.ForViewport(2944, 1840, 7);
+        Assert.Equal(0.5 - 630d / 2944, hud.HotbarLeft, 6);
+        Assert.Equal(0.5 + 630d / 2944, hud.HotbarRight, 6);
+        Assert.Equal(0.5 + 707d / 2944, hud.InventoryX, 6);
+        Assert.Equal(1 - 77d / 1840, hud.CenterY, 6);
+        Assert.True(hud.TryGetSlot(0.30, 0.95, out var first));
+        Assert.Equal(0, first);
+        Assert.True(hud.TryGetSlot(0.70, 0.95, out var last));
+        Assert.Equal(8, last);
+
+        var profile = new TouchControlProfile
+        {
+            ViewportAspectRatio = 2944d / 1840,
+            ViewportWidthPixels = 2944,
+            ViewportHeightPixels = 1840,
+            MinecraftGuiScale = 7
+        };
+        var inventory = profile.Controls.Single(control =>
+            control.Action == TouchControlAction.Inventory);
+        Assert.Equal(hud.InventoryX, inventory.CenterX, 6);
+        Assert.Equal(hud.CenterY, inventory.CenterY, 6);
+        Assert.Equal(hud.InventoryRadius, inventory.Radius, 6);
+    }
+
+    [Fact]
     public void AndroidDropsLegacyInventoryOverridesAndKeepsTheButtonOutOfLayoutEditing()
     {
         var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,

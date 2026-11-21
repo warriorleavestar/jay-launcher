@@ -163,6 +163,11 @@ public final class SdlMenuBootstrap {
         }
     }
 
+    /** Current Minecraft GUI scale, cached while transitioning from a menu into gameplay. */
+    public static int guiScale() {
+        return AndroidGameBootstrap.guiScale();
+    }
+
     public static boolean dispatchInventorySplit(float x, float y, int count) {
         try {
             if (menu == null) menu = new Menu();

@@ -10,7 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define JAY_JVM_ABI_VERSION 18
+#define JAY_JVM_ABI_VERSION 19
 #define JAY_ACTION_COUNT 13
 #define JAY_EVENT_CAPACITY 80
 #define JAY_EVENT_CHAR 1
@@ -53,6 +53,7 @@ static jmethodID g_is_gameplay_controls_active;
 static jmethodID g_is_block_target;
 static jmethodID g_is_text_input_focused;
 static jmethodID g_is_text_input_at;
+static jmethodID g_gui_scale;
 static jmethodID g_inventory_stack_count;
 static jmethodID g_dispatch_inventory_split;
 static _Atomic int g_input_bridge_error_logged;
@@ -291,6 +292,7 @@ int jay_jvm_run_main(JNIEnv *env, const char *class_name, int argc, const char *
         JAY_INPUT_METHOD(g_is_block_target, "isBlockTarget", "()Z");
         JAY_INPUT_METHOD(g_is_text_input_focused, "textInputFocusState", "()I");
         JAY_INPUT_METHOD(g_is_text_input_at, "isTextInputAt", "(FF)Z");
+        JAY_INPUT_METHOD(g_gui_scale, "guiScale", "()I");
         JAY_INPUT_METHOD(g_inventory_stack_count, "inventoryStackCount", "(FF)I");
         JAY_INPUT_METHOD(g_dispatch_inventory_split, "dispatchInventorySplit", "(FFI)Z");
 #undef JAY_INPUT_METHOD
@@ -382,6 +384,21 @@ int jay_inventory_stack_count(float x, float y) {
     }
     if (attached && g_vm != NULL) (*g_vm)->DetachCurrentThread(g_vm);
     return count;
+}
+
+__attribute__((visibility("default")))
+int jay_gui_scale_get(void) {
+    int attached;
+    JNIEnv *env = jay_input_environment(&attached);
+    if (env == NULL || g_gui_scale == NULL) return 0;
+    jint scale = (*env)->CallStaticIntMethod(env, g_input_bridge_class, g_gui_scale);
+    if ((*env)->ExceptionCheck(env)) {
+        if (!atomic_exchange(&g_input_bridge_error_logged, 1)) (*env)->ExceptionDescribe(env);
+        (*env)->ExceptionClear(env);
+        scale = 0;
+    }
+    if (attached && g_vm != NULL) (*g_vm)->DetachCurrentThread(g_vm);
+    return scale > 0 ? scale : 0;
 }
 
 __attribute__((visibility("default")))

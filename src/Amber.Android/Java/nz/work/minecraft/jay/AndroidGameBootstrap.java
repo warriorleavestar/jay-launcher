@@ -66,6 +66,7 @@ public final class AndroidGameBootstrap {
     private static boolean inputBridgeReady;
     private static boolean inputBridgeFailed;
     private static boolean inputDispatchErrorLogged;
+    private static volatile int lastGuiScale;
 
     private AndroidGameBootstrap() {}
 
@@ -580,6 +581,26 @@ public final class AndroidGameBootstrap {
         } catch (ReflectiveOperationException | RuntimeException error) {
             reportInputError(error);
             return -1;
+        }
+    }
+
+    /** Current Minecraft GUI scale, cached while transitioning from a menu into gameplay. */
+    public static int guiScale() {
+        if (!prepareInputBridge()) return lastGuiScale;
+        try {
+            Object minecraft = minecraft();
+            Object active = minecraft == null ? null : screen(minecraft);
+            Object liveWindow = minecraft == null ? null : window(minecraft);
+            if (active != null && liveWindow != null) {
+                int logicalWidth = screenWidth.getInt(active);
+                int physicalWidth = (Integer)windowWidth.invoke(liveWindow);
+                if (logicalWidth > 0 && physicalWidth > 0)
+                    lastGuiScale = Math.max(1,
+                        (int)Math.round(physicalWidth / (double)logicalWidth));
+            }
+            return lastGuiScale;
+        } catch (ReflectiveOperationException | RuntimeException error) {
+            return lastGuiScale;
         }
     }
 

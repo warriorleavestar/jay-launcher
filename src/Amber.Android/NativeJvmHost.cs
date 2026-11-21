@@ -7,7 +7,7 @@ namespace Amber.Android;
 
 internal static partial class NativeJvmHost
 {
-    private const int ExpectedAbiVersion = 18;
+    private const int ExpectedAbiVersion = 19;
     public static bool GameplayControlsActive => IsAvailable && GetNativeGameplayMode() != 0;
 
     public static bool HasBlockTarget
@@ -27,6 +27,16 @@ internal static partial class NativeJvmHost
             if (!IsAvailable) return -1;
             try { return Math.Clamp(GetNativeTextInputFocused(), -1, 1); }
             catch (EntryPointNotFoundException) { return -1; }
+        }
+    }
+
+    public static int GuiScale
+    {
+        get
+        {
+            if (!IsAvailable) return 0;
+            try { return Math.Max(0, GetNativeGuiScale()); }
+            catch (EntryPointNotFoundException) { return 0; }
         }
     }
 
@@ -244,6 +254,9 @@ internal static partial class NativeJvmHost
 
     [LibraryImport("jayjvm", EntryPoint = "jay_text_input_at_get")]
     private static partial int GetNativeTextInputAt(float x, float y);
+
+    [LibraryImport("jayjvm", EntryPoint = "jay_gui_scale_get")]
+    private static partial int GetNativeGuiScale();
 
     [LibraryImport("jayjvm", EntryPoint = "jay_jvm_load", StringMarshalling = StringMarshalling.Utf8)]
     private static partial nint LoadJvm(string path);
