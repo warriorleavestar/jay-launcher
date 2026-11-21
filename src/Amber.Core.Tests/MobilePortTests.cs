@@ -1146,7 +1146,7 @@ public sealed class MobilePortTests
     }
 
     [Fact]
-    public void AndroidInventorySplitsRunOnTheMinecraftClientThread()
+    public void AndroidInventoryAccessRunsOnTheMinecraftClientThread()
     {
         var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", ".."));
@@ -1157,9 +1157,17 @@ public sealed class MobilePortTests
 
         var glfwSplit = JavaMethod(glfw, "public static boolean dispatchInventorySplit", "/** True only");
         var sdlSplit = JavaMethod(sdl, "public static boolean dispatchInventorySplit", "public static boolean isBlockTarget");
+        var glfwCount = JavaMethod(glfw, "public static int inventoryStackCount", "/** Picks an exact quantity");
+        var sdlCount = JavaMethod(sdl, "public static int inventoryStackCount", "public static boolean dispatchInventorySplit");
         Assert.Contains("minecraftExecute.invoke", glfwSplit, StringComparison.Ordinal);
         Assert.Contains("dispatchInventorySplitNow", glfwSplit, StringComparison.Ordinal);
         Assert.Contains("((Executor)game).execute", sdlSplit, StringComparison.Ordinal);
+        Assert.Contains("minecraftExecute.invoke", glfwCount, StringComparison.Ordinal);
+        Assert.Contains("FutureTask<Integer>", glfwCount, StringComparison.Ordinal);
+        Assert.Contains("((Executor)game).execute", sdlCount, StringComparison.Ordinal);
+        Assert.Contains("FutureTask<Integer>", sdlCount, StringComparison.Ordinal);
+        Assert.Contains("get(250, TimeUnit.MILLISECONDS)", glfwCount, StringComparison.Ordinal);
+        Assert.Contains("get(250, TimeUnit.MILLISECONDS)", sdlCount, StringComparison.Ordinal);
     }
 
     [Fact]

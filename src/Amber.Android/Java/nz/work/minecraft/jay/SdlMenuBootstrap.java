@@ -2,7 +2,11 @@ package nz.work.minecraft.jay;
 
 import java.lang.reflect.*;
 import java.util.Arrays;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /** Deliver touchscreen menu gestures on the 26.3 client thread in scaled GUI coordinates. */
 public final class SdlMenuBootstrap {
@@ -124,7 +128,26 @@ public final class SdlMenuBootstrap {
             if (menu == null) menu = new Menu();
             Menu input = menu;
             Object game = input.instance.invoke(null);
-            return game == null ? -1 : input.stackCount(game, x, y);
+            if (!(game instanceof Executor)) return -1;
+            FutureTask<Integer> query = new FutureTask<>(() -> {
+                try { return input.stackCount(game, x, y); }
+                catch (ReflectiveOperationException error) {
+                    System.err.println("Jay inventory query: " + error);
+                    return -1;
+                }
+            });
+            ((Executor)game).execute(query);
+            try {
+                return query.get(250, TimeUnit.MILLISECONDS);
+            } catch (InterruptedException interrupted) {
+                query.cancel(false);
+                Thread.currentThread().interrupt();
+                return -1;
+            } catch (ExecutionException | TimeoutException unavailable) {
+                query.cancel(false);
+                System.err.println("Jay inventory query: " + unavailable);
+                return -1;
+            }
         } catch (ReflectiveOperationException error) {
             return -1;
         }

@@ -14,6 +14,10 @@ import java.io.ByteArrayOutputStream;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /** Supplies LWJGL OpenGL entry points through Jay's EGL-backed GLFW bridge before Minecraft starts. */
 public final class AndroidGameBootstrap {
@@ -544,24 +548,56 @@ public final class AndroidGameBootstrap {
     public static int inventoryStackCount(float normalizedX, float normalizedY) {
         if (!prepareInputBridge()) return -1;
         try {
-            Object minecraft = minecraft();
+            final Object minecraft = minecraft();
             if (minecraft == null) return -1;
-            Object screen = screen(minecraft);
-            if (containerScreenType == null || !containerScreenType.isInstance(screen)) return -1;
-            double x = Math.max(0.0, Math.min(1.0, normalizedX)) * screenWidth.getInt(screen);
-            double y = Math.max(0.0, Math.min(1.0, normalizedY)) * screenHeight.getInt(screen);
-            Object slot = containerHoveredSlot.invoke(screen, x, y);
-            if (slot == null) return -1;
-            Object stack = slotGetItem.invoke(slot);
-            if (stack == null) return 0;
-            int count = itemStackGetCount != null
-                ? (Integer)itemStackGetCount.invoke(stack)
-                : itemStackCount.getInt(stack);
-            return Math.max(0, count);
+            if (minecraftExecute == null) {
+                minecraftExecute = accessible(minecraft.getClass().getMethod(
+                    "execute", Runnable.class));
+            }
+            if (minecraftExecute == null)
+                return inventoryStackCountNow(minecraft, normalizedX, normalizedY);
+
+            FutureTask<Integer> query = new FutureTask<>(() -> {
+                try {
+                    return inventoryStackCountNow(minecraft, normalizedX, normalizedY);
+                } catch (ReflectiveOperationException | RuntimeException error) {
+                    reportInputError(error);
+                    return -1;
+                }
+            });
+            minecraftExecute.invoke(minecraft, query);
+            try {
+                return query.get(250, TimeUnit.MILLISECONDS);
+            } catch (InterruptedException interrupted) {
+                query.cancel(false);
+                Thread.currentThread().interrupt();
+                return -1;
+            } catch (ExecutionException | TimeoutException unavailable) {
+                query.cancel(false);
+                reportInputError(unavailable);
+                return -1;
+            }
         } catch (ReflectiveOperationException | RuntimeException error) {
             reportInputError(error);
             return -1;
         }
+    }
+
+    private static int inventoryStackCountNow(Object minecraft, float normalizedX,
+                                              float normalizedY)
+        throws ReflectiveOperationException {
+        Object screen = screen(minecraft);
+        if (containerScreenType == null || !containerScreenType.isInstance(screen)) return -1;
+        double x = Math.max(0.0, Math.min(1.0, normalizedX)) * screenWidth.getInt(screen);
+        double y = Math.max(0.0, Math.min(1.0, normalizedY)) * screenHeight.getInt(screen);
+        Object slot = containerHoveredSlot.invoke(screen, x, y);
+        if (slot == null) return -1;
+        Object stack = slotGetItem.invoke(slot);
+        if (stack == null) return 0;
+        int count = itemStackGetCount != null
+            ? (Integer)itemStackGetCount.invoke(stack)
+            : itemStackCount.getInt(stack);
+        return Math.max(0, count);
     }
 
     /** Picks an exact quantity from a slot using Minecraft's own synchronized click path. */
