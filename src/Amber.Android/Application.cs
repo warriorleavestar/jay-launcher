@@ -39,7 +39,9 @@ public sealed class Application : AvaloniaAndroidApplication<Amber.App.App>
             // so a Java 25 game never causes the legacy runtime to be installed by mistake.
             var requiredJava = await AndroidEmbeddedGame.PrepareVersionMetadataAsync(
                 this, versionId, gameProgress, ct);
-            var java25 = requiredJava >= 25;
+            if (!AndroidRuntimeChoice.IsSupported(requiredJava))
+                throw new InvalidOperationException(L.T("mobile.runtime.unsupported"));
+            var java25 = AndroidRuntimeChoice.UsesJava25(requiredJava);
             if (!AndroidRuntimeStore.IsInstalled(this, java25))
             {
                 var descriptor = AndroidRuntimeStore.Descriptor(this, java25)

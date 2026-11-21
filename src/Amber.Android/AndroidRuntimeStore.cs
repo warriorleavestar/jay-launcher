@@ -22,7 +22,8 @@ internal static class AndroidRuntimeStore
     public static bool RequiresJava25(Context context, string versionId)
     {
         var directory = new Amber.Core.Game.GameDirectory(Path.Combine(context.FilesDir!.AbsolutePath, "minecraft"));
-        return File.Exists(directory.VersionJsonPath(versionId)) && directory.ResolveVersion(versionId).JavaVersion?.MajorVersion >= 25;
+        return File.Exists(directory.VersionJsonPath(versionId)) &&
+               AndroidRuntimeChoice.UsesJava25(directory.ResolveVersion(versionId).JavaVersion?.MajorVersion ?? 8);
     }
 
     public static RuntimeArchiveDescriptor? Descriptor(Context context, bool java25)

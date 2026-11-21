@@ -64,11 +64,14 @@ internal static class AndroidEmbeddedGame
         playerName = playerName.Trim();
         if (playerName.Length is < 1 or > 16 || playerName.Any(c => !(char.IsAsciiLetterOrDigit(c) || c == '_')))
             throw new ArgumentException("Minecraft names must use 1-16 letters, numbers or underscores.");
+        var gameRoot = Path.Combine(context.FilesDir!.AbsolutePath, "minecraft");
+        var gameDirectory = new GameDirectory(gameRoot);
+        var requiredJava = gameDirectory.ResolveVersion(versionId).JavaVersion?.MajorVersion ?? 8;
+        if (!AndroidRuntimeChoice.IsSupported(requiredJava))
+            throw new InvalidOperationException(L.T("mobile.runtime.unsupported"));
         var java25 = AndroidRuntimeStore.RequiresJava25(context, versionId);
         if (!AndroidRuntimeStore.IsInstalled(context, java25)) throw new InvalidOperationException("The Android runtime is not installed.");
 
-        var gameRoot = Path.Combine(context.FilesDir!.AbsolutePath, "minecraft");
-        var gameDirectory = new GameDirectory(gameRoot);
         using var http = Downloader.CreateHttpClient();
         var downloader = new Downloader(http, SourceChain.Default()) { MaxConcurrency = 8, MaxChunksPerFile = 4 };
         var rules = AndroidRules();
@@ -77,7 +80,6 @@ internal static class AndroidEmbeddedGame
             progress?.Report(new(value.Stage, value.Files.CompletedFiles, value.Files.TotalFiles, value.Files.BytesDownloaded, value.Files.ActiveFiles)));
         var runtimeRoot = AndroidRuntimeStore.Root(context, java25);
         await installer.PrepareVersionAsync(versionId, forwardedProgress, ct);
-        var requiredJava = gameDirectory.ResolveVersion(versionId).JavaVersion?.MajorVersion ?? 8;
         var installedJava = JavaRuntimeRelease.ReadMajor(runtimeRoot)
             ?? throw new InvalidOperationException(L.T("mobile.runtime.invalid_release"));
         if (installedJava < requiredJava)

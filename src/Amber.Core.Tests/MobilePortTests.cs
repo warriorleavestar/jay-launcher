@@ -34,6 +34,29 @@ public sealed class MobilePortTests
         Assert.Null(JavaRuntimeRelease.ParseMajor(version));
     }
 
+    [Theory]
+    [InlineData(8, false)]
+    [InlineData(17, false)]
+    [InlineData(21, false)]
+    [InlineData(22, true)]
+    [InlineData(24, true)]
+    [InlineData(25, true)]
+    public void AndroidRuntimeChoiceUsesJava25ForEveryCompatiblePost21Instance(
+        int requiredJava, bool java25)
+    {
+        Assert.True(AndroidRuntimeChoice.IsSupported(requiredJava));
+        Assert.Equal(java25, AndroidRuntimeChoice.UsesJava25(requiredJava));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(26)]
+    [InlineData(99)]
+    public void AndroidRuntimeChoiceRejectsUnsupportedMajorsBeforeDownload(int requiredJava)
+    {
+        Assert.False(AndroidRuntimeChoice.IsSupported(requiredJava));
+    }
+
     [Fact]
     public void AndroidJava21RuntimeDoesNotRequireJava25GraphicsLibraries()
     {
@@ -1437,9 +1460,11 @@ public sealed class MobilePortTests
             "src", "Amber.Android", "AndroidEmbeddedGame.cs"));
 
         var metadataFetch = application.IndexOf("PrepareVersionMetadataAsync(", StringComparison.Ordinal);
-        var runtimeChoice = application.IndexOf("var java25 = requiredJava >= 25;", StringComparison.Ordinal);
+        var runtimeSupport = application.IndexOf("AndroidRuntimeChoice.IsSupported(requiredJava)", StringComparison.Ordinal);
+        var runtimeChoice = application.IndexOf("AndroidRuntimeChoice.UsesJava25(requiredJava)", StringComparison.Ordinal);
         var runtimeInstall = application.IndexOf("AndroidRuntimeStore.InstallAsync", StringComparison.Ordinal);
-        Assert.True(metadataFetch >= 0 && runtimeChoice > metadataFetch && runtimeInstall > runtimeChoice);
+        Assert.True(metadataFetch >= 0 && runtimeSupport > metadataFetch && runtimeChoice > runtimeSupport &&
+                    runtimeInstall > runtimeChoice);
 
         var prepareMethod = embeddedGame.IndexOf("PrepareVersionMetadataAsync(", StringComparison.Ordinal);
         var prepareVersion = embeddedGame.IndexOf("installer.PrepareVersionAsync", prepareMethod,
