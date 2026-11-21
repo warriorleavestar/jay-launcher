@@ -259,6 +259,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     private readonly HashSet<Keycode> _hardwareKeys = [];
     private readonly HashSet<TouchControlAction> _hardwareActions = [];
     private readonly HardwareTextInputGate _hardwareTextInputGate = new();
+    private readonly HardwareMouseButtonTracker _hardwareMouseButtons = new();
     private bool _settingsOpen;
     private bool _layoutEditing;
     private int? _editingPointer;
@@ -1223,15 +1224,17 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
             MotionEventActions.Down or MotionEventActions.Up)
         {
             var pressed = e.ActionMasked is MotionEventActions.ButtonPress or MotionEventActions.Down;
-            // Several Android mouse drivers leave ActionButton empty for DOWN/UP. Those
-            // actions represent the primary button.
-            var actionButton = e.ActionMasked is MotionEventActions.Down or MotionEventActions.Up
-                ? MotionEventButtonState.Primary : e.ActionButton;
+            // Some vendor mouse/trackpad drivers leave ActionButton empty even for
+            // BUTTON_PRESS/RELEASE. Recover the transition from ButtonState; ordinary DOWN/UP
+            // still have the Android-defined primary-button fallback.
+            var actionButton = _hardwareMouseButtons.Resolve((int)e.ActionButton,
+                (int)e.ButtonState, pressed,
+                e.ActionMasked is MotionEventActions.Down or MotionEventActions.Up);
             var action = actionButton switch
             {
-                MotionEventButtonState.Primary => TouchControlAction.PrimaryAction,
-                MotionEventButtonState.Secondary => TouchControlAction.SecondaryAction,
-                MotionEventButtonState.Tertiary => TouchControlAction.Inventory,
+                HardwareMouseButtonTracker.Primary => TouchControlAction.PrimaryAction,
+                HardwareMouseButtonTracker.Secondary => TouchControlAction.SecondaryAction,
+                HardwareMouseButtonTracker.Tertiary => TouchControlAction.Inventory,
                 _ => (TouchControlAction?)null
             };
             // DOWN/UP can arrive without a preceding HOVER_MOVE (trackpads and ADB both do
@@ -1295,6 +1298,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
             DispatchAction(action, false);
         _hardwareActions.Clear();
         _sdl?.ReleaseAll();
+        _hardwareMouseButtons.Reset();
         _hasMousePosition = false;
     }
 

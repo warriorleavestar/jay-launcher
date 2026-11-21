@@ -1083,6 +1083,22 @@ public sealed class MobilePortTests
     }
 
     [Fact]
+    public void LostChatKeyDoesNotLeaveTheSoftKeyboardArmedDuringGameplay()
+    {
+        long uptime = 10_000;
+        var session = new SoftKeyboardInputSession(() => uptime);
+        session.Request(gameplayActive: true, focusState: 0);
+
+        uptime += 1_999;
+        session.Observe(gameplayActive: true, focusState: 0);
+        Assert.True(session.AcceptsConnection(focusState: 0));
+
+        uptime++;
+        session.Observe(gameplayActive: true, focusState: 0);
+        Assert.False(session.AcceptsConnection(focusState: 0));
+    }
+
+    [Fact]
     public void KeyboardOverlayReleaseDoesNotResyncTextFocusAtItsButtonCoordinates()
     {
         var sink = new RecordingTouchSink();
@@ -1112,6 +1128,37 @@ public sealed class MobilePortTests
         Assert.Contains("ConfigChanges.Keyboard", activity, StringComparison.Ordinal);
         Assert.Contains("ConfigChanges.KeyboardHidden", activity, StringComparison.Ordinal);
         Assert.Contains("ConfigChanges.Navigation", activity, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MissingAndroidActionButtonIsRecoveredFromButtonState()
+    {
+        var tracker = new HardwareMouseButtonTracker();
+
+        Assert.Equal(HardwareMouseButtonTracker.Secondary,
+            tracker.Resolve(actionButton: 0, buttonState: HardwareMouseButtonTracker.Secondary,
+                pressed: true, primaryFallback: false));
+        Assert.Equal(HardwareMouseButtonTracker.Secondary,
+            tracker.Resolve(actionButton: 0, buttonState: 0,
+                pressed: false, primaryFallback: false));
+    }
+
+    [Fact]
+    public void DuplicateAndroidMousePacketsDoNotInventAnotherButtonTransition()
+    {
+        var tracker = new HardwareMouseButtonTracker();
+
+        Assert.Equal(HardwareMouseButtonTracker.Primary,
+            tracker.Resolve(actionButton: 0, buttonState: HardwareMouseButtonTracker.Primary,
+                pressed: true, primaryFallback: true));
+        Assert.Equal(0, tracker.Resolve(actionButton: 0,
+            buttonState: HardwareMouseButtonTracker.Primary,
+            pressed: true, primaryFallback: false));
+        Assert.Equal(HardwareMouseButtonTracker.Primary,
+            tracker.Resolve(actionButton: 0, buttonState: 0,
+                pressed: false, primaryFallback: true));
+        Assert.Equal(0, tracker.Resolve(actionButton: 0, buttonState: 0,
+            pressed: false, primaryFallback: false));
     }
 
     [Fact]
