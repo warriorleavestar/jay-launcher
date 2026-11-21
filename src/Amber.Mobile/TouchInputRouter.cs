@@ -261,7 +261,7 @@ public sealed class TouchInputRouter
         if (!_pointers.Remove(pointerId, out var pointer)) return false;
         if (pointer.Action == TouchControlAction.Move)
         {
-            RestoreRemainingMovement();
+            RestoreRemainingMovement(cancelAction: cancelled);
         }
         else if (pointer.Action is null)
         {
@@ -278,12 +278,18 @@ public sealed class TouchInputRouter
                 _sink.SplitInventoryStack(pointer.StartX, pointer.StartY,
                     pointer.InventorySelectedCount);
             else if (pointer.PointerHeld && pointer.HeldAction is { } heldAction)
-                _sink.SetAction(heldAction, false);
+            {
+                if (cancelled) _sink.CancelAction(heldAction);
+                else _sink.SetAction(heldAction, false);
+            }
             else if (!cancelled && pointer.ClickOnRelease && !pointer.HasDragged)
                 _sink.SetPointer(pointer.X, pointer.Y, true);
         }
         else if (!pointer.ToggleAction && pointer.Action is { } action)
-            _sink.SetAction(action, false);
+        {
+            if (cancelled) _sink.CancelAction(action);
+            else _sink.SetAction(action, false);
+        }
         return true;
     }
 

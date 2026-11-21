@@ -830,6 +830,26 @@ public sealed class MobilePortTests
     }
 
     [Fact]
+    public void CancelledReleaseUsesCancellationEdgesForHeldActions()
+    {
+        var sink = new RecordingTouchSink();
+        var profile = new TouchControlProfile { Mode = TouchControlMode.JoystickAndTap };
+        var router = new TouchInputRouter(sink, profile);
+        var jump = profile.Controls.Single(control => control.Action == TouchControlAction.Jump);
+
+        Assert.True(router.Press(88, jump.CenterX, jump.CenterY));
+        Assert.True(router.Release(88, cancelled: true));
+        Assert.Contains(TouchControlAction.Jump, sink.CanceledActions);
+        Assert.DoesNotContain((TouchControlAction.Jump, false), sink.Actions);
+
+        Assert.True(router.Press(89, 0.52, 0.45));
+        Assert.True(router.BeginLongPress(89));
+        Assert.True(router.Release(89, cancelled: true));
+        Assert.Contains(TouchControlAction.PrimaryAction, sink.CanceledActions);
+        Assert.DoesNotContain((TouchControlAction.PrimaryAction, false), sink.Actions);
+    }
+
+    [Fact]
     public void TouchInputRouterCancelReleasesMovementAndMining()
     {
         var sink = new RecordingTouchSink();
