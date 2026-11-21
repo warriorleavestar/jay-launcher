@@ -95,6 +95,10 @@ if [[ "$runtime_os" != Linux ]]; then
 fi
 
 if [[ "$contents" == complete ]]; then
+  if [[ ! -f "$work/lib/libc++_shared.so" ]]; then
+    echo "complete runtime is missing lib/libc++_shared.so required by Android OpenJDK" >&2
+    exit 1
+  fi
   for required_library in \
     libmobileglues.so \
     liblwjgl.so \
@@ -104,7 +108,8 @@ if [[ "$contents" == complete ]]; then
     libshaderc.so \
     libspirv-cross.so \
     libfreetype.so \
-    libopenal.so
+    libopenal.so \
+    libjnidispatch.so
   do
     if [[ ! -f "$work/native/$required_library" ]]; then
       echo "complete runtime is missing native/$required_library" >&2

@@ -100,6 +100,9 @@ internal static class AndroidEmbeddedGame
             extraJvm.Add("-Dorg.lwjgl.sdl.libname=" + sdlLibrary);
             extraJvm.Add("-Dorg.lwjgl.vulkan.libname=/system/lib64/libvulkan.so");
             extraJvm.Add("-Djna.boot.library.path=" + nativeRoot);
+            // Mojang's desktop JNA jar contains a glibc-linked Linux native. Android must
+            // use the matching libjnidispatch.so staged in our verified runtime instead.
+            extraJvm.Add("-Djna.nounpack=true");
             extraJvm.Add("-Dorg.lwjgl.spvc.libname=" + Path.Combine(nativeRoot, AndroidNativeLibraries.SpirvCross));
             extraJvm.Add("-Dorg.lwjgl.shaderc.libname=" + Path.Combine(nativeRoot, AndroidNativeLibraries.Shaderc));
             extraJvm.Add("-Dorg.lwjgl.opengl.libname=" + Path.Combine(nativeRoot, "libmobileglues.so"));

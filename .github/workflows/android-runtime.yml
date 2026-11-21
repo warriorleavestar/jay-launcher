@@ -13,6 +13,7 @@ on:
       - 'scripts/build-android-shader-tools.sh'
       - 'scripts/build-android-lwjgl.sh'
       - 'scripts/build-android-lwjgl-vma.sh'
+      - 'scripts/fetch-android-jna.sh'
       - 'scripts/build-android-sdl.sh'
       - 'third_party/android-openjdk/**'
       - 'third_party/android-mobileglues/**'
@@ -169,6 +170,8 @@ jobs:
           bash scripts/build-android-lwjgl.sh \
             "$ndk" "${{ matrix.architecture }}" "$lwjgl"
           bash scripts/build-android-lwjgl-vma.sh \
+            "$ndk" "${{ matrix.architecture }}" "$lwjgl"
+          bash scripts/fetch-android-jna.sh \
             "$ndk" "${{ matrix.architecture }}" "$lwjgl"
 
       - name: Assemble complete Java 25 game runtime

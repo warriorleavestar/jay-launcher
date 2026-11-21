@@ -19,6 +19,7 @@ internal static class AndroidNativeLibraries
     [
         .. Java21,
         "liblwjgl_vma.so",
+        "libjnidispatch.so",
         Shaderc,
         SpirvCross,
     ];

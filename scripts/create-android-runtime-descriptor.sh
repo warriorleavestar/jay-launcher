@@ -47,7 +47,7 @@ jq -n -S \
   --argjson archiveSize "$archive_size" \
   --arg archiveSha256 "$checksum" \
   --argjson maximumExtractedSize "$extracted_size" \
-  --arg license "OpenJDK GPL-2.0 with Classpath Exception; MobileGlues LGPL-2.1-only; LWJGL BSD; bundled component licenses included" \
+  --arg license "OpenJDK GPL-2.0 with Classpath Exception; MobileGlues LGPL-2.1-only; LWJGL BSD; JNA Apache-2.0 OR LGPL-2.1-or-later; bundled component licenses included" \
   --arg sourceUrl "$source_url" \
   --arg downloadUrl "$download_url" \
   '{

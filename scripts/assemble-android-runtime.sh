@@ -19,11 +19,26 @@ test -d "$renderer_directory"
 test -d "$lwjgl_directory"
 test -x "$elf_reader"
 
+case "$architecture" in
+  arm64-v8a) android_triple="aarch64-linux-android" ;;
+  x86_64) android_triple="x86_64-linux-android" ;;
+  *) echo "unsupported architecture: $architecture" >&2; exit 2 ;;
+esac
+toolchain="$(cd "$(dirname "$elf_reader")/.." && pwd)"
+cxx_runtime="$toolchain/sysroot/usr/lib/$android_triple/libc++_shared.so"
+if [[ ! -f "$cxx_runtime" ]]; then
+  echo "Android C++ runtime not found beside the NDK ELF reader: $cxx_runtime" >&2
+  exit 1
+fi
+
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 runtime="$work/runtime"
 mkdir -p "$runtime/native"
 tar -xf "$jre_archive" -C "$runtime"
+# Android OpenJDK's libjvm links the NDK C++ runtime dynamically. Keep it next
+# to the JRE libraries so the host can preload it before opening libjvm.so.
+cp "$cxx_runtime" "$runtime/lib/libc++_shared.so"
 
 copy_runtime_files() {
   local source_directory="$1" file
@@ -36,6 +51,7 @@ copy_runtime_files "$renderer_directory"
 copy_runtime_files "$lwjgl_directory"
 
 test -f "$runtime/lib/server/libjvm.so"
+test -f "$runtime/lib/libc++_shared.so"
 test -f "$runtime/native/libmobileglues.so"
 test -f "$runtime/native/liblwjgl.so"
 test -f "$runtime/native/liblwjgl_opengl.so"
