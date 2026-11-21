@@ -762,6 +762,48 @@ public sealed class MobilePortTests
         Assert.Equal(2, sink.Pointers.Count(pointer => pointer.Click));
     }
 
+    [Fact]
+    public void OverlayControlInterruptsPendingInventoryDoubleTap()
+    {
+        var sink = new RecordingTouchSink();
+        var count = 64;
+        var profile = new TouchControlProfile();
+        var router = new TouchInputRouter(sink, profile,
+            inventorySlotState: (_, _) => new InventorySlotState(17, count));
+        var keyboard = profile.Controls.Single(control =>
+            control.Action == TouchControlAction.Keyboard);
+
+        router.Press(150, 0.48, 0.36, controlsEnabled: false);
+        router.Release(150);
+        count = 0;
+        router.Press(151, keyboard.CenterX, keyboard.CenterY, controlsEnabled: false);
+        router.Release(151);
+        router.Press(152, 0.48, 0.36, controlsEnabled: false);
+        router.Release(152);
+
+        Assert.Empty(sink.ReturnedInventoryItems);
+        Assert.Equal(2, sink.Pointers.Count(pointer => pointer.Click));
+    }
+
+    [Fact]
+    public void SystemCancellationInterruptsPendingInventoryDoubleTap()
+    {
+        var sink = new RecordingTouchSink();
+        var count = 64;
+        var router = new TouchInputRouter(sink,
+            inventorySlotState: (_, _) => new InventorySlotState(17, count));
+
+        router.Press(153, 0.48, 0.36, controlsEnabled: false);
+        router.Release(153);
+        count = 0;
+        router.CancelAll();
+        router.Press(154, 0.48, 0.36, controlsEnabled: false);
+        router.Release(154);
+
+        Assert.Empty(sink.ReturnedInventoryItems);
+        Assert.Equal(2, sink.Pointers.Count(pointer => pointer.Click));
+    }
+
     [Theory]
     [InlineData(-1, -1, -1)]
     [InlineData(0x0001_2340, 0x0122, 64)]

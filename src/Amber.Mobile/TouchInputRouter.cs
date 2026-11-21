@@ -94,6 +94,10 @@ public sealed class TouchInputRouter
             _sink.SetPointer(x, y, false);
             return true;
         }
+        // Any explicit overlay control interrupts a pending menu double tap. Otherwise a
+        // Back/keyboard/settings press between two slot taps could reuse stale carried-stack
+        // state when the player returns to the container quickly.
+        _lastMenuTap = null;
         if (control.Action == TouchControlAction.Sprint)
         {
             SprintLocked = !SprintLocked;
@@ -319,6 +323,7 @@ public sealed class TouchInputRouter
 
     public void ReleaseAll()
     {
+        _lastMenuTap = null;
         foreach (var pointerId in _pointers.Keys.ToArray()) Release(pointerId, cancelled: true);
     }
 
@@ -330,6 +335,7 @@ public sealed class TouchInputRouter
     /// </summary>
     public void CancelAll()
     {
+        _lastMenuTap = null;
         foreach (var pointerId in _pointers.Keys.ToArray()) Cancel(pointerId);
     }
 
