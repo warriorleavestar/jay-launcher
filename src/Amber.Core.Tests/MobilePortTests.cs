@@ -924,6 +924,20 @@ public sealed class MobilePortTests
         Assert.True(gate.AcceptCommittedCodePoint('a', 5_021));
     }
 
+    [Fact]
+    public void HardwareTextInputGateConsumesPendingEchoAcrossMultiCharacterCommit()
+    {
+        var gate = new HardwareTextInputGate();
+
+        Assert.True(gate.AcceptHardwareCodePoint(30, 'b', 6_000, 7_000, 0));
+        var committed = "book".EnumerateRunes()
+            .Where(rune => gate.AcceptCommittedCodePoint(rune.Value, 7_020))
+            .Select(rune => rune.ToString());
+
+        Assert.Equal("ook", string.Concat(committed));
+        Assert.True(gate.AcceptCommittedCodePoint('b', 7_030));
+    }
+
     [Theory]
     [InlineData(1, false, true)]
     [InlineData(0, true, false)]

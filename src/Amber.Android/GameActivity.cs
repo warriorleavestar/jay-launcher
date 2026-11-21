@@ -1404,23 +1404,18 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         {
             if (text?.ToString() is { } value)
             {
+                var deliveredAt = SystemClock.UptimeMillis();
+                var accepted = value.EnumerateRunes()
+                    .Where(rune => _owner._hardwareTextInputGate.AcceptCommittedCodePoint(
+                        rune.Value, deliveredAt))
+                    .ToArray();
                 if (_owner._sdl is not null)
                 {
-                    _owner._sdl.CommitText(value);
+                    if (accepted.Length > 0)
+                        _owner._sdl.CommitText(string.Concat(accepted.Select(rune => rune.ToString())));
                     return true;
                 }
-                var runes = value.EnumerateRunes().ToArray();
-                if (runes.Length == 1)
-                {
-                    var codePoint = runes[0].Value;
-                    if (_owner._hardwareTextInputGate.AcceptCommittedCodePoint(codePoint,
-                            SystemClock.UptimeMillis()))
-                        NativeJvmHost.AddCodePoint(codePoint);
-                }
-                else
-                {
-                    foreach (var rune in runes) NativeJvmHost.AddCodePoint(rune.Value);
-                }
+                foreach (var rune in accepted) NativeJvmHost.AddCodePoint(rune.Value);
             }
             return true;
         }
