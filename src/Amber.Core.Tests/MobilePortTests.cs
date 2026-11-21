@@ -1186,6 +1186,21 @@ public sealed class MobilePortTests
     }
 
     [Fact]
+    public void SdlAndroidBackUsesMinecraftEscapeWhileTheGameIsRunning()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var activity = File.ReadAllText(Path.Combine(repository, "src", "Amber.Android", "Sdl",
+            "JaySdlActivity.java"));
+        var back = JavaMethod(activity, "@Override public void onBackPressed", "super.onBackPressed();");
+
+        Assert.Contains("mSDLThread != null", back, StringComparison.Ordinal);
+        Assert.Contains("!mSDLMainFinished", back, StringComparison.Ordinal);
+        Assert.Contains("onNativeKeyDown(KeyEvent.KEYCODE_ESCAPE)", back, StringComparison.Ordinal);
+        Assert.Contains("onNativeKeyUp(KeyEvent.KEYCODE_ESCAPE)", back, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void DownloadableAndroidBuildsRequireBuiltInCurseForgeKeyButPullRequestsStayKeyless()
     {
         var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
