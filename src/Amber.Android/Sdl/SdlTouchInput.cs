@@ -83,6 +83,7 @@ internal sealed partial class SdlTouchInput(Activity activity)
     }
 
     public void Backspace() { Key(Keycode.Del, true); Key(Keycode.Del, false); }
+    public void ForwardDelete() { Key(Keycode.ForwardDel, true); Key(Keycode.ForwardDel, false); }
     public void Enter() { Key(Keycode.Enter, true); Key(Keycode.Enter, false); }
 
     public void ReleaseAll()

@@ -959,6 +959,19 @@ public sealed class MobilePortTests
     }
 
     [Theory]
+    [InlineData(0, 0, 0, 0)]
+    [InlineData(2, 0, 2, 0)]
+    [InlineData(0, 3, 0, 3)]
+    [InlineData(-1, -2, 0, 0)]
+    public void AndroidTextDeletionPlanPreservesImeDirectionAndNoOps(
+        int beforeLength, int afterLength, int backspaces, int forwardDeletes)
+    {
+        var plan = AndroidTextDeletionPlan.Create(beforeLength, afterLength);
+        Assert.Equal(backspaces, plan.Backspaces);
+        Assert.Equal(forwardDeletes, plan.ForwardDeletes);
+    }
+
+    [Theory]
     [InlineData(1, false, true)]
     [InlineData(0, true, false)]
     [InlineData(-1, false, false)]

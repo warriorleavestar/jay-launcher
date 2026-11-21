@@ -1393,6 +1393,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     {
         private const int GlfwKeyEnter = 257;
         private const int GlfwKeyBackspace = 259;
+        private const int GlfwKeyDelete = 261;
         private readonly TouchControlOverlay _owner;
 
         public JayInputConnection(TouchControlOverlay owner) : base(owner, false)
@@ -1422,12 +1423,15 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
 
         public override bool DeleteSurroundingText(int beforeLength, int afterLength)
         {
+            var plan = AndroidTextDeletionPlan.Create(beforeLength, afterLength);
             if (_owner._sdl is not null)
             {
-                for (var i = 0; i < Math.Max(1, beforeLength); i++) _owner._sdl.Backspace();
+                for (var i = 0; i < plan.Backspaces; i++) _owner._sdl.Backspace();
+                for (var i = 0; i < plan.ForwardDeletes; i++) _owner._sdl.ForwardDelete();
                 return true;
             }
-            for (var i = 0; i < Math.Max(1, beforeLength); i++) NativeJvmHost.AddKey(GlfwKeyBackspace);
+            for (var i = 0; i < plan.Backspaces; i++) NativeJvmHost.AddKey(GlfwKeyBackspace);
+            for (var i = 0; i < plan.ForwardDeletes; i++) NativeJvmHost.AddKey(GlfwKeyDelete);
             return true;
         }
 

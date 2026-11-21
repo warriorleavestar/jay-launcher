@@ -55,3 +55,10 @@ internal sealed class HardwareTextInputGate
     }
 
 }
+
+/// <summary>Normalizes Android IME deletion requests without inventing a backspace for a no-op.</summary>
+internal readonly record struct AndroidTextDeletionPlan(int Backspaces, int ForwardDeletes)
+{
+    public static AndroidTextDeletionPlan Create(int beforeLength, int afterLength) =>
+        new(Math.Max(0, beforeLength), Math.Max(0, afterLength));
+}
