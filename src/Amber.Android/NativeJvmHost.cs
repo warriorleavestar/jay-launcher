@@ -7,7 +7,7 @@ namespace Amber.Android;
 
 internal static partial class NativeJvmHost
 {
-    private const int ExpectedAbiVersion = 17;
+    private const int ExpectedAbiVersion = 18;
     public static bool GameplayControlsActive => IsAvailable && GetNativeGameplayMode() != 0;
 
     public static bool HasBlockTarget
@@ -155,10 +155,14 @@ internal static partial class NativeJvmHost
     }
 
     public static int InventoryStackCount(double x, double y)
+        => InventorySlotState(x, y).Count;
+
+    public static InventorySlotState InventorySlotState(double x, double y)
     {
-        if (!IsAvailable) return 0;
-        try { return GetNativeInventoryStackCount((float)x, (float)y); }
-        catch (EntryPointNotFoundException) { return 0; }
+        if (!IsAvailable) return new(-1, -1);
+        try { return Amber.Mobile.InventorySlotState.FromPacked(
+            GetNativeInventoryStackCount((float)x, (float)y)); }
+        catch (EntryPointNotFoundException) { return new(-1, -1); }
     }
 
     public static void SplitInventoryStack(double x, double y, int count)

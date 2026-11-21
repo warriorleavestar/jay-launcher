@@ -58,8 +58,11 @@ public final class SdlMenuBootstrap {
             if (!container.isInstance(active)) return -1;
             Object hovered = findSlot.invoke(active, nx * width.getInt(active), ny * height.getInt(active));
             if (hovered == null) return -1;
+            int index = slotIndex.getInt(hovered);
+            if (index < 0 || index > 0x7ffffe) return -1;
             Object stack = slotItem.invoke(hovered);
-            return stack == null ? 0 : Math.max(0, (Integer)itemCount.invoke(stack));
+            int count = stack == null ? 0 : Math.max(0, (Integer)itemCount.invoke(stack));
+            return ((index + 1) << 8) | Math.min(255, count);
         }
 
         boolean split(Object game, float nx, float ny, int requested) throws ReflectiveOperationException {

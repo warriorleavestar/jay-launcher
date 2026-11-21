@@ -35,7 +35,7 @@ diff --git a/src/null_window.c b/src/null_window.c
 index 1db0811..b84b668 100644
 --- a/src/null_window.c
 +++ b/src/null_window.c
-@@ -29,6 +29,92 @@
+@@ -29,6 +29,91 @@
  
  #include <stdlib.h>
  
@@ -56,10 +56,9 @@ index 1db0811..b84b668 100644
 +    uint32_t pointerClicks;
 +    uint32_t actions;
 +    uint32_t actionTaps;
-+    uint32_t textCount;
-+    uint32_t keyCount;
-+    uint32_t text[64];
-+    int32_t keys[16];
++    uint32_t eventCount;
++    uint32_t eventTypes[80];
++    int32_t eventValues[80];
 +    uint64_t pointerGeneration;
 +    float inventorySplitX;
 +    float inventorySplitY;
@@ -128,7 +127,7 @@ index 1db0811..b84b668 100644
  static void applySizeLimits(_GLFWwindow* window, int* width, int* height)
  {
      if (window->numer != GLFW_DONT_CARE && window->denom != GLFW_DONT_CARE)
-@@ -46,10 +79,17 @@ static void applySizeLimits(_GLFWwindow* window, int* width, int* height)
+@@ -46,10 +78,17 @@ static void applySizeLimits(_GLFWwindow* window, int* width, int* height)
      else if (window->maxwidth != GLFW_DONT_CARE)
          *width = _glfw_min(*width, window->maxwidth);
  
@@ -146,7 +145,7 @@ index 1db0811..b84b668 100644
  }
  
  static void fitToMonitor(_GLFWwindow* window)
-@@ -76,6 +109,21 @@ static int createNativeWindow(_GLFWwindow* window,
+@@ -76,6 +108,21 @@ static int createNativeWindow(_GLFWwindow* window,
                                const _GLFWwndconfig* wndconfig,
                                const _GLFWfbconfig* fbconfig)
  {
@@ -168,7 +167,7 @@ index 1db0811..b84b668 100644
      if (window->monitor)
          fitToMonitor(window);
      else
-@@ -94,6 +142,7 @@ static int createNativeWindow(_GLFWwindow* window,
+@@ -94,6 +141,7 @@ static int createNativeWindow(_GLFWwindow* window,
          window->null.width = wndconfig->width;
          window->null.height = wndconfig->height;
      }
@@ -176,7 +175,7 @@ index 1db0811..b84b668 100644
  
      window->null.visible = wndconfig->visible;
      window->null.decorated = wndconfig->decorated;
-@@ -121,18 +170,18 @@ GLFWbool _glfwCreateWindowNull(_GLFWwindow* window,
+@@ -121,18 +169,18 @@ GLFWbool _glfwCreateWindowNull(_GLFWwindow* window,
      if (ctxconfig->client != GLFW_NO_API)
      {
          if (ctxconfig->source == GLFW_NATIVE_CONTEXT_API ||
@@ -201,7 +200,7 @@ index 1db0811..b84b668 100644
                  return GLFW_FALSE;
          }
  
-@@ -175,6 +224,11 @@ void _glfwDestroyWindowNull(_GLFWwindow* window)
+@@ -175,6 +223,11 @@ void _glfwDestroyWindowNull(_GLFWwindow* window)
  
      if (window->context.destroy)
          window->context.destroy(window);
@@ -213,7 +212,7 @@ index 1db0811..b84b668 100644
  }
  
  void _glfwSetWindowTitleNull(_GLFWwindow* window, const char* title)
-@@ -486,6 +544,166 @@ GLFWbool _glfwWindowVisibleNull(_GLFWwindow* window)
+@@ -486,6 +543,173 @@ GLFWbool _glfwWindowVisibleNull(_GLFWwindow* window)
  
 +#if defined(__ANDROID__)
 +static void inputMouseButton(_GLFWwindow* window, int button, int action)
@@ -267,12 +266,6 @@ index 1db0811..b84b668 100644
 +    if (input.generation == window->null.jayInputGeneration)
 +        return;
 +    window->null.jayInputGeneration = input.generation;
-+    if (input.inventorySplitGeneration != jayInventorySplitGeneration)
-+    {
-+        jayInventorySplitGeneration = input.inventorySplitGeneration;
-+        jayJavaInventorySplit(input.inventorySplitX, input.inventorySplitY,
-+                              input.inventorySplitCount);
-+    }
 +    if (window->cursorMode == GLFW_CURSOR_DISABLED && input.pointerClicks > 0)
 +    {
 +        // Gameplay owns a disabled/locked cursor, but touchscreen taps still need to
@@ -304,6 +297,14 @@ index 1db0811..b84b668 100644
 +        }
 +        window->callbacks.cursorPos = cursorCallback;
 +        window->callbacks.mouseButton = mouseCallback;
++    }
++    // A double-tap split is queued after its first ordinary click. Consume the pointer
++    // first even when both arrive in one snapshot, then perform the split on the picked stack.
++    if (input.inventorySplitGeneration != jayInventorySplitGeneration)
++    {
++        jayInventorySplitGeneration = input.inventorySplitGeneration;
++        jayJavaInventorySplit(input.inventorySplitX, input.inventorySplitY,
++                              input.inventorySplitCount);
 +    }
 +    const uint32_t previous = window->null.jayActions;
 +    window->null.jayActions = input.actions;
@@ -357,12 +358,17 @@ index 1db0811..b84b668 100644
 +                     (movement & bit) ? GLFW_PRESS : GLFW_RELEASE);
 +    }
 +    window->null.jayMovementKeys = movement;
-+    for (uint32_t index = 0; index < input.textCount && index < 64; index++)
-+        inputChar(window, input.text[index]);
-+    for (uint32_t index = 0; index < input.keyCount && index < 16; index++)
++    // Characters and functional keys share one FIFO so IME commits such as
++    // "first\\tsecond" cannot be regrouped into "firstsecond" followed by Tab.
++    for (uint32_t index = 0; index < input.eventCount && index < 80; index++)
 +    {
-+        inputKey(window, input.keys[index], GLFW_PRESS);
-+        inputKey(window, input.keys[index], GLFW_RELEASE);
++        if (input.eventTypes[index] == 1)
++            inputChar(window, (uint32_t) input.eventValues[index]);
++        else if (input.eventTypes[index] == 2)
++        {
++            inputKey(window, input.eventValues[index], GLFW_PRESS);
++            inputKey(window, input.eventValues[index], GLFW_RELEASE);
++        }
 +    }
 +    if (window->cursorMode == GLFW_CURSOR_DISABLED &&
 +        (input.lookX != 0.f || input.lookY != 0.f))
@@ -380,7 +386,7 @@ index 1db0811..b84b668 100644
  }
  
  void _glfwWaitEventsNull(void)
-@@ -562,7 +660,11 @@ EGLNativeDisplayType _glfwGetEGLNativeDisplayNull(void)
+@@ -562,7 +666,11 @@ EGLNativeDisplayType _glfwGetEGLNativeDisplayNull(void)
  
  EGLNativeWindowType _glfwGetEGLNativeWindowNull(_GLFWwindow* window)
  {

@@ -743,6 +743,39 @@ public sealed class MobilePortTests
     }
 
     [Fact]
+    public void TouchInputRouterDoesNotSplitAcrossAdjacentInventorySlots()
+    {
+        var sink = new RecordingTouchSink();
+        var firstCount = 64;
+        var router = new TouchInputRouter(sink,
+            inventorySlotState: (x, _) => x < 0.50
+                ? new InventorySlotState(17, firstCount)
+                : new InventorySlotState(18, 0));
+
+        router.Press(140, 0.49, 0.36, controlsEnabled: false);
+        router.Release(140);
+        firstCount = 0;
+        router.Press(141, 0.51, 0.36, controlsEnabled: false);
+        router.Release(141);
+
+        Assert.Empty(sink.ReturnedInventoryItems);
+        Assert.Equal(2, sink.Pointers.Count(pointer => pointer.Click));
+    }
+
+    [Theory]
+    [InlineData(-1, -1, -1)]
+    [InlineData(0x0001_2340, 0x0122, 64)]
+    [InlineData(0x0000_0100, 0, 0)]
+    public void PackedInventorySlotStatePreservesIdentityAndCount(
+        int packed, int expectedSlot, int expectedCount)
+    {
+        var state = InventorySlotState.FromPacked(packed);
+
+        Assert.Equal(expectedSlot, state.SlotId);
+        Assert.Equal(expectedCount, state.Count);
+    }
+
+    [Fact]
     public void CancelledSecondInventoryTapDoesNotSplitTheEarlierStack()
     {
         var sink = new RecordingTouchSink();
@@ -1060,6 +1093,40 @@ public sealed class MobilePortTests
             new(AndroidTextCommitKind.Text, "field"),
             new(AndroidTextCommitKind.Enter)
         ], plan);
+    }
+
+    [Fact]
+    public void AndroidGlfwSnapshotPreservesMixedTextAndKeyOrder()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var native = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android.Native", "jay_jvm_host.c"));
+        var glfw = File.ReadAllText(Path.Combine(repository,
+            "third_party", "android-glfw", "jay-android.patch"));
+
+        Assert.Contains("uint32_t event_types[JAY_EVENT_CAPACITY]", native, StringComparison.Ordinal);
+        Assert.Contains("int32_t event_values[JAY_EVENT_CAPACITY]", native, StringComparison.Ordinal);
+        Assert.DoesNotContain("snapshot->text_count", native, StringComparison.Ordinal);
+        Assert.DoesNotContain("snapshot->key_count", native, StringComparison.Ordinal);
+        Assert.Contains("input.eventTypes[index] == 1", glfw, StringComparison.Ordinal);
+        Assert.Contains("input.eventTypes[index] == 2", glfw, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AndroidGlfwConsumesFirstTapBeforeQueuedDoubleTapSplit()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var glfw = File.ReadAllText(Path.Combine(repository,
+            "third_party", "android-glfw", "jay-android.patch"));
+        var pointer = glfw.IndexOf("input.pointerGeneration != window->null.jayPointerGeneration",
+            StringComparison.Ordinal);
+        var split = glfw.IndexOf("input.inventorySplitGeneration != jayInventorySplitGeneration",
+            StringComparison.Ordinal);
+
+        Assert.True(pointer >= 0);
+        Assert.True(split > pointer);
     }
 
     [Theory]

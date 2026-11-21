@@ -29,14 +29,21 @@ public sealed class TouchInputRouter
     private readonly Dictionary<int, PointerState> _pointers = [];
     private readonly ITouchInputSink _sink;
     private readonly Func<double, double, int> _inventoryStackCount;
+    private readonly Func<double, double, InventorySlotState> _inventorySlotState;
     private MenuTap? _lastMenuTap;
 
     public TouchInputRouter(ITouchInputSink sink, TouchControlProfile? profile = null,
-        Func<double, double, int>? inventoryStackCount = null)
+        Func<double, double, int>? inventoryStackCount = null,
+        Func<double, double, InventorySlotState>? inventorySlotState = null)
     {
         _sink = sink;
         Profile = profile ?? new TouchControlProfile();
         _inventoryStackCount = inventoryStackCount ?? ((_, _) => 0);
+        _inventorySlotState = inventorySlotState ?? ((x, y) =>
+        {
+            var count = _inventoryStackCount(x, y);
+            return new InventorySlotState(count >= 0 ? 0 : -1, count);
+        });
     }
 
     public TouchControlProfile Profile { get; }
@@ -356,13 +363,15 @@ public sealed class TouchInputRouter
     private void CompleteMenuTap(double x, double y)
     {
         var now = Stopwatch.GetTimestamp();
+        var current = _inventorySlotState(x, y);
         if (_lastMenuTap is { } previous &&
             (now - previous.Timestamp) / (double)Stopwatch.Frequency <= DoubleTapSeconds)
         {
             var physicalX = (x - previous.X) * Math.Clamp(Profile.ViewportAspectRatio, 1.2, 3.0);
             var yDistance = y - previous.Y;
             if (physicalX * physicalX + yDistance * yDistance <=
-                DoubleTapDistance * DoubleTapDistance)
+                DoubleTapDistance * DoubleTapDistance &&
+                current.SlotId >= 0 && current.SlotId == previous.SlotId)
             {
                 _lastMenuTap = null;
                 // The first tap has already picked the source stack up. Return its lower half
@@ -372,9 +381,11 @@ public sealed class TouchInputRouter
             }
         }
 
-        var count = Math.Clamp(_inventoryStackCount(x, y), 0, 64);
+        var count = Math.Clamp(current.Count, 0, 64);
         _sink.SetPointer(x, y, true);
-        _lastMenuTap = count > 1 ? new(x, y, count, now) : null;
+        _lastMenuTap = count > 1 && current.SlotId >= 0
+            ? new(x, y, current.SlotId, count, now)
+            : null;
     }
 
     private void AddLook(double x, double y) =>
@@ -433,7 +444,15 @@ public sealed class TouchInputRouter
                 heldAction, menuInteraction, toggleAction, false, 0, 0) { }
     }
 
-    private readonly record struct MenuTap(double X, double Y, int Total, long Timestamp);
+    private readonly record struct MenuTap(double X, double Y, int SlotId, int Total, long Timestamp);
 }
 
 public readonly record struct InventorySplitSelection(double X, double Y, int Count, int Total);
+
+/// <summary>A live container-slot identity and its current stack size.</summary>
+public readonly record struct InventorySlotState(int SlotId, int Count)
+{
+    public static InventorySlotState FromPacked(int packed) => packed < 0
+        ? new(-1, -1)
+        : new((packed >> 8) - 1, packed & 0xff);
+}

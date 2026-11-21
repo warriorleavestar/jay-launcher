@@ -287,7 +287,8 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         _preferences = context.GetSharedPreferences("jay-touch-controls", FileCreationMode.Private)!;
         LoadProfile();
         _router = new TouchInputRouter(this, _profile,
-            inventoryStackCount: sdl is null ? NativeJvmHost.InventoryStackCount : sdl.InventoryStackCount);
+            inventoryStackCount: sdl is null ? NativeJvmHost.InventoryStackCount : sdl.InventoryStackCount,
+            inventorySlotState: sdl is null ? NativeJvmHost.InventorySlotState : sdl.InventorySlotState);
         Clickable = true;
         Focusable = true;
         FocusableInTouchMode = true;

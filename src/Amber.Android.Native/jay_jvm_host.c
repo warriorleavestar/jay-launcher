@@ -10,10 +10,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define JAY_JVM_ABI_VERSION 17
+#define JAY_JVM_ABI_VERSION 18
 #define JAY_ACTION_COUNT 13
-#define JAY_TEXT_CAPACITY 64
-#define JAY_KEY_CAPACITY 16
+#define JAY_EVENT_CAPACITY 80
+#define JAY_EVENT_CHAR 1
+#define JAY_EVENT_KEY 2
 
 typedef jint (*jay_create_jvm_fn)(JavaVM **, void **, void *);
 
@@ -27,10 +28,9 @@ typedef struct {
     uint32_t pointer_clicks;
     uint32_t actions;
     uint32_t action_taps;
-    uint32_t text_count;
-    uint32_t key_count;
-    uint32_t text[JAY_TEXT_CAPACITY];
-    int32_t keys[JAY_KEY_CAPACITY];
+    uint32_t event_count;
+    uint32_t event_types[JAY_EVENT_CAPACITY];
+    int32_t event_values[JAY_EVENT_CAPACITY];
     uint64_t pointer_generation;
     float inventory_split_x;
     float inventory_split_y;
@@ -78,10 +78,9 @@ static _Atomic int g_inventory_split_count;
 static _Atomic uint64_t g_inventory_split_generation;
 static _Atomic uint64_t g_generation;
 static pthread_mutex_t g_event_mutex = PTHREAD_MUTEX_INITIALIZER;
-static uint32_t g_text[JAY_TEXT_CAPACITY];
-static uint32_t g_text_count;
-static int32_t g_keys[JAY_KEY_CAPACITY];
-static uint32_t g_key_count;
+static uint32_t g_event_types[JAY_EVENT_CAPACITY];
+static int32_t g_event_values[JAY_EVENT_CAPACITY];
+static uint32_t g_event_count;
 
 static int jay_query_gameplay_mode(void);
 static void jay_refresh_block_target(void);
@@ -593,7 +592,10 @@ __attribute__((visibility("default")))
 void jay_input_add_codepoint(uint32_t codepoint) {
     if (codepoint == 0 || codepoint > 0x10ffffu || (codepoint >= 0xd800u && codepoint <= 0xdfffu)) return;
     pthread_mutex_lock(&g_event_mutex);
-    if (g_text_count < JAY_TEXT_CAPACITY) g_text[g_text_count++] = codepoint;
+    if (g_event_count < JAY_EVENT_CAPACITY) {
+        g_event_types[g_event_count] = JAY_EVENT_CHAR;
+        g_event_values[g_event_count++] = (int32_t)codepoint;
+    }
     atomic_fetch_add(&g_generation, 1);
     pthread_mutex_unlock(&g_event_mutex);
 }
@@ -601,7 +603,10 @@ void jay_input_add_codepoint(uint32_t codepoint) {
 __attribute__((visibility("default")))
 void jay_input_add_key(int32_t key) {
     pthread_mutex_lock(&g_event_mutex);
-    if (g_key_count < JAY_KEY_CAPACITY) g_keys[g_key_count++] = key;
+    if (g_event_count < JAY_EVENT_CAPACITY) {
+        g_event_types[g_event_count] = JAY_EVENT_KEY;
+        g_event_values[g_event_count++] = key;
+    }
     atomic_fetch_add(&g_generation, 1);
     pthread_mutex_unlock(&g_event_mutex);
 }
@@ -622,12 +627,12 @@ void jay_input_read(jay_input_snapshot *snapshot) {
     snapshot->pointer_clicks = atomic_exchange(&g_pointer_clicks, 0);
     snapshot->actions = atomic_load(&g_actions);
     snapshot->action_taps = atomic_exchange(&g_action_taps, 0);
-    snapshot->text_count = g_text_count;
-    snapshot->key_count = g_key_count;
-    for (uint32_t i = 0; i < g_text_count; i++) snapshot->text[i] = g_text[i];
-    for (uint32_t i = 0; i < g_key_count; i++) snapshot->keys[i] = g_keys[i];
-    g_text_count = 0;
-    g_key_count = 0;
+    snapshot->event_count = g_event_count;
+    for (uint32_t i = 0; i < g_event_count; i++) {
+        snapshot->event_types[i] = g_event_types[i];
+        snapshot->event_values[i] = g_event_values[i];
+    }
+    g_event_count = 0;
     snapshot->pointer_generation = atomic_load(&g_pointer_generation);
     snapshot->inventory_split_x = atomic_load(&g_inventory_split_x);
     snapshot->inventory_split_y = atomic_load(&g_inventory_split_y);

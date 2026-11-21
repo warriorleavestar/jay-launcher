@@ -544,7 +544,7 @@ public final class AndroidGameBootstrap {
             }
     }
 
-    /** Returns the live count under a normalized pointer, or -1 outside a container slot. */
+    /** Returns (slot id + 1) in the high bits and the live count in the low byte. */
     public static int inventoryStackCount(float normalizedX, float normalizedY) {
         if (!prepareInputBridge()) return -1;
         try {
@@ -593,11 +593,13 @@ public final class AndroidGameBootstrap {
         Object slot = containerHoveredSlot.invoke(screen, x, y);
         if (slot == null) return -1;
         Object stack = slotGetItem.invoke(slot);
-        if (stack == null) return 0;
+        int id = slotId.getInt(slot);
+        if (id < 0 || id > 0x7ffffe) return -1;
+        if (stack == null) return (id + 1) << 8;
         int count = itemStackGetCount != null
             ? (Integer)itemStackGetCount.invoke(stack)
             : itemStackCount.getInt(stack);
-        return Math.max(0, count);
+        return ((id + 1) << 8) | Math.min(255, Math.max(0, count));
     }
 
     /** Picks an exact quantity from a slot using Minecraft's own synchronized click path. */

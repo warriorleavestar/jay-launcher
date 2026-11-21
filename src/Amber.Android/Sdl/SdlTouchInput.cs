@@ -26,7 +26,9 @@ internal sealed partial class SdlTouchInput(Activity activity)
     private bool MenuPointer(uint action) => GetFocus() != 0 &&
         DispatchMenuPointer(_mouseX / Math.Max(1, Width), _mouseY / Math.Max(1, Height), action) != 0;
 
-    public int InventoryStackCount(double x, double y) => GetInventoryStackCount((float)x, (float)y);
+    public int InventoryStackCount(double x, double y) => InventorySlotState(x, y).Count;
+    public InventorySlotState InventorySlotState(double x, double y) =>
+        Amber.Mobile.InventorySlotState.FromPacked(GetInventoryStackCount((float)x, (float)y));
     public void SplitInventoryStack(double x, double y, int count) =>
         DispatchInventorySplit((float)x, (float)y, count);
 
