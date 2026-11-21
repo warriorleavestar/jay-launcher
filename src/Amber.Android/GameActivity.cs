@@ -14,9 +14,15 @@ namespace Amber.Android;
 [Activity(
     Label = "Jay Game",
     Process = ":game",
+    LaunchMode = LaunchMode.SingleTask,
     Theme = "@style/MyTheme.NoActionBar",
+    // Minecraft owns an independent OpenGL SurfaceView. Disabling Android HWUI for the
+    // surrounding Activity avoids an Android 15 RenderThread teardown race during the first
+    // embedded-JVM launch; it does not disable or slow the game's OpenGL renderer.
+    HardwareAccelerated = false,
     ScreenOrientation = ScreenOrientation.SensorLandscape,
-    ConfigurationChanges = ConfigChanges.Orientation | ConfigChanges.ScreenSize | ConfigChanges.UiMode)]
+    ConfigurationChanges = ConfigChanges.Orientation | ConfigChanges.ScreenSize | ConfigChanges.UiMode |
+        ConfigChanges.Keyboard | ConfigChanges.KeyboardHidden | ConfigChanges.Navigation)]
 public sealed class GameActivity : Activity, ISurfaceHolderCallback
 {
     public const string ServerAddressExtra = "nz.work.minecraft.jay.SERVER_ADDRESS";
@@ -24,7 +30,9 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
     public const string PlayerNameExtra = "nz.work.minecraft.jay.PLAYER_NAME";
     private CancellationTokenSource? _gameSetup;
     private TouchControlOverlay? _touchOverlay;
-    private readonly TaskCompletionSource _surfaceReady = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly object _surfaceSync = new();
+    private TaskCompletionSource _surfaceReady = NewSurfaceReadySource();
+    private bool _surfaceAvailable;
 
     protected override void OnCreate(Bundle? savedInstanceState)
     {
@@ -55,8 +63,21 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
         _touchOverlay?.UpdateHardwareCapture(hasFocus);
     }
 
-    public override bool DispatchKeyEvent(KeyEvent? e) =>
-        _touchOverlay?.HandleHardwareKey(e) == true || base.DispatchKeyEvent(e);
+    public override bool DispatchKeyEvent(KeyEvent? e)
+    {
+        // Android's default Back handling finishes this Activity. In the dedicated game process
+        // that immediately reaches OnDestroy and kills HotSpot, including an integrated server
+        // that may still be saving. Treat Back as Minecraft Escape once the game owns the view:
+        // the pause/menu flow can then save and quit normally before main() returns.
+        if (e?.KeyCode == Keycode.Back && _touchOverlay?.Visibility == ViewStates.Visible)
+        {
+            if (e.Action == KeyEventActions.Down && e.RepeatCount == 0)
+                _touchOverlay.HandleSystemBack();
+            return true;
+        }
+
+        return _touchOverlay?.HandleHardwareKey(e) == true || base.DispatchKeyEvent(e);
+    }
 
     public override bool DispatchGenericMotionEvent(MotionEvent? e) =>
         _touchOverlay?.HandleHardwareMotion(e) == true || base.DispatchGenericMotionEvent(e);
@@ -93,15 +114,21 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
 
     protected override void OnDestroy()
     {
+        _touchOverlay?.CancelAllInput();
         _gameSetup?.Cancel();
         _gameSetup?.Dispose();
         _gameSetup = null;
         base.OnDestroy();
+        // This Activity owns an embedded HotSpot VM in the dedicated :game process. HotSpot does
+        // not support creating a second VM after main() returns or startup fails. Leaving this
+        // process alive makes the cold-start retry (and every later launch) fail with JNI_EEXIST.
+        // The launcher runs in the package's main process, so terminating this one is isolated.
+        global::Android.OS.Process.KillProcess(global::Android.OS.Process.MyPid());
     }
 
     protected override void OnPause()
     {
-        _touchOverlay?.ReleaseHardwareInput();
+        _touchOverlay?.CancelAllInput();
         base.OnPause();
     }
 
@@ -120,7 +147,16 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
             // inside the isolated game process, then switches directly to Minecraft without a setup screen.
             var prepared = await AndroidEmbeddedGame.PrepareAsync(this, versionId, playerName,
                 Intent?.GetStringExtra(ServerAddressExtra), progress: null, ct);
-            await _surfaceReady.Task.WaitAsync(ct);
+            await WaitForSurfaceAsync(ct);
+            // A freshly installed/cold Android process is still draining ART and UI finalizers
+            // when the surface first appears. Starting HotSpot in that window can replace signal
+            // handlers while those threads are active and crash the first launch only. Let the
+            // Android side become quiescent before creating the embedded VM.
+            await Task.Delay(1800, ct);
+            // The Activity may have been backgrounded while it was settling. A completed TCS
+            // only proves that a surface existed earlier; never start HotSpot against a surface
+            // that Android has already destroyed.
+            await WaitForSurfaceAsync(ct);
             var runTask = Task.Run(() => AndroidEmbeddedGame.Run(prepared), ct);
             await Task.Delay(900, ct);
             if (_touchOverlay is not null)
@@ -136,8 +172,7 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
         {
             Finish();
         }
-        catch (Exception exception) when (exception is IOException or InvalidDataException or HttpRequestException
-                                           or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
+        catch (Exception exception)
         {
             global::Android.Util.Log.Error("JayGame", exception.ToString());
             Toast.MakeText(this, exception.Message, ToastLength.Long)?.Show();
@@ -149,13 +184,45 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
     public void SurfaceCreated(ISurfaceHolder holder)
     {
         NativeJvmHost.SetSurface(holder.Surface);
-        _surfaceReady.TrySetResult();
+        lock (_surfaceSync)
+        {
+            _surfaceAvailable = true;
+            _surfaceReady.TrySetResult();
+        }
     }
 
-    public void SurfaceChanged(ISurfaceHolder holder, Format format, int width, int height) =>
+    public void SurfaceChanged(ISurfaceHolder holder, Format format, int width, int height)
+    {
         NativeJvmHost.SetSurface(holder.Surface);
+    }
 
-    public void SurfaceDestroyed(ISurfaceHolder holder) => NativeJvmHost.SetSurface(null);
+    public void SurfaceDestroyed(ISurfaceHolder holder)
+    {
+        lock (_surfaceSync)
+        {
+            _surfaceAvailable = false;
+            if (_surfaceReady.Task.IsCompleted)
+                _surfaceReady = NewSurfaceReadySource();
+        }
+        NativeJvmHost.SetSurface(null);
+    }
+
+    private async Task WaitForSurfaceAsync(CancellationToken ct)
+    {
+        while (true)
+        {
+            Task ready;
+            lock (_surfaceSync)
+            {
+                if (_surfaceAvailable) return;
+                ready = _surfaceReady.Task;
+            }
+            await ready.WaitAsync(ct);
+        }
+    }
+
+    private static TaskCompletionSource NewSurfaceReadySource() =>
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     private static FrameLayout.LayoutParams MatchParent() => new(
         ViewGroup.LayoutParams.MatchParent,
@@ -165,6 +232,7 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
 /// <summary>Touch and hardware input overlay shown only after Minecraft owns the game surface.</summary>
 internal sealed class TouchControlOverlay : View, ITouchInputSink
 {
+    private const int GlfwKeyEscape = 256;
     private const long LongPressDelayMs = 340;
     private const long LongPressRingMs = 1150;
     private readonly Paint _fill = new() { AntiAlias = true, Color = Color.Argb(142, 48, 53, 59) };
@@ -182,13 +250,22 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     private readonly Paint _progress = new() { AntiAlias = true, Color = Color.Argb(235, 255, 255, 255), StrokeWidth = 8, StrokeCap = Paint.Cap.Round };
     private readonly Paint _scrim = new() { AntiAlias = false, Color = Color.Argb(175, 0, 0, 0) };
     private readonly Paint _panel = new() { AntiAlias = false, Color = Color.Argb(245, 24, 27, 31) };
+    private readonly Paint _keyboardPreviewBackground = new() { AntiAlias = true, Color = Color.Argb(238, 20, 23, 28) };
+    private readonly Paint _keyboardPreviewText = new() { AntiAlias = true, Color = Color.White, TextAlign = Paint.Align.Left };
     private readonly TouchInputRouter _router;
     private readonly TouchControlProfile _profile = new();
     private readonly ISharedPreferences _preferences;
     private readonly Dictionary<int, LongPressIndicator> _longPressIndicators = [];
+    private readonly Dictionary<int, long> _longPressTokens = [];
     private readonly HashSet<int> _hotbarPointers = [];
+    private readonly HashSet<int> _textInputPointers = [];
     private readonly HashSet<Keycode> _hardwareKeys = [];
-    private readonly HashSet<TouchControlAction> _hardwareActions = [];
+    private const int TouchActionSource = 0;
+    private const int HardwareKeyboardSourceBase = 0x10000;
+    private const int HardwarePointerSourceBase = 0x20000;
+    private readonly InputActionLatch _actionLatch = new();
+    private readonly HardwareTextInputGate _hardwareTextInputGate = new();
+    private readonly HardwareMouseButtonTracker _hardwareMouseButtons = new();
     private bool _settingsOpen;
     private bool _layoutEditing;
     private int? _editingPointer;
@@ -197,28 +274,71 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     private float _lastMouseX;
     private float _lastMouseY;
     private bool _hasMousePosition;
+    private (double X, double Y) _touchMovement;
+    private (double X, double Y) _hardwareMovement;
     private bool? _lastGameplayControlsActive;
+    private bool? _lastTextInputFocused;
+    private long _nextLongPressToken;
+    private long _nextGuiScalePoll;
+    private int _minecraftGuiScale;
 
     private readonly SdlTouchInput? _sdl;
+    private readonly SoftKeyboardInputSession _softKeyboardSession = new();
+    private readonly SoftKeyboardPreviewBuffer _softKeyboardPreview = new();
     private bool GameplayActive => _sdl?.InWorld ?? NativeJvmHost.GameplayControlsActive;
 
     public TouchControlOverlay(Context context, SdlTouchInput? sdl = null) : base(context)
     {
         _sdl = sdl;
+        // The game itself renders into the SurfaceView. Keep the transparent controls on a
+        // software layer so Android's HWUI worker cannot race the JVM/EGL surface startup and
+        // lock a RenderNode mutex after it has been destroyed (seen as a first-launch SIGABRT
+        // on Android 15/emulator graphics drivers).
+        SetLayerType(LayerType.Software, null);
         _preferences = context.GetSharedPreferences("jay-touch-controls", FileCreationMode.Private)!;
         LoadProfile();
         _router = new TouchInputRouter(this, _profile,
-            inventoryStackCount: sdl is null ? NativeJvmHost.InventoryStackCount : sdl.InventoryStackCount);
+            inventoryStackCount: sdl is null ? NativeJvmHost.InventoryStackCount : sdl.InventoryStackCount,
+            inventorySlotState: sdl is null ? NativeJvmHost.InventorySlotState : sdl.InventorySlotState);
         Clickable = true;
         Focusable = true;
         FocusableInTouchMode = true;
     }
 
-    public override bool OnCheckIsTextEditor() => true;
+    // Only advertise an Android text editor while Minecraft actually owns a text field.
+    // Keeping this true during gameplay makes physical W/A/S/D key presses wake the IME
+    // on tablets, which covers half the screen and prevents keyboard/mouse play.
+    private int TextInputFocusState => _sdl is not null
+        ? (_sdl.TextInputActive ? 1 : 0)
+        : NativeJvmHost.TextInputFocusState;
+    private bool TextInputFocused => _softKeyboardSession.AcceptsConnection(TextInputFocusState);
+
+    public override bool OnCheckIsTextEditor() => TextInputFocused;
+
+    // GameActivity forwards keys from Activity.DispatchKeyEvent before View dispatch. The SDL
+    // host cannot call this managed overlay directly; once external-input mode requests focus
+    // for pointer capture, Android sends physical keys here instead of to SDL's SurfaceView.
+    // Handling the focused-view path keeps W/A/S/D and menu keys working without duplicating
+    // GameActivity delivery (an Activity-consumed event never reaches these overrides).
+    public override bool OnKeyDown(Keycode keyCode, KeyEvent? e) =>
+        HandleHardwareKey(e) || base.OnKeyDown(keyCode, e);
+
+    public override bool OnKeyUp(Keycode keyCode, KeyEvent? e) =>
+        HandleHardwareKey(e) || base.OnKeyUp(keyCode, e);
+
+    public override void OnWindowFocusChanged(bool hasWindowFocus)
+    {
+        base.OnWindowFocusChanged(hasWindowFocus);
+        // GameActivity forwards this too, but the SDL path hosts this overlay inside
+        // JaySdlActivity. Keep the lifecycle cleanup on the view so both hosts release held
+        // movement/mining keys when backgrounded and reacquire pointer capture on return.
+        if (!hasWindowFocus) CancelAllInput();
+        UpdateHardwareCapture(hasWindowFocus);
+    }
 
     public override IInputConnection? OnCreateInputConnection(EditorInfo? outAttrs)
     {
-        if (outAttrs is null) return null;
+        if (outAttrs is null || !TextInputFocused) return null;
         outAttrs.InputType = InputTypes.ClassText | InputTypes.TextFlagNoSuggestions;
         outAttrs.ImeOptions = ImeFlags.NoExtractUi;
         return new JayInputConnection(this);
@@ -229,8 +349,19 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         base.OnDraw(canvas);
         // This view is composited over a SurfaceView. Clear its transparent layer on every frame;
         // otherwise some Android GPU drivers retain the previous joystick knob position.
-        canvas.DrawColor(Color.Transparent, PorterDuff.Mode.Clear);
+        canvas.DrawColor(Color.Transparent, PorterDuff.Mode.Clear!);
         var gameplayControlsActive = GameplayActive;
+        var textInputFocusState = TextInputFocusState;
+        _softKeyboardSession.Observe(gameplayControlsActive, textInputFocusState);
+        var textInputFocused = _softKeyboardSession.AcceptsConnection(textInputFocusState);
+        if (_lastTextInputFocused != textInputFocused)
+        {
+            _lastTextInputFocused = textInputFocused;
+            // Minecraft auto-focuses some fields while opening a screen (notably the world-list
+            // search box). Do not cover the new screen with the IME until the player actually
+            // taps the editor; focus loss may still dismiss a keyboard that is already open.
+            if (!textInputFocused) Post(HideKeyboard);
+        }
         UpdateViewportGeometry();
         if (_lastGameplayControlsActive != gameplayControlsActive)
         {
@@ -255,7 +386,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
                         ? "拆分"
                         : control.Label);
         }
-        DrawLongPressIndicators(canvas);
+        var animatingHoldFeedback = DrawLongPressIndicators(canvas);
         DrawInventorySplitSelection(canvas);
         if (_profile.Mode == TouchControlMode.JoystickAndCrosshair && gameplayControlsActive)
             DrawCrosshair(canvas);
@@ -263,7 +394,56 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
             DrawSettings(canvas);
         else if (_layoutEditing)
             DrawEditGuide(canvas);
-        PostInvalidateDelayed(100);
+        DrawSoftKeyboardPreview(canvas);
+        // Mining progress and inventory quantity selection must animate continuously under the
+        // finger. Keep the idle overlay on its low-power poll, but follow display vsync while a
+        // surface gesture is active so the progress ring does not advance in visible 100 ms jumps.
+        if (animatingHoldFeedback || _router.InventorySplitSelections.Count > 0)
+            PostInvalidateOnAnimation();
+        else
+            PostInvalidateDelayed(100);
+    }
+
+    private void DrawSoftKeyboardPreview(Canvas canvas)
+    {
+        if (!_softKeyboardPreview.IsActive) return;
+
+        var density = Resources?.DisplayMetrics?.Density ?? 1f;
+        var margin = 12f * density;
+        using var visibleFrame = new Rect();
+        GetWindowVisibleDisplayFrame(visibleFrame);
+        var location = new int[2];
+        GetLocationOnScreen(location);
+        // On Android 15 an edge-to-edge SurfaceView resizes for the IME while this transparent
+        // overlay can retain the decor view's full height. Anchor to the actual visible frame so
+        // the preview sits above the keyboard instead of being painted underneath it.
+        var visibleBottom = Math.Clamp(visibleFrame.Bottom - location[1], 0, Height);
+        var height = Math.Min(64f * density, visibleBottom * 0.14f);
+        var top = visibleBottom - height - margin;
+        var radius = 8f * density;
+        canvas.DrawRoundRect(margin, top, Width - margin, visibleBottom - margin,
+            radius, radius, _keyboardPreviewBackground);
+
+        _keyboardPreviewText.TextSize = Math.Clamp(20f * density, 22f, height * 0.48f);
+        var value = _softKeyboardPreview.Text;
+        if (string.IsNullOrEmpty(value))
+        {
+            _keyboardPreviewText.Color = Color.Argb(190, 210, 214, 220);
+            value = "输入聊天或指令…";
+        }
+        else
+        {
+            _keyboardPreviewText.Color = Color.White;
+            var available = Width - margin * 4;
+            var visibleRunes = value.EnumerateRunes().ToList();
+            while (visibleRunes.Count > 1 &&
+                   _keyboardPreviewText.MeasureText(string.Concat(visibleRunes)) > available)
+                visibleRunes.RemoveAt(0);
+            value = string.Concat(visibleRunes);
+        }
+
+        var baseline = top + height * 0.68f;
+        canvas.DrawText(value, margin * 2, baseline, _keyboardPreviewText);
     }
 
     private void DrawMovementPad(Canvas canvas, float x, float y, float radius)
@@ -411,9 +591,10 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         _joystickMark.Color = WithAlpha(Color.Argb(145, 235, 238, 242), Math.Max(0.45f, _controlOpacity));
     }
 
-    private void DrawLongPressIndicators(Canvas canvas)
+    private bool DrawLongPressIndicators(Canvas canvas)
     {
         var now = SystemClock.UptimeMillis();
+        var drewAnimatedFeedback = false;
         var scale = Math.Min(Width, Height);
         // The indicator must remain visible around a resting fingertip on a tablet.
         var radius = scale * 0.058f;
@@ -427,6 +608,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
             // Match the mobile interaction: an ordinary touch has no decoration. The ring starts
             // only after the gesture has become a mining hold and the crosshair is on a block.
             if (!_router.IsLongPress(pointerId) || !NativeJvmHost.HasBlockTarget) continue;
+            drewAnimatedFeedback = true;
             var miningElapsed = now - indicator.DownAt - LongPressDelayMs;
             var x = (float)(indicator.X * Width);
             var y = (float)(indicator.Y * Height);
@@ -437,6 +619,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
             canvas.DrawCircle(x, y, radius * 0.16f,
                 _router.IsLongPress(pointerId) ? _activeFill : _fill);
         }
+        return drewAnimatedFeedback;
     }
 
     private void DrawInventorySplitSelection(Canvas canvas)
@@ -623,11 +806,24 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     }
 
     private bool TryGetHotbarSlot(double x, double y, out int slot) =>
-        TouchHudGeometry.ForAspectRatio(CurrentAspectRatio()).TryGetSlot(x, y, out slot);
+        TouchHudGeometry.ForViewport(Width, Height, _minecraftGuiScale).TryGetSlot(x, y, out slot);
 
     private double CurrentAspectRatio() => Height > 0 ? Width / (double)Height : 16d / 9d;
 
-    private void UpdateViewportGeometry() => _profile.ViewportAspectRatio = CurrentAspectRatio();
+    private void UpdateViewportGeometry()
+    {
+        _profile.ViewportAspectRatio = CurrentAspectRatio();
+        _profile.ViewportWidthPixels = Width;
+        _profile.ViewportHeightPixels = Height;
+        var now = SystemClock.UptimeMillis();
+        if (now >= _nextGuiScalePoll)
+        {
+            var liveScale = _sdl?.GuiScale ?? NativeJvmHost.GuiScale;
+            if (liveScale > 0) _minecraftGuiScale = liveScale;
+            _nextGuiScalePoll = now + 1000;
+        }
+        _profile.MinecraftGuiScale = _minecraftGuiScale;
+    }
 
     private void DrawChevron(Canvas canvas, float x, float y, float size)
     {
@@ -663,14 +859,14 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         foreach (var modeValue in Enum.GetValues<TouchControlMode>())
         foreach (var action in Enum.GetValues<TouchControlAction>())
         {
-            // v1 stored the inventory key against a fixed 16:9 coordinate. Dropping only that
-            // stale override lets the new aspect-aware anchor repair existing tablet installs.
-            if (layoutVersion < 2 && action == TouchControlAction.Inventory) continue;
+            // Inventory is permanently attached to the hotbar. Ignore every historical custom
+            // coordinate, including v2 values created by the old layout editor.
+            if (action == TouchControlAction.Inventory) continue;
             var x = _preferences.GetFloat($"position-{modeValue}-{action}-x", float.NaN);
             var y = _preferences.GetFloat($"position-{modeValue}-{action}-y", float.NaN);
             if (!float.IsNaN(x) && !float.IsNaN(y)) _profile.SetPosition(modeValue, action, x, y);
         }
-        if (layoutVersion < 2)
+        if (layoutVersion < 3)
         {
             using var editor = _preferences.Edit()!;
             foreach (var modeValue in Enum.GetValues<TouchControlMode>())
@@ -678,7 +874,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
                 editor.Remove($"position-{modeValue}-{TouchControlAction.Inventory}-x");
                 editor.Remove($"position-{modeValue}-{TouchControlAction.Inventory}-y");
             }
-            editor.PutInt("layout-version", 2);
+            editor.PutInt("layout-version", 3);
             editor.Apply();
         }
     }
@@ -692,7 +888,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         editor.PutString("attack-area", _profile.AttackArea.ToString());
         editor.PutFloat("opacity", _controlOpacity);
         editor.PutBoolean("forced-sprint", _profile.ForcedSprint);
-        editor.PutInt("layout-version", 2);
+        editor.PutInt("layout-version", 3);
         foreach (var modeValue in Enum.GetValues<TouchControlMode>())
         foreach (var action in Enum.GetValues<TouchControlAction>())
         {
@@ -785,6 +981,9 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
                 }
                 var control = _profile.HitTest(x, y);
                 if (control is null) return true;
+                // The inventory face belongs to the hotbar and follows its aspect-aware anchor;
+                // moving it would recreate the detached/overlapping button this editor replaced.
+                if (control.Action == TouchControlAction.Inventory) return true;
                 _editingPointer = e.GetPointerId(index);
                 _editingAction = control.Action;
                 return true;
@@ -827,8 +1026,24 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
                 // Visible overlay controls are checked first. The inventory key's hit rectangle
                 // ends exactly where the ninth hotbar slot begins, so neither steals the other.
                 var control = _profile.HitTest(x, y, gameplay);
+                // Remember the editor under the finger before Minecraft handles the click.
+                // Some menu buttons replace the whole screen on release; querying afterwards
+                // would mistake an automatically focused search box on the new screen for the
+                // button the player actually touched.
+                var touchedEditor = !gameplay && control is null &&
+                    (_sdl?.TextInputAt(x, y) ?? NativeJvmHost.TextInputAt(x, y));
+                if (touchedEditor)
+                    _textInputPointers.Add(pointerId);
+                else
+                    _textInputPointers.Remove(pointerId);
                 if (gameplay && control is null && TryGetHotbarSlot(x, y, out var slot))
                 {
+                    // A lost UP during an IME/window transition can leave the recycled ID in
+                    // the router. The hotbar bypasses Router.Press, so cancel that stale gesture
+                    // explicitly and invalidate any delayed long-press callback first.
+                    _longPressTokens.Remove(pointerId);
+                    _longPressIndicators.Remove(pointerId);
+                    _router.Cancel(pointerId);
                     _hotbarPointers.Add(pointerId);
                     if (_sdl is null) NativeJvmHost.AddKey(49 + slot);
                     else _sdl.SelectSlot(slot);
@@ -837,12 +1052,23 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
                 var handled = _router.Press(pointerId, x, y, gameplay);
                 if (handled && control is null)
                 {
+                    // Pointer IDs are recycled aggressively (usually ID 0 for each new
+                    // single-finger gesture). Tie the delayed callback to this exact DOWN so
+                    // an old tap cannot turn a later tap into an early long press.
+                    var longPressToken = ++_nextLongPressToken;
+                    _longPressTokens[pointerId] = longPressToken;
                     if (gameplay)
                         _longPressIndicators[pointerId] = new(x, y, SystemClock.UptimeMillis());
                     PostDelayed(() =>
                     {
+                        if (!_longPressTokens.TryGetValue(pointerId, out var currentToken) ||
+                            currentToken != longPressToken)
+                            return;
                         if (!_router.BeginLongPress(pointerId))
+                        {
+                            _longPressTokens.Remove(pointerId);
                             _longPressIndicators.Remove(pointerId);
+                        }
                         Invalidate();
                     }, LongPressDelayMs);
                 }
@@ -859,19 +1085,34 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
                     }
                     moved |= _router.Move(movingId, e.GetX(i) / Width, e.GetY(i) / Height);
                     if (!_router.IsLongPressCandidate(movingId))
+                    {
+                        _longPressTokens.Remove(movingId);
                         _longPressIndicators.Remove(movingId);
+                    }
                 }
                 return moved;
             case MotionEventActions.Up:
             case MotionEventActions.PointerUp:
                 var releasedId = e.GetPointerId(actionIndex);
-                if (_hotbarPointers.Remove(releasedId)) return true;
+                var releasedX = e.GetX(actionIndex) / Width;
+                var releasedY = e.GetY(actionIndex) / Height;
+                var touchedTextInput = _textInputPointers.Remove(releasedId);
+                _longPressTokens.Remove(releasedId);
                 _longPressIndicators.Remove(releasedId);
-                return _router.Release(releasedId);
+                if (_hotbarPointers.Remove(releasedId)) return true;
+                // Capture this before Release removes the pointer. Overlay controls (especially
+                // the keyboard button) must not be mistaken for taps on a Minecraft text field.
+                var syncTextInput = _router.TargetsGameSurface(releasedId);
+                var released = _router.Release(releasedId);
+                if (released && syncTextInput && !GameplayActive)
+                    PostDelayed(() => SyncSoftKeyboardAfterTap(releasedX, releasedY, touchedTextInput), 140);
+                return released;
             case MotionEventActions.Cancel:
+                _longPressTokens.Clear();
                 _longPressIndicators.Clear();
                 _hotbarPointers.Clear();
-                _router.ReleaseAll();
+                _textInputPointers.Clear();
+                _router.CancelAll();
                 return true;
             default:
                 return false;
@@ -887,22 +1128,18 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     public override bool OnCapturedPointerEvent(MotionEvent? e) =>
         HandleHardwareMotion(e) || base.OnCapturedPointerEvent(e);
 
-    public override bool OnKeyPreIme(Keycode keyCode, KeyEvent? e) =>
-        HandleHardwareKey(e) || base.OnKeyPreIme(keyCode, e);
-
-    public override bool OnKeyDown(Keycode keyCode, KeyEvent? e) =>
-        HandleHardwareKey(e) || base.OnKeyDown(keyCode, e);
-
-    public override bool OnKeyUp(Keycode keyCode, KeyEvent? e) =>
-        HandleHardwareKey(e) || base.OnKeyUp(keyCode, e);
-
     public void SetAction(TouchControlAction action, bool pressed)
     {
         if (action == TouchControlAction.Settings)
         {
             if (pressed)
             {
-                _router.ReleaseAll();
+                // Opening settings cancels every other finger. Releasing pending gestures here
+                // would turn them into clicks or commit an inventory split behind the panel.
+                _longPressTokens.Clear();
+                _longPressIndicators.Clear();
+                _hotbarPointers.Clear();
+                _router.CancelAll();
                 _settingsOpen = !_settingsOpen;
                 _layoutEditing = false;
                 Invalidate();
@@ -911,29 +1148,29 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         }
         if (action == TouchControlAction.Close)
             action = TouchControlAction.Menu;
-        if (_sdl is null) AndroidGameInputBridge.SetAction(action, pressed);
-        else _sdl.Action(action, pressed);
+        ApplyActionChange(_actionLatch.Set(action, TouchActionSource, pressed));
         if (action == TouchControlAction.Keyboard && pressed)
             PostDelayed(ShowKeyboard, 100);
     }
 
+    public void CancelAction(TouchControlAction action)
+    {
+        if (action == TouchControlAction.Close)
+            action = TouchControlAction.Menu;
+        ApplyActionChange(_actionLatch.Set(action, TouchActionSource, pressed: false,
+            cancelled: true));
+    }
+
     public void SetMovement(double x, double y)
     {
-        if (_sdl is null) AndroidGameInputBridge.SetMovement(x, y);
-        else _sdl.Move(x, y);
+        _touchMovement = (x, y);
+        DispatchCombinedMovement();
     }
 
-    public void AddLook(double x, double y)
-    {
-        if (_sdl is null) AndroidGameInputBridge.AddLook(x, y);
-        else _sdl.Look(x, y);
-    }
+    public void AddLook(double x, double y) => DispatchLook(x, y);
 
     public void SetPointer(double x, double y, bool click)
-    {
-        if (_sdl is null) AndroidGameInputBridge.SetPointer(x, y, click);
-        else _sdl.Pointer(x, y, click);
-    }
+        => DispatchPointer(x, y, click);
 
     private void DispatchAction(TouchControlAction action, bool pressed)
     {
@@ -941,11 +1178,34 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         else _sdl.Action(action, pressed);
     }
 
+    private void ApplyActionChange(InputActionChange? change)
+    {
+        if (change is not { } edge) return;
+        if (edge.Pressed)
+        {
+            DispatchAction(edge.Action, true);
+            return;
+        }
+        if (!edge.Cancelled)
+        {
+            DispatchAction(edge.Action, false);
+            return;
+        }
+        // SDL receives button edges immediately, so it still needs the matching release. The
+        // GLFW snapshot bridge has a distinct cancellation edge that suppresses an unconsumed tap.
+        if (_sdl is null) AndroidGameInputBridge.CancelAction(edge.Action);
+        else _sdl.Action(edge.Action, false);
+    }
+
     private void DispatchMovement(double x, double y)
     {
         if (_sdl is null) AndroidGameInputBridge.SetMovement(x, y);
         else _sdl.Move(x, y);
     }
+
+    private void DispatchCombinedMovement() => DispatchMovement(
+        Math.Clamp(_touchMovement.X + _hardwareMovement.X, -1, 1),
+        Math.Clamp(_touchMovement.Y + _hardwareMovement.Y, -1, 1));
 
     private void DispatchLook(double x, double y)
     {
@@ -965,6 +1225,28 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         else _sdl.SplitInventoryStack(x, y, count);
     }
 
+    public void ReturnCarriedInventoryItems(double x, double y, int count)
+    {
+        if (count < 1) return;
+        // A negative operation is internal to the native/Java bridge: it means that the
+        // first tap already carries the stack and this many right-clicks must return items.
+        if (_sdl is null) NativeJvmHost.SplitInventoryStack(x, y, -count);
+        else _sdl.SplitInventoryStack(x, y, -count);
+    }
+
+    public void HandleSystemBack()
+    {
+        CancelAllInput();
+        if (_sdl is not null)
+        {
+            _sdl.KeyEvent(Keycode.Escape, true);
+            _sdl.KeyEvent(Keycode.Escape, false);
+            return;
+        }
+
+        NativeJvmHost.AddKey(GlfwKeyEscape);
+    }
+
     public bool HandleHardwareKey(KeyEvent? e)
     {
         // Physical keys stay available in every touch layout. The dedicated external-input
@@ -973,44 +1255,67 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         var pressed = e.Action == KeyEventActions.Down;
         if (e.Action is not (KeyEventActions.Down or KeyEventActions.Up)) return false;
 
+        // Volume, call, camera and the other Android-reserved keys belong to the system. The
+        // focused SDL overlay otherwise consumes every key and turns these into meaningless
+        // Minecraft/SDL events, so a tablet can no longer adjust its volume while playing.
+        // Back is handled by each host Activity before view dispatch and remains Minecraft Escape.
+        if (e.IsSystem) return false;
+
+        // Gameplay bindings are combined with touch so releasing one input source cannot clear
+        // another. Menus still receive the original key and character stream below.
+        if (GameplayActive && IsMovementKey(e.KeyCode))
+        {
+            // Keep SDL's physical-key source separate from the combined touch movement source.
+            // Its source-aware key latch suppresses duplicate edges while preserving either one.
+            _sdl?.KeyEvent(e.KeyCode, pressed, pressed && e.RepeatCount > 0);
+            if (pressed) _hardwareKeys.Add(e.KeyCode); else _hardwareKeys.Remove(e.KeyCode);
+            UpdateHardwareMovement();
+            return true;
+        }
+        if (GameplayActive && HardwareAction(e.KeyCode) is { } gameplayAction)
+        {
+            _sdl?.KeyEvent(e.KeyCode, pressed, pressed && e.RepeatCount > 0);
+            DispatchHardwareActionTransition(gameplayAction,
+                HardwareKeyboardSourceBase + (int)e.KeyCode, pressed);
+            return true;
+        }
+
+        // Modern Minecraft owns an SDL window. Its remaining keyboard queue receives both the
+        // key-down and key-up events; printable characters are delivered separately.
+        if (_sdl is not null)
+        {
+            _sdl.KeyEvent(e.KeyCode, pressed, pressed && e.RepeatCount > 0);
+            if (pressed && e.UnicodeChar > 0 &&
+                _hardwareTextInputGate.AcceptHardwareCodePoint((int)e.KeyCode,
+                    e.UnicodeChar, e.DownTime, SystemClock.UptimeMillis(), e.RepeatCount))
+                _sdl.CommitText(char.ConvertFromUtf32(e.UnicodeChar));
+            return true;
+        }
+
         // Menu and chat screens need ordinary key/character delivery before gameplay
         // bindings. Otherwise W/A/S/D and E/Q/T disappear from typed text.
         if (!GameplayActive)
         {
-            if (_sdl is not null)
-            {
-                _sdl.KeyEvent(e.KeyCode, pressed, pressed && e.RepeatCount > 0);
-                if (pressed && e.UnicodeChar > 0)
-                    _sdl.CommitText(char.ConvertFromUtf32(e.UnicodeChar));
-                return true;
-            }
             if (!pressed) return GlfwKey(e.KeyCode) is not null || e.UnicodeChar > 0;
-            var handled = false;
-            if (GlfwKey(e.KeyCode) is { } menuKey)
-            {
-                NativeJvmHost.AddKey(menuKey);
-                handled = true;
-            }
+            // A physical key can be delivered both through Activity.DispatchKeyEvent and a
+            // freshly-created InputConnection. Feed it through the view-lifetime gate here and
+            // consume the Activity event; soft keyboards still use CommitText directly.
+            var menuKey = GlfwKey(e.KeyCode);
             if (e.UnicodeChar > 0)
             {
+                if (!_hardwareTextInputGate.AcceptHardwareCodePoint((int)e.KeyCode,
+                        e.UnicodeChar, e.DownTime, SystemClock.UptimeMillis(), e.RepeatCount))
+                    return true;
+                // Printable keys still carry menu bindings. Minecraft needs E to close an
+                // inventory and number keys to swap a hovered stack into the hotbar, while the
+                // character callback is independently needed by chat and text fields.
+                if (menuKey is { } mappedTextKey) NativeJvmHost.AddKey(mappedTextKey);
                 NativeJvmHost.AddCodePoint(e.UnicodeChar);
-                handled = true;
+                return true;
             }
-            return handled;
-        }
-
-        if (pressed) _hardwareKeys.Add(e.KeyCode); else _hardwareKeys.Remove(e.KeyCode);
-
-        if (IsMovementKey(e.KeyCode))
-        {
-            UpdateHardwareMovement();
-            return true;
-        }
-
-        if (HardwareAction(e.KeyCode) is { } action)
-        {
-            if (pressed) _hardwareActions.Add(action); else _hardwareActions.Remove(action);
-            DispatchAction(action, pressed);
+            if (menuKey is not { } mappedMenuKey) return false;
+            if (_hardwareTextInputGate.Accept((int)e.KeyCode, e.DownTime, e.RepeatCount))
+                NativeJvmHost.AddKey(mappedMenuKey);
             return true;
         }
 
@@ -1040,15 +1345,19 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
             MotionEventActions.Down or MotionEventActions.Up)
         {
             var pressed = e.ActionMasked is MotionEventActions.ButtonPress or MotionEventActions.Down;
-            // Several Android mouse drivers leave ActionButton empty for DOWN/UP. Those
-            // actions represent the primary button.
-            var actionButton = e.ActionMasked is MotionEventActions.Down or MotionEventActions.Up
-                ? MotionEventButtonState.Primary : e.ActionButton;
+            // Some vendor mouse/trackpad drivers leave ActionButton empty even for
+            // BUTTON_PRESS/RELEASE. Recover the transition from ButtonState; ordinary DOWN/UP
+            // still have the Android-defined primary-button fallback.
+            var actionButton = _hardwareMouseButtons.Resolve((int)e.ActionButton,
+                (int)e.ButtonState, pressed,
+                e.ActionMasked is MotionEventActions.Down or MotionEventActions.Up);
             var action = actionButton switch
             {
-                MotionEventButtonState.Primary => TouchControlAction.PrimaryAction,
-                MotionEventButtonState.Secondary => TouchControlAction.SecondaryAction,
-                MotionEventButtonState.Tertiary => TouchControlAction.Inventory,
+                HardwareMouseButtonTracker.Primary => TouchControlAction.PrimaryAction,
+                HardwareMouseButtonTracker.Secondary => TouchControlAction.SecondaryAction,
+                // Match desktop Minecraft: the middle button is pick-block. Opening the
+                // inventory remains E / the dedicated hotbar-adjacent touch button.
+                HardwareMouseButtonTracker.Tertiary => TouchControlAction.PickBlock,
                 _ => (TouchControlAction?)null
             };
             // DOWN/UP can arrive without a preceding HOVER_MOVE (trackpads and ADB both do
@@ -1056,10 +1365,8 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
             if (!GameplayActive && Width > 0 && Height > 0)
                 DispatchPointer(e.GetX() / Width, e.GetY() / Height, false);
             if (action is { } mapped)
-            {
-                if (pressed) _hardwareActions.Add(mapped); else _hardwareActions.Remove(mapped);
-                DispatchAction(mapped, pressed);
-            }
+                DispatchHardwareActionTransition(mapped,
+                    HardwarePointerSourceBase + (int)mapped, pressed);
             return true;
         }
 
@@ -1107,14 +1414,36 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
 #pragma warning restore CA1416
     }
 
-    public void ReleaseHardwareInput()
+    public void ReleaseHardwareInput(bool cancelled = false)
     {
         _hardwareKeys.Clear();
-        DispatchMovement(0, 0);
-        foreach (var action in _hardwareActions.ToArray())
-            DispatchAction(action, false);
-        _hardwareActions.Clear();
+        _hardwareMovement = (0, 0);
+        DispatchCombinedMovement();
+        foreach (var change in _actionLatch.ClearSources(
+                     source => source >= HardwareKeyboardSourceBase, cancelled))
+            ApplyActionChange(change);
+        _sdl?.ReleaseHardware();
+        _hardwareMouseButtons.Reset();
         _hasMousePosition = false;
+    }
+
+    private void DispatchHardwareActionTransition(TouchControlAction action, int source,
+        bool pressed)
+    {
+        // Some Android mouse stacks report one physical click as both DOWN/UP and
+        // BUTTON_PRESS/BUTTON_RELEASE. Only forward state transitions; forwarding the duplicate
+        // release becomes a second click in both the GLFW and SDL bridges.
+        ApplyActionChange(_actionLatch.Set(action, source, pressed));
+    }
+
+    public void CancelAllInput()
+    {
+        _longPressTokens.Clear();
+        _longPressIndicators.Clear();
+        _hotbarPointers.Clear();
+        _textInputPointers.Clear();
+        _router.CancelAll();
+        ReleaseHardwareInput(cancelled: true);
     }
 
     private static bool IsMovementKey(Keycode key) => key is Keycode.W or Keycode.A or Keycode.S or Keycode.D
@@ -1126,8 +1455,9 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         var right = _hardwareKeys.Contains(Keycode.D) || _hardwareKeys.Contains(Keycode.DpadRight);
         var forward = _hardwareKeys.Contains(Keycode.W) || _hardwareKeys.Contains(Keycode.DpadUp);
         var back = _hardwareKeys.Contains(Keycode.S) || _hardwareKeys.Contains(Keycode.DpadDown);
-        DispatchMovement((right ? 1 : 0) - (left ? 1 : 0),
+        _hardwareMovement = ((right ? 1 : 0) - (left ? 1 : 0),
             (back ? 1 : 0) - (forward ? 1 : 0));
+        DispatchCombinedMovement();
     }
 
     private static TouchControlAction? HardwareAction(Keycode key) => key switch
@@ -1186,6 +1516,9 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
 
     private void ShowKeyboard()
     {
+        _softKeyboardSession.Request(GameplayActive, TextInputFocusState);
+        _softKeyboardPreview.Begin();
+        PostInvalidateOnAnimation();
         RequestFocus();
         var input = (InputMethodManager?)Context!.GetSystemService(Context.InputMethodService);
         input?.RestartInput(this);
@@ -1194,46 +1527,171 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         input?.ShowSoftInput(this, ShowFlags.Forced);
     }
 
-    private sealed class JayInputConnection(TouchControlOverlay target) : BaseInputConnection(target, false)
+    private void SyncSoftKeyboardAfterTap(double x, double y, bool touchedTextInput)
+    {
+        // SDL starts text input for automatically focused widgets too. Require both active text
+        // input and a hit on the focused editor, otherwise tapping Singleplayer and opening the
+        // world list immediately covers it with the IME because its search box auto-focuses.
+        if (_sdl is not null)
+        {
+            if (SoftKeyboardInputPolicy.ShouldOpenAfterTouch(
+                    _sdl.TextInputActive, touchedTextInput))
+                ShowKeyboard();
+            else
+                HideKeyboard();
+            return;
+        }
+
+        var targeted = NativeJvmHost.TextInputAt(x, y);
+        if (targeted)
+        {
+            ShowKeyboard();
+            return;
+        }
+
+        HideKeyboard();
+    }
+
+    private void HideKeyboard()
+    {
+        _softKeyboardSession.Clear();
+        _softKeyboardPreview.End();
+        PostInvalidateOnAnimation();
+        var input = (InputMethodManager?)Context!.GetSystemService(Context.InputMethodService);
+        input?.HideSoftInputFromWindow(WindowToken, HideSoftInputFlags.None);
+        // ShowFlags.Forced is needed on tablets that report a hardware keyboard, but it also
+        // makes Android eager to reopen the IME while this View remains focused. Drop Android
+        // view focus after a non-editor tap; ShowKeyboard restores it on the next real editor tap.
+        ClearFocus();
+    }
+
+    private sealed class JayInputConnection : BaseInputConnection
     {
         private const int GlfwKeyEnter = 257;
+        private const int GlfwKeyTab = 258;
         private const int GlfwKeyBackspace = 259;
+        private const int GlfwKeyDelete = 261;
+        private readonly TouchControlOverlay _owner;
+
+        public JayInputConnection(TouchControlOverlay owner) : base(owner, false)
+        {
+            _owner = owner;
+        }
 
         public override bool CommitText(Java.Lang.ICharSequence? text, int newCursorPosition)
         {
             if (text?.ToString() is { } value)
             {
-                if (target._sdl is not null) target._sdl.CommitText(value);
-                else foreach (var rune in value.EnumerateRunes()) NativeJvmHost.AddCodePoint(rune.Value);
+                var deliveredAt = SystemClock.UptimeMillis();
+                var accepted = value.EnumerateRunes()
+                    .Where(rune => _owner._hardwareTextInputGate.AcceptCommittedCodePoint(
+                        rune.Value, deliveredAt))
+                    .ToArray();
+                _owner._softKeyboardPreview.Commit(accepted);
+                _owner.PostInvalidateOnAnimation();
+                var plan = AndroidTextCommitPlan.Create(accepted);
+                if (_owner._sdl is not null)
+                {
+                    foreach (var action in plan)
+                    {
+                        if (action.Kind == AndroidTextCommitKind.Text)
+                            _owner._sdl.CommitText(action.Text);
+                        else if (action.Kind == AndroidTextCommitKind.Enter)
+                            _owner._sdl.Enter();
+                        else
+                            _owner._sdl.Tab();
+                    }
+                    return true;
+                }
+                foreach (var action in plan)
+                {
+                    if (action.Kind == AndroidTextCommitKind.Enter)
+                        NativeJvmHost.AddKey(GlfwKeyEnter);
+                    else if (action.Kind == AndroidTextCommitKind.Tab)
+                        NativeJvmHost.AddKey(GlfwKeyTab);
+                    else
+                        foreach (var rune in action.Text.EnumerateRunes())
+                            NativeJvmHost.AddCodePoint(rune.Value);
+                }
             }
+            return true;
+        }
+
+        public override bool SetComposingText(Java.Lang.ICharSequence? text, int newCursorPosition)
+        {
+            _owner._softKeyboardPreview.SetComposingText(text?.ToString());
+            _owner.PostInvalidateOnAnimation();
             return true;
         }
 
         public override bool DeleteSurroundingText(int beforeLength, int afterLength)
         {
-            for (var i = 0; i < Math.Max(1, beforeLength); i++)
-                if (target._sdl is not null) target._sdl.Backspace(); else NativeJvmHost.AddKey(GlfwKeyBackspace);
+            var plan = AndroidTextDeletionPlan.Create(beforeLength, afterLength);
+            _owner._softKeyboardPreview.Backspace(plan.Backspaces);
+            _owner.PostInvalidateOnAnimation();
+            if (_owner._sdl is not null)
+            {
+                for (var i = 0; i < plan.Backspaces; i++) _owner._sdl.Backspace();
+                for (var i = 0; i < plan.ForwardDeletes; i++) _owner._sdl.ForwardDelete();
+                return true;
+            }
+            for (var i = 0; i < plan.Backspaces; i++) NativeJvmHost.AddKey(GlfwKeyBackspace);
+            for (var i = 0; i < plan.ForwardDeletes; i++) NativeJvmHost.AddKey(GlfwKeyDelete);
             return true;
         }
 
         public override bool PerformEditorAction(ImeAction actionCode)
         {
-            if (target._sdl is not null) target._sdl.Enter(); else NativeJvmHost.AddKey(GlfwKeyEnter);
+            _owner._softKeyboardPreview.ClearText();
+            _owner.PostInvalidateOnAnimation();
+            if (_owner._sdl is not null)
+            {
+                _owner._sdl.Enter();
+                return true;
+            }
+            NativeJvmHost.AddKey(GlfwKeyEnter);
             return true;
         }
 
         public override bool SendKeyEvent(KeyEvent? e)
         {
-            if (e?.Action != KeyEventActions.Down) return true;
-            if (target._sdl is not null)
+            if (e is null) return true;
+            if (_owner._sdl is not null)
             {
-                if (e.KeyCode == Keycode.Del) target._sdl.Backspace();
-                else if (e.KeyCode == Keycode.Enter) target._sdl.Enter();
-                else if (e.UnicodeChar > 0) target._sdl.CommitText(char.ConvertFromUtf32(e.UnicodeChar));
+                if (e.Action is KeyEventActions.Down or KeyEventActions.Up)
+                    _owner._sdl.KeyEvent(e.KeyCode, e.Action == KeyEventActions.Down,
+                        e.Action == KeyEventActions.Down && e.RepeatCount > 0);
+                // Some IMEs express printable text only as SendKeyEvent and never follow it
+                // with CommitText. Preserve that character for SDL while the view-lifetime
+                // gate suppresses a duplicate Activity delivery or a correlated CommitText.
+                if (e.Action == KeyEventActions.Down && e.UnicodeChar > 0 &&
+                    _owner._hardwareTextInputGate.AcceptHardwareCodePoint((int)e.KeyCode,
+                        e.UnicodeChar, e.DownTime, SystemClock.UptimeMillis(), e.RepeatCount))
+                {
+                    _owner._softKeyboardPreview.Commit(
+                        char.ConvertFromUtf32(e.UnicodeChar).EnumerateRunes());
+                    _owner.PostInvalidateOnAnimation();
+                    _owner._sdl.CommitText(char.ConvertFromUtf32(e.UnicodeChar));
+                }
+                return true;
             }
-            else if (e.KeyCode == Keycode.Del) NativeJvmHost.AddKey(GlfwKeyBackspace);
+            if (e.Action != KeyEventActions.Down) return true;
+            if (e.KeyCode == Keycode.Del) NativeJvmHost.AddKey(GlfwKeyBackspace);
             else if (e.KeyCode == Keycode.Enter) NativeJvmHost.AddKey(GlfwKeyEnter);
-            else if (e.UnicodeChar > 0) NativeJvmHost.AddCodePoint(e.UnicodeChar);
+            else if (e.UnicodeChar > 0)
+            {
+                var handledAt = SystemClock.UptimeMillis();
+                if (_owner._hardwareTextInputGate.AcceptHardwareCodePoint((int)e.KeyCode,
+                        e.UnicodeChar, e.DownTime, handledAt, e.RepeatCount))
+                {
+                    _owner._softKeyboardPreview.Commit(
+                        char.ConvertFromUtf32(e.UnicodeChar).EnumerateRunes());
+                    _owner.PostInvalidateOnAnimation();
+                    NativeJvmHost.AddCodePoint(e.UnicodeChar);
+                }
+            }
+            // Soft keyboards normally use CommitText; physical keyboards can instead arrive as
+            // SendKeyEvent. Both paths feed the character callback, but never for one event.
             return true;
         }
     }

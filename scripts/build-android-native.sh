@@ -39,8 +39,13 @@ build_one x86_64 x86_64-linux-android26-clang
 
 for library in "$output"/*/libjayjvm.so; do
   program_headers="$("$toolchain/bin/llvm-readelf" -lW "$library")"
+  exported_symbols="$("$toolchain/bin/llvm-readelf" -Ws "$library")"
   if ! grep -q 'LOAD.*0x4000' <<<"$program_headers"; then
     echo "$library does not use 16 KiB LOAD segment alignment" >&2
+    exit 1
+  fi
+  if ! grep -q 'jay_gui_scale_get$' <<<"$exported_symbols"; then
+    echo "$library does not export jay_gui_scale_get" >&2
     exit 1
   fi
 done

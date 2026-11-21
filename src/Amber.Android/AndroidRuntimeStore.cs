@@ -22,16 +22,20 @@ internal static class AndroidRuntimeStore
     public static bool RequiresJava25(Context context, string versionId)
     {
         var directory = new Amber.Core.Game.GameDirectory(Path.Combine(context.FilesDir!.AbsolutePath, "minecraft"));
-        return File.Exists(directory.VersionJsonPath(versionId)) && directory.ResolveVersion(versionId).JavaVersion?.MajorVersion >= 25;
+        return File.Exists(directory.VersionJsonPath(versionId)) &&
+               AndroidRuntimeChoice.UsesJava25(directory.ResolveVersion(versionId).JavaVersion?.MajorVersion ?? 8);
     }
 
     public static RuntimeArchiveDescriptor? Descriptor(Context context, bool java25)
     {
         if (!java25) return AndroidRuntimeCatalog.ForCurrentProcess();
-        if (RuntimeInformation.ProcessArchitecture != Architecture.Arm64 || Environment.SystemPageSize > 4096) return null;
-        if (context.Assets?.List("")?.Contains("jre25.json") != true) return null;
-        using var metadata = context.Assets.Open("jre25.json");
-        return JsonSerializer.Deserialize(metadata, AndroidDescriptorContext.Default.RuntimeArchiveDescriptor);
+        var assets = Java25Assets(context);
+        if (assets is null) return null;
+        using var metadata = context.Assets!.Open(assets.DescriptorAsset);
+        var descriptor = JsonSerializer.Deserialize(metadata, AndroidDescriptorContext.Default.RuntimeArchiveDescriptor);
+        return descriptor is not null && descriptor.Architecture == CurrentArchitecture() && descriptor.Validate().Count == 0
+            ? descriptor
+            : null;
     }
 
     public static bool IsInstalled(Context context, bool java25 = false)
@@ -42,13 +46,18 @@ internal static class AndroidRuntimeStore
         try
         {
             var manifest = RuntimeBundleManifest.Read(manifestPath);
+            var java25Assets = java25 ? Java25Assets(context) : null;
             var descriptor = Descriptor(context, java25);
             // Installation already verifies every SHA-256 before activation. Startup only checks
             // the immutable app-private layout so opening the game never hashes the full JRE on
-            // Android's UI thread.
-            return descriptor is not null &&
-                   string.Equals(manifest.Id, descriptor.Id, StringComparison.Ordinal) &&
-                   RuntimeBundleVerifier.VerifyLayout(root, manifest, CurrentArchitecture());
+            // Android's UI thread. PR/debug APKs intentionally omit the Java 25 download catalog;
+            // that must not invalidate a runtime which a previous signed build already installed.
+            // If this APK does carry a catalog, keep enforcing its exact runtime generation.
+            var catalogPresent = !java25 || java25Assets is not null;
+            var accepted = AndroidRuntimeAssetCatalog.AcceptsInstalledRuntime(
+                manifest.Id, descriptor?.Id, catalogPresent);
+            var layoutValid = RuntimeBundleVerifier.VerifyLayout(root, manifest, CurrentArchitecture());
+            return accepted && layoutValid;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or CryptographicException)
         {
@@ -71,7 +80,8 @@ internal static class AndroidRuntimeStore
                 descriptor,
                 async (archive, token) =>
                 {
-                    if (java25) return context.Assets!.Open("jre25-arm64-v8a.tar.xz");
+                    var embeddedArchive = java25 ? Java25Assets(context)?.ArchiveAsset : null;
+                    if (embeddedArchive is not null) return context.Assets!.Open(embeddedArchive);
                     response = await RuntimeClient.GetAsync(archive.DownloadUrl, HttpCompletionOption.ResponseHeadersRead, token);
                     response.EnsureSuccessStatusCode();
                     if (response.RequestMessage?.RequestUri?.Scheme != Uri.UriSchemeHttps)
@@ -97,6 +107,12 @@ internal static class AndroidRuntimeStore
         System.Runtime.InteropServices.Architecture.X64 => "x86_64",
         _ => "unsupported"
     };
+
+    private static AndroidRuntimeAssets? Java25Assets(Context context) =>
+        AndroidRuntimeAssetCatalog.SelectJava25(
+            CurrentArchitecture(),
+            Environment.SystemPageSize,
+            context.Assets?.List("") ?? []);
 
     private static HttpClient CreateRuntimeClient() =>
         Downloader.CreateHttpClient(category: NetworkCategory.Download);

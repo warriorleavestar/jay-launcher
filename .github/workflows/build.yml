@@ -162,6 +162,8 @@ jobs:
     timeout-minutes: 45
     env:
       RELEASE_SIGNED_ANDROID: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.publish_android_preview) }}
+      MINECRAFT_LEGACY_INPUT_VERSION: '1.21.11'
+      MINECRAFT_NAMED_INPUT_VERSION: '26.3'
     defaults:
       run:
         working-directory: src
@@ -185,12 +187,50 @@ jobs:
           -p:JavaSdkDirectory=${{ runner.temp }}/jdk
           -p:AcceptAndroidSdkLicenses=true
 
+      - name: Verify Minecraft touch bridge signatures
+        shell: bash
+        run: |
+          set -euo pipefail
+          manifest="$(curl --fail --silent --show-error \
+            https://piston-meta.mojang.com/mc/game/version_manifest_v2.json)"
+          javap_path="$(find "${{ runner.temp }}/jdk" -type f -name javap -print -quit)"
+          test -n "$javap_path"
+          check_version() {
+            local version_id=$1
+            local version_url version_json client_url client_sha1 client_jar
+            version_url="$(jq --raw-output --arg id "$version_id" \
+              '.versions[] | select(.id == $id) | .url' <<<"$manifest" | head -n 1)"
+            test -n "$version_url"
+            version_json="$(curl --fail --silent --show-error "$version_url")"
+            client_url="$(jq --raw-output '.downloads.client.url' <<<"$version_json")"
+            client_sha1="$(jq --raw-output '.downloads.client.sha1' <<<"$version_json")"
+            client_jar="${{ runner.temp }}/minecraft-$version_id-client.jar"
+            curl --fail --location --retry 2 --output "$client_jar" "$client_url"
+            echo "$client_sha1  $client_jar" | sha1sum --check --strict
+            JAVAP_BIN="$javap_path" bash ../scripts/check-android-input-bridge.sh "$client_jar"
+          }
+          check_version "$MINECRAFT_LEGACY_INPUT_VERSION"
+          check_version "$MINECRAFT_NAMED_INPUT_VERSION"
+
       - name: Install Android NDK and CMake
         shell: bash
         run: |
+          set -euo pipefail
+          sdk_root="${{ runner.temp }}/android-sdk"
+          sdkmanager="$(find "$sdk_root" -type f -name sdkmanager -print -quit 2>/dev/null || true)"
+          if [ -z "$sdkmanager" ] && command -v sdkmanager >/dev/null 2>&1; then
+            sdkmanager="$(command -v sdkmanager)"
+          fi
+          if [ -z "$sdkmanager" ] && [ -n "${ANDROID_HOME:-}" ] && [ -d "$ANDROID_HOME" ]; then
+            sdkmanager="$(find "$ANDROID_HOME" -type f -name sdkmanager -print -quit 2>/dev/null || true)"
+          fi
+          if [ -z "$sdkmanager" ] || [ ! -x "$sdkmanager" ]; then
+            echo "::error::Android sdkmanager was not installed by the .NET workload or runner image."
+            exit 1
+          fi
           # yes exits non-zero (EPIPE) once sdkmanager stops reading; pipefail would fail the step.
-          (yes || true) | "${{ runner.temp }}/android-sdk/cmdline-tools/latest/bin/sdkmanager" \
-            --sdk_root="${{ runner.temp }}/android-sdk" "ndk;28.2.13676358" "cmake;3.22.1"
+          (yes || true) | "$sdkmanager" \
+            --sdk_root="$sdk_root" "ndk;28.2.13676358" "cmake;3.22.1"
 
       - name: Build Jay native JVM host
         shell: bash
@@ -206,6 +246,53 @@ jobs:
             "${{ runner.temp }}/android-sdk" \
             Amber.Android/obj/jay-glfw
 
+      - name: Build pinned SDL Android bridge
+        shell: bash
+        run: |
+          bash ../scripts/build-android-sdl.sh \
+            "${{ runner.temp }}/android-sdk" \
+            "${{ runner.temp }}/jdk" \
+            Amber.Android/obj/jay-sdl
+
+      - name: Fetch pinned Java 25 runtime catalog
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          catalog="Amber.Android/obj/jay-runtime-catalog"
+          rm -rf "$catalog"
+          mkdir -p "$catalog"
+          if ! gh release download android-runtime-v2 \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern 'runtime25-*.json' \
+            --dir "$catalog"; then
+            rm -f "$catalog"/*
+            if [[ "${{ github.event_name }}" == pull_request ]]; then
+              echo "::notice::android-runtime-v2 is not published yet; PR APK omits the Java 25 catalog."
+              exit 0
+            fi
+            echo "::error::android-runtime-v2 descriptors are required for downloadable Android builds."
+            exit 1
+          fi
+          for architecture in arm64-v8a x86_64; do
+            descriptor="$catalog/runtime25-$architecture.json"
+            archive="jay-android-runtime25-$architecture.tar.xz"
+            expected_download="${{ github.server_url }}/${{ github.repository }}/releases/download/android-runtime-v2/$archive"
+            test -f "$descriptor"
+            jq -e \
+              --arg architecture "$architecture" \
+              --arg id "jay-android-runtime25-v2-$architecture" \
+              --arg downloadUrl "$expected_download" \
+              '.Format == 1 and .Id == $id and .Architecture == $architecture and
+               .ArchiveSize > 0 and (.ArchiveSha256 | test("^[0-9a-f]{64}$")) and
+               .MaximumExtractedSize >= .ArchiveSize and .MaximumExtractedSize <= 1073741824 and
+               (.License | length) > 0 and (.SourceUrl | startswith("https://")) and
+               .DownloadUrl == $downloadUrl' \
+              "$descriptor" >/dev/null
+          done
+          test "$(find "$catalog" -maxdepth 1 -type f | wc -l | tr -d ' ')" = 2
+
       - name: Prepare stable preview signing key
         if: env.RELEASE_SIGNED_ANDROID == 'true'
         shell: bash
@@ -215,17 +302,32 @@ jobs:
           test -n "$ANDROID_RELEASE_KEYSTORE_BASE64"
           printf '%s' "$ANDROID_RELEASE_KEYSTORE_BASE64" | base64 --decode > "${{ runner.temp }}/jay-android-preview.p12"
 
+      - name: Require CurseForge key for downloadable Android builds
+        if: env.RELEASE_SIGNED_ANDROID == 'true'
+        shell: bash
+        env:
+          # Keep the key out of PRs, ordinary manual CI and every unrelated Android build step.
+          JAY_CURSEFORGE_API_KEY: ${{ secrets.CURSEFORGE_API_KEY }}
+        run: |
+          if [ -z "$JAY_CURSEFORGE_API_KEY" ]; then
+            echo "::error::CURSEFORGE_API_KEY secret is empty; downloadable Android builds must include the CurseForge key."
+            exit 1
+          fi
+
       - name: Publish CI APK
         if: env.RELEASE_SIGNED_ANDROID != 'true'
         run: >-
           dotnet publish Amber.Android/Amber.Android.csproj -c Release -m:1
           -p:AndroidSdkDirectory=${{ runner.temp }}/android-sdk
           -p:JavaSdkDirectory=${{ runner.temp }}/jdk
+          -p:JaySdlRuntimeDir=${{ github.workspace }}/src/Amber.Android/obj/jay-sdl
+          -p:JayAndroidRuntimeCatalogDir=${{ github.workspace }}/src/Amber.Android/obj/jay-runtime-catalog
           -p:AndroidPackageFormats=apk
 
       - name: Publish release-signed preview APK
         if: env.RELEASE_SIGNED_ANDROID == 'true'
         env:
+          JAY_CURSEFORGE_API_KEY: ${{ secrets.CURSEFORGE_API_KEY }}
           ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
           ANDROID_RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_STORE_PASSWORD }}
           ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
@@ -233,6 +335,8 @@ jobs:
           dotnet publish Amber.Android/Amber.Android.csproj -c Release -m:1
           -p:AndroidSdkDirectory=${{ runner.temp }}/android-sdk
           -p:JavaSdkDirectory=${{ runner.temp }}/jdk
+          -p:JaySdlRuntimeDir=${{ github.workspace }}/src/Amber.Android/obj/jay-sdl
+          -p:JayAndroidRuntimeCatalogDir=${{ github.workspace }}/src/Amber.Android/obj/jay-runtime-catalog
           -p:AndroidPackageFormats=apk
           -p:AndroidKeyStore=true
           -p:AndroidSigningKeyStore=${{ runner.temp }}/jay-android-preview.p12
@@ -254,6 +358,10 @@ jobs:
           [[ "$BADGING" == *"versionName='$DISPLAY_VERSION'"* ]]
           [[ "$BADGING" == *"versionCode='$BUILD_VERSION'"* ]]
           "$APKSIGNER_PATH" verify "$APK_PATH"
+          if compgen -G 'Amber.Android/obj/jay-runtime-catalog/runtime25-*.json' >/dev/null; then
+            unzip -Z1 "$APK_PATH" | grep -Fx 'assets/runtime25-arm64-v8a.json'
+            unzip -Z1 "$APK_PATH" | grep -Fx 'assets/runtime25-x86_64.json'
+          fi
           if [[ "$RELEASE_SIGNED_ANDROID" == true ]]; then
             CERT_SHA256="$("$APKSIGNER_PATH" verify --print-certs "$APK_PATH" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')"
             test "$CERT_SHA256" = "595779309affcfebd61f591c3127a75c5471fbcd0f192539fbe5f52b951808e0"

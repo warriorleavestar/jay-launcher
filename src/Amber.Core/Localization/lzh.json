@@ -1740,6 +1740,8 @@
   "mobile.runtime.ready": "所驗 Java 行器已裝。",
   "mobile.runtime.failed": "Java 行器裝之未成：{0}",
   "mobile.runtime.unsupported": "此器之算架未見支。",
+  "mobile.runtime.invalid_release": "所裝 Android Java 行器無可驗之版本，宜復裝遊戲行器。",
+  "mobile.runtime.too_old": "Minecraft {0} 須 Java {1}，而今 Android 行器為 Java {2}。宜更新 Jay 遊戲行器而復試。",
   "mobile.gateway.notification.channel": "Jay 伺服器之閘",
   "mobile.gateway.notification.title": "Jay 伺服器之閘方行",
   "mobile.gateway.notification.body": "Minecraft 居前時仍可用 Jay 本機之址。",

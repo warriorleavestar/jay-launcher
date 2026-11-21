@@ -22,7 +22,26 @@ public sealed class Application : AvaloniaAndroidApplication<Amber.App.App>
         Amber.App.App.MobileGameDirectory = Path.Combine(files, "minecraft");
         Amber.App.App.MobileLaunchRequested = async (versionId, playerName, serverAddress, progress, ct) =>
         {
-            var java25 = AndroidRuntimeStore.RequiresJava25(this, versionId);
+            var gameProgress = new Progress<AndroidGameInstallProgress>(value =>
+            {
+                var fraction = value.Total <= 0 ? null : (double?)value.Completed / value.Total;
+                var detail = value.Stage switch
+                {
+                    InstallStage.Manifest or InstallStage.VersionJson => L.T("mobile.game.fetching_manifest"),
+                    InstallStage.AssetIndex => L.T("mobile.game.fetching_assets"),
+                    InstallStage.Files => L.F("mobile.game.downloading", value.Completed, value.Total),
+                    _ => L.T("mobile.game.preparing")
+                };
+                progress?.Report(new Amber.App.MobileLaunchProgress(fraction, detail, value.Bytes, value.ActiveFiles));
+            });
+
+            // A fresh Android profile has no local version JSON. Fetch that small metadata first
+            // so a Java 25 game never causes the legacy runtime to be installed by mistake.
+            var requiredJava = await AndroidEmbeddedGame.PrepareVersionMetadataAsync(
+                this, versionId, gameProgress, ct);
+            if (!AndroidRuntimeChoice.IsSupported(requiredJava))
+                throw new InvalidOperationException(L.T("mobile.runtime.unsupported"));
+            var java25 = AndroidRuntimeChoice.UsesJava25(requiredJava);
             if (!AndroidRuntimeStore.IsInstalled(this, java25))
             {
                 var descriptor = AndroidRuntimeStore.Descriptor(this, java25)
@@ -45,18 +64,7 @@ public sealed class Application : AvaloniaAndroidApplication<Amber.App.App>
             // Complete the selected instance before changing Activity. GameActivity repeats only the cheap invocation
             // construction in its isolated process; all network work stays visible in the launcher's task line.
             await AndroidEmbeddedGame.PrepareAsync(this, versionId, playerName, serverAddress,
-                new Progress<AndroidGameInstallProgress>(value =>
-                {
-                    var fraction = value.Total <= 0 ? null : (double?)value.Completed / value.Total;
-                    var detail = value.Stage switch
-                    {
-                        InstallStage.Manifest or InstallStage.VersionJson => L.T("mobile.game.fetching_manifest"),
-                        InstallStage.AssetIndex => L.T("mobile.game.fetching_assets"),
-                        InstallStage.Files => L.F("mobile.game.downloading", value.Completed, value.Total),
-                        _ => L.T("mobile.game.preparing")
-                    };
-                    progress?.Report(new Amber.App.MobileLaunchProgress(fraction, detail, value.Bytes, value.ActiveFiles));
-                }), ct);
+                gameProgress, ct);
 
             ct.ThrowIfCancellationRequested();
             var intent = new Intent(this, typeof(GameActivity));
