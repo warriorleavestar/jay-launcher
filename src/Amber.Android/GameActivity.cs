@@ -301,6 +301,16 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
 
     public override bool OnCheckIsTextEditor() => TextInputFocused;
 
+    public override void OnWindowFocusChanged(bool hasWindowFocus)
+    {
+        base.OnWindowFocusChanged(hasWindowFocus);
+        // GameActivity forwards this too, but the SDL path hosts this overlay inside
+        // JaySdlActivity. Keep the lifecycle cleanup on the view so both hosts release held
+        // movement/mining keys when backgrounded and reacquire pointer capture on return.
+        if (!hasWindowFocus) CancelAllInput();
+        UpdateHardwareCapture(hasWindowFocus);
+    }
+
     public override IInputConnection? OnCreateInputConnection(EditorInfo? outAttrs)
     {
         if (outAttrs is null || !TextInputFocused) return null;

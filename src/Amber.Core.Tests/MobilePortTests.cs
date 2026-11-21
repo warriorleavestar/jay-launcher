@@ -1077,6 +1077,26 @@ public sealed class MobilePortTests
     }
 
     [Fact]
+    public void TouchOverlayReleasesHeldInputAcrossBothGlfwAndSdlWindowFocusChanges()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var activity = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "GameActivity.cs"));
+        var overrideStart = activity.IndexOf(
+            "public override void OnWindowFocusChanged(bool hasWindowFocus)",
+            activity.IndexOf("internal sealed class TouchControlOverlay", StringComparison.Ordinal),
+            StringComparison.Ordinal);
+        var overrideEnd = activity.IndexOf("public override IInputConnection?", overrideStart,
+            StringComparison.Ordinal);
+
+        Assert.True(overrideStart >= 0 && overrideEnd > overrideStart);
+        var focusHandler = activity[overrideStart..overrideEnd];
+        Assert.Contains("if (!hasWindowFocus) CancelAllInput();", focusHandler, StringComparison.Ordinal);
+        Assert.Contains("UpdateHardwareCapture(hasWindowFocus);", focusHandler, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void DownloadableAndroidBuildsRequireBuiltInCurseForgeKeyButPullRequestsStayKeyless()
     {
         var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
