@@ -1,3 +1,5 @@
+using System.Text;
+
 namespace Amber.Mobile;
 
 /// <summary>
@@ -70,4 +72,61 @@ internal sealed class SoftKeyboardInputSession
         _enteredTextScreen = false;
         _openingDeadline = 0;
     }
+}
+
+/// <summary>
+/// Mirrors the text currently owned by Android's IME so SDL games that do not redraw their own
+/// editor after an <c>adjustResize</c> can still show the player what they are typing. This is a
+/// presentation buffer only; the authoritative text continues to be delivered to Minecraft.
+/// </summary>
+internal sealed class SoftKeyboardPreviewBuffer
+{
+    private readonly List<Rune> _committed = [];
+    private string _composing = "";
+
+    public bool IsActive { get; private set; }
+    public string Text => string.Concat(_committed.Select(rune => rune.ToString())) + _composing;
+
+    public void Begin()
+    {
+        IsActive = true;
+        ClearText();
+    }
+
+    public void End()
+    {
+        IsActive = false;
+        ClearText();
+    }
+
+    public void SetComposingText(string? text) =>
+        _composing = FilterDisplayText(text);
+
+    public void Commit(IEnumerable<Rune> runes)
+    {
+        _composing = "";
+        foreach (var rune in runes)
+        {
+            if (rune.Value is '\r' or '\n' or '\t') continue;
+            if (!Rune.IsControl(rune)) _committed.Add(rune);
+        }
+    }
+
+    public void Backspace(int count)
+    {
+        _composing = "";
+        while (count-- > 0 && _committed.Count > 0)
+            _committed.RemoveAt(_committed.Count - 1);
+    }
+
+    public void ClearText()
+    {
+        _committed.Clear();
+        _composing = "";
+    }
+
+    private static string FilterDisplayText(string? text) => string.Concat(
+        (text ?? "").EnumerateRunes()
+            .Where(rune => rune.Value is not ('\r' or '\n' or '\t') && !Rune.IsControl(rune))
+            .Select(rune => rune.ToString()));
 }

@@ -250,6 +250,8 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     private readonly Paint _progress = new() { AntiAlias = true, Color = Color.Argb(235, 255, 255, 255), StrokeWidth = 8, StrokeCap = Paint.Cap.Round };
     private readonly Paint _scrim = new() { AntiAlias = false, Color = Color.Argb(175, 0, 0, 0) };
     private readonly Paint _panel = new() { AntiAlias = false, Color = Color.Argb(245, 24, 27, 31) };
+    private readonly Paint _keyboardPreviewBackground = new() { AntiAlias = true, Color = Color.Argb(238, 20, 23, 28) };
+    private readonly Paint _keyboardPreviewText = new() { AntiAlias = true, Color = Color.White, TextAlign = Paint.Align.Left };
     private readonly TouchInputRouter _router;
     private readonly TouchControlProfile _profile = new();
     private readonly ISharedPreferences _preferences;
@@ -275,6 +277,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
 
     private readonly SdlTouchInput? _sdl;
     private readonly SoftKeyboardInputSession _softKeyboardSession = new();
+    private readonly SoftKeyboardPreviewBuffer _softKeyboardPreview = new();
     private bool GameplayActive => _sdl?.InWorld ?? NativeJvmHost.GameplayControlsActive;
 
     public TouchControlOverlay(Context context, SdlTouchInput? sdl = null) : base(context)
@@ -384,6 +387,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
             DrawSettings(canvas);
         else if (_layoutEditing)
             DrawEditGuide(canvas);
+        DrawSoftKeyboardPreview(canvas);
         // Mining progress and inventory quantity selection must animate continuously under the
         // finger. Keep the idle overlay on its low-power poll, but follow display vsync while a
         // surface gesture is active so the progress ring does not advance in visible 100 ms jumps.
@@ -391,6 +395,48 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
             PostInvalidateOnAnimation();
         else
             PostInvalidateDelayed(100);
+    }
+
+    private void DrawSoftKeyboardPreview(Canvas canvas)
+    {
+        if (!_softKeyboardPreview.IsActive) return;
+
+        var density = Resources?.DisplayMetrics?.Density ?? 1f;
+        var margin = 12f * density;
+        using var visibleFrame = new Rect();
+        GetWindowVisibleDisplayFrame(visibleFrame);
+        var location = new int[2];
+        GetLocationOnScreen(location);
+        // On Android 15 an edge-to-edge SurfaceView resizes for the IME while this transparent
+        // overlay can retain the decor view's full height. Anchor to the actual visible frame so
+        // the preview sits above the keyboard instead of being painted underneath it.
+        var visibleBottom = Math.Clamp(visibleFrame.Bottom - location[1], 0, Height);
+        var height = Math.Min(64f * density, visibleBottom * 0.14f);
+        var top = visibleBottom - height - margin;
+        var radius = 8f * density;
+        canvas.DrawRoundRect(margin, top, Width - margin, visibleBottom - margin,
+            radius, radius, _keyboardPreviewBackground);
+
+        _keyboardPreviewText.TextSize = Math.Clamp(20f * density, 22f, height * 0.48f);
+        var value = _softKeyboardPreview.Text;
+        if (string.IsNullOrEmpty(value))
+        {
+            _keyboardPreviewText.Color = Color.Argb(190, 210, 214, 220);
+            value = "输入聊天或指令…";
+        }
+        else
+        {
+            _keyboardPreviewText.Color = Color.White;
+            var available = Width - margin * 4;
+            var visibleRunes = value.EnumerateRunes().ToList();
+            while (visibleRunes.Count > 1 &&
+                   _keyboardPreviewText.MeasureText(string.Concat(visibleRunes)) > available)
+                visibleRunes.RemoveAt(0);
+            value = string.Concat(visibleRunes);
+        }
+
+        var baseline = top + height * 0.68f;
+        canvas.DrawText(value, margin * 2, baseline, _keyboardPreviewText);
     }
 
     private void DrawMovementPad(Canvas canvas, float x, float y, float radius)
@@ -1419,6 +1465,8 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     private void ShowKeyboard()
     {
         _softKeyboardSession.Request(GameplayActive, TextInputFocusState);
+        _softKeyboardPreview.Begin();
+        PostInvalidateOnAnimation();
         RequestFocus();
         var input = (InputMethodManager?)Context!.GetSystemService(Context.InputMethodService);
         input?.RestartInput(this);
@@ -1455,6 +1503,8 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     private void HideKeyboard()
     {
         _softKeyboardSession.Clear();
+        _softKeyboardPreview.End();
+        PostInvalidateOnAnimation();
         var input = (InputMethodManager?)Context!.GetSystemService(Context.InputMethodService);
         input?.HideSoftInputFromWindow(WindowToken, HideSoftInputFlags.None);
         // ShowFlags.Forced is needed on tablets that report a hardware keyboard, but it also
@@ -1485,6 +1535,8 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
                     .Where(rune => _owner._hardwareTextInputGate.AcceptCommittedCodePoint(
                         rune.Value, deliveredAt))
                     .ToArray();
+                _owner._softKeyboardPreview.Commit(accepted);
+                _owner.PostInvalidateOnAnimation();
                 var plan = AndroidTextCommitPlan.Create(accepted);
                 if (_owner._sdl is not null)
                 {
@@ -1513,9 +1565,18 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
             return true;
         }
 
+        public override bool SetComposingText(Java.Lang.ICharSequence? text, int newCursorPosition)
+        {
+            _owner._softKeyboardPreview.SetComposingText(text?.ToString());
+            _owner.PostInvalidateOnAnimation();
+            return true;
+        }
+
         public override bool DeleteSurroundingText(int beforeLength, int afterLength)
         {
             var plan = AndroidTextDeletionPlan.Create(beforeLength, afterLength);
+            _owner._softKeyboardPreview.Backspace(plan.Backspaces);
+            _owner.PostInvalidateOnAnimation();
             if (_owner._sdl is not null)
             {
                 for (var i = 0; i < plan.Backspaces; i++) _owner._sdl.Backspace();
@@ -1529,6 +1590,8 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
 
         public override bool PerformEditorAction(ImeAction actionCode)
         {
+            _owner._softKeyboardPreview.ClearText();
+            _owner.PostInvalidateOnAnimation();
             if (_owner._sdl is not null)
             {
                 _owner._sdl.Enter();
@@ -1552,7 +1615,12 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
                 if (e.Action == KeyEventActions.Down && e.UnicodeChar > 0 &&
                     _owner._hardwareTextInputGate.AcceptHardwareCodePoint((int)e.KeyCode,
                         e.UnicodeChar, e.DownTime, SystemClock.UptimeMillis(), e.RepeatCount))
+                {
+                    _owner._softKeyboardPreview.Commit(
+                        char.ConvertFromUtf32(e.UnicodeChar).EnumerateRunes());
+                    _owner.PostInvalidateOnAnimation();
                     _owner._sdl.CommitText(char.ConvertFromUtf32(e.UnicodeChar));
+                }
                 return true;
             }
             if (e.Action != KeyEventActions.Down) return true;
@@ -1563,7 +1631,12 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
                 var handledAt = SystemClock.UptimeMillis();
                 if (_owner._hardwareTextInputGate.AcceptHardwareCodePoint((int)e.KeyCode,
                         e.UnicodeChar, e.DownTime, handledAt, e.RepeatCount))
+                {
+                    _owner._softKeyboardPreview.Commit(
+                        char.ConvertFromUtf32(e.UnicodeChar).EnumerateRunes());
+                    _owner.PostInvalidateOnAnimation();
                     NativeJvmHost.AddCodePoint(e.UnicodeChar);
+                }
             }
             // Soft keyboards normally use CommitText; physical keyboards can instead arrive as
             // SendKeyEvent. Both paths feed the character callback, but never for one event.

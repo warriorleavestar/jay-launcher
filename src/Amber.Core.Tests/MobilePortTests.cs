@@ -1283,6 +1283,37 @@ public sealed class MobilePortTests
     }
 
     [Fact]
+    public void SoftKeyboardPreviewTracksUnicodeCompositionCommitAndBackspace()
+    {
+        var preview = new SoftKeyboardPreviewBuffer();
+        preview.Begin();
+
+        preview.SetComposingText("你");
+        Assert.Equal("你", preview.Text);
+
+        preview.Commit("你好👋".EnumerateRunes());
+        Assert.Equal("你好👋", preview.Text);
+
+        preview.Backspace(1);
+        Assert.Equal("你好", preview.Text);
+        Assert.True(preview.IsActive);
+    }
+
+    [Fact]
+    public void SoftKeyboardPreviewOmitsSubmitCharactersAndClearsAtSessionEnd()
+    {
+        var preview = new SoftKeyboardPreviewBuffer();
+        preview.Begin();
+        preview.Commit("say hi\r\n\t".EnumerateRunes());
+
+        Assert.Equal("say hi", preview.Text);
+
+        preview.End();
+        Assert.False(preview.IsActive);
+        Assert.Empty(preview.Text);
+    }
+
+    [Fact]
     public void KeyboardOverlayReleaseDoesNotResyncTextFocusAtItsButtonCoordinates()
     {
         var sink = new RecordingTouchSink();
@@ -1523,6 +1554,24 @@ public sealed class MobilePortTests
         Assert.Contains("!mSDLMainFinished", back, StringComparison.Ordinal);
         Assert.Contains("onNativeKeyDown(KeyEvent.KEYCODE_ESCAPE)", back, StringComparison.Ordinal);
         Assert.Contains("onNativeKeyUp(KeyEvent.KEYCODE_ESCAPE)", back, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SdlGameWindowResizesForTheSoftKeyboard()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var manifest = File.ReadAllText(Path.Combine(repository, "src", "Amber.Android",
+            "Properties", "AndroidManifest.xml"));
+
+        Assert.Contains("android:name=\"nz.work.minecraft.jay.JaySdlActivity\"", manifest,
+            StringComparison.Ordinal);
+        Assert.Contains("android:windowSoftInputMode=\"adjustResize\"", manifest,
+            StringComparison.Ordinal);
+        Assert.Contains("android:theme=\"@style/MyTheme.NoActionBar\"", manifest,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("Theme.Material.NoActionBar.Fullscreen", manifest,
+            StringComparison.Ordinal);
     }
 
     [Fact]
