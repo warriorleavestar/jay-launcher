@@ -136,6 +136,19 @@ public sealed class MobilePortTests
                 ["jre25.json", "jre25-arm64-v8a.tar.xz"]));
     }
 
+    [Theory]
+    [InlineData("jay-runtime-v2-arm64", null, false, true)]
+    [InlineData("jay-runtime-v2-arm64", "jay-runtime-v2-arm64", true, true)]
+    [InlineData("jay-runtime-v2-arm64", null, true, false)]
+    [InlineData("jay-runtime-v2-arm64", "jay-runtime-v3-arm64", true, false)]
+    [InlineData("", null, false, false)]
+    public void InstalledAndroidRuntimeSurvivesCataloglessDebugBuilds(
+        string manifestId, string? descriptorId, bool catalogPresent, bool expected)
+    {
+        Assert.Equal(expected,
+            AndroidRuntimeAssetCatalog.AcceptsInstalledRuntime(manifestId, descriptorId, catalogPresent));
+    }
+
     [Fact]
     public void AndroidRuntimeReleaseReadsTheStandardReleaseFile()
     {

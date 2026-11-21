@@ -46,13 +46,18 @@ internal static class AndroidRuntimeStore
         try
         {
             var manifest = RuntimeBundleManifest.Read(manifestPath);
+            var java25Assets = java25 ? Java25Assets(context) : null;
             var descriptor = Descriptor(context, java25);
             // Installation already verifies every SHA-256 before activation. Startup only checks
             // the immutable app-private layout so opening the game never hashes the full JRE on
-            // Android's UI thread.
-            return descriptor is not null &&
-                   string.Equals(manifest.Id, descriptor.Id, StringComparison.Ordinal) &&
-                   RuntimeBundleVerifier.VerifyLayout(root, manifest, CurrentArchitecture());
+            // Android's UI thread. PR/debug APKs intentionally omit the Java 25 download catalog;
+            // that must not invalidate a runtime which a previous signed build already installed.
+            // If this APK does carry a catalog, keep enforcing its exact runtime generation.
+            var catalogPresent = !java25 || java25Assets is not null;
+            var accepted = AndroidRuntimeAssetCatalog.AcceptsInstalledRuntime(
+                manifest.Id, descriptor?.Id, catalogPresent);
+            var layoutValid = RuntimeBundleVerifier.VerifyLayout(root, manifest, CurrentArchitecture());
+            return accepted && layoutValid;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or CryptographicException)
         {
