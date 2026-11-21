@@ -1128,6 +1128,12 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         var pressed = e.Action == KeyEventActions.Down;
         if (e.Action is not (KeyEventActions.Down or KeyEventActions.Up)) return false;
 
+        // Volume, call, camera and the other Android-reserved keys belong to the system. The
+        // focused SDL overlay otherwise consumes every key and turns these into meaningless
+        // Minecraft/SDL events, so a tablet can no longer adjust its volume while playing.
+        // Back is handled by each host Activity before view dispatch and remains Minecraft Escape.
+        if (e.IsSystem) return false;
+
         // Minecraft 26.3 owns an SDL window. Its keyboard queue must receive both the key-down
         // and key-up events; sending the old GLFW/JVM callbacks makes text appear to work while
         // leaving gameplay keys stuck or completely ignored.

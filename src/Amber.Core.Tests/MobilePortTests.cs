@@ -1215,6 +1215,21 @@ public sealed class MobilePortTests
     }
 
     [Fact]
+    public void FocusedSdlOverlayLeavesAndroidSystemKeysToTheActivity()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var overlay = File.ReadAllText(Path.Combine(repository, "src", "Amber.Android",
+            "GameActivity.cs"));
+        var hardwareKeys = JavaMethod(overlay, "public bool HandleHardwareKey", "public bool HandleHardwareMotion");
+        var systemGuard = hardwareKeys.IndexOf("if (e.IsSystem) return false;", StringComparison.Ordinal);
+        var sdlRoute = hardwareKeys.IndexOf("if (_sdl is not null)", StringComparison.Ordinal);
+
+        Assert.True(systemGuard >= 0 && systemGuard < sdlRoute,
+            "Android system keys must bypass the focused SDL overlay before SDL routing.");
+    }
+
+    [Fact]
     public void DownloadableAndroidBuildsRequireBuiltInCurseForgeKeyButPullRequestsStayKeyless()
     {
         var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
