@@ -1202,6 +1202,21 @@ public sealed class MobilePortTests
     }
 
     [Fact]
+    public void EverySdlInstanceUsesTheTouchMenuBootstrapInsteadOfOneHardCodedVersion()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var embedded = File.ReadAllText(Path.Combine(repository, "src", "Amber.Android",
+            "AndroidEmbeddedGame.cs"));
+        var bootstrap = JavaMethod(embedded, "var bootstrap = Path.Combine", "return new AndroidPreparedGame");
+
+        Assert.Contains("sdl ? \"nz.work.minecraft.jay.SdlMenuBootstrap\"", bootstrap,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("versionId == \"26.3\"", embedded, StringComparison.Ordinal);
+        Assert.DoesNotContain("if (sdl && !namedSdlInput)", embedded, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void SdlAndroidBackUsesMinecraftEscapeWhileTheGameIsRunning()
     {
         var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,

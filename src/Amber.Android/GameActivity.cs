@@ -1134,7 +1134,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         // Back is handled by each host Activity before view dispatch and remains Minecraft Escape.
         if (e.IsSystem) return false;
 
-        // Minecraft 26.3 owns an SDL window. Its keyboard queue must receive both the key-down
+        // Modern Minecraft owns an SDL window. Its keyboard queue must receive both the key-down
         // and key-up events; sending the old GLFW/JVM callbacks makes text appear to work while
         // leaving gameplay keys stuck or completely ignored.
         if (_sdl is not null)
@@ -1387,7 +1387,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
 
     private void SyncSoftKeyboardAfterTap(double x, double y)
     {
-        // SDL owns text-field focus for the 26.3 client and its Java bridge deliberately has no
+        // SDL owns text-field focus for the modern client and its Java bridge deliberately has no
         // coordinate hit-test. Once SDL reports active text input, keep/restart the IME; when it
         // does not, let the normal focus transition hide it rather than treating every tap as an
         // authoritative miss and closing a keyboard that SDL has just opened asynchronously.

@@ -147,8 +147,6 @@ internal static class AndroidEmbeddedGame
             ExtraJvmArgs = extraJvm,
             LauncherName = "Jay Android",
         });
-        bool namedSdlInput = sdl && invocation.MainClass == "net.minecraft.client.main.Main" && versionId == "26.3";
-        if (sdl && !namedSdlInput) return new AndroidPreparedGame(runtimeRoot, gameRoot, nativeRoot, true, invocation);
         var bootstrap = Path.Combine(cache, "jay-runtime-probe.jar");
         await CopyAssetAsync(context, "jay-runtime-probe.jar", bootstrap, ct);
         var vmOptions = invocation.VmOptions.Select(value =>
@@ -157,7 +155,7 @@ internal static class AndroidEmbeddedGame
                 : value).ToArray();
         invocation = new EmbeddedJavaInvocation(
             vmOptions,
-            namedSdlInput ? "nz.work.minecraft.jay.SdlMenuBootstrap" : "nz.work.minecraft.jay.AndroidGameBootstrap",
+            sdl ? "nz.work.minecraft.jay.SdlMenuBootstrap" : "nz.work.minecraft.jay.AndroidGameBootstrap",
             [invocation.MainClass, .. invocation.Arguments],
             invocation.TransientDirectory);
         return new AndroidPreparedGame(runtimeRoot, gameRoot, nativeRoot, sdl, invocation);

@@ -8,7 +8,7 @@ import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
-/** Deliver touchscreen menu gestures on the 26.3 client thread in scaled GUI coordinates. */
+/** Deliver touchscreen menu gestures on modern SDL Minecraft's client thread in scaled GUI coordinates. */
 public final class SdlMenuBootstrap {
     private static volatile Menu menu;
     private static boolean held;
