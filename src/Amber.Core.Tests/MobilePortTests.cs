@@ -2270,6 +2270,85 @@ public sealed class MobilePortTests
         }
     }
 
+    [Fact]
+    public async Task AndroidRuntimeArchiveInstallerSerializesConcurrentInstalls()
+    {
+        var parent = Path.Combine(Path.GetTempPath(), "jay-runtime-archive-" + Guid.NewGuid().ToString("N"));
+        var target = Path.Combine(parent, "active");
+        var archive = CreateRuntimeArchive();
+        using var entered = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        var secondOpened = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var held = 0;
+        try
+        {
+            var first = RuntimeArchiveInstaller.InstallCoreAsync(
+                target,
+                RuntimeArchive(archive),
+                (_, _) => Task.FromResult<Stream>(new MemoryStream(archive, writable: false)),
+                progress: null,
+                CancellationToken.None,
+                beforeExtractEntry: () =>
+                {
+                    if (Interlocked.Exchange(ref held, 1) != 0) return;
+                    entered.Set();
+                    release.Wait();
+                });
+
+            Assert.True(entered.Wait(TimeSpan.FromSeconds(30)), "First extraction never started.");
+            var second = RuntimeArchiveInstaller.InstallAsync(
+                target,
+                RuntimeArchive(archive),
+                (_, _) =>
+                {
+                    secondOpened.TrySetResult();
+                    return Task.FromResult<Stream>(new MemoryStream(archive, writable: false));
+                });
+
+            await Task.Delay(100);
+            Assert.False(secondOpened.Task.IsCompleted);
+            release.Set();
+            await first.WaitAsync(TimeSpan.FromSeconds(60));
+            await second.WaitAsync(TimeSpan.FromSeconds(60));
+            Assert.True(secondOpened.Task.IsCompletedSuccessfully);
+        }
+        finally
+        {
+            release.Set();
+            if (Directory.Exists(parent)) Directory.Delete(parent, true);
+        }
+    }
+
+    [Fact]
+    public async Task AndroidRuntimeArchiveInstallerRecoversInterruptedFilesBeforeDownloading()
+    {
+        var parent = Path.Combine(Path.GetTempPath(), "jay-runtime-archive-" + Guid.NewGuid().ToString("N"));
+        var target = Path.Combine(parent, "active");
+        var backup = target + ".backup-crash";
+        var staging = target + ".install-crash";
+        var download = target + ".download-crash";
+        Directory.CreateDirectory(backup);
+        Directory.CreateDirectory(staging);
+        await File.WriteAllTextAsync(Path.Combine(backup, "keep.txt"), "old runtime");
+        await File.WriteAllTextAsync(Path.Combine(staging, "partial.txt"), "partial runtime");
+        await File.WriteAllTextAsync(download, "partial archive");
+        try
+        {
+            var archive = CreateRuntimeArchive();
+            await Assert.ThrowsAsync<IOException>(() => RuntimeArchiveInstaller.InstallAsync(
+                target,
+                RuntimeArchive(archive),
+                (_, _) => throw new IOException("Simulated download failure.")));
+
+            Assert.Equal("old runtime", await File.ReadAllTextAsync(Path.Combine(target, "keep.txt")));
+            Assert.Equal([target], Directory.GetFileSystemEntries(parent));
+        }
+        finally
+        {
+            if (Directory.Exists(parent)) Directory.Delete(parent, true);
+        }
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
