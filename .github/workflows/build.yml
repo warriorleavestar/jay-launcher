@@ -176,6 +176,10 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
+      - name: Verify Android menu event queue
+        shell: bash
+        run: bash ../scripts/check-android-menu-queue.sh
+
       - name: Install Android workload
         run: dotnet workload install android
 

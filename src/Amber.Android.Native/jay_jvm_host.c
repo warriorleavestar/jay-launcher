@@ -10,6 +10,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "jay_menu_queue.h"
+
 #define JAY_JVM_ABI_VERSION 20
 #define JAY_ACTION_COUNT 13
 #define JAY_EVENT_CAPACITY 80
@@ -80,11 +82,8 @@ static pthread_mutex_t g_event_mutex = PTHREAD_MUTEX_INITIALIZER;
 static uint32_t g_event_types[JAY_EVENT_CAPACITY];
 static int32_t g_event_values[JAY_EVENT_CAPACITY];
 static uint32_t g_event_count;
-static uint32_t g_menu_event_types[JAY_MENU_EVENT_CAPACITY];
-static float g_menu_event_x[JAY_MENU_EVENT_CAPACITY];
-static float g_menu_event_y[JAY_MENU_EVENT_CAPACITY];
-static int32_t g_menu_event_values[JAY_MENU_EVENT_CAPACITY];
-static uint32_t g_menu_event_count;
+
+static jay_menu_queue g_menu_events;
 
 static int jay_query_gameplay_mode(void);
 static void jay_refresh_block_target(void);
@@ -592,11 +591,10 @@ void jay_input_set_pointer(float x, float y, int click) {
     pthread_mutex_lock(&g_event_mutex);
     atomic_store(&g_pointer_x, x);
     atomic_store(&g_pointer_y, y);
-    if (click && g_menu_event_count < JAY_MENU_EVENT_CAPACITY) {
-        g_menu_event_types[g_menu_event_count] = JAY_MENU_EVENT_POINTER;
-        g_menu_event_x[g_menu_event_count] = x;
-        g_menu_event_y[g_menu_event_count] = y;
-        g_menu_event_values[g_menu_event_count++] = 1;
+    if (click && !jay_menu_queue_push(
+            &g_menu_events, JAY_MENU_EVENT_POINTER, x, y, 1)) {
+        __android_log_write(ANDROID_LOG_ERROR, "JayMinecraft",
+            "Out of memory while queueing a touch menu event");
     }
     atomic_fetch_add(&g_pointer_generation, 1);
     atomic_fetch_add(&g_generation, 1);
@@ -611,11 +609,10 @@ void jay_input_split_inventory(float x, float y, int count) {
     if (y < 0.f) y = 0.f;
     if (y > 1.f) y = 1.f;
     pthread_mutex_lock(&g_event_mutex);
-    if (g_menu_event_count < JAY_MENU_EVENT_CAPACITY) {
-        g_menu_event_types[g_menu_event_count] = JAY_MENU_EVENT_SPLIT;
-        g_menu_event_x[g_menu_event_count] = x;
-        g_menu_event_y[g_menu_event_count] = y;
-        g_menu_event_values[g_menu_event_count++] = count;
+    if (!jay_menu_queue_push(
+            &g_menu_events, JAY_MENU_EVENT_SPLIT, x, y, count)) {
+        __android_log_write(ANDROID_LOG_ERROR, "JayMinecraft",
+            "Out of memory while queueing an inventory split event");
     }
     atomic_fetch_add(&g_generation, 1);
     pthread_mutex_unlock(&g_event_mutex);
@@ -665,14 +662,13 @@ void jay_input_read(jay_input_snapshot *snapshot) {
         snapshot->event_values[i] = g_event_values[i];
     }
     g_event_count = 0;
-    snapshot->menu_event_count = g_menu_event_count;
-    for (uint32_t i = 0; i < g_menu_event_count; i++) {
-        snapshot->menu_event_types[i] = g_menu_event_types[i];
-        snapshot->menu_event_x[i] = g_menu_event_x[i];
-        snapshot->menu_event_y[i] = g_menu_event_y[i];
-        snapshot->menu_event_values[i] = g_menu_event_values[i];
-    }
-    g_menu_event_count = 0;
+    snapshot->menu_event_count = jay_menu_queue_drain(
+        &g_menu_events,
+        JAY_MENU_EVENT_CAPACITY,
+        snapshot->menu_event_types,
+        snapshot->menu_event_x,
+        snapshot->menu_event_y,
+        snapshot->menu_event_values);
     snapshot->pointer_generation = atomic_load(&g_pointer_generation);
     snapshot->generation = atomic_load(&g_generation);
     pthread_mutex_unlock(&g_event_mutex);

@@ -1311,13 +1311,25 @@ public sealed class MobilePortTests
             "..", "..", "..", "..", ".."));
         var native = File.ReadAllText(Path.Combine(repository,
             "src", "Amber.Android.Native", "jay_jvm_host.c"));
+        var queue = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android.Native", "jay_menu_queue.c"));
+        var nativeBuild = File.ReadAllText(Path.Combine(repository,
+            "scripts", "build-android-native.sh"));
         var glfw = File.ReadAllText(Path.Combine(repository,
             "third_party", "android-glfw", "jay-android.patch"));
 
         Assert.Contains("JAY_MENU_EVENT_CAPACITY 32", native, StringComparison.Ordinal);
-        Assert.Contains("g_menu_event_types[g_menu_event_count] = JAY_MENU_EVENT_POINTER", native,
+        Assert.Contains("jay_menu_queue_push(\n            &g_menu_events, JAY_MENU_EVENT_POINTER", native,
             StringComparison.Ordinal);
-        Assert.Contains("g_menu_event_types[g_menu_event_count] = JAY_MENU_EVENT_SPLIT", native,
+        Assert.Contains("jay_menu_queue_push(\n            &g_menu_events, JAY_MENU_EVENT_SPLIT", native,
+            StringComparison.Ordinal);
+        Assert.Contains("snapshot->menu_event_count = jay_menu_queue_drain(", native,
+            StringComparison.Ordinal);
+        Assert.Contains("while (drained < capacity && queue->head != NULL)", queue,
+            StringComparison.Ordinal);
+        Assert.Contains("jay_jvm_host.c\" \"$source_dir/jay_menu_queue.c", nativeBuild,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("g_menu_event_count < JAY_MENU_EVENT_CAPACITY", native,
             StringComparison.Ordinal);
         Assert.Contains("for (uint32_t index = 0; index < input.menuEventCount; index++)", glfw,
             StringComparison.Ordinal);

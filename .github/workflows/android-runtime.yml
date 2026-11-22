@@ -24,6 +24,8 @@ on:
       - 'src/Amber.Android/NativeJvmHost.cs'
       - 'src/Amber.Android.Native/**'
       - 'scripts/build-android-native.sh'
+      - 'scripts/check-android-menu-queue.sh'
+      - 'tests/android-native/jay_menu_queue_test.c'
   workflow_dispatch:
     inputs:
       architecture:
@@ -79,6 +81,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      - name: Verify Android menu event queue
+        shell: bash
+        run: bash scripts/check-android-menu-queue.sh
 
       - name: Install Android NDK
         shell: bash
