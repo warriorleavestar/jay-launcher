@@ -176,9 +176,11 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
-      - name: Verify Android menu event queue
+      - name: Verify Android native input queues
         shell: bash
-        run: bash ../scripts/check-android-menu-queue.sh
+        run: |
+          bash ../scripts/check-android-menu-queue.sh
+          bash ../scripts/check-android-scalar-queue.sh
 
       - name: Install Android workload
         run: dotnet workload install android

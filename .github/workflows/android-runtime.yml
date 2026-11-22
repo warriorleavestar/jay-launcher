@@ -25,7 +25,9 @@ on:
       - 'src/Amber.Android.Native/**'
       - 'scripts/build-android-native.sh'
       - 'scripts/check-android-menu-queue.sh'
+      - 'scripts/check-android-scalar-queue.sh'
       - 'tests/android-native/jay_menu_queue_test.c'
+      - 'tests/android-native/jay_scalar_queue_test.c'
   workflow_dispatch:
     inputs:
       architecture:
@@ -82,9 +84,11 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Verify Android menu event queue
+      - name: Verify Android native input queues
         shell: bash
-        run: bash scripts/check-android-menu-queue.sh
+        run: |
+          bash scripts/check-android-menu-queue.sh
+          bash scripts/check-android-scalar-queue.sh
 
       - name: Install Android NDK
         shell: bash

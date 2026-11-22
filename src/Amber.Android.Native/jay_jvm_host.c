@@ -11,6 +11,7 @@
 #include <string.h>
 
 #include "jay_menu_queue.h"
+#include "jay_scalar_queue.h"
 
 #define JAY_JVM_ABI_VERSION 20
 #define JAY_ACTION_COUNT 13
@@ -79,10 +80,7 @@ static _Atomic int g_gameplay_mode;
 static _Atomic int g_block_target;
 static _Atomic uint64_t g_generation;
 static pthread_mutex_t g_event_mutex = PTHREAD_MUTEX_INITIALIZER;
-static uint32_t g_event_types[JAY_EVENT_CAPACITY];
-static int32_t g_event_values[JAY_EVENT_CAPACITY];
-static uint32_t g_event_count;
-
+static jay_scalar_queue g_events;
 static jay_menu_queue g_menu_events;
 
 static int jay_query_gameplay_mode(void);
@@ -622,9 +620,9 @@ __attribute__((visibility("default")))
 void jay_input_add_codepoint(uint32_t codepoint) {
     if (codepoint == 0 || codepoint > 0x10ffffu || (codepoint >= 0xd800u && codepoint <= 0xdfffu)) return;
     pthread_mutex_lock(&g_event_mutex);
-    if (g_event_count < JAY_EVENT_CAPACITY) {
-        g_event_types[g_event_count] = JAY_EVENT_CHAR;
-        g_event_values[g_event_count++] = (int32_t)codepoint;
+    if (!jay_scalar_queue_push(&g_events, JAY_EVENT_CHAR, (int32_t)codepoint)) {
+        __android_log_write(ANDROID_LOG_ERROR, "JayMinecraft",
+            "Out of memory while queueing a text input event");
     }
     atomic_fetch_add(&g_generation, 1);
     pthread_mutex_unlock(&g_event_mutex);
@@ -633,9 +631,9 @@ void jay_input_add_codepoint(uint32_t codepoint) {
 __attribute__((visibility("default")))
 void jay_input_add_key(int32_t key) {
     pthread_mutex_lock(&g_event_mutex);
-    if (g_event_count < JAY_EVENT_CAPACITY) {
-        g_event_types[g_event_count] = JAY_EVENT_KEY;
-        g_event_values[g_event_count++] = key;
+    if (!jay_scalar_queue_push(&g_events, JAY_EVENT_KEY, key)) {
+        __android_log_write(ANDROID_LOG_ERROR, "JayMinecraft",
+            "Out of memory while queueing a key input event");
     }
     atomic_fetch_add(&g_generation, 1);
     pthread_mutex_unlock(&g_event_mutex);
@@ -656,12 +654,11 @@ void jay_input_read(jay_input_snapshot *snapshot) {
     snapshot->pointer_y = atomic_load(&g_pointer_y);
     snapshot->actions = atomic_load(&g_actions);
     snapshot->action_taps = atomic_exchange(&g_action_taps, 0);
-    snapshot->event_count = g_event_count;
-    for (uint32_t i = 0; i < g_event_count; i++) {
-        snapshot->event_types[i] = g_event_types[i];
-        snapshot->event_values[i] = g_event_values[i];
-    }
-    g_event_count = 0;
+    snapshot->event_count = jay_scalar_queue_drain(
+        &g_events,
+        JAY_EVENT_CAPACITY,
+        snapshot->event_types,
+        snapshot->event_values);
     snapshot->menu_event_count = jay_menu_queue_drain(
         &g_menu_events,
         JAY_MENU_EVENT_CAPACITY,

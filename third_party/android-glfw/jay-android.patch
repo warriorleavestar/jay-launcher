@@ -295,7 +295,8 @@ index 1db0811..b84b668 100644
 +        return;
 +    jayGameplayModeSet(window->cursorMode == GLFW_CURSOR_DISABLED);
 +    jayInputRead(&input);
-+    if (input.generation == window->null.jayInputGeneration && input.menuEventCount == 0)
++    if (input.generation == window->null.jayInputGeneration &&
++        input.eventCount == 0 && input.menuEventCount == 0)
 +        return;
 +    window->null.jayInputGeneration = input.generation;
 +    // Pointer clicks and stack operations share one FIFO so rapid multi-touch gestures keep

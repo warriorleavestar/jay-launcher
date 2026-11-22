@@ -28,7 +28,8 @@ build_one() {
   mkdir -p "$output/$abi"
   "$toolchain/bin/$compiler" \
     -std=c17 -O2 -fPIC -fvisibility=hidden -Wall -Wextra -Werror \
-    -shared "$source_dir/jay_jvm_host.c" "$source_dir/jay_menu_queue.c" \
+    -shared "$source_dir/jay_jvm_host.c" \
+    "$source_dir/jay_menu_queue.c" "$source_dir/jay_scalar_queue.c" \
     -Wl,-z,max-page-size=16384 \
     -landroid -llog -ldl \
     -o "$output/$abi/libjayjvm.so"

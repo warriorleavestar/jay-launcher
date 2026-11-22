@@ -1293,11 +1293,26 @@ public sealed class MobilePortTests
             "..", "..", "..", "..", ".."));
         var native = File.ReadAllText(Path.Combine(repository,
             "src", "Amber.Android.Native", "jay_jvm_host.c"));
+        var scalarQueue = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android.Native", "jay_scalar_queue.c"));
+        var nativeBuild = File.ReadAllText(Path.Combine(repository,
+            "scripts", "build-android-native.sh"));
         var glfw = File.ReadAllText(Path.Combine(repository,
             "third_party", "android-glfw", "jay-android.patch"));
 
         Assert.Contains("uint32_t event_types[JAY_EVENT_CAPACITY]", native, StringComparison.Ordinal);
         Assert.Contains("int32_t event_values[JAY_EVENT_CAPACITY]", native, StringComparison.Ordinal);
+        Assert.Contains("jay_scalar_queue_push(&g_events, JAY_EVENT_CHAR", native,
+            StringComparison.Ordinal);
+        Assert.Contains("jay_scalar_queue_push(&g_events, JAY_EVENT_KEY", native,
+            StringComparison.Ordinal);
+        Assert.Contains("snapshot->event_count = jay_scalar_queue_drain(", native,
+            StringComparison.Ordinal);
+        Assert.Contains("while (drained < capacity && queue->head != NULL)", scalarQueue,
+            StringComparison.Ordinal);
+        Assert.Contains("jay_scalar_queue.c", nativeBuild, StringComparison.Ordinal);
+        Assert.DoesNotContain("g_event_count < JAY_EVENT_CAPACITY", native,
+            StringComparison.Ordinal);
         Assert.DoesNotContain("snapshot->text_count", native, StringComparison.Ordinal);
         Assert.DoesNotContain("snapshot->key_count", native, StringComparison.Ordinal);
         Assert.Contains("input.eventTypes[index] == 1", glfw, StringComparison.Ordinal);
@@ -1327,14 +1342,13 @@ public sealed class MobilePortTests
             StringComparison.Ordinal);
         Assert.Contains("while (drained < capacity && queue->head != NULL)", queue,
             StringComparison.Ordinal);
-        Assert.Contains("jay_jvm_host.c\" \"$source_dir/jay_menu_queue.c", nativeBuild,
-            StringComparison.Ordinal);
+        Assert.Contains("jay_menu_queue.c", nativeBuild, StringComparison.Ordinal);
         Assert.DoesNotContain("g_menu_event_count < JAY_MENU_EVENT_CAPACITY", native,
             StringComparison.Ordinal);
         Assert.Contains("for (uint32_t index = 0; index < input.menuEventCount; index++)", glfw,
             StringComparison.Ordinal);
         Assert.Contains(
-            "input.generation == window->null.jayInputGeneration && input.menuEventCount == 0",
+            "input.eventCount == 0 && input.menuEventCount == 0",
             glfw, StringComparison.Ordinal);
         Assert.Contains("input.menuEventTypes[index] == JAY_MENU_EVENT_POINTER", glfw,
             StringComparison.Ordinal);
