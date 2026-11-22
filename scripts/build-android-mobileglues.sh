@@ -9,7 +9,7 @@ fi
 ndk="$1"
 abi="$2"
 output="$3"
-source_commit="97558a69157b033b890958b1e49258c5b51a80c6"
+source_commit="0c27a3a8b3f51babd59fcca8ff59f28cbee1eecd"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
@@ -34,8 +34,14 @@ git -C "$work/source" submodule update --init --depth 1 \
 patch_file="$(cd "$(dirname "$0")/../third_party/android-mobileglues" && pwd)/jay-android.patch"
 git -C "$work/source" apply --check "$patch_file"
 git -C "$work/source" apply "$patch_file"
-git -C "$work/source" apply "$(dirname "$patch_file")/fragment-output-arrays.patch"
-git -C "$work/source" apply "$(dirname "$patch_file")/emulator-angle.patch"
+
+if [[ "${JAY_RUN_HOST_TESTS:-0}" == 1 ]]; then
+  "${CXX:-c++}" -std=c++17 -O2 \
+    "$work/source/MobileGlues-cpp/tests/fragment_output_indices_test.cpp" \
+    "$work/source/MobileGlues-cpp/gl/glsl/fragment_output_indices.cpp" \
+    -o "$work/fragment-output-indices-test"
+  "$work/fragment-output-indices-test"
+fi
 
 cmake -S "$work/source/MobileGlues-cpp" -B "$work/build" -G Ninja \
   -DCMAKE_TOOLCHAIN_FILE="$ndk/build/cmake/android.toolchain.cmake" \

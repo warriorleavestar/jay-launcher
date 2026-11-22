@@ -3,7 +3,7 @@ namespace Amber.Mobile;
 public enum TouchControlAction
 {
     Move, PrimaryAction, SecondaryAction, Jump, Inventory, Menu, Keyboard,
-    Sneak, Sprint, Drop, PreviousSlot, NextSlot, Settings, Close
+    Sneak, Sprint, Drop, PreviousSlot, NextSlot, PickBlock, Settings, Close
 }
 
 public enum TouchControlMode { JoystickAndTap, DPadAndTap, JoystickAndCrosshair, ExternalKeyboardMouse }
@@ -25,6 +25,9 @@ public sealed class TouchControlProfile
     public double LookSensitivity { get; set; } = 1.65;
     public bool ForcedSprint { get; set; } = true;
     public double ViewportAspectRatio { get; set; } = 16d / 9d;
+    public int ViewportWidthPixels { get; set; }
+    public int ViewportHeightPixels { get; set; }
+    public int MinecraftGuiScale { get; set; }
 
     public IReadOnlyList<TouchControlDefinition> Controls => TouchControlLayout.For(Mode)
         .Select(Apply).ToArray();
@@ -46,7 +49,7 @@ public sealed class TouchControlProfile
     public (double X, double Y) MovementVector(double x, double y)
     {
         var move = Controls.Single(control => control.Action == TouchControlAction.Move);
-        var vector = TouchControlLayout.MovementVector(move, x, y);
+        var vector = TouchControlLayout.MovementVector(move, x, y, ViewportAspectRatio);
         if (Mode != TouchControlMode.DPadAndTap) return vector;
         var length = Math.Sqrt(vector.X * vector.X + vector.Y * vector.Y);
         if (length < 0.20) return (0, 0);
@@ -58,14 +61,29 @@ public sealed class TouchControlProfile
     public void SetPosition(TouchControlAction action, double x, double y) =>
         SetPosition(Mode, action, x, y);
 
-    public void SetPosition(TouchControlMode mode, TouchControlAction action, double x, double y) =>
+    public void SetPosition(TouchControlMode mode, TouchControlAction action, double x, double y)
+    {
+        // Inventory is part of the Minecraft HUD, not a free-floating action button. Keeping a
+        // saved coordinate here detaches it from slot 9 whenever aspect ratio or scale changes.
+        if (action == TouchControlAction.Inventory)
+        {
+            _positions.Remove((mode, action));
+            return;
+        }
         _positions[(mode, action)] = (Math.Clamp(x, 0.04, 0.96), Math.Clamp(y, 0.04, 0.96));
+    }
 
     public bool TryGetPosition(TouchControlAction action, out (double X, double Y) position) =>
         TryGetPosition(Mode, action, out position);
 
     public bool TryGetPosition(TouchControlMode mode, TouchControlAction action,
-        out (double X, double Y) position) => _positions.TryGetValue((mode, action), out position);
+        out (double X, double Y) position)
+    {
+        if (action != TouchControlAction.Inventory)
+            return _positions.TryGetValue((mode, action), out position);
+        position = default;
+        return false;
+    }
 
     public void ResetPositions()
     {
@@ -75,16 +93,27 @@ public sealed class TouchControlProfile
     private TouchControlDefinition Apply(TouchControlDefinition control)
     {
         var radius = Math.Clamp(control.Radius * Scale, 0.018, 0.15);
-        var hasCustomPosition = _positions.TryGetValue((Mode, control.Action), out var position);
+        var position = default((double X, double Y));
+        var hasCustomPosition = control.Action != TouchControlAction.Inventory &&
+            _positions.TryGetValue((Mode, control.Action), out position);
         var positioned = hasCustomPosition
             ? control with { CenterX = position.X, CenterY = position.Y }
             : control;
-        if (!hasCustomPosition && control.Action == TouchControlAction.Inventory)
+        if (control.Action == TouchControlAction.Inventory)
         {
-            // The inventory key grows away from the hotbar. Using its scaled radius here keeps
-            // the left edge attached to slot 9 without letting the larger hit box steal slot taps.
-            var hud = TouchHudGeometry.ForAspectRatio(ViewportAspectRatio, radius);
-            positioned = control with { CenterX = hud.InventoryX, CenterY = hud.CenterY };
+            // Minecraft's automatic GUI scale can make the hotbar more than twice as wide as
+            // scale 3 on a tablet. Anchor to the live framebuffer/GUI scale rather than a fixed
+            // aspect-ratio estimate, and make this face exactly one Minecraft slot high.
+            var hud = ViewportWidthPixels > 0 && ViewportHeightPixels > 0 && MinecraftGuiScale > 0
+                ? TouchHudGeometry.ForViewport(
+                    ViewportWidthPixels, ViewportHeightPixels, MinecraftGuiScale, radius)
+                : TouchHudGeometry.ForAspectRatio(ViewportAspectRatio, radius);
+            return control with
+            {
+                CenterX = hud.InventoryX,
+                CenterY = hud.CenterY,
+                Radius = hud.InventoryRadius
+            };
         }
         return positioned with { Radius = radius };
     }
@@ -132,18 +161,23 @@ public static class TouchControlLayout
     public static (double X, double Y) JoystickVector(double x, double y) =>
         new TouchControlProfile().MovementVector(x, y);
 
-    internal static (double X, double Y) MovementVector(TouchControlDefinition move, double x, double y)
+    internal static (double X, double Y) MovementVector(TouchControlDefinition move, double x, double y,
+        double aspectRatio)
     {
-        var dx = (x - move.CenterX) / move.Radius;
+        // Controls are drawn with a pixel radius based on the viewport's short edge. Normalised
+        // X therefore covers aspectRatio times as many pixels as normalised Y in landscape.
+        // Measure both hit testing and joystick travel in the same square pixel space as the UI.
+        var dx = (x - move.CenterX) * Math.Clamp(aspectRatio, 1.2, 3.0) / move.Radius;
         var dy = (y - move.CenterY) / move.Radius;
         var length = Math.Sqrt(dx * dx + dy * dy);
         if (length > 1) { dx /= length; dy /= length; }
         return (dx, dy);
     }
 
-    internal static double Distance(TouchControlDefinition control, double x, double y)
+    internal static double Distance(TouchControlDefinition control, double x, double y,
+        double aspectRatio)
     {
-        var dx = x - control.CenterX;
+        var dx = (x - control.CenterX) * Math.Clamp(aspectRatio, 1.2, 3.0);
         var dy = y - control.CenterY;
         return Math.Sqrt(dx * dx + dy * dy);
     }
@@ -152,7 +186,7 @@ public static class TouchControlLayout
         double aspectRatio)
     {
         if (control.Action != TouchControlAction.Inventory)
-            return Distance(control, x, y) <= control.Radius;
+            return Distance(control, x, y, aspectRatio) <= control.Radius;
 
         // The inventory key is flush with the ninth hotbar slot. Match its rendered rectangular
         // face exactly so its larger circular accessibility target cannot steal taps from slot 9.
@@ -167,7 +201,7 @@ public static class TouchControlLayout
 /// <summary>Aspect-ratio aware geometry shared by Android rendering and hit testing.</summary>
 public readonly record struct TouchHudGeometry(
     double HotbarLeft, double HotbarRight, double HotbarTop, double HotbarBottom,
-    double CenterY, double InventoryX)
+    double CenterY, double InventoryX, double InventoryRadius)
 {
     public static TouchHudGeometry ForAspectRatio(double aspectRatio, double inventoryRadius = 0.024)
     {
@@ -183,7 +217,34 @@ public readonly record struct TouchHudGeometry(
         // high on 16:10 tablets. The slot centre is about 0.981 of the viewport height.
         var centerY = Math.Min(0.981, 1 - inventoryHalfHeight);
         return new(0.5 - halfWidth, 0.5 + halfWidth, 0.875, 1,
-            centerY, 0.5 + halfWidth + inventoryHalfWidthX);
+            centerY, 0.5 + halfWidth + inventoryHalfWidthX, inventoryRadius);
+    }
+
+    public static TouchHudGeometry ForViewport(int width, int height, int guiScale,
+        double fallbackInventoryRadius = 0.024)
+    {
+        if (width <= 0 || height <= 0 || guiScale <= 0)
+            return ForAspectRatio(width > 0 && height > 0 ? width / (double)height : 16d / 9d,
+                fallbackInventoryRadius);
+
+        // Java Edition's hotbar texture is 182x22 GUI pixels. Its nine selectable cells occupy
+        // the inner 180 pixels; the one-pixel texture border remains between slot 9 and Jay's
+        // attached inventory face. The face itself matches a 20x20 slot.
+        var scale = Math.Clamp(guiScale, 1, Math.Max(1, Math.Min(width / 182, height / 22)));
+        var hotbarHalfWidth = 90d * scale / width;
+        var textureHalfWidth = 91d * scale / width;
+        var inventoryHalfWidth = 10d * scale / width;
+        var inventoryHalfHeight = 10d * scale / height;
+        var radius = inventoryHalfHeight / 0.82;
+        var centerY = 1d - 11d * scale / height;
+        return new(
+            0.5 - hotbarHalfWidth,
+            0.5 + hotbarHalfWidth,
+            1d - 22d * scale / height,
+            1,
+            centerY,
+            0.5 + textureHalfWidth + inventoryHalfWidth,
+            radius);
     }
 
     public bool TryGetSlot(double x, double y, out int slot)

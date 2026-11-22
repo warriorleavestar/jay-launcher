@@ -2,9 +2,13 @@ package nz.work.minecraft.jay;
 
 import java.lang.reflect.*;
 import java.util.Arrays;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
-/** Deliver touchscreen menu gestures on the 26.3 client thread in scaled GUI coordinates. */
+/** Deliver touchscreen menu gestures on modern SDL Minecraft's client thread in scaled GUI coordinates. */
 public final class SdlMenuBootstrap {
     private static volatile Menu menu;
     private static boolean held;
@@ -54,8 +58,11 @@ public final class SdlMenuBootstrap {
             if (!container.isInstance(active)) return -1;
             Object hovered = findSlot.invoke(active, nx * width.getInt(active), ny * height.getInt(active));
             if (hovered == null) return -1;
+            int index = slotIndex.getInt(hovered);
+            if (index < 0 || index > 0x7ffffe) return -1;
             Object stack = slotItem.invoke(hovered);
-            return stack == null ? 0 : Math.max(0, (Integer)itemCount.invoke(stack));
+            int count = stack == null ? 0 : Math.max(0, (Integer)itemCount.invoke(stack));
+            return ((index + 1) << 8) | Math.min(255, count);
         }
 
         boolean split(Object game, float nx, float ny, int requested) throws ReflectiveOperationException {
@@ -65,9 +72,16 @@ public final class SdlMenuBootstrap {
             if (hovered == null) return false;
             Object stack = slotItem.invoke(hovered);
             int total = stack == null ? 0 : Math.max(0, (Integer)itemCount.invoke(stack));
+            int index = slotIndex.getInt(hovered);
+            if (requested < 0) {
+                // A preceding tap already carries the whole stack. Right-clicking the empty
+                // source slot returns one item at a time, leaving exactly half on the cursor.
+                for (int returned = 0; returned < -requested; returned++)
+                    slotClicked.invoke(active, hovered, index, 1, pickup);
+                return true;
+            }
             if (total == 0) return false;
             int selected = Math.max(1, Math.min(total, requested));
-            int index = slotIndex.getInt(hovered);
             slotClicked.invoke(active, hovered, index, 0, pickup);
             for (int remaining = total; remaining > selected; remaining--)
                 slotClicked.invoke(active, hovered, index, 1, pickup);
@@ -124,10 +138,34 @@ public final class SdlMenuBootstrap {
             if (menu == null) menu = new Menu();
             Menu input = menu;
             Object game = input.instance.invoke(null);
-            return game == null ? -1 : input.stackCount(game, x, y);
+            if (!(game instanceof Executor)) return -1;
+            FutureTask<Integer> query = new FutureTask<>(() -> {
+                try { return input.stackCount(game, x, y); }
+                catch (ReflectiveOperationException error) {
+                    System.err.println("Jay inventory query: " + error);
+                    return -1;
+                }
+            });
+            ((Executor)game).execute(query);
+            try {
+                return query.get(250, TimeUnit.MILLISECONDS);
+            } catch (InterruptedException interrupted) {
+                query.cancel(false);
+                Thread.currentThread().interrupt();
+                return -1;
+            } catch (ExecutionException | TimeoutException unavailable) {
+                query.cancel(false);
+                System.err.println("Jay inventory query: " + unavailable);
+                return -1;
+            }
         } catch (ReflectiveOperationException error) {
             return -1;
         }
+    }
+
+    /** Current Minecraft GUI scale, cached while transitioning from a menu into gameplay. */
+    public static int guiScale() {
+        return AndroidGameBootstrap.guiScale();
     }
 
     public static boolean dispatchInventorySplit(float x, float y, int count) {
@@ -146,7 +184,30 @@ public final class SdlMenuBootstrap {
         }
     }
 
-    public static boolean isBlockTarget() { return false; }
+    /** True only while ordinary gameplay is aiming at a block that can be mined. */
+    public static boolean isBlockTarget() {
+        try {
+            if (menu == null) menu = new Menu();
+            Menu input = menu;
+            Object game = input.instance.invoke(null);
+            if (game == null) return false;
+            Object active = input.current.invoke(input.guiField.get(game));
+            Object hit = input.hitResult.get(game);
+            return active == null && hit != null && input.blockHit.isInstance(hit);
+        } catch (ReflectiveOperationException | RuntimeException error) {
+            return false;
+        }
+    }
+
+    /** Keep the SDL/Java 25 menu path on the same editor-focus bridge as GLFW. */
+    public static int textInputFocusState() {
+        return AndroidGameBootstrap.textInputFocusState();
+    }
+
+    /** True only when this touch began over the focused Minecraft editor. */
+    public static boolean isTextInputAt(float x, float y) {
+        return AndroidGameBootstrap.isTextInputAt(x, y);
+    }
 
     // SDLActivity owns these event types. The native host probes one common bridge surface for
     // both GLFW and SDL, so explicit no-op methods avoid treating the intentional SDL routing as
@@ -158,6 +219,7 @@ public final class SdlMenuBootstrap {
     public static boolean dispatchLook(float x, float y) { return false; }
 
     public static void main(String[] args) throws Exception {
+        AndroidGameBootstrap.routeConsoleToLogcat();
         Class.forName(args[0]).getMethod("main", String[].class)
             .invoke(null, (Object)Arrays.copyOfRange(args, 1, args.length));
     }

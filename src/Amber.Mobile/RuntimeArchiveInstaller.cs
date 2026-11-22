@@ -45,13 +45,17 @@ public readonly record struct RuntimeInstallProgress(RuntimeInstallPhase Phase, 
 /// <summary>Downloads, bounds, extracts and atomically activates a self-contained Android JRE archive.</summary>
 public static class RuntimeArchiveInstaller
 {
+    private static readonly SemaphoreSlim InstallGate = new(1, 1);
+
     public static Task<RuntimeBundleManifest> InstallAsync(
         string destination,
         RuntimeArchiveDescriptor descriptor,
         Func<RuntimeArchiveDescriptor, CancellationToken, Task<Stream>> openArchive,
         IProgress<RuntimeInstallProgress>? progress = null,
-        CancellationToken ct = default) =>
-        InstallCoreAsync(destination, descriptor, openArchive, progress, ct, beforeExtractEntry: null);
+        CancellationToken ct = default,
+        bool reuseInstalled = false) =>
+        InstallCoreAsync(destination, descriptor, openArchive, progress, ct,
+            beforeExtractEntry: null, reuseInstalled: reuseInstalled);
 
     /// <param name="beforeExtractEntry">
     /// Test seam: runs on the extraction thread before each archive entry is written, so tests can
@@ -63,7 +67,8 @@ public static class RuntimeArchiveInstaller
         Func<RuntimeArchiveDescriptor, CancellationToken, Task<Stream>> openArchive,
         IProgress<RuntimeInstallProgress>? progress,
         CancellationToken ct,
-        Action? beforeExtractEntry)
+        Action? beforeExtractEntry,
+        bool reuseInstalled = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(destination);
         ArgumentNullException.ThrowIfNull(descriptor);
@@ -71,11 +76,35 @@ public static class RuntimeArchiveInstaller
         var errors = descriptor.Validate();
         if (errors.Count != 0) throw new InvalidDataException(string.Join(" ", errors));
 
+        await InstallGate.WaitAsync(ct);
+        try
+        {
+            return await InstallExclusiveAsync(destination, descriptor, openArchive, progress, ct,
+                beforeExtractEntry, reuseInstalled);
+        }
+        finally
+        {
+            InstallGate.Release();
+        }
+    }
+
+    private static async Task<RuntimeBundleManifest> InstallExclusiveAsync(
+        string destination,
+        RuntimeArchiveDescriptor descriptor,
+        Func<RuntimeArchiveDescriptor, CancellationToken, Task<Stream>> openArchive,
+        IProgress<RuntimeInstallProgress>? progress,
+        CancellationToken ct,
+        Action? beforeExtractEntry,
+        bool reuseInstalled)
+    {
         var target = Path.GetFullPath(destination);
         if (File.Exists(target)) throw new IOException("The runtime destination is a file.");
         var parent = Directory.GetParent(target)?.FullName
             ?? throw new InvalidDataException("The runtime destination has no parent directory.");
         Directory.CreateDirectory(parent);
+        RecoverInterruptedInstall(target, parent);
+        if (reuseInstalled && TryReuseInstalled(target, descriptor, out var installed))
+            return installed;
 
         var suffix = Guid.NewGuid().ToString("N");
         var staging = target + ".install-" + suffix;
@@ -110,6 +139,65 @@ public static class RuntimeArchiveInstaller
         {
             if (File.Exists(archivePath)) File.Delete(archivePath);
             if (Directory.Exists(staging)) Directory.Delete(staging, true);
+            if (Directory.Exists(backup))
+            {
+                if (!Directory.Exists(target)) Directory.Move(backup, target);
+                else Directory.Delete(backup, true);
+            }
+        }
+    }
+
+    private static void RecoverInterruptedInstall(string target, string parent)
+    {
+        var name = Path.GetFileName(target);
+        var installPrefix = name + ".install-";
+        var downloadPrefix = name + ".download-";
+        var backupPrefix = name + ".backup-";
+
+        foreach (var directory in Directory.EnumerateDirectories(parent)
+                     .Where(path => Path.GetFileName(path).StartsWith(installPrefix,
+                         StringComparison.Ordinal)))
+            Directory.Delete(directory, true);
+        foreach (var file in Directory.EnumerateFiles(parent)
+                     .Where(path => Path.GetFileName(path).StartsWith(downloadPrefix,
+                         StringComparison.Ordinal)))
+            File.Delete(file);
+
+        var backups = Directory.EnumerateDirectories(parent)
+            .Where(path => Path.GetFileName(path).StartsWith(backupPrefix,
+                StringComparison.Ordinal))
+            .OrderByDescending(Directory.GetLastWriteTimeUtc)
+            .ToArray();
+        var first = 0;
+        if (!Directory.Exists(target) && backups.Length > 0)
+        {
+            Directory.Move(backups[0], target);
+            first = 1;
+        }
+        for (var i = first; i < backups.Length; i++) Directory.Delete(backups[i], true);
+    }
+
+    private static bool TryReuseInstalled(
+        string target,
+        RuntimeArchiveDescriptor descriptor,
+        out RuntimeBundleManifest manifest)
+    {
+        manifest = null!;
+        var manifestPath = Path.Combine(target, "runtime-manifest.json");
+        if (!File.Exists(manifestPath)) return false;
+        try
+        {
+            var candidate = RuntimeBundleManifest.Read(manifestPath);
+            if (candidate.Id != descriptor.Id || candidate.Architecture != descriptor.Architecture ||
+                !RuntimeBundleVerifier.VerifyLayout(target, candidate, descriptor.Architecture))
+                return false;
+            manifest = candidate;
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+                                          System.Text.Json.JsonException or CryptographicException)
+        {
+            return false;
         }
     }
 
