@@ -91,7 +91,8 @@ internal static class AndroidRuntimeStore
                     return await response.Content.ReadAsStreamAsync(token);
                 },
                 progress,
-                ct);
+                ct,
+                reuseInstalled: true);
             MakeRuntimeCodeReadOnly(context, manifest, java25);
             return manifest;
         }

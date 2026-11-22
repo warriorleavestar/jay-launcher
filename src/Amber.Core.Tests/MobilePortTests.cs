@@ -2303,14 +2303,18 @@ public sealed class MobilePortTests
                 {
                     secondOpened.TrySetResult();
                     return Task.FromResult<Stream>(new MemoryStream(archive, writable: false));
-                });
+                },
+                reuseInstalled: true);
 
             await Task.Delay(100);
             Assert.False(secondOpened.Task.IsCompleted);
             release.Set();
-            await first.WaitAsync(TimeSpan.FromSeconds(60));
-            await second.WaitAsync(TimeSpan.FromSeconds(60));
-            Assert.True(secondOpened.Task.IsCompletedSuccessfully);
+            var firstManifest = await first.WaitAsync(TimeSpan.FromSeconds(60));
+            var secondManifest = await second.WaitAsync(TimeSpan.FromSeconds(60));
+            Assert.False(secondOpened.Task.IsCompleted);
+            Assert.Equal(firstManifest.Id, secondManifest.Id);
+            Assert.Equal(firstManifest.Files.Select(file => file.Path),
+                secondManifest.Files.Select(file => file.Path));
         }
         finally
         {

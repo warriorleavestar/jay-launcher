@@ -52,8 +52,10 @@ public static class RuntimeArchiveInstaller
         RuntimeArchiveDescriptor descriptor,
         Func<RuntimeArchiveDescriptor, CancellationToken, Task<Stream>> openArchive,
         IProgress<RuntimeInstallProgress>? progress = null,
-        CancellationToken ct = default) =>
-        InstallCoreAsync(destination, descriptor, openArchive, progress, ct, beforeExtractEntry: null);
+        CancellationToken ct = default,
+        bool reuseInstalled = false) =>
+        InstallCoreAsync(destination, descriptor, openArchive, progress, ct,
+            beforeExtractEntry: null, reuseInstalled: reuseInstalled);
 
     /// <param name="beforeExtractEntry">
     /// Test seam: runs on the extraction thread before each archive entry is written, so tests can
@@ -65,7 +67,8 @@ public static class RuntimeArchiveInstaller
         Func<RuntimeArchiveDescriptor, CancellationToken, Task<Stream>> openArchive,
         IProgress<RuntimeInstallProgress>? progress,
         CancellationToken ct,
-        Action? beforeExtractEntry)
+        Action? beforeExtractEntry,
+        bool reuseInstalled = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(destination);
         ArgumentNullException.ThrowIfNull(descriptor);
@@ -77,7 +80,7 @@ public static class RuntimeArchiveInstaller
         try
         {
             return await InstallExclusiveAsync(destination, descriptor, openArchive, progress, ct,
-                beforeExtractEntry);
+                beforeExtractEntry, reuseInstalled);
         }
         finally
         {
@@ -91,7 +94,8 @@ public static class RuntimeArchiveInstaller
         Func<RuntimeArchiveDescriptor, CancellationToken, Task<Stream>> openArchive,
         IProgress<RuntimeInstallProgress>? progress,
         CancellationToken ct,
-        Action? beforeExtractEntry)
+        Action? beforeExtractEntry,
+        bool reuseInstalled)
     {
         var target = Path.GetFullPath(destination);
         if (File.Exists(target)) throw new IOException("The runtime destination is a file.");
@@ -99,6 +103,8 @@ public static class RuntimeArchiveInstaller
             ?? throw new InvalidDataException("The runtime destination has no parent directory.");
         Directory.CreateDirectory(parent);
         RecoverInterruptedInstall(target, parent);
+        if (reuseInstalled && TryReuseInstalled(target, descriptor, out var installed))
+            return installed;
 
         var suffix = Guid.NewGuid().ToString("N");
         var staging = target + ".install-" + suffix;
@@ -169,6 +175,30 @@ public static class RuntimeArchiveInstaller
             first = 1;
         }
         for (var i = first; i < backups.Length; i++) Directory.Delete(backups[i], true);
+    }
+
+    private static bool TryReuseInstalled(
+        string target,
+        RuntimeArchiveDescriptor descriptor,
+        out RuntimeBundleManifest manifest)
+    {
+        manifest = null!;
+        var manifestPath = Path.Combine(target, "runtime-manifest.json");
+        if (!File.Exists(manifestPath)) return false;
+        try
+        {
+            var candidate = RuntimeBundleManifest.Read(manifestPath);
+            if (candidate.Id != descriptor.Id || candidate.Architecture != descriptor.Architecture ||
+                !RuntimeBundleVerifier.VerifyLayout(target, candidate, descriptor.Architecture))
+                return false;
+            manifest = candidate;
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+                                          System.Text.Json.JsonException or CryptographicException)
+        {
+            return false;
+        }
     }
 
     private static async Task WriteArchiveAsync(
