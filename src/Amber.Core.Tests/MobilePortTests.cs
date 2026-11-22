@@ -1717,6 +1717,23 @@ public sealed class MobilePortTests
     }
 
     [Fact]
+    public void AndroidMissingRuntimeCatalogIsNotReportedAsAnUnsupportedCpu()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var application = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "Application.cs"));
+        var store = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "AndroidRuntimeStore.cs"));
+
+        Assert.Contains("IsCurrentArchitectureSupported", store, StringComparison.Ordinal);
+        Assert.Contains("? \"mobile.runtime.catalog_missing\"", application,
+            StringComparison.Ordinal);
+        Assert.Contains(": \"mobile.runtime.unsupported\"", application,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AndroidInventoryAccessRunsOnTheMinecraftClientThread()
     {
         var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,

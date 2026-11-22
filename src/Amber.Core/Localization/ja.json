@@ -1790,6 +1790,7 @@
   "mobile.runtime.ready": "検証済み Java ランタイムをインストールしました。",
   "mobile.runtime.failed": "Java ランタイムをインストールできませんでした：{0}",
   "mobile.runtime.unsupported": "このデバイスの CPU アーキテクチャには対応していません。",
+  "mobile.runtime.catalog_missing": "このテストビルドには Java ランタイムのダウンロード情報が含まれていません。最新の Jay 正式版をインストールして再試行してください。",
   "mobile.runtime.invalid_release": "インストール済みの Android Java ランタイムに有効なバージョン情報がありません。ゲーム実行環境を再インストールしてください。",
   "mobile.runtime.too_old": "Minecraft {0} には Java {1} が必要ですが、現在の Android 実行環境は Java {2} です。Jay のゲーム実行環境を更新してから再試行してください。",
   "mobile.gateway.notification.channel": "Jay ゲートウェイ",

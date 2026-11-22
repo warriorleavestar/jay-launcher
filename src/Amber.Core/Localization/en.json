@@ -1821,6 +1821,7 @@
   "mobile.runtime.ready": "The verified Java runtime is installed.",
   "mobile.runtime.failed": "Could not install the Java runtime: {0}",
   "mobile.runtime.unsupported": "This device architecture is not supported.",
+  "mobile.runtime.catalog_missing": "This test build does not include Java runtime download metadata. Install the latest official Jay build and try again.",
   "mobile.runtime.invalid_release": "The installed Android Java runtime has no valid version information. Reinstall the game runtime.",
   "mobile.runtime.too_old": "Minecraft {0} requires Java {1}, but the installed Android runtime is Java {2}. Update Jay's game runtime and try again.",
   "mobile.gateway.notification.channel": "Jay gateway",

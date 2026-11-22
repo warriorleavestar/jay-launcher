@@ -45,7 +45,10 @@ public sealed class Application : AvaloniaAndroidApplication<Amber.App.App>
             if (!AndroidRuntimeStore.IsInstalled(this, java25))
             {
                 var descriptor = AndroidRuntimeStore.Descriptor(this, java25)
-                    ?? throw new InvalidOperationException(L.T("mobile.runtime.unsupported"));
+                    ?? throw new InvalidOperationException(L.T(
+                        AndroidRuntimeStore.IsCurrentArchitectureSupported
+                            ? "mobile.runtime.catalog_missing"
+                            : "mobile.runtime.unsupported"));
                 await AndroidRuntimeStore.InstallAsync(this, descriptor, java25, new Progress<RuntimeInstallProgress>(value =>
                 {
                     var fraction = value.Total <= 0 ? null : (double?)value.Completed / value.Total;

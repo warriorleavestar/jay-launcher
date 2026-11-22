@@ -16,6 +16,9 @@ internal static class AndroidRuntimeStore
     private const string ManifestName = "runtime-manifest.json";
     private static readonly HttpClient RuntimeClient = CreateRuntimeClient();
 
+    public static bool IsCurrentArchitectureSupported =>
+        CurrentArchitecture() is "arm64-v8a" or "x86_64";
+
     public static string Root(Context context, bool java25 = false) =>
         Path.Combine(context.FilesDir!.AbsolutePath, java25 ? "game-runtime-25" : "game-runtime");
 
