@@ -1257,6 +1257,20 @@ public sealed class MobilePortTests
     }
 
     [Fact]
+    public void HardwareTextInputGateSuppressesRapidPhysicalKeyEchoesInOrder()
+    {
+        var gate = new HardwareTextInputGate();
+
+        Assert.True(gate.AcceptHardwareCodePoint(29, 'a', 8_000, 9_000, 0));
+        Assert.True(gate.AcceptHardwareCodePoint(30, 'b', 8_010, 9_010, 0));
+
+        Assert.False(gate.AcceptCommittedCodePoint('a', 9_020));
+        Assert.False(gate.AcceptCommittedCodePoint('b', 9_021));
+        Assert.True(gate.AcceptCommittedCodePoint('a', 9_022));
+        Assert.True(gate.AcceptCommittedCodePoint('b', 9_023));
+    }
+
+    [Fact]
     public void HardwareTextInputGateConsumesPendingEchoAcrossMultiCharacterCommit()
     {
         var gate = new HardwareTextInputGate();

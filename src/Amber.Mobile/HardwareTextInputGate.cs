@@ -8,13 +8,12 @@ namespace Amber.Mobile;
 internal sealed class HardwareTextInputGate
 {
     private const long ImeCommitSuppressionWindowMs = 500;
+    private const int MaxPendingHardwareEchoes = 32;
     private bool _hasLast;
     private int _lastKeyCode;
     private long _lastDownTime;
     private int _lastRepeatCount;
-    private bool _hasPendingCommittedDuplicate;
-    private int _lastHardwareCodePoint;
-    private long _lastHardwareDeliveredAt;
+    private readonly Queue<PendingHardwareEcho> _pendingHardwareEchoes = new();
 
     public bool Accept(int keyCode, long downTime, int repeatCount)
     {
@@ -34,26 +33,39 @@ internal sealed class HardwareTextInputGate
         long deliveredAt, int repeatCount)
     {
         if (!Accept(keyCode, downTime, repeatCount)) return false;
-        _hasPendingCommittedDuplicate = true;
-        _lastHardwareCodePoint = codePoint;
-        _lastHardwareDeliveredAt = deliveredAt;
+        RemoveExpiredEchoes(deliveredAt);
+        if (_pendingHardwareEchoes.Count >= MaxPendingHardwareEchoes)
+            _pendingHardwareEchoes.Dequeue();
+        _pendingHardwareEchoes.Enqueue(new(codePoint, deliveredAt));
         return true;
     }
 
     public bool AcceptCommittedCodePoint(int codePoint, long deliveredAt)
     {
-        var hardwareDuplicate = _hasPendingCommittedDuplicate &&
-                                _lastHardwareCodePoint == codePoint &&
-                                deliveredAt >= _lastHardwareDeliveredAt &&
-                                deliveredAt - _lastHardwareDeliveredAt <= ImeCommitSuppressionWindowMs;
-        // A physical key may be echoed once through CommitText by a recreated input
-        // connection. Consume only that one correlated echo. Keeping the pending marker set
-        // would also discard a legitimate second copy of the same character (for example the
-        // two 'o' characters in "book").
-        _hasPendingCommittedDuplicate = false;
-        return !hardwareDuplicate;
+        RemoveExpiredEchoes(deliveredAt);
+        if (_pendingHardwareEchoes.TryPeek(out var pending) &&
+            deliveredAt >= pending.DeliveredAt && pending.CodePoint == codePoint)
+        {
+            _pendingHardwareEchoes.Dequeue();
+            return false;
+        }
+
+        // CommitText preserves event order. A non-matching character means this is an
+        // independent IME commit rather than the queued hardware echo, so abandon the stale
+        // correlation instead of suppressing a legitimate matching character later.
+        _pendingHardwareEchoes.Clear();
+        return true;
     }
 
+    private void RemoveExpiredEchoes(long deliveredAt)
+    {
+        while (_pendingHardwareEchoes.TryPeek(out var pending) &&
+               (deliveredAt < pending.DeliveredAt ||
+                deliveredAt - pending.DeliveredAt > ImeCommitSuppressionWindowMs))
+            _pendingHardwareEchoes.Dequeue();
+    }
+
+    private readonly record struct PendingHardwareEcho(int CodePoint, long DeliveredAt);
 }
 
 /// <summary>Normalizes Android IME deletion requests without inventing a backspace for a no-op.</summary>
