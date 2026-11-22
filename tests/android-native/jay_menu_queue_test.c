@@ -13,6 +13,13 @@ static void assert_float(float actual, float expected) {
     assert(difference < 0.0001f);
 }
 
+static int glfw_should_process(
+    uint64_t generation,
+    uint64_t previous_generation,
+    uint32_t menu_event_count) {
+    return generation != previous_generation || menu_event_count > 0;
+}
+
 int main(void) {
     jay_menu_queue queue = {0};
 
@@ -51,6 +58,9 @@ int main(void) {
     assert_float(ys[0], 0.8f);
     assert(values[0] == 33);
     assert(jay_menu_queue_count(&queue) == 0);
+    /* The next snapshot keeps the enqueue generation but must still reach GLFW. */
+    assert(glfw_should_process(33, 33, second));
+    assert(!glfw_should_process(33, 33, 0));
 
     jay_menu_queue_clear(&queue);
     return 0;

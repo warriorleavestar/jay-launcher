@@ -1333,6 +1333,9 @@ public sealed class MobilePortTests
             StringComparison.Ordinal);
         Assert.Contains("for (uint32_t index = 0; index < input.menuEventCount; index++)", glfw,
             StringComparison.Ordinal);
+        Assert.Contains(
+            "input.generation == window->null.jayInputGeneration && input.menuEventCount == 0",
+            glfw, StringComparison.Ordinal);
         Assert.Contains("input.menuEventTypes[index] == JAY_MENU_EVENT_POINTER", glfw,
             StringComparison.Ordinal);
         Assert.Contains("input.menuEventTypes[index] == JAY_MENU_EVENT_SPLIT", glfw,
