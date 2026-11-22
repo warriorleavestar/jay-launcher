@@ -1825,12 +1825,22 @@ public sealed class MobilePortTests
             "..", "..", "..", "..", ".."));
         var activity = File.ReadAllText(Path.Combine(repository, "src", "Amber.Android", "Sdl",
             "JaySdlActivity.java"));
-        var back = JavaMethod(activity, "@Override public void onBackPressed", "super.onBackPressed();");
+        var back = JavaMethod(activity, "private void handleSystemBack", "super.onBackPressed();");
 
         Assert.Contains("mSDLThread != null", back, StringComparison.Ordinal);
         Assert.Contains("!mSDLMainFinished", back, StringComparison.Ordinal);
         Assert.Contains("onNativeKeyDown(KeyEvent.KEYCODE_ESCAPE)", back, StringComparison.Ordinal);
         Assert.Contains("onNativeKeyUp(KeyEvent.KEYCODE_ESCAPE)", back, StringComparison.Ordinal);
+        Assert.Contains("Build.VERSION.SDK_INT >= 33", activity, StringComparison.Ordinal);
+        Assert.Contains("Api33BackHandler.register(this)", activity, StringComparison.Ordinal);
+        Assert.Contains("Api33BackHandler.unregister(this, jayBackInvokedCallback)", activity,
+            StringComparison.Ordinal);
+        Assert.Contains("OnBackInvokedDispatcher.PRIORITY_DEFAULT", activity,
+            StringComparison.Ordinal);
+        Assert.Contains("public void onBackInvoked()", activity, StringComparison.Ordinal);
+        Assert.Contains("activity.handleSystemBack()", activity, StringComparison.Ordinal);
+        Assert.Contains("@Override public void onBackPressed()", activity, StringComparison.Ordinal);
+        Assert.Contains("handleSystemBack();", activity, StringComparison.Ordinal);
     }
 
     [Fact]
