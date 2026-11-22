@@ -1319,9 +1319,9 @@ public sealed class MobilePortTests
             "third_party", "android-glfw", "jay-android.patch"));
 
         Assert.Contains("JAY_MENU_EVENT_CAPACITY 32", native, StringComparison.Ordinal);
-        Assert.Contains("jay_menu_queue_push(\n            &g_menu_events, JAY_MENU_EVENT_POINTER", native,
+        Assert.Contains("JAY_MENU_EVENT_POINTER, x, y, 1", native,
             StringComparison.Ordinal);
-        Assert.Contains("jay_menu_queue_push(\n            &g_menu_events, JAY_MENU_EVENT_SPLIT", native,
+        Assert.Contains("JAY_MENU_EVENT_SPLIT, x, y, count", native,
             StringComparison.Ordinal);
         Assert.Contains("snapshot->menu_event_count = jay_menu_queue_drain(", native,
             StringComparison.Ordinal);
