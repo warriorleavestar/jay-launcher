@@ -10,11 +10,14 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define JAY_JVM_ABI_VERSION 19
+#define JAY_JVM_ABI_VERSION 20
 #define JAY_ACTION_COUNT 13
 #define JAY_EVENT_CAPACITY 80
+#define JAY_MENU_EVENT_CAPACITY 32
 #define JAY_EVENT_CHAR 1
 #define JAY_EVENT_KEY 2
+#define JAY_MENU_EVENT_POINTER 1
+#define JAY_MENU_EVENT_SPLIT 2
 
 typedef jint (*jay_create_jvm_fn)(JavaVM **, void **, void *);
 
@@ -25,17 +28,17 @@ typedef struct {
     float look_y;
     float pointer_x;
     float pointer_y;
-    uint32_t pointer_clicks;
     uint32_t actions;
     uint32_t action_taps;
     uint32_t event_count;
     uint32_t event_types[JAY_EVENT_CAPACITY];
     int32_t event_values[JAY_EVENT_CAPACITY];
+    uint32_t menu_event_count;
+    uint32_t menu_event_types[JAY_MENU_EVENT_CAPACITY];
+    float menu_event_x[JAY_MENU_EVENT_CAPACITY];
+    float menu_event_y[JAY_MENU_EVENT_CAPACITY];
+    int32_t menu_event_values[JAY_MENU_EVENT_CAPACITY];
     uint64_t pointer_generation;
-    float inventory_split_x;
-    float inventory_split_y;
-    int32_t inventory_split_count;
-    uint64_t inventory_split_generation;
     uint64_t generation;
 } jay_input_snapshot;
 
@@ -67,21 +70,21 @@ static _Atomic float g_look_x;
 static _Atomic float g_look_y;
 static _Atomic float g_pointer_x;
 static _Atomic float g_pointer_y;
-static _Atomic uint32_t g_pointer_clicks;
 static _Atomic uint64_t g_pointer_generation;
 static _Atomic uint32_t g_actions;
 static _Atomic uint32_t g_action_taps;
 static _Atomic int g_gameplay_mode;
 static _Atomic int g_block_target;
-static _Atomic float g_inventory_split_x;
-static _Atomic float g_inventory_split_y;
-static _Atomic int g_inventory_split_count;
-static _Atomic uint64_t g_inventory_split_generation;
 static _Atomic uint64_t g_generation;
 static pthread_mutex_t g_event_mutex = PTHREAD_MUTEX_INITIALIZER;
 static uint32_t g_event_types[JAY_EVENT_CAPACITY];
 static int32_t g_event_values[JAY_EVENT_CAPACITY];
 static uint32_t g_event_count;
+static uint32_t g_menu_event_types[JAY_MENU_EVENT_CAPACITY];
+static float g_menu_event_x[JAY_MENU_EVENT_CAPACITY];
+static float g_menu_event_y[JAY_MENU_EVENT_CAPACITY];
+static int32_t g_menu_event_values[JAY_MENU_EVENT_CAPACITY];
+static uint32_t g_menu_event_count;
 
 static int jay_query_gameplay_mode(void);
 static void jay_refresh_block_target(void);
@@ -589,7 +592,12 @@ void jay_input_set_pointer(float x, float y, int click) {
     pthread_mutex_lock(&g_event_mutex);
     atomic_store(&g_pointer_x, x);
     atomic_store(&g_pointer_y, y);
-    if (click) atomic_fetch_add(&g_pointer_clicks, 1);
+    if (click && g_menu_event_count < JAY_MENU_EVENT_CAPACITY) {
+        g_menu_event_types[g_menu_event_count] = JAY_MENU_EVENT_POINTER;
+        g_menu_event_x[g_menu_event_count] = x;
+        g_menu_event_y[g_menu_event_count] = y;
+        g_menu_event_values[g_menu_event_count++] = 1;
+    }
     atomic_fetch_add(&g_pointer_generation, 1);
     atomic_fetch_add(&g_generation, 1);
     pthread_mutex_unlock(&g_event_mutex);
@@ -598,11 +606,19 @@ void jay_input_set_pointer(float x, float y, int click) {
 __attribute__((visibility("default")))
 void jay_input_split_inventory(float x, float y, int count) {
     if (count == 0) return;
-    atomic_store(&g_inventory_split_x, x);
-    atomic_store(&g_inventory_split_y, y);
-    atomic_store(&g_inventory_split_count, count);
-    atomic_fetch_add(&g_inventory_split_generation, 1);
+    if (x < 0.f) x = 0.f;
+    if (x > 1.f) x = 1.f;
+    if (y < 0.f) y = 0.f;
+    if (y > 1.f) y = 1.f;
+    pthread_mutex_lock(&g_event_mutex);
+    if (g_menu_event_count < JAY_MENU_EVENT_CAPACITY) {
+        g_menu_event_types[g_menu_event_count] = JAY_MENU_EVENT_SPLIT;
+        g_menu_event_x[g_menu_event_count] = x;
+        g_menu_event_y[g_menu_event_count] = y;
+        g_menu_event_values[g_menu_event_count++] = count;
+    }
     atomic_fetch_add(&g_generation, 1);
+    pthread_mutex_unlock(&g_event_mutex);
 }
 
 __attribute__((visibility("default")))
@@ -641,7 +657,6 @@ void jay_input_read(jay_input_snapshot *snapshot) {
     pthread_mutex_lock(&g_event_mutex);
     snapshot->pointer_x = atomic_load(&g_pointer_x);
     snapshot->pointer_y = atomic_load(&g_pointer_y);
-    snapshot->pointer_clicks = atomic_exchange(&g_pointer_clicks, 0);
     snapshot->actions = atomic_load(&g_actions);
     snapshot->action_taps = atomic_exchange(&g_action_taps, 0);
     snapshot->event_count = g_event_count;
@@ -650,11 +665,15 @@ void jay_input_read(jay_input_snapshot *snapshot) {
         snapshot->event_values[i] = g_event_values[i];
     }
     g_event_count = 0;
+    snapshot->menu_event_count = g_menu_event_count;
+    for (uint32_t i = 0; i < g_menu_event_count; i++) {
+        snapshot->menu_event_types[i] = g_menu_event_types[i];
+        snapshot->menu_event_x[i] = g_menu_event_x[i];
+        snapshot->menu_event_y[i] = g_menu_event_y[i];
+        snapshot->menu_event_values[i] = g_menu_event_values[i];
+    }
+    g_menu_event_count = 0;
     snapshot->pointer_generation = atomic_load(&g_pointer_generation);
-    snapshot->inventory_split_x = atomic_load(&g_inventory_split_x);
-    snapshot->inventory_split_y = atomic_load(&g_inventory_split_y);
-    snapshot->inventory_split_count = atomic_load(&g_inventory_split_count);
-    snapshot->inventory_split_generation = atomic_load(&g_inventory_split_generation);
     snapshot->generation = atomic_load(&g_generation);
     pthread_mutex_unlock(&g_event_mutex);
 }

@@ -1305,19 +1305,28 @@ public sealed class MobilePortTests
     }
 
     [Fact]
-    public void AndroidGlfwConsumesFirstTapBeforeQueuedDoubleTapSplit()
+    public void AndroidGlfwQueuesPointerAndSplitEventsInOriginalOrder()
     {
         var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", ".."));
+        var native = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android.Native", "jay_jvm_host.c"));
         var glfw = File.ReadAllText(Path.Combine(repository,
             "third_party", "android-glfw", "jay-android.patch"));
-        var pointer = glfw.IndexOf("input.pointerGeneration != window->null.jayPointerGeneration",
-            StringComparison.Ordinal);
-        var split = glfw.IndexOf("hasInventorySplit && input.inventorySplitCount < 0",
-            StringComparison.Ordinal);
 
-        Assert.True(pointer >= 0);
-        Assert.True(split > pointer);
+        Assert.Contains("JAY_MENU_EVENT_CAPACITY 32", native, StringComparison.Ordinal);
+        Assert.Contains("g_menu_event_types[g_menu_event_count] = JAY_MENU_EVENT_POINTER", native,
+            StringComparison.Ordinal);
+        Assert.Contains("g_menu_event_types[g_menu_event_count] = JAY_MENU_EVENT_SPLIT", native,
+            StringComparison.Ordinal);
+        Assert.Contains("for (uint32_t index = 0; index < input.menuEventCount; index++)", glfw,
+            StringComparison.Ordinal);
+        Assert.Contains("input.menuEventTypes[index] == JAY_MENU_EVENT_POINTER", glfw,
+            StringComparison.Ordinal);
+        Assert.Contains("input.menuEventTypes[index] == JAY_MENU_EVENT_SPLIT", glfw,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("inventorySplitGeneration", glfw, StringComparison.Ordinal);
+        Assert.DoesNotContain("pointerClicks", glfw, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1678,20 +1687,17 @@ public sealed class MobilePortTests
     }
 
     [Fact]
-    public void GlfwInventorySnapshotPreservesDragAndDoubleTapOperationOrder()
+    public void AndroidNativeAndManagedJvmAbiVersionsMatchTheQueuedInputLayout()
     {
         var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", ".."));
-        var patch = File.ReadAllText(Path.Combine(repository, "third_party", "android-glfw",
-            "jay-android.patch"));
-        var positive = patch.IndexOf("hasInventorySplit && input.inventorySplitCount >= 0",
-            StringComparison.Ordinal);
-        var pointer = patch.IndexOf("if (window->cursorMode == GLFW_CURSOR_DISABLED",
-            StringComparison.Ordinal);
-        var negative = patch.IndexOf("hasInventorySplit && input.inventorySplitCount < 0",
-            StringComparison.Ordinal);
+        var native = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android.Native", "jay_jvm_host.c"));
+        var managed = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "NativeJvmHost.cs"));
 
-        Assert.True(positive >= 0 && pointer > positive && negative > pointer);
+        Assert.Contains("#define JAY_JVM_ABI_VERSION 20", native, StringComparison.Ordinal);
+        Assert.Contains("ExpectedAbiVersion = 20", managed, StringComparison.Ordinal);
     }
 
     [Fact]
