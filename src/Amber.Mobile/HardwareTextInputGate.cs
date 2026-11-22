@@ -50,9 +50,22 @@ internal sealed class HardwareTextInputGate
             return false;
         }
 
-        // CommitText preserves event order. A non-matching character means this is an
-        // independent IME commit rather than the queued hardware echo, so abandon the stale
-        // correlation instead of suppressing a legitimate matching character later.
+        // A key is allowed to have no CommitText echo. If the newest hardware character is
+        // echoed, discard the older unechoed candidates and consume that newest correlation.
+        // Do not search arbitrary middle entries by character: only strict FIFO order or the
+        // latest event can establish which physical key this otherwise anonymous commit follows.
+        if (_pendingHardwareEchoes.Count > 1)
+        {
+            var newest = _pendingHardwareEchoes.Last();
+            if (deliveredAt >= newest.DeliveredAt && newest.CodePoint == codePoint)
+            {
+                _pendingHardwareEchoes.Clear();
+                return false;
+            }
+        }
+
+        // A commit matching neither the ordered head nor the newest event is independent IME
+        // input, so abandon stale correlations instead of suppressing a matching character later.
         _pendingHardwareEchoes.Clear();
         return true;
     }

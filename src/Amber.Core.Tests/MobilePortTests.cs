@@ -1271,6 +1271,32 @@ public sealed class MobilePortTests
     }
 
     [Fact]
+    public void HardwareTextInputGateAllowsMissingEarlierEchoBeforeLatestEcho()
+    {
+        var gate = new HardwareTextInputGate();
+
+        Assert.True(gate.AcceptHardwareCodePoint(29, 'a', 10_000, 11_000, 0));
+        Assert.True(gate.AcceptHardwareCodePoint(30, 'b', 10_010, 11_010, 0));
+
+        Assert.False(gate.AcceptCommittedCodePoint('b', 11_020));
+        Assert.True(gate.AcceptCommittedCodePoint('a', 11_021));
+        Assert.True(gate.AcceptCommittedCodePoint('b', 11_022));
+    }
+
+    [Fact]
+    public void HardwareTextInputGateDoesNotMatchAnArbitraryMiddleCandidate()
+    {
+        var gate = new HardwareTextInputGate();
+
+        Assert.True(gate.AcceptHardwareCodePoint(29, 'a', 12_000, 13_000, 0));
+        Assert.True(gate.AcceptHardwareCodePoint(30, 'b', 12_010, 13_010, 0));
+        Assert.True(gate.AcceptHardwareCodePoint(31, 'c', 12_020, 13_020, 0));
+
+        Assert.True(gate.AcceptCommittedCodePoint('b', 13_030));
+        Assert.True(gate.AcceptCommittedCodePoint('c', 13_031));
+    }
+
+    [Fact]
     public void HardwareTextInputGateConsumesPendingEchoAcrossMultiCharacterCommit()
     {
         var gate = new HardwareTextInputGate();
