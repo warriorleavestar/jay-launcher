@@ -7,6 +7,7 @@ using Android.Text;
 using Android.Views;
 using Android.Views.InputMethods;
 using Android.Widget;
+using Android.Window;
 using Amber.Mobile;
 
 namespace Amber.Android;
@@ -33,11 +34,13 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
     private readonly object _surfaceSync = new();
     private TaskCompletionSource _surfaceReady = NewSurfaceReadySource();
     private bool _surfaceAvailable;
+    private IOnBackInvokedCallback? _backInvokedCallback;
 
     protected override void OnCreate(Bundle? savedInstanceState)
     {
         base.OnCreate(savedInstanceState);
         Window?.AddFlags(WindowManagerFlags.Fullscreen | WindowManagerFlags.KeepScreenOn);
+        RegisterBackInvokedCallback();
 
         var root = new FrameLayout(this);
         var surface = new SurfaceView(this);
@@ -72,7 +75,7 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
         if (e?.KeyCode == Keycode.Back && _touchOverlay?.Visibility == ViewStates.Visible)
         {
             if (e.Action == KeyEventActions.Down && e.RepeatCount == 0)
-                _touchOverlay.HandleSystemBack();
+                HandleActivityBack();
             return true;
         }
 
@@ -112,8 +115,44 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
 #pragma warning restore CS0618
     }
 
+    private void RegisterBackInvokedCallback()
+    {
+        if (Build.VERSION.SdkInt < BuildVersionCodes.Tiramisu) return;
+#pragma warning disable CA1416
+        _backInvokedCallback = new GameBackInvokedCallback(this);
+        OnBackInvokedDispatcher.RegisterOnBackInvokedCallback(
+            IOnBackInvokedDispatcher.PriorityDefault, _backInvokedCallback);
+#pragma warning restore CA1416
+    }
+
+    private void HandleActivityBack()
+    {
+        if (_touchOverlay?.Visibility == ViewStates.Visible)
+        {
+            _touchOverlay.HandleSystemBack();
+            return;
+        }
+
+        // Before the embedded game owns the screen, preserve Android's normal Back behavior.
+        Finish();
+    }
+
+    private void UnregisterBackInvokedCallback()
+    {
+        if (_backInvokedCallback is not { } callback) return;
+        if (Build.VERSION.SdkInt >= BuildVersionCodes.Tiramisu)
+        {
+#pragma warning disable CA1416
+            OnBackInvokedDispatcher.UnregisterOnBackInvokedCallback(callback);
+#pragma warning restore CA1416
+        }
+        callback.Dispose();
+        _backInvokedCallback = null;
+    }
+
     protected override void OnDestroy()
     {
+        UnregisterBackInvokedCallback();
         _touchOverlay?.CancelAllInput();
         _gameSetup?.Cancel();
         _gameSetup?.Dispose();
@@ -124,6 +163,21 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
         // process alive makes the cold-start retry (and every later launch) fail with JNI_EEXIST.
         // The launcher runs in the package's main process, so terminating this one is isolated.
         global::Android.OS.Process.KillProcess(global::Android.OS.Process.MyPid());
+    }
+
+    private sealed class GameBackInvokedCallback : Java.Lang.Object, IOnBackInvokedCallback
+    {
+        private readonly WeakReference<GameActivity> _activity;
+
+        public GameBackInvokedCallback(GameActivity activity)
+        {
+            _activity = new WeakReference<GameActivity>(activity);
+        }
+
+        public void OnBackInvoked()
+        {
+            if (_activity.TryGetTarget(out var activity)) activity.HandleActivityBack();
+        }
     }
 
     protected override void OnPause()

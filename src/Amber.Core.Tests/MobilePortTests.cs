@@ -1834,6 +1834,28 @@ public sealed class MobilePortTests
     }
 
     [Fact]
+    public void GlfwAndroidPredictiveBackUsesMinecraftEscapeWhileTheGameIsRunning()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var activity = File.ReadAllText(Path.Combine(repository, "src", "Amber.Android",
+            "GameActivity.cs"));
+        var manifest = File.ReadAllText(Path.Combine(repository, "src", "Amber.Android",
+            "Properties", "AndroidManifest.xml"));
+
+        Assert.Contains("BuildVersionCodes.Tiramisu", activity, StringComparison.Ordinal);
+        Assert.Contains("RegisterOnBackInvokedCallback", activity, StringComparison.Ordinal);
+        Assert.Contains("UnregisterOnBackInvokedCallback", activity, StringComparison.Ordinal);
+        Assert.Contains("IOnBackInvokedDispatcher.PriorityDefault", activity,
+            StringComparison.Ordinal);
+        Assert.Contains("public void OnBackInvoked()", activity, StringComparison.Ordinal);
+        Assert.Contains("activity.HandleActivityBack()", activity, StringComparison.Ordinal);
+        Assert.Contains("_touchOverlay.HandleSystemBack()", activity, StringComparison.Ordinal);
+        Assert.Contains("android:enableOnBackInvokedCallback=\"true\"", manifest,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void SdlGameWindowResizesForTheSoftKeyboard()
     {
         var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
