@@ -1313,7 +1313,7 @@ public sealed class MobilePortTests
             "third_party", "android-glfw", "jay-android.patch"));
         var pointer = glfw.IndexOf("input.pointerGeneration != window->null.jayPointerGeneration",
             StringComparison.Ordinal);
-        var split = glfw.IndexOf("input.inventorySplitGeneration != jayInventorySplitGeneration",
+        var split = glfw.IndexOf("hasInventorySplit && input.inventorySplitCount < 0",
             StringComparison.Ordinal);
 
         Assert.True(pointer >= 0);
