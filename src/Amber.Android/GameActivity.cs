@@ -1388,10 +1388,13 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
 
         if (e.ActionMasked == MotionEventActions.Scroll)
         {
-            if (!GameplayActive) return false;
             var scroll = e.GetAxisValue(Axis.Vscroll);
             if (Math.Abs(scroll) > 0.01f)
             {
+                // The overlay owns the embedded Minecraft window, so Android's base View
+                // cannot forward a wheel event that arrives while an inventory, recipe book
+                // or settings screen is open. Route it through the same GLFW/SDL scroll bridge
+                // in menus as in gameplay; Minecraft decides whether the current screen uses it.
                 var action = scroll > 0 ? TouchControlAction.PreviousSlot : TouchControlAction.NextSlot;
                 DispatchAction(action, true);
                 DispatchAction(action, false);

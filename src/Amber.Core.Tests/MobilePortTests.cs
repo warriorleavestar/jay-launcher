@@ -1953,6 +1953,29 @@ public sealed class MobilePortTests
     }
 
     [Fact]
+    public void ExternalMouseWheelReachesMinecraftMenusAsWellAsGameplay()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var overlay = File.ReadAllText(Path.Combine(repository, "src", "Amber.Android",
+            "GameActivity.cs"));
+        var hardwareMotion = JavaMethod(overlay, "public bool HandleHardwareMotion",
+            "private static bool IsHardwarePointer");
+        var scrollStart = hardwareMotion.IndexOf(
+            "if (e.ActionMasked == MotionEventActions.Scroll)", StringComparison.Ordinal);
+        var scrollEnd = hardwareMotion.IndexOf(
+            "if (e.ActionMasked is MotionEventActions.ButtonPress", scrollStart,
+            StringComparison.Ordinal);
+
+        Assert.True(scrollStart >= 0 && scrollEnd > scrollStart);
+        var scrollRoute = hardwareMotion[scrollStart..scrollEnd];
+        Assert.DoesNotContain("if (!GameplayActive) return false;", scrollRoute,
+            StringComparison.Ordinal);
+        Assert.Contains("DispatchAction(action, true);", scrollRoute, StringComparison.Ordinal);
+        Assert.Contains("DispatchAction(action, false);", scrollRoute, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AndroidInventoryBridgesPreserveTheCarriedStackReturnOperation()
     {
         var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
