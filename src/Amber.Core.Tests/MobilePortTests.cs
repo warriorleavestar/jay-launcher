@@ -1364,15 +1364,33 @@ public sealed class MobilePortTests
     }
 
     [Theory]
-    [InlineData(true, true, true)]
-    [InlineData(true, false, false)]
-    [InlineData(false, true, false)]
-    [InlineData(false, false, false)]
-    public void SoftKeyboardOnlyOpensAfterTouchingTheFocusedEditor(
-        bool textInputActive, bool touchedFocusedEditor, bool expected)
+    [InlineData(true, true, false, true)]
+    [InlineData(true, false, true, true)]
+    [InlineData(true, false, false, false)]
+    [InlineData(false, true, true, false)]
+    public void SoftKeyboardOnlyOpensAfterTouchingAnEditorBeforeOrAfterTheClick(
+        bool textInputActive, bool touchedFocusedEditor, bool focusedAfterClick, bool expected)
     {
         Assert.Equal(expected,
-            SoftKeyboardInputPolicy.ShouldOpenAfterTouch(textInputActive, touchedFocusedEditor));
+            SoftKeyboardInputPolicy.ShouldOpenAfterTouch(
+                textInputActive, touchedFocusedEditor, focusedAfterClick));
+    }
+
+    [Fact]
+    public void FinishingAndroidCompositionCommitsItExactlyOnce()
+    {
+        var composition = new AndroidCompositionBuffer();
+        composition.Set("你");
+
+        Assert.Equal("你", composition.Take());
+        Assert.Empty(composition.Take());
+
+        composition.Set("old");
+        composition.Set("new");
+        Assert.Equal("new", composition.Take());
+        composition.Set("discarded");
+        composition.Clear();
+        Assert.Empty(composition.Take());
     }
 
     [Fact]
@@ -1643,6 +1661,54 @@ public sealed class MobilePortTests
         Assert.Contains("FutureTask<Integer>", sdlCount, StringComparison.Ordinal);
         Assert.Contains("get(250, TimeUnit.MILLISECONDS)", glfwCount, StringComparison.Ordinal);
         Assert.Contains("get(250, TimeUnit.MILLISECONDS)", sdlCount, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void NamedAndroidInventoryBridgeInitializesTheMenuSlotIdentity()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var bootstrap = File.ReadAllText(Path.Combine(repository, "src", "Amber.Android", "Java",
+            "nz", "work", "minecraft", "jay", "AndroidGameBootstrap.java"));
+        var named = JavaMethod(bootstrap, "private static void prepareNamedInputBridge",
+            "private static void prepareNamedMouseInputFactory");
+
+        Assert.Contains("slotId = accessible(slotType.getDeclaredField(\"index\"))", named,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GlfwInventorySnapshotPreservesDragAndDoubleTapOperationOrder()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var patch = File.ReadAllText(Path.Combine(repository, "third_party", "android-glfw",
+            "jay-android.patch"));
+        var positive = patch.IndexOf("hasInventorySplit && input.inventorySplitCount >= 0",
+            StringComparison.Ordinal);
+        var pointer = patch.IndexOf("if (window->cursorMode == GLFW_CURSOR_DISABLED",
+            StringComparison.Ordinal);
+        var negative = patch.IndexOf("hasInventorySplit && input.inventorySplitCount < 0",
+            StringComparison.Ordinal);
+
+        Assert.True(positive >= 0 && pointer > positive && negative > pointer);
+    }
+
+    [Fact]
+    public void SoftKeyboardPreviewKeepsClampBoundsValidAtTinyVisibleHeights()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var activity = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "GameActivity.cs"));
+        var draw = activity[activity.IndexOf("private void DrawSoftKeyboardPreview",
+            StringComparison.Ordinal)..activity.IndexOf("private void DrawMovementPad",
+            StringComparison.Ordinal)];
+
+        Assert.Contains("if (visibleBottom <= margin * 2", draw, StringComparison.Ordinal);
+        Assert.Contains("minimumTextSize = Math.Min(22f, maximumTextSize)", draw,
+            StringComparison.Ordinal);
+        Assert.Contains("minimumTextSize, maximumTextSize", draw, StringComparison.Ordinal);
     }
 
     [Fact]

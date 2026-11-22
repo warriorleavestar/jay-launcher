@@ -19,8 +19,26 @@ internal static class SoftKeyboardInputPolicy
     /// touch actually landed on that editor; otherwise opening the world list covers it with a
     /// keyboard even though the player tapped the Singleplayer button on the preceding screen.
     /// </summary>
-    public static bool ShouldOpenAfterTouch(bool textInputActive, bool touchedFocusedEditor) =>
-        textInputActive && touchedFocusedEditor;
+    public static bool ShouldOpenAfterTouch(bool textInputActive,
+        bool touchedFocusedEditorBeforeClick, bool focusedEditorAtTouchAfterClick) =>
+        textInputActive && (touchedFocusedEditorBeforeClick || focusedEditorAtTouchAfterClick);
+}
+
+/// <summary>Keeps IME composition until Android explicitly commits or finishes it.</summary>
+internal sealed class AndroidCompositionBuffer
+{
+    private string _pending = "";
+
+    public void Set(string? text) => _pending = text ?? "";
+
+    public void Clear() => _pending = "";
+
+    public string Take()
+    {
+        var value = _pending;
+        _pending = "";
+        return value;
+    }
 }
 
 /// <summary>

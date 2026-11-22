@@ -95,7 +95,7 @@ public final class AndroidGameBootstrap {
 
         @Override public synchronized void write(int value) throws IOException {
             int byteValue = value & 0xff;
-            if (byteValue == '\n') flushLine();
+            if (byteValue == '\n') flushLine(true);
             else if (byteValue != '\r') line.write(byteValue);
         }
 
@@ -104,12 +104,15 @@ public final class AndroidGameBootstrap {
         }
 
         @Override public synchronized void flush() throws IOException {
-            flushLine();
+            flushLine(false);
         }
 
-        private void flushLine() throws IOException {
+        private void flushLine(boolean endOfLine) throws IOException {
             if (line.size() == 0) return;
-            String text = new String(line.toByteArray(), StandardCharsets.UTF_8);
+            byte[] buffered = line.toByteArray();
+            int completeLength = endOfLine ? buffered.length : completeUtf8PrefixLength(buffered);
+            if (completeLength == 0) return;
+            String text = new String(buffered, 0, completeLength, StandardCharsets.UTF_8);
             for (int start = 0; start < text.length();) {
                 int end = start;
                 int encodedLength = 0;
@@ -124,6 +127,25 @@ public final class AndroidGameBootstrap {
                 start = end;
             }
             line.reset();
+            line.write(buffered, completeLength, buffered.length - completeLength);
+        }
+
+        private static int completeUtf8PrefixLength(byte[] bytes) {
+            int end = bytes.length;
+            int lead = end - 1;
+            int continuationBytes = 0;
+            while (lead >= 0 && (bytes[lead] & 0xc0) == 0x80 && continuationBytes < 3) {
+                lead--;
+                continuationBytes++;
+            }
+            if (lead < 0) return end;
+            int first = bytes[lead] & 0xff;
+            int expected = first < 0x80 ? 1
+                : (first & 0xe0) == 0xc0 ? 2
+                : (first & 0xf0) == 0xe0 ? 3
+                : (first & 0xf8) == 0xf0 ? 4
+                : 1;
+            return expected > continuationBytes + 1 ? lead : end;
         }
 
         private static int utf8Length(int codePoint) {
@@ -266,6 +288,9 @@ public final class AndroidGameBootstrap {
             screenHeight = accessible(screenType.getDeclaredField("height"));
             screenFocused = accessible(eventHandlerType.getDeclaredField("focused"));
             containerHoveredSlot = slotAtMethod(containerScreenType, slotType);
+            // Named Mojang mappings expose the menu slot identity as Slot.index. This is
+            // distinct from Slot.slot, which is the backing Container index.
+            slotId = accessible(slotType.getDeclaredField("index"));
             slotGetItem = accessible(slotType.getDeclaredMethod("getItem"));
             itemStackGetCount = accessible(itemStackType.getDeclaredMethod("getCount"));
         } catch (ReflectiveOperationException optionalInventoryApiUnavailable) {

@@ -39,6 +39,15 @@ public final class ConsoleLogTest {
             "split UTF-8 decoding");
 
         messages.clear();
+        PrintStream autoFlush = new PrintStream(output, true, "UTF-8");
+        autoFlush.write(split, 0, 2);
+        require(messages.isEmpty(), "auto-flush emitted an incomplete UTF-8 sequence");
+        autoFlush.write(split, 2, split.length - 2);
+        require(messages.size() == 1, "auto-flush split UTF-8 line count");
+        require("世界".equals(new String(messages.get(0), StandardCharsets.UTF_8)),
+            "auto-flush split UTF-8 decoding");
+
+        messages.clear();
         PrintStream print = new PrintStream(output, true, "UTF-8");
         print.println("日本語と English");
         require(messages.size() == 1, "PrintStream line count");

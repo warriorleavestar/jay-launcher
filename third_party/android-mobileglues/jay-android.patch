@@ -91,22 +91,21 @@ new file mode 100644
 index 0000000..a34e61f
 --- /dev/null
 +++ b/MobileGlues-cpp/gl/glsl/fragment_output_indices.h
-@@ -0,0 +1,9 @@
+@@ -0,0 +1,8 @@
 +#pragma once
 +
 +#include <string>
 +
 +// OpenGL ES requires fragment-output array indices to be constant integral
-+// expressions. Desktop GLSL permits a runtime index. Expand only assignments
-+// to declared fragment-output arrays into a switch whose individual writes use
-+// constant indices; all other array accesses are left untouched.
++// expressions. Desktop GLSL permits a runtime index. Expand writes into a switch
++// and reads into constant-index conditional expressions.
 +std::string legalize_fragment_output_array_indices(const std::string& essl);
 diff --git a/MobileGlues-cpp/gl/glsl/fragment_output_indices.cpp b/MobileGlues-cpp/gl/glsl/fragment_output_indices.cpp
 new file mode 100644
 index 0000000..bb4739d
 --- /dev/null
 +++ b/MobileGlues-cpp/gl/glsl/fragment_output_indices.cpp
-@@ -0,0 +1,206 @@
+@@ -0,0 +1,247 @@
 +#include "fragment_output_indices.h"
 +
 +#include <algorithm>
@@ -166,6 +165,47 @@ index 0000000..bb4739d
 +            if (close == std::string::npos) continue;
 +            const std::string index = trim_copy(expression.substr(open + 1, close - open - 1));
 +            if (index.empty() || is_constant_index(index)) continue;
++            size_t cursor = close + 1;
++            for (;;) {
++                while (cursor < expression.size() &&
++                       std::isspace(static_cast<unsigned char>(expression[cursor]))) ++cursor;
++                if (cursor < expression.size() && expression[cursor] == '.') {
++                    ++cursor;
++                    while (cursor < expression.size() &&
++                           (std::isalnum(static_cast<unsigned char>(expression[cursor])) ||
++                            expression[cursor] == '_')) ++cursor;
++                    continue;
++                }
++                if (cursor < expression.size() && expression[cursor] == '[') {
++                    const size_t suffix_end = matching_bracket(expression, cursor);
++                    if (suffix_end == std::string::npos) break;
++                    cursor = suffix_end + 1;
++                    continue;
++                }
++                break;
++            }
++            while (cursor < expression.size() &&
++                   std::isspace(static_cast<unsigned char>(expression[cursor]))) ++cursor;
++            static const char* mutations[] = {
++                "<<=", ">>=", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "=", "++", "--"
++            };
++            bool mutating = false;
++            for (const char* candidate : mutations) {
++                const size_t length = std::char_traits<char>::length(candidate);
++                if (expression.compare(cursor, length, candidate) == 0 &&
++                    !(length == 1 && cursor + 1 < expression.size() &&
++                      expression[cursor + 1] == '=')) {
++                    mutating = true;
++                    break;
++                }
++            }
++            size_t prefix = occurrence;
++            while (prefix > 0 &&
++                   std::isspace(static_cast<unsigned char>(expression[prefix - 1]))) --prefix;
++            if (prefix >= 2 &&
++                (expression.compare(prefix - 2, 2, "++") == 0 ||
++                 expression.compare(prefix - 2, 2, "--") == 0)) mutating = true;
++            if (mutating) continue;
 +
 +            // ESSL also requires constant indices when a fragment output is read. A
 +            // conditional expression preserves the value and type while every actual
@@ -301,7 +341,7 @@ index 0000000..bb4739d
 +        }
 +    }
 +
-+    if (replacements.empty()) return essl;
++    if (replacements.empty()) return legalize_output_reads(essl, outputs);
 +    std::sort(replacements.begin(), replacements.end(),
 +              [](const replacement_t& a, const replacement_t& b) { return a.begin > b.begin; });
 +    std::string result = essl;
@@ -311,14 +351,14 @@ index 0000000..bb4739d
 +        result.replace(replacement.begin, replacement.end - replacement.begin, replacement.text);
 +        previous_begin = replacement.begin;
 +    }
-+    return result;
++    return legalize_output_reads(result, outputs);
 +}
 diff --git a/MobileGlues-cpp/tests/fragment_output_indices_test.cpp b/MobileGlues-cpp/tests/fragment_output_indices_test.cpp
 new file mode 100644
 index 0000000..fc1a733
 --- /dev/null
 +++ b/MobileGlues-cpp/tests/fragment_output_indices_test.cpp
-@@ -0,0 +1,76 @@
+@@ -0,0 +1,85 @@
 +#include "../gl/glsl/fragment_output_indices.h"
 +
 +#include <cstdio>
@@ -393,5 +433,14 @@ index 0000000..fc1a733
 +} })";
 +    expect_equal("dynamic output readback",
 +                 legalize_fragment_output_array_indices(readback), readback_expected);
++
++    const std::string free_reads = R"(layout(location = 0) out vec4 color[2];
++void consume(vec4 value);
++void main() { vec4 saved = color[i]; consume(color[j]); })";
++    const std::string free_reads_expected = R"(layout(location = 0) out vec4 color[2];
++void consume(vec4 value);
++void main() { vec4 saved = ((i) == 0 ? color[0] : color[1]); consume(((j) == 0 ? color[0] : color[1])); })";
++    expect_equal("dynamic output reads outside assignments",
++                 legalize_fragment_output_array_indices(free_reads), free_reads_expected);
 +    std::puts("fragment output index tests passed");
 +}

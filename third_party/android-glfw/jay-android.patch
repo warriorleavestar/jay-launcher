@@ -212,7 +212,7 @@ index 1db0811..b84b668 100644
  }
  
  void _glfwSetWindowTitleNull(_GLFWwindow* window, const char* title)
-@@ -486,6 +543,173 @@ GLFWbool _glfwWindowVisibleNull(_GLFWwindow* window)
+@@ -486,6 +543,183 @@ GLFWbool _glfwWindowVisibleNull(_GLFWwindow* window)
  
 +#if defined(__ANDROID__)
 +static void inputMouseButton(_GLFWwindow* window, int button, int action)
@@ -266,6 +266,16 @@ index 1db0811..b84b668 100644
 +    if (input.generation == window->null.jayInputGeneration)
 +        return;
 +    window->null.jayInputGeneration = input.generation;
++    const GLFWbool hasInventorySplit =
++        input.inventorySplitGeneration != jayInventorySplitGeneration;
++    // A normal drag queues its positive pickup before the destination click. Preserve that
++    // order even when both operations land in this snapshot.
++    if (hasInventorySplit && input.inventorySplitCount >= 0)
++    {
++        jayInventorySplitGeneration = input.inventorySplitGeneration;
++        jayJavaInventorySplit(input.inventorySplitX, input.inventorySplitY,
++                              input.inventorySplitCount);
++    }
 +    if (window->cursorMode == GLFW_CURSOR_DISABLED && input.pointerClicks > 0)
 +    {
 +        // Gameplay owns a disabled/locked cursor, but touchscreen taps still need to
@@ -298,9 +308,9 @@ index 1db0811..b84b668 100644
 +        window->callbacks.cursorPos = cursorCallback;
 +        window->callbacks.mouseButton = mouseCallback;
 +    }
-+    // A double-tap split is queued after its first ordinary click. Consume the pointer
-+    // first even when both arrive in one snapshot, then perform the split on the picked stack.
-+    if (input.inventorySplitGeneration != jayInventorySplitGeneration)
++    // A negative split returns part of the stack picked up by the preceding double-tap, so it
++    // deliberately runs after that pointer click.
++    if (hasInventorySplit && input.inventorySplitCount < 0)
 +    {
 +        jayInventorySplitGeneration = input.inventorySplitGeneration;
 +        jayJavaInventorySplit(input.inventorySplitX, input.inventorySplitY,

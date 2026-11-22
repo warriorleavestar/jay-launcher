@@ -418,13 +418,17 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         // overlay can retain the decor view's full height. Anchor to the actual visible frame so
         // the preview sits above the keyboard instead of being painted underneath it.
         var visibleBottom = Math.Clamp(visibleFrame.Bottom - location[1], 0, Height);
+        if (visibleBottom <= margin * 2 || Width <= margin * 2) return;
         var height = Math.Min(64f * density, visibleBottom * 0.14f);
         var top = visibleBottom - height - margin;
         var radius = 8f * density;
         canvas.DrawRoundRect(margin, top, Width - margin, visibleBottom - margin,
             radius, radius, _keyboardPreviewBackground);
 
-        _keyboardPreviewText.TextSize = Math.Clamp(20f * density, 22f, height * 0.48f);
+        var maximumTextSize = Math.Max(1f, height * 0.48f);
+        var minimumTextSize = Math.Min(22f, maximumTextSize);
+        _keyboardPreviewText.TextSize = Math.Clamp(
+            20f * density, minimumTextSize, maximumTextSize);
         var value = _softKeyboardPreview.Text;
         if (string.IsNullOrEmpty(value))
         {
@@ -1534,8 +1538,9 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         // world list immediately covers it with the IME because its search box auto-focuses.
         if (_sdl is not null)
         {
+            var focusedEditorAtRelease = _sdl.TextInputAt(x, y);
             if (SoftKeyboardInputPolicy.ShouldOpenAfterTouch(
-                    _sdl.TextInputActive, touchedTextInput))
+                    _sdl.TextInputActive, touchedTextInput, focusedEditorAtRelease))
                 ShowKeyboard();
             else
                 HideKeyboard();
@@ -1572,6 +1577,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         private const int GlfwKeyBackspace = 259;
         private const int GlfwKeyDelete = 261;
         private readonly TouchControlOverlay _owner;
+        private readonly AndroidCompositionBuffer _composition = new();
 
         public JayInputConnection(TouchControlOverlay owner) : base(owner, false)
         {
@@ -1580,52 +1586,72 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
 
         public override bool CommitText(Java.Lang.ICharSequence? text, int newCursorPosition)
         {
+            _composition.Clear();
             if (text?.ToString() is { } value)
+                DeliverText(value);
+            return true;
+        }
+
+        private void DeliverText(string value)
+        {
+            var deliveredAt = SystemClock.UptimeMillis();
+            var accepted = value.EnumerateRunes()
+                .Where(rune => _owner._hardwareTextInputGate.AcceptCommittedCodePoint(
+                    rune.Value, deliveredAt))
+                .ToArray();
+            _owner._softKeyboardPreview.Commit(accepted);
+            _owner.PostInvalidateOnAnimation();
+            var plan = AndroidTextCommitPlan.Create(accepted);
+            if (_owner._sdl is not null)
             {
-                var deliveredAt = SystemClock.UptimeMillis();
-                var accepted = value.EnumerateRunes()
-                    .Where(rune => _owner._hardwareTextInputGate.AcceptCommittedCodePoint(
-                        rune.Value, deliveredAt))
-                    .ToArray();
-                _owner._softKeyboardPreview.Commit(accepted);
-                _owner.PostInvalidateOnAnimation();
-                var plan = AndroidTextCommitPlan.Create(accepted);
-                if (_owner._sdl is not null)
-                {
-                    foreach (var action in plan)
-                    {
-                        if (action.Kind == AndroidTextCommitKind.Text)
-                            _owner._sdl.CommitText(action.Text);
-                        else if (action.Kind == AndroidTextCommitKind.Enter)
-                            _owner._sdl.Enter();
-                        else
-                            _owner._sdl.Tab();
-                    }
-                    return true;
-                }
                 foreach (var action in plan)
                 {
-                    if (action.Kind == AndroidTextCommitKind.Enter)
-                        NativeJvmHost.AddKey(GlfwKeyEnter);
-                    else if (action.Kind == AndroidTextCommitKind.Tab)
-                        NativeJvmHost.AddKey(GlfwKeyTab);
+                    if (action.Kind == AndroidTextCommitKind.Text)
+                        _owner._sdl.CommitText(action.Text);
+                    else if (action.Kind == AndroidTextCommitKind.Enter)
+                        _owner._sdl.Enter();
                     else
-                        foreach (var rune in action.Text.EnumerateRunes())
-                            NativeJvmHost.AddCodePoint(rune.Value);
+                        _owner._sdl.Tab();
                 }
+                return;
             }
-            return true;
+            foreach (var action in plan)
+            {
+                if (action.Kind == AndroidTextCommitKind.Enter)
+                    NativeJvmHost.AddKey(GlfwKeyEnter);
+                else if (action.Kind == AndroidTextCommitKind.Tab)
+                    NativeJvmHost.AddKey(GlfwKeyTab);
+                else
+                    foreach (var rune in action.Text.EnumerateRunes())
+                        NativeJvmHost.AddCodePoint(rune.Value);
+            }
         }
 
         public override bool SetComposingText(Java.Lang.ICharSequence? text, int newCursorPosition)
         {
-            _owner._softKeyboardPreview.SetComposingText(text?.ToString());
+            var value = text?.ToString();
+            _composition.Set(value);
+            _owner._softKeyboardPreview.SetComposingText(value);
             _owner.PostInvalidateOnAnimation();
+            return true;
+        }
+
+        public override bool FinishComposingText()
+        {
+            var value = _composition.Take();
+            if (value.Length > 0)
+                DeliverText(value);
+            else
+            {
+                _owner._softKeyboardPreview.SetComposingText(null);
+                _owner.PostInvalidateOnAnimation();
+            }
             return true;
         }
 
         public override bool DeleteSurroundingText(int beforeLength, int afterLength)
         {
+            _composition.Clear();
             var plan = AndroidTextDeletionPlan.Create(beforeLength, afterLength);
             _owner._softKeyboardPreview.Backspace(plan.Backspaces);
             _owner.PostInvalidateOnAnimation();
@@ -1642,6 +1668,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
 
         public override bool PerformEditorAction(ImeAction actionCode)
         {
+            _composition.Clear();
             _owner._softKeyboardPreview.ClearText();
             _owner.PostInvalidateOnAnimation();
             if (_owner._sdl is not null)
