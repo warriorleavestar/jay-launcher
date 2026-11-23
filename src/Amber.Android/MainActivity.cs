@@ -4,7 +4,6 @@ using Android.Content.PM;
 using Android.OS;
 using Android.Views;
 using Android.Views.InputMethods;
-using Android.Window;
 using Avalonia.Android;
 
 namespace Amber.Android;
@@ -18,12 +17,13 @@ namespace Amber.Android;
     ConfigurationChanges = ConfigChanges.Orientation | ConfigChanges.ScreenSize | ConfigChanges.UiMode)]
 public sealed class MainActivity : AvaloniaMainActivity
 {
-    private IOnBackInvokedCallback? _backInvokedCallback;
-
     protected override void OnCreate(Bundle? savedInstanceState)
     {
         base.OnCreate(savedInstanceState);
-        RegisterBackInvokedCallback();
+        // Avalonia coordinates predictive Back through AndroidX and exposes the result here.
+        // Registering a second platform callback races that dispatcher and can background the
+        // Activity before the launcher has a chance to close its current page.
+        BackRequested += OnLauncherBackRequested;
     }
 
     protected override void OnResume()
@@ -38,66 +38,15 @@ public sealed class MainActivity : AvaloniaMainActivity
         base.OnPause();
     }
 
-    public override bool DispatchKeyEvent(KeyEvent? e)
+    private static void OnLauncherBackRequested(object? sender, AndroidBackRequestedEventArgs e)
     {
-        // Three-button navigation and physical Back arrive as key events instead of the Android
-        // 13 predictive-back callback. Consume the full gesture so its key-up cannot background
-        // the Activity after the launcher has already closed its current panel.
-        if (e?.KeyCode == Keycode.Back)
-        {
-            if (e.Action == KeyEventActions.Down && e.RepeatCount == 0) HandleActivityBack();
-            return true;
-        }
-        return base.DispatchKeyEvent(e);
-    }
-
-#pragma warning disable CS0672, CS0618
-    public override void OnBackPressed() => HandleActivityBack();
-#pragma warning restore CS0672, CS0618
-
-    private void RegisterBackInvokedCallback()
-    {
-        if (Build.VERSION.SdkInt < BuildVersionCodes.Tiramisu) return;
-#pragma warning disable CA1416
-        _backInvokedCallback = new LauncherBackInvokedCallback(this);
-        OnBackInvokedDispatcher.RegisterOnBackInvokedCallback(
-            IOnBackInvokedDispatcher.PriorityDefault, _backInvokedCallback);
-#pragma warning restore CA1416
-    }
-
-    private void HandleActivityBack()
-    {
-        if (Amber.App.App.MobileBackRequested?.Invoke() == true) return;
-        MoveTaskToBack(true);
+        e.Handled = Amber.App.App.MobileBackRequested?.Invoke() == true;
     }
 
     protected override void OnDestroy()
     {
-        if (_backInvokedCallback is { } callback)
-        {
-            if (Build.VERSION.SdkInt >= BuildVersionCodes.Tiramisu)
-            {
-#pragma warning disable CA1416
-                OnBackInvokedDispatcher.UnregisterOnBackInvokedCallback(callback);
-#pragma warning restore CA1416
-            }
-            callback.Dispose();
-            _backInvokedCallback = null;
-        }
+        BackRequested -= OnLauncherBackRequested;
         base.OnDestroy();
-    }
-
-    private sealed class LauncherBackInvokedCallback : Java.Lang.Object, IOnBackInvokedCallback
-    {
-        private readonly WeakReference<MainActivity> _activity;
-
-        public LauncherBackInvokedCallback(MainActivity activity) =>
-            _activity = new WeakReference<MainActivity>(activity);
-
-        public void OnBackInvoked()
-        {
-            if (_activity.TryGetTarget(out var activity)) activity.HandleActivityBack();
-        }
     }
 
     private void SetLauncherKeyboardVisible(bool visible)
