@@ -9,6 +9,7 @@ using System.Security.Cryptography;
 using System.Formats.Tar;
 using System.IO.Compression;
 using System.Collections.Concurrent;
+using System.Text.Json;
 
 namespace Amber.Core.Tests;
 
@@ -2232,6 +2233,25 @@ public sealed class MobilePortTests
         {
             Directory.Delete(root, true);
         }
+    }
+
+    [Fact]
+    public void AndroidRuntimeValidationRejectsNullJsonFieldsWithoutCrashing()
+    {
+        var nullFiles = JsonSerializer.Deserialize<RuntimeBundleManifest>(
+            """{"format":1,"id":"broken","architecture":"arm64-v8a","files":null}""")!;
+        var nullFileFields = new RuntimeBundleManifest(1, "broken", "arm64-v8a",
+            [new RuntimeBundleFile("lib/libjvm.so", 1, null!, null!, null!)]);
+        var nullArchiveHash = new RuntimeArchiveDescriptor(
+            1, "broken", "arm64-v8a", 1, null!, 1,
+            "GPL-2.0-with-classpath-exception",
+            "https://example.invalid/source",
+            "https://example.invalid/runtime.tar.xz");
+
+        Assert.NotEmpty(nullFiles.Validate());
+        Assert.False(RuntimeBundleVerifier.VerifyLayout("unused", nullFiles, "arm64-v8a"));
+        Assert.NotEmpty(nullFileFields.Validate());
+        Assert.NotEmpty(nullArchiveHash.Validate());
     }
 
     [Fact]

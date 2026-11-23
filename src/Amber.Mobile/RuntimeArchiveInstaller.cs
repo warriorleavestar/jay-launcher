@@ -26,7 +26,8 @@ public sealed record RuntimeArchiveDescriptor(
         if (ArchiveSize <= 0) errors.Add("The runtime archive size is invalid.");
         if (MaximumExtractedSize < ArchiveSize || MaximumExtractedSize > 1024L * 1024 * 1024)
             errors.Add("The runtime extracted-size limit is invalid.");
-        if (ArchiveSha256.Length != 64 || ArchiveSha256.Any(c => !Uri.IsHexDigit(c)))
+        if (string.IsNullOrWhiteSpace(ArchiveSha256) || ArchiveSha256.Length != 64 ||
+            ArchiveSha256.Any(c => !Uri.IsHexDigit(c)))
             errors.Add("The runtime archive SHA-256 is invalid.");
         if (string.IsNullOrWhiteSpace(License)) errors.Add("The runtime archive license is missing.");
         if (!IsHttps(SourceUrl)) errors.Add("The runtime source URL is invalid.");
