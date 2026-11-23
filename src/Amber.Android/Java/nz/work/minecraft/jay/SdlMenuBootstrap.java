@@ -30,7 +30,8 @@ public final class SdlMenuBootstrap {
         final Field guiField = client.getField("gui");
         final Method current = gui.getMethod("screen");
         final Field hitResult = client.getField("hitResult");
-        final Class<?> blockHit = Class.forName("net.minecraft.world.phys.BlockHitResult");
+        final Method hitType = hitResult.getType().getMethod("getType");
+        final Object blockType = hitType.getReturnType().getField("BLOCK").get(null);
         final Method attack = client.getDeclaredMethod("startAttack");
         final Method use = client.getDeclaredMethod("startUseItem");
         final Class<?> container = Class.forName("net.minecraft.client.gui.screens.inventory.AbstractContainerScreen");
@@ -55,6 +56,11 @@ public final class SdlMenuBootstrap {
             use.setAccessible(true);
             findSlot.setAccessible(true);
             slotClicked.setAccessible(true);
+        }
+
+        // Minecraft also represents a ray that missed as a BlockHitResult.
+        boolean targetsBlock(Object hit) throws ReflectiveOperationException {
+            return hit != null && hitType.invoke(hit) == blockType;
         }
 
         int stackCount(Object game, float nx, float ny) throws ReflectiveOperationException {
@@ -97,7 +103,7 @@ public final class SdlMenuBootstrap {
             if (action == GAMEPLAY_CONTEXTUAL_ACTION) {
                 if (active != null) return;
                 Object hit = hitResult.get(game);
-                if (hit != null && blockHit.isInstance(hit)) use.invoke(game);
+                if (targetsBlock(hit)) use.invoke(game);
                 else attack.invoke(game);
                 return;
             }
@@ -197,7 +203,7 @@ public final class SdlMenuBootstrap {
             if (game == null) return false;
             Object active = input.current.invoke(input.guiField.get(game));
             Object hit = input.hitResult.get(game);
-            return active == null && hit != null && input.blockHit.isInstance(hit);
+            return active == null && input.targetsBlock(hit);
         } catch (ReflectiveOperationException | RuntimeException error) {
             return false;
         }

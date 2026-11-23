@@ -54,6 +54,10 @@ if "$javap_bin" -classpath "$jar_path" -private net.minecraft.client.Minecraft \
   dump net.minecraft.client.gui.screens.inventory.AbstractContainerScreen container.txt
   dump net.minecraft.world.inventory.Slot slot.txt
   dump net.minecraft.world.item.ItemStack stack.txt
+  dump net.minecraft.world.phys.HitResult hit.txt
+  dump 'net.minecraft.world.phys.HitResult$Type' hit-type.txt
+  require hit.txt 'net.minecraft.world.phys.HitResult$Type getType();'
+  require hit-type.txt 'net.minecraft.world.phys.HitResult$Type BLOCK;'
 
   require minecraft.txt "public static net.minecraft.client.Minecraft getInstance();"
   require minecraft.txt "net.minecraft.client.MouseHandler mouseHandler;"

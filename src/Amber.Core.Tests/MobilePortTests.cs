@@ -2080,7 +2080,8 @@ public sealed class MobilePortTests
 
         Assert.Contains("input.current.invoke", blockTarget, StringComparison.Ordinal);
         Assert.Contains("input.hitResult.get", blockTarget, StringComparison.Ordinal);
-        Assert.Contains("input.blockHit.isInstance", blockTarget, StringComparison.Ordinal);
+        Assert.Contains("input.targetsBlock(hit)", blockTarget, StringComparison.Ordinal);
+        Assert.Contains("hitType.invoke(hit) == blockType", sdl, StringComparison.Ordinal);
         Assert.DoesNotContain("return false; }", blockTarget, StringComparison.Ordinal);
     }
 
