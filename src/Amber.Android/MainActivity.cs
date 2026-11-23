@@ -40,7 +40,20 @@ public sealed class MainActivity : AvaloniaMainActivity
 
     private static void OnLauncherBackRequested(object? sender, AndroidBackRequestedEventArgs e)
     {
-        e.Handled = Amber.App.App.MobileBackRequested?.Invoke() == true;
+        if (Amber.App.App.MobileBackRequested?.Invoke() == true)
+        {
+            e.Handled = true;
+            return;
+        }
+
+        // Avalonia's AndroidX fallback re-enters its own OnBackPressed override on API 33+ and
+        // can leave the root page visible. At the launcher root, explicitly perform Android's
+        // expected task-to-background action and consume this invocation once.
+        if (sender is MainActivity activity)
+        {
+            activity.MoveTaskToBack(true);
+            e.Handled = true;
+        }
     }
 
     protected override void OnDestroy()
