@@ -197,6 +197,24 @@ public sealed class MobilePortTests
     }
 
     [Fact]
+    public void AndroidMiningIndicatorUsesTheActiveGameBridge()
+    {
+        var repository = FindRepositoryRoot();
+        var activity = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "GameActivity.cs"));
+        var sdl = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "Sdl", "SdlTouchInput.cs"));
+
+        Assert.Contains(
+            "private bool HasBlockTarget => _sdl?.HasBlockTarget ?? NativeJvmHost.HasBlockTarget;",
+            activity, StringComparison.Ordinal);
+        Assert.Contains("!HasBlockTarget", activity, StringComparison.Ordinal);
+        Assert.DoesNotContain("!NativeJvmHost.HasBlockTarget", activity, StringComparison.Ordinal);
+        Assert.Contains("EntryPoint = \"jay_block_target_get\"", sdl, StringComparison.Ordinal);
+        Assert.Contains("public bool HasBlockTarget", sdl, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AndroidMobileGluesBuildAppliesTheEmulatorAnglePatch()
     {
         var root = FindRepositoryRoot();

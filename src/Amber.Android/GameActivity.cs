@@ -367,6 +367,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     private readonly SoftKeyboardInputSession _softKeyboardSession = new();
     private readonly SoftKeyboardPreviewBuffer _softKeyboardPreview = new();
     private bool GameplayActive => _sdl?.InWorld ?? NativeJvmHost.GameplayControlsActive;
+    private bool HasBlockTarget => _sdl?.HasBlockTarget ?? NativeJvmHost.HasBlockTarget;
 
     public TouchControlOverlay(Context context, SdlTouchInput? sdl = null) : base(context)
     {
@@ -735,7 +736,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         {
             // Match the mobile interaction: an ordinary touch has no decoration. The ring starts
             // only after the gesture has become a mining hold and the crosshair is on a block.
-            if (!_router.IsLongPress(pointerId) || !NativeJvmHost.HasBlockTarget) continue;
+            if (!_router.IsLongPress(pointerId) || !HasBlockTarget) continue;
             drewAnimatedFeedback = true;
             var miningElapsed = now - indicator.DownAt - LongPressDelayMs;
             var x = (float)(indicator.X * Width);

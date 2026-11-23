@@ -36,6 +36,9 @@ internal sealed partial class SdlTouchInput(Activity activity)
     [LibraryImport("jayjvm", EntryPoint = "jay_gui_scale_get")]
     private static partial int GetGuiScale();
 
+    [LibraryImport("jayjvm", EntryPoint = "jay_block_target_get")]
+    private static partial int GetBlockTarget();
+
     private bool MenuPointer(uint action) => GetFocus() != 0 &&
         DispatchMenuPointer(_mouseX / Math.Max(1, Width), _mouseY / Math.Max(1, Height), action) != 0;
 
@@ -45,6 +48,15 @@ internal sealed partial class SdlTouchInput(Activity activity)
     public void SplitInventoryStack(double x, double y, int count) =>
         DispatchInventorySplit((float)x, (float)y, count);
     public bool TextInputAt(double x, double y) => GetTextInputAt((float)x, (float)y) != 0;
+    public bool HasBlockTarget
+    {
+        get
+        {
+            try { return GetBlockTarget() != 0; }
+            catch (EntryPointNotFoundException) { return false; }
+            catch (DllNotFoundException) { return false; }
+        }
+    }
     public int GuiScale
     {
         get
