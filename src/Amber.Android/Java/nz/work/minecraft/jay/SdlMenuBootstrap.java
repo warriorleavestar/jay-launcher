@@ -10,6 +10,10 @@ import java.util.concurrent.TimeoutException;
 
 /** Deliver touchscreen menu gestures on modern SDL Minecraft's client thread in scaled GUI coordinates. */
 public final class SdlMenuBootstrap {
+    private static final int MOVE_ACTION = 0;
+    private static final int DOWN_ACTION = 1;
+    private static final int UP_ACTION = 2;
+    private static final int GAMEPLAY_CONTEXTUAL_ACTION = 3;
     private static volatile Menu menu;
     private static boolean held;
     private static Object previousScreen;
@@ -90,7 +94,7 @@ public final class SdlMenuBootstrap {
 
         void deliver(Object game, float nx, float ny, int action) throws ReflectiveOperationException {
             Object active = current.invoke(guiField.get(game));
-            if (action == 3) {
+            if (action == GAMEPLAY_CONTEXTUAL_ACTION) {
                 if (active != null) return;
                 Object hit = hitResult.get(game);
                 if (hit != null && blockHit.isInstance(hit)) use.invoke(game);
@@ -102,13 +106,13 @@ public final class SdlMenuBootstrap {
             if (active == null) return;
             double x = nx * width.getInt(active), y = ny * height.getInt(active);
             Object click = makeEvent.newInstance(x, y, left);
-            if (action == 1) {
+            if (action == DOWN_ACTION) {
                 down.invoke(active, click, false);
                 held = true;
-            } else if (action == 2) {
+            } else if (action == UP_ACTION) {
                 if (held) up.invoke(active, click);
                 held = false;
-            } else {
+            } else if (action == MOVE_ACTION) {
                 move.invoke(active, x, y);
                 if (held) drag.invoke(active, click, x - previousX, y - previousY);
             }

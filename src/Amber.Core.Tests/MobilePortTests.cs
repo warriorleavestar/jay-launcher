@@ -1840,6 +1840,35 @@ public sealed class MobilePortTests
     }
 
     [Fact]
+    public void AndroidSdlTouchAndJavaMenuBridgeShareGestureProtocol()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var sdl = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "Sdl", "SdlTouchInput.cs"));
+        var bootstrap = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "Java", "nz", "work", "minecraft", "jay",
+            "SdlMenuBootstrap.java"));
+        var embedded = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "AndroidEmbeddedGame.cs"));
+
+        Assert.Contains("MenuMoveAction = 0", sdl, StringComparison.Ordinal);
+        Assert.Contains("MenuDownAction = 1", sdl, StringComparison.Ordinal);
+        Assert.Contains("MenuUpAction = 2", sdl, StringComparison.Ordinal);
+        Assert.Contains("GameplayContextualAction = 3", sdl, StringComparison.Ordinal);
+        Assert.Contains("MenuPointer(pressed ? MenuDownAction : MenuUpAction)", sdl,
+            StringComparison.Ordinal);
+        Assert.Contains("MenuPointer(GameplayContextualAction)", sdl, StringComparison.Ordinal);
+        Assert.Contains("MOVE_ACTION = 0", bootstrap, StringComparison.Ordinal);
+        Assert.Contains("DOWN_ACTION = 1", bootstrap, StringComparison.Ordinal);
+        Assert.Contains("UP_ACTION = 2", bootstrap, StringComparison.Ordinal);
+        Assert.Contains("GAMEPLAY_CONTEXTUAL_ACTION = 3", bootstrap, StringComparison.Ordinal);
+        Assert.Contains("if (held) drag.invoke", bootstrap, StringComparison.Ordinal);
+        Assert.Contains("sdl ? \"nz.work.minecraft.jay.SdlMenuBootstrap\"", embedded,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void TouchOverlayReleasesHeldInputAcrossBothGlfwAndSdlWindowFocusChanges()
     {
         var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
