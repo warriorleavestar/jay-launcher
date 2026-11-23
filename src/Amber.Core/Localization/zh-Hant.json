@@ -2112,6 +2112,7 @@
   "shell.nav.multiplayer": "連線",
   "shell.nav.multiplayer_short": "連線",
   "shell.settings": "設定",
+  "shell.settings_short": "設",
   "shell.settings_tip": "設定（Ctrl+,）",
   "shell.account.none": "新增帳號",
   "shell.back": "返回",

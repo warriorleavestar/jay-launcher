@@ -18,14 +18,40 @@
     <DataTemplate DataType="vm:HelpCenterViewModel"><views:HelpCenterPage /></DataTemplate>
   </UserControl.DataTemplates>
 
-  <Grid ColumnDefinitions="220,*" Background="{DynamicResource PageBg}">
+  <UserControl.Styles>
+    <Style Selector=".compact TextBlock.mobile-sidebar-label">
+      <Setter Property="IsVisible" Value="False" />
+    </Style>
+    <Style Selector="TextBlock.mobile-compact-only">
+      <Setter Property="IsVisible" Value="False" />
+    </Style>
+    <Style Selector=".compact TextBlock.mobile-compact-only">
+      <Setter Property="IsVisible" Value="True" />
+    </Style>
+    <Style Selector=".compact Path.mobile-nav-icon">
+      <Setter Property="IsVisible" Value="False" />
+    </Style>
+    <Style Selector=".compact Button.mobile-sidebar-button">
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="Padding" Value="6,8" />
+    </Style>
+    <Style Selector=".compact Grid.mobile-nav-row">
+      <Setter Property="Width" Value="48" />
+      <Setter Property="ColumnSpacing" Value="0" />
+    </Style>
+    <Style Selector=".compact ListBox.nav ListBoxItem">
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+    </Style>
+  </UserControl.Styles>
+
+  <Grid x:Name="ShellGrid" ColumnDefinitions="220,*" Background="{DynamicResource PageBg}">
     <Border Classes="sidebar" BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="0,0,1,0">
       <Grid RowDefinitions="Auto,*,Auto" Margin="10">
-        <Button Classes="ghost" Command="{Binding Shell.GoSectionCommand}" CommandParameter="library"
+        <Button Classes="ghost mobile-sidebar-button" Command="{Binding Shell.GoSectionCommand}" CommandParameter="library"
                 HorizontalContentAlignment="Left" Padding="10,8">
           <StackPanel Orientation="Horizontal" Spacing="10">
             <Image Source="avares://Jay/Assets/jay.png" Width="30" Height="30" />
-            <TextBlock Text="Jay" FontSize="21" FontWeight="Bold" VerticalAlignment="Center" Foreground="{DynamicResource SidebarText}" />
+            <TextBlock Classes="mobile-sidebar-label" Text="Jay" FontSize="21" FontWeight="Bold" VerticalAlignment="Center" Foreground="{DynamicResource SidebarText}" />
           </StackPanel>
         </Button>
 
@@ -38,28 +64,32 @@
           </ListBox.Styles>
           <ListBox.ItemTemplate>
             <DataTemplate DataType="vm:NavSection">
-              <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12" MinHeight="48">
-                <Path Data="{Binding Icon}" Stroke="{DynamicResource SidebarText}" Width="21" Height="21" VerticalAlignment="Center" />
-                <TextBlock Grid.Column="1" Text="{Binding Title}" Foreground="{DynamicResource SidebarText}"
+              <Grid Classes="mobile-nav-row" ColumnDefinitions="Auto,*" ColumnSpacing="12" MinHeight="48">
+                <Path Classes="mobile-nav-icon" Data="{Binding Icon}" Stroke="{DynamicResource SidebarText}" Width="21" Height="21" VerticalAlignment="Center" />
+                <TextBlock Classes="mobile-sidebar-label" Grid.Column="1" Text="{Binding Title}" Foreground="{DynamicResource SidebarText}"
                            FontSize="15" VerticalAlignment="Center" />
+                <TextBlock Classes="mobile-compact-only" Grid.ColumnSpan="2" Text="{Binding ShortTitle}"
+                           Foreground="{DynamicResource SidebarText}" FontSize="12"
+                           HorizontalAlignment="Center" VerticalAlignment="Center" />
               </Grid>
             </DataTemplate>
           </ListBox.ItemTemplate>
         </ListBox>
 
         <StackPanel Grid.Row="2" Spacing="4">
-          <Button Classes="ghost" Command="{Binding Shell.OpenSettingsCommand}" HorizontalContentAlignment="Left" MinHeight="48">
+          <Button Classes="ghost mobile-sidebar-button" Command="{Binding Shell.OpenSettingsCommand}" HorizontalContentAlignment="Left" MinHeight="48">
             <StackPanel Orientation="Horizontal" Spacing="12">
-              <Path Data="{StaticResource Icon.Settings}" Stroke="{DynamicResource SidebarText}" Width="21" Height="21" />
-              <TextBlock Text="{l:T shell.settings}" Foreground="{DynamicResource SidebarText}" VerticalAlignment="Center" />
+              <Path Classes="mobile-nav-icon" Data="{StaticResource Icon.Settings}" Stroke="{DynamicResource SidebarText}" Width="21" Height="21" />
+              <TextBlock Classes="mobile-sidebar-label" Text="{l:T shell.settings}" Foreground="{DynamicResource SidebarText}" VerticalAlignment="Center" />
+              <TextBlock Classes="mobile-compact-only" Text="{l:T shell.settings_short}" Foreground="{DynamicResource SidebarText}" VerticalAlignment="Center" />
             </StackPanel>
           </Button>
-          <Button Classes="ghost" Command="{Binding Shell.OpenMeCommand}" HorizontalContentAlignment="Left" MinHeight="48">
+          <Button Classes="ghost mobile-sidebar-button" Command="{Binding Shell.OpenMeCommand}" HorizontalContentAlignment="Left" MinHeight="48">
             <StackPanel Orientation="Horizontal" Spacing="12">
               <Border Width="24" Height="24" CornerRadius="12" Background="{DynamicResource AccentTint}">
                 <TextBlock Text="{Binding Shell.AccountInitial}" HorizontalAlignment="Center" VerticalAlignment="Center" />
               </Border>
-              <TextBlock Text="{Binding Shell.AccountName}" Foreground="{DynamicResource SidebarText}" VerticalAlignment="Center" />
+              <TextBlock Classes="mobile-sidebar-label" Text="{Binding Shell.AccountName}" Foreground="{DynamicResource SidebarText}" VerticalAlignment="Center" />
             </StackPanel>
           </Button>
         </StackPanel>
