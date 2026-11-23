@@ -170,6 +170,31 @@ public sealed class MobilePortTests
     }
 
     [Fact]
+    public void AndroidEmulatorRunnerInvokesOneRepositorySmokeScript()
+    {
+        var repository = FindRepositoryRoot();
+        var workflow = File.ReadAllText(Path.Combine(repository,
+            ".github", "workflows", "build.yml")).Replace("\r\n", "\n", StringComparison.Ordinal);
+        var smokeStart = workflow.IndexOf("  android-smoke:\n", StringComparison.Ordinal);
+        var smokeEnd = workflow.IndexOf("\n  publish-android-preview:\n", smokeStart,
+            StringComparison.Ordinal);
+
+        Assert.True(smokeStart >= 0 && smokeEnd > smokeStart);
+        var smoke = workflow[smokeStart..smokeEnd];
+        Assert.Contains("persist-credentials: false", smoke, StringComparison.Ordinal);
+        Assert.Contains(
+            "bash scripts/check-android-emulator-smoke.sh android-assets/Jay-android-experimental.apk",
+            smoke, StringComparison.Ordinal);
+        Assert.DoesNotContain("launcher_component=", smoke, StringComparison.Ordinal);
+
+        var script = File.ReadAllText(Path.Combine(repository,
+            "scripts", "check-android-emulator-smoke.sh"));
+        Assert.Contains("launcher_component=", script, StringComparison.Ordinal);
+        Assert.Contains("android-touch-settings-en.png", script, StringComparison.Ordinal);
+        Assert.Contains("android-touch-settings-pseudo.png", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AndroidMobileGluesBuildAppliesTheEmulatorAnglePatch()
     {
         var root = FindRepositoryRoot();
