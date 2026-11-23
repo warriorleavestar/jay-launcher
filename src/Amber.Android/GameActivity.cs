@@ -957,9 +957,21 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         foreach (var modeValue in Enum.GetValues<TouchControlMode>())
         foreach (var action in Enum.GetValues<TouchControlAction>())
         {
-            if (!_profile.TryGetPosition(modeValue, action, out var position)) continue;
-            editor.PutFloat($"position-{modeValue}-{action}-x", (float)position.X);
-            editor.PutFloat($"position-{modeValue}-{action}-y", (float)position.Y);
+            var xKey = $"position-{modeValue}-{action}-x";
+            var yKey = $"position-{modeValue}-{action}-y";
+            if (_profile.TryGetPosition(modeValue, action, out var position))
+            {
+                editor.PutFloat(xKey, (float)position.X);
+                editor.PutFloat(yKey, (float)position.Y);
+            }
+            else
+            {
+                // ResetPositions removes overrides from the in-memory profile. Remove their
+                // persisted values too, otherwise the supposedly reset layout returns the next
+                // time the dedicated game process starts.
+                editor.Remove(xKey);
+                editor.Remove(yKey);
+            }
         }
         editor.Apply();
     }

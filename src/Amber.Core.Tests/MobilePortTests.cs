@@ -521,6 +521,22 @@ public sealed class MobilePortTests
     }
 
     [Fact]
+    public void AndroidSavingTouchProfileRemovesResetPositionOverrides()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var activity = File.ReadAllText(Path.Combine(repository, "src", "Amber.Android",
+            "GameActivity.cs"));
+        var saveProfile = JavaMethod(activity, "private void SaveProfile()",
+            "private bool HandleSettingsTouch");
+
+        Assert.Contains("if (_profile.TryGetPosition(modeValue, action, out var position))",
+            saveProfile, StringComparison.Ordinal);
+        Assert.Contains("editor.Remove(xKey);", saveProfile, StringComparison.Ordinal);
+        Assert.Contains("editor.Remove(yKey);", saveProfile, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void TouchProfileOffersIndependentAttackAreas()
     {
         var profile = new TouchControlProfile { ViewportAspectRatio = 1.6 };
