@@ -37,6 +37,13 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
+      - name: Match the signed release tag to the launcher version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $version = dotnet msbuild Amber.App/Amber.App.csproj -getProperty:Version
+          if ("v$version" -ne $env:GITHUB_REF_NAME) { throw 'Release tag must match the launcher version' }
+
       - name: Restore
         run: dotnet restore Amber.slnx
 
@@ -118,6 +125,25 @@ jobs:
           New-Item -ItemType Directory -Force ../packages | Out-Null
           Get-ChildItem ../out/${{ matrix.rid }} -Recurse -Filter *.pdb | Remove-Item
           Compress-Archive -Path ../out/${{ matrix.rid }}/* -DestinationPath ../packages/Jay-${{ matrix.rid }}.zip
+          $version = dotnet msbuild Amber.App/Amber.App.csproj -getProperty:Version
+          $pin = (Get-Content ../build/pins.json -Raw | ConvertFrom-Json).pins | Where-Object id -eq windows-update-compiler
+          $setup = Join-Path $env:RUNNER_TEMP $pin.file
+          Invoke-WebRequest $pin.urls[0] -OutFile $setup
+          if ((Get-FileHash $setup).Hash -ne $pin.sha256) { throw "Inno Setup checksum mismatch" }
+          $compiler = Join-Path $env:RUNNER_TEMP 'jay-inno'
+          $tool = Start-Process $setup -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/CURRENTUSER',"/DIR=`"$compiler`"") -PassThru -Wait
+          if ($tool.ExitCode -ne 0) { throw "Compiler setup failed: $($tool.ExitCode)" }
+          & "$compiler\ISCC.exe" "/DJayVersion=$version" ../scripts/jay-windows-update.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (!(Test-Path ../packages/Jay-win-x64-setup.exe)) { throw "Missing Windows update installer" }
+          # Exercise an existing portable install, including a save in a user-chosen sibling folder.
+          $fixture = Join-Path $env:RUNNER_TEMP 'Jay update test'
+          $world = Join-Path $fixture 'instances/test/saves/world'
+          New-Item -ItemType Directory -Force $world | Out-Null
+          Set-Content "$world/level.dat" 'existing-save' -NoNewline
+          Set-Content "$fixture/Jay.exe" 'old-launcher'
+          $up = Start-Process ../packages/Jay-win-x64-setup.exe -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',"/DIR=`"$fixture`"") -PassThru -Wait
+          if ($up.ExitCode -ne 0 -or (Get-FileHash "$fixture/Jay.exe").Hash -ne (Get-FileHash ../out/win-x64/Jay.exe).Hash -or (Get-Content "$world/level.dat" -Raw) -ne 'existing-save') { throw 'In-place Windows update failed' }
           Copy-Item ../server/README.md ../out/server-${{ matrix.rid }}/
           Copy-Item ../docs/network-server.md ../out/server-${{ matrix.rid }}/
           Compress-Archive -Path ../out/server-${{ matrix.rid }}/* -DestinationPath ../packages/JayServer-${{ matrix.rid }}.zip
@@ -128,6 +154,21 @@ jobs:
         run: |
           find ../out/${{ matrix.rid }} -name '*.pdb' -delete
           bash ../scripts/publish-macos.sh "${{ matrix.rid }}" "../out/${{ matrix.rid }}" "../packages"
+          # Only the disposable CI runner gets this system-wide installation.
+          app=/Applications/Jay.app
+          test ! -e "$app"
+          sudo mkdir -p "$app/Contents/MacOS"
+          sudo cp /usr/bin/true "$app/Contents/MacOS/Jay"
+          sudo /usr/libexec/PlistBuddy -c 'Add :CFBundleIdentifier string nz.work.minecraft.jay' "$app/Contents/Info.plist"
+          sudo /usr/libexec/PlistBuddy -c 'Add :CFBundleVersion string 0.0.1' "$app/Contents/Info.plist"
+          sudo /usr/libexec/PlistBuddy -c 'Add :CFBundleExecutable string Jay' "$app/Contents/Info.plist"
+          save="$RUNNER_TEMP/Jay test game/saves/world/level.dat"
+          mkdir -p "$(dirname "$save")"
+          printf 'existing-save' > "$save"
+          sudo /usr/sbin/installer -pkg "../packages/Jay-${{ matrix.rid }}.pkg" -target /
+          test "$(cat "$save")" = existing-save
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app/Contents/Info.plist")" != 0.0.1
+          codesign --verify --deep --strict "$app"
           chmod +x ../out/server-${{ matrix.rid }}/jay-server
           cp ../server/README.md ../docs/network-server.md ../out/server-${{ matrix.rid }}/
           tar -C ../out/server-${{ matrix.rid }} -czf ../packages/JayServer-${{ matrix.rid }}.tar.gz .
@@ -161,7 +202,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      RELEASE_SIGNED_ANDROID: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.publish_android_preview) }}
+      RELEASE_SIGNED_ANDROID: ${{ startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.publish_android_preview) }}
       MINECRAFT_LEGACY_INPUT_VERSION: '1.21.11'
       MINECRAFT_NAMED_INPUT_VERSION: '26.3'
     defaults:
@@ -646,17 +687,28 @@ jobs:
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: publish
+    needs: [publish, android]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
-          # Desktop and server packages only; the Android and iOS simulator builds are not release assets.
+          # Desktop installers, portable packages and servers.
           pattern: 'jay-{win,osx,linux}-*'
           path: release-assets
           merge-multiple: true
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: jay-android
+          path: android-release
+      - name: Stage the channel-signed Android update
+        run: |
+          cp android-release/Jay-android-experimental.apk release-assets/Jay-android.apk
+          for installer in Jay-win-x64-setup.exe Jay-osx-arm64.pkg Jay-osx-x64.pkg Jay-android.apk; do
+            test -s "release-assets/$installer"
+          done
 
       # Jay release signature (privacy plan item 2): 2 of the 3 trustees sign this list offline
       # (`jay-server release prepare` / `cosign`), then SHA256SUMS.txt.sigs (and trust-chain.json, once the

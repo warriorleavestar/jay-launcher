@@ -75,6 +75,8 @@ else
 fi
 codesign --verify --deep --strict --verbose=2 "$bundle"
 
+bash "$root/scripts/package-macos-update.sh" "$bundle" "$output/Jay-$rid.pkg"
+
 ln -s /Applications "$stage/dmg/Applications"
 dmg="$output/Jay-$rid.dmg"
 rm -f "$dmg"

@@ -5,6 +5,8 @@ using Android.OS;
 using Android.Views;
 using Android.Views.InputMethods;
 using Avalonia.Android;
+using Amber.App.Services;
+using Amber.Core.Localization;
 
 namespace Amber.Android;
 
@@ -17,6 +19,9 @@ namespace Amber.Android;
     ConfigurationChanges = ConfigChanges.Orientation | ConfigChanges.ScreenSize | ConfigChanges.UiMode)]
 public sealed class MainActivity : AvaloniaMainActivity
 {
+    private const int InstallPermissionRequest = 3821;
+    private TaskCompletionSource<bool>? _installPermission;
+
     protected override void OnCreate(Bundle? savedInstanceState)
     {
         base.OnCreate(savedInstanceState);
@@ -40,10 +45,12 @@ public sealed class MainActivity : AvaloniaMainActivity
     {
         base.OnResume();
         Amber.App.App.MobileTextInputFocusChanged = SetLauncherKeyboardVisible;
+        LauncherUpdate.AndroidInstall = InstallUpdate;
     }
 
     protected override void OnPause()
     {
+        LauncherUpdate.AndroidInstall = null;
         Amber.App.App.MobileTextInputFocusChanged = null;
         base.OnPause();
     }
@@ -68,8 +75,60 @@ public sealed class MainActivity : AvaloniaMainActivity
 
     protected override void OnDestroy()
     {
+        _installPermission?.TrySetCanceled();
         BackRequested -= OnLauncherBackRequested;
         base.OnDestroy();
+    }
+
+    protected override void OnActivityResult(int requestCode, Result resultCode, Intent? data)
+    {
+        base.OnActivityResult(requestCode, resultCode, data);
+        if (requestCode == InstallPermissionRequest)
+            _installPermission?.TrySetResult(PackageManager!.CanRequestPackageInstalls());
+    }
+
+    private async Task InstallUpdate(string path, CancellationToken ct)
+    {
+        var manager = (ActivityManager?)GetSystemService(ActivityService);
+        if (manager?.AppTasks?.Any(task =>
+            task.TaskInfo?.TopActivity?.ClassName is { } name &&
+            (name.EndsWith(".GameActivity", StringComparison.Ordinal) || name.EndsWith(".JaySdlActivity", StringComparison.Ordinal))) == true)
+            throw new InvalidOperationException(L.T("tools.update.finish_game"));
+        var pm = PackageManager!;
+        // Check the installed identity before opening the installer. Android enforces the
+        // signing relationship and downgrade policy again when the user confirms.
+#pragma warning disable CS0618, CA1422
+        var candidate = pm.GetPackageArchiveInfo(path, PackageInfoFlags.Signatures);
+        var current = pm.GetPackageInfo(PackageName!, PackageInfoFlags.Signatures);
+        var signers = current?.Signatures;
+        if (candidate?.PackageName != PackageName || signers is not { Count: > 0 }
+            || candidate?.Signatures is not { Count: > 0 } offered
+            || !signers.Select(s => s.ToCharsString()).Order().SequenceEqual(offered.Select(s => s.ToCharsString()).Order())
+            || (OperatingSystem.IsAndroidVersionAtLeast(28) ? candidate.LongVersionCode <= current!.LongVersionCode : candidate.VersionCode <= current!.VersionCode))
+            throw new InvalidDataException(L.T("tools.update.identity"));
+#pragma warning restore CS0618, CA1422
+        if (!pm.CanRequestPackageInstalls())
+        {
+            _installPermission = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            try
+            {
+                StartActivityForResult(new Intent(global::Android.Provider.Settings.ActionManageUnknownAppSources,
+                    global::Android.Net.Uri.Parse("package:" + PackageName)), InstallPermissionRequest);
+                if (!await _installPermission.Task.WaitAsync(ct))
+                    throw new InvalidOperationException(L.T("tools.update.permission"));
+            }
+            finally { _installPermission = null; }
+        }
+        ct.ThrowIfCancellationRequested();
+        if (IsFinishing || IsDestroyed)
+        {
+            throw new InvalidOperationException(L.T("tools.update.foreground"));
+        }
+        var uri = AndroidX.Core.Content.FileProvider.GetUriForFile(this, PackageName + ".updates", new Java.IO.File(path));
+        var intent = new Intent(Intent.ActionView);
+        intent.SetDataAndType(uri, "application/vnd.android.package-archive");
+        intent.AddFlags(ActivityFlags.GrantReadUriPermission);
+        StartActivity(intent);
     }
 
     private void SetLauncherKeyboardVisible(bool visible)

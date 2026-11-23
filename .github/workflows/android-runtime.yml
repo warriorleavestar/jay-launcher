@@ -284,5 +284,6 @@ jobs:
           gh release create "$tag" release-assets/* \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
+            --latest=false \
             --title "Jay Android Java 25 runtime v3" \
             --notes "Verified Java 25 game runtimes for ARM64 and x86_64. Built from $JAY_SOURCE_SHA; includes exact checksums, extracted-size limits and source/license metadata."

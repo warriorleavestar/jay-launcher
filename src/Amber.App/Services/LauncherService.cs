@@ -178,6 +178,9 @@ public sealed class LauncherService : IDisposable
         && (!freshSettings || (selfTest is { Length: > 0 } && scope != "firstrun"));
 
     /// <summary>所有长任务（活动中心“进行中”）。</summary>
+    internal event Action? ShowUpdateTask;
+    internal void RevealUpdateTask() => ShowUpdateTask?.Invoke();
+
     public Amber.Core.Activity.TaskCenter Tasks { get; } = new();
 
     /// <summary>所有要你处理的请求（请求条、房间卡、小窗共用，一处处理处处撤掉）。</summary>

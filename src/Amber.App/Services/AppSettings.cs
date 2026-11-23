@@ -79,7 +79,7 @@ public sealed class AppSettings
     public string? UpdateFeedUrl { get; set; }
 
     /// <summary>
-    /// Check the update feed once a day and tell the user about a signed newer version. Jay never downloads it.
+    /// Notify the user about signed releases. Downloading an installer requires a separate user action.
     /// On for a new install. A settings file from before this switch existed keeps what that Jay did: it never checked
     /// by itself (even with an update address it only checked on click), so it stays off. The saved choice then carries over.
     /// </summary>
@@ -93,6 +93,8 @@ public sealed class AppSettings
     /// <summary>The saved switch; null in a fresh install and in settings files written before it existed.</summary>
     [System.Text.Json.Serialization.JsonPropertyName("AutoUpdateCheck")]
     public bool? AutoUpdateCheckSaved { get; set; }
+
+    public bool? AndroidUpdateChecksConfigured { get; set; }
 
     /// <summary>When the automatic update check last ran (successfully or not).</summary>
     public DateTimeOffset? LastUpdateCheck { get; set; }
@@ -283,6 +285,8 @@ public sealed class AppSettings
                     var loaded = JsonSerializer.Deserialize(read(path), AppJsonContext.Default.AppSettings) ?? new AppSettings();
                     // Upgraded from a Jay without the switch: that Jay never checked by itself, so neither does this one.
                     loaded.AutoUpdateCheckSaved ??= false;
+                    if (OperatingSystem.IsAndroid() && loaded.AndroidUpdateChecksConfigured != true)
+                        loaded.AutoUpdateCheck = false;
                     return loaded;
                 }
                 return new AppSettings { IsFresh = true };
@@ -317,6 +321,7 @@ public sealed class AppSettings
         if (ReadOnly) return;
         // A new install shows the daily update check on: write that down, or the next start would read it as an upgrade.
         AutoUpdateCheckSaved ??= true;
+        if (OperatingSystem.IsAndroid()) AndroidUpdateChecksConfigured = true;
         var path = SavePathForTest ?? FilePath;
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         var temp = path + ".tmp";

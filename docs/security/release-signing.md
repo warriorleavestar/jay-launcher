@@ -17,7 +17,7 @@ Each release carries, next to its packages:
 
 ## What the app checks
 
-The update check (`UpdateCheck.cs`, Settings › About › Check for updates, and the daily automatic check) downloads those three files from the newer
+The update check (`UpdateCheck.cs`, Settings › About › Check for updates, and the automatic check while Jay is open) downloads those three files from the newer
 release's assets and offers the update only when:
 
 - `SHA256SUMS.txt.sigs` is for exactly this `SHA256SUMS.txt` and this tag;
@@ -29,8 +29,20 @@ release's assets and offers the update only when:
   data folder), so an old signed release can't be passed off as new.
 
 Anything else: the app says the version was found but did not pass verification, and shows no button.
-Jay does not download or install the update itself: the notice opens the release page, whose address is
-built from the verified tag. A package downloaded from there can be checked with About › Verify a Jay download.
+Windows, macOS and Android offer **Download and update** when the signed list and the release
+both contain the installer for the current platform. Jay streams the installer into its private
+update cache, checks SHA-256, and opens the native installer for confirmation. It keeps game
+instances, worlds and accounts in place. The Windows updater targets the running portable
+installation. On macOS, install Jay.app from the DMG before using its update-only PKG.
+Android requires the same application ID and signing identity and a higher version code.
+Earlier launchers need one ordinary in-place upgrade to gain this feature.
+
+To deliver an update, increment the launcher version and mobile build number, then tag the
+matching commit. CI stages the Windows setup EXE, both macOS PKGs and the channel-signed
+Android APK beside the portable packages in the release draft. Sign the resulting checksum list
+as below and publish the signed draft as **latest**. An enabled launcher checks shortly after
+opening and every 15 minutes thereafter. Settings › About can also check immediately.
+A rolling preview alone does not authorize a launcher update.
 
 About › **Verify a Jay download** runs the same check on a file the user already downloaded (with
 `SHA256SUMS.txt`, `.sigs` and `trust-chain.json` next to it). `jay-server release verify` does the same on
@@ -96,7 +108,7 @@ package end to end, and publish:
 gh release upload v0.9.0 rel/SHA256SUMS.txt.sigs
 gh release download v0.9.0 --pattern 'Jay-win-x64.zip' --dir rel
 jay-server release verify rel/Jay-win-x64.zip --tag v0.9.0
-gh release edit v0.9.0 --draft=false
+gh release edit v0.9.0 --draft=false --latest
 ```
 
 ## EasyTier builds
