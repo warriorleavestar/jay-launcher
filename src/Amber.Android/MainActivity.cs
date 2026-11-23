@@ -19,6 +19,9 @@ namespace Amber.Android;
     ConfigurationChanges = ConfigChanges.Orientation | ConfigChanges.ScreenSize | ConfigChanges.UiMode)]
 public sealed class MainActivity : AvaloniaMainActivity
 {
+    private const int InstallPermissionRequest = 3821;
+    private TaskCompletionSource<bool>? _installPermission;
+
     protected override void OnCreate(Bundle? savedInstanceState)
     {
         base.OnCreate(savedInstanceState);
@@ -72,11 +75,19 @@ public sealed class MainActivity : AvaloniaMainActivity
 
     protected override void OnDestroy()
     {
+        _installPermission?.TrySetCanceled();
         BackRequested -= OnLauncherBackRequested;
         base.OnDestroy();
     }
 
-    private void InstallUpdate(string path)
+    protected override void OnActivityResult(int requestCode, Result resultCode, Intent? data)
+    {
+        base.OnActivityResult(requestCode, resultCode, data);
+        if (requestCode == InstallPermissionRequest)
+            _installPermission?.TrySetResult(PackageManager!.CanRequestPackageInstalls());
+    }
+
+    private async Task InstallUpdate(string path, CancellationToken ct)
     {
         var manager = (ActivityManager?)GetSystemService(ActivityService);
         if (manager?.AppTasks?.Any(task =>
@@ -98,9 +109,20 @@ public sealed class MainActivity : AvaloniaMainActivity
 #pragma warning restore CS0618, CA1422
         if (!pm.CanRequestPackageInstalls())
         {
-            StartActivity(new Intent(global::Android.Provider.Settings.ActionManageUnknownAppSources,
-                global::Android.Net.Uri.Parse("package:" + PackageName)));
-            throw new InvalidOperationException(L.T("tools.update.permission"));
+            _installPermission = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            try
+            {
+                StartActivityForResult(new Intent(global::Android.Provider.Settings.ActionManageUnknownAppSources,
+                    global::Android.Net.Uri.Parse("package:" + PackageName)), InstallPermissionRequest);
+                if (!await _installPermission.Task.WaitAsync(ct))
+                    throw new InvalidOperationException(L.T("tools.update.permission"));
+            }
+            finally { _installPermission = null; }
+        }
+        ct.ThrowIfCancellationRequested();
+        if (IsFinishing || IsDestroyed)
+        {
+            throw new InvalidOperationException(L.T("tools.update.foreground"));
         }
         var uri = AndroidX.Core.Content.FileProvider.GetUriForFile(this, PackageName + ".updates", new Java.IO.File(path));
         var intent = new Intent(Intent.ActionView);

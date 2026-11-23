@@ -70,6 +70,7 @@ internal sealed class UpdateNotifier : IDisposable
         if (!AutoUpdateCheck.IsSupported) return null;
         // Self-checks and page snapshots must not reach the network or put a notice on the request bar.
         if (Environment.GetEnvironmentVariable("AMBER_SELFTEST") is { Length: > 0 } || Environment.GetEnvironmentVariable("AMBER_SNAPSHOT_DIR") is { Length: > 0 }) return null;
+        LauncherUpdate.CleanInstalledDownloads();
         var notifier = new UpdateNotifier(service);
         DispatcherTimer.RunOnce(() =>
         {

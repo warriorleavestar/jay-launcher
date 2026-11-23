@@ -26,6 +26,28 @@ public class LauncherUpdateTests
     }
 
     [Fact]
+    public void ReopeningUpdatedLauncherCleansOnlyInstalledPackages()
+    {
+        var cache = Directory.CreateTempSubdirectory();
+        try
+        {
+            const string apk = "Jay-android.apk";
+            var digest = new string('a', 64);
+            var installed = cache.CreateSubdirectory("0.8.1_" + digest);
+            var future = cache.CreateSubdirectory("0.9.0_" + digest);
+            var custom = cache.CreateSubdirectory("saves");
+            foreach (var entry in new[] { installed, future, custom }) File.WriteAllText(Path.Combine(entry.FullName, apk), "fixture");
+            File.WriteAllText(Path.Combine(installed.FullName, "level.dat"), "world");
+            LauncherUpdate.CleanInstalledDownloads(cache.FullName, "0.8.1", apk);
+            Assert.False(File.Exists(Path.Combine(installed.FullName, apk)));
+            Assert.True(File.Exists(Path.Combine(future.FullName, apk)));
+            Assert.True(File.Exists(Path.Combine(custom.FullName, apk)));
+            Assert.Equal("world", File.ReadAllText(Path.Combine(installed.FullName, "level.dat")));
+        }
+        finally { cache.Delete(true); }
+    }
+
+    [Fact]
     public async Task FailedDownloadPreservesExistingBytesAndRetryRevalidatesCache()
     {
         var directory = Directory.CreateTempSubdirectory();
