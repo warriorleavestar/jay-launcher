@@ -900,16 +900,39 @@ public final class AndroidGameBootstrap {
     public static boolean dispatchMouseButton(int button, int action) {
         if (!prepareInputBridge()) return false;
         try {
-            Object minecraft = minecraft();
+            final Object minecraft = minecraft();
             if (minecraft == null) return false;
-            Object window = window(minecraft);
-            Object mouse = minecraftMouse.get(minecraft);
-            if (window == null || mouse == null) return false;
-            pressMouse(mouse, handle(window), button, action);
-            return true;
+            if (minecraftExecute == null) {
+                minecraftExecute = accessible(minecraft.getClass().getMethod(
+                    "execute", Runnable.class));
+            }
+            if (minecraftExecute != null) {
+                final int queuedButton = button;
+                final int queuedAction = action;
+                minecraftExecute.invoke(minecraft, new Runnable() {
+                    @Override public void run() {
+                        try {
+                            dispatchMouseButtonNow(minecraft, queuedButton, queuedAction);
+                        } catch (ReflectiveOperationException | RuntimeException error) {
+                            reportInputError(error);
+                        }
+                    }
+                });
+                return true;
+            }
+            return dispatchMouseButtonNow(minecraft, button, action);
         } catch (ReflectiveOperationException | RuntimeException error) {
             return reportInputError(error);
         }
+    }
+
+    private static boolean dispatchMouseButtonNow(Object minecraft, int button, int action)
+        throws ReflectiveOperationException {
+        Object window = window(minecraft);
+        Object mouse = minecraftMouse.get(minecraft);
+        if (window == null || mouse == null) return false;
+        pressMouse(mouse, handle(window), button, action);
+        return true;
     }
 
     public static boolean dispatchKey(int key, int action) {
