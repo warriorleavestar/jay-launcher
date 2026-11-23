@@ -1591,6 +1591,27 @@ public sealed class MobilePortTests
     }
 
     [Fact]
+    public void LauncherTextFieldsRecoverTheAndroidSoftwareKeyboard()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var activity = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "MainActivity.cs"));
+        var shell = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.App", "Views", "MobileLauncherView.axaml.cs"));
+
+        Assert.Contains("MobileTextInputFocusChanged = SetLauncherKeyboardVisible", activity,
+            StringComparison.Ordinal);
+        Assert.Contains("RestartInput(target)", activity, StringComparison.Ordinal);
+        Assert.Contains("ShowSoftInput(target, ShowFlags.Forced)", activity,
+            StringComparison.Ordinal);
+        Assert.Contains("AddHandler(GotFocusEvent, OnElementGotFocus", shell,
+            StringComparison.Ordinal);
+        Assert.Contains("MobileTextInputFocusChanged?.Invoke(textInput)", shell,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void MissingAndroidActionButtonIsRecoveredFromButtonState()
     {
         var tracker = new HardwareMouseButtonTracker();
