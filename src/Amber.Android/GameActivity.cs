@@ -623,14 +623,18 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         var bounds = new RectF(Width * 0.615f, Height * (y - 0.038f), Width * 0.955f, Height * (y + 0.038f));
         canvas.DrawRect(bounds, selected ? _activeFill : _buttonFace);
         canvas.DrawRect(bounds, _buttonBorder);
-        canvas.DrawText(text, Width * 0.785f, Height * (y + 0.012f), _hint);
+        DrawFittedCenteredText(canvas, text, bounds.CenterX(), Height * (y + 0.012f),
+            bounds.Width() * 0.90f);
     }
 
     private void DrawStepper(Canvas canvas, string text, float y)
     {
         DrawPanelButton(canvas, "−", 0.615f, y - 0.038f, 0.675f, y + 0.038f);
         DrawPanelButton(canvas, "+", 0.895f, y - 0.038f, 0.955f, y + 0.038f);
-        canvas.DrawText(text, Width * 0.785f, Height * (y + 0.012f), _hint);
+        var textLeft = Width * 0.685f;
+        var textRight = Width * 0.885f;
+        DrawFittedCenteredText(canvas, text, (textLeft + textRight) / 2,
+            Height * (y + 0.012f), textRight - textLeft);
     }
 
     private void DrawPanelButton(Canvas canvas, string text, float left, float top, float right, float bottom)
@@ -638,7 +642,34 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         var bounds = new RectF(Width * left, Height * top, Width * right, Height * bottom);
         canvas.DrawRect(bounds, _buttonFace);
         canvas.DrawRect(bounds, _buttonBorder);
-        canvas.DrawText(text, Width * ((left + right) / 2), Height * ((top + bottom) / 2 + 0.012f), _hint);
+        DrawFittedCenteredText(canvas, text, bounds.CenterX(),
+            Height * ((top + bottom) / 2 + 0.012f), bounds.Width() * 0.84f);
+    }
+
+    private void DrawFittedCenteredText(
+        Canvas canvas,
+        string text,
+        float centerX,
+        float baseline,
+        float availableWidth)
+    {
+        var preferredSize = _hint.TextSize;
+        _hint.TextSize = TouchTextLayout.FitTextSize(
+            preferredSize,
+            _hint.MeasureText(text),
+            availableWidth,
+            minimumSize: 10f);
+        if (_hint.MeasureText(text) > availableWidth)
+        {
+            const string ellipsis = "…";
+            var runes = text.EnumerateRunes().ToList();
+            while (runes.Count > 0 &&
+                   _hint.MeasureText(string.Concat(runes) + ellipsis) > availableWidth)
+                runes.RemoveAt(runes.Count - 1);
+            text = string.Concat(runes) + ellipsis;
+        }
+        canvas.DrawText(text, centerX, baseline, _hint);
+        _hint.TextSize = preferredSize;
     }
 
     private void ApplyControlOpacity()

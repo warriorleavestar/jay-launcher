@@ -140,6 +140,35 @@ public sealed class MobilePortTests
         }
     }
 
+    [Theory]
+    [InlineData(17f, 120f, 132f, 17f)]
+    [InlineData(17f, 170f, 132f, 13.2f)]
+    [InlineData(17f, 500f, 132f, 10f)]
+    public void AndroidTouchSettingsLabelsFitBetweenStepperButtons(
+        float preferred,
+        float measured,
+        float available,
+        float expected)
+    {
+        Assert.Equal(expected,
+            TouchTextLayout.FitTextSize(preferred, measured, available, minimumSize: 10f),
+            precision: 3);
+    }
+
+    [Fact]
+    public void AndroidTouchSettingsTrimLabelsThatRemainTooWideAtMinimumSize()
+    {
+        var repository = FindRepositoryRoot();
+        var activity = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "GameActivity.cs"));
+        var draw = JavaMethod(activity, "private void DrawStepper",
+            "private void ApplyControlOpacity");
+
+        Assert.Contains("DrawFittedCenteredText", draw, StringComparison.Ordinal);
+        Assert.Contains("TouchTextLayout.FitTextSize", draw, StringComparison.Ordinal);
+        Assert.Contains("const string ellipsis = \"…\"", draw, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void AndroidMobileGluesBuildAppliesTheEmulatorAnglePatch()
     {
