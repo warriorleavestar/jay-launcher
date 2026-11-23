@@ -2112,6 +2112,7 @@
   "shell.nav.multiplayer": "联机",
   "shell.nav.multiplayer_short": "联机",
   "shell.settings": "设置",
+  "shell.settings_short": "设",
   "shell.settings_tip": "设置（Ctrl+,）",
   "shell.account.none": "添加账号",
   "shell.back": "返回",

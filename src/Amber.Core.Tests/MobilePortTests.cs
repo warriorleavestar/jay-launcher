@@ -1591,6 +1591,48 @@ public sealed class MobilePortTests
     }
 
     [Fact]
+    public void LauncherTextFieldsRecoverTheAndroidSoftwareKeyboard()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var activity = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "MainActivity.cs"));
+        var shell = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.App", "Views", "MobileLauncherView.axaml.cs"));
+
+        Assert.Contains("MobileTextInputFocusChanged = SetLauncherKeyboardVisible", activity,
+            StringComparison.Ordinal);
+        Assert.Contains("RestartInput(target)", activity, StringComparison.Ordinal);
+        Assert.Contains("ShowSoftInput(target, ShowFlags.Forced)", activity,
+            StringComparison.Ordinal);
+        Assert.Contains("AddHandler(GotFocusEvent, OnElementGotFocus", shell,
+            StringComparison.Ordinal);
+        Assert.Contains("MobileTextInputFocusChanged?.Invoke(textInput)", shell,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AndroidBackClosesLauncherNavigationBeforeBackgroundingTheActivity()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var app = File.ReadAllText(Path.Combine(repository, "src", "Amber.App", "App.axaml.cs"));
+        var shell = File.ReadAllText(Path.Combine(repository, "src", "Amber.App", "Views", "MobileLauncherView.axaml.cs"));
+        var activity = File.ReadAllText(Path.Combine(repository, "src", "Amber.Android", "MainActivity.cs"));
+
+        Assert.Contains("Func<bool>? MobileBackRequested", app, StringComparison.Ordinal);
+        Assert.Contains("App.MobileBackRequested = HandleMobileBack", shell, StringComparison.Ordinal);
+        Assert.Contains("download.CloseAfterStart?.Invoke()", shell, StringComparison.Ordinal);
+        Assert.Contains("Router.CanGoBack", shell, StringComparison.Ordinal);
+        Assert.Contains("main.Shell.Router.Back()", shell, StringComparison.Ordinal);
+        Assert.Contains("MobileBackRequested?.Invoke() == true", activity, StringComparison.Ordinal);
+        Assert.Contains("BackRequested += OnLauncherBackRequested", activity, StringComparison.Ordinal);
+        Assert.Contains("e.Handled =", activity, StringComparison.Ordinal);
+        Assert.Contains("activity.MoveTaskToBack(true)", activity, StringComparison.Ordinal);
+        Assert.DoesNotContain("RegisterOnBackInvokedCallback", activity, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void MissingAndroidActionButtonIsRecoveredFromButtonState()
     {
         var tracker = new HardwareMouseButtonTracker();

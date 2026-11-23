@@ -2112,6 +2112,7 @@
   "shell.nav.multiplayer": "マルチプレイ",
   "shell.nav.multiplayer_short": "マルチ",
   "shell.settings": "設定",
+  "shell.settings_short": "設定",
   "shell.settings_tip": "設定（Ctrl+,）",
   "shell.account.none": "アカウントを追加",
   "shell.back": "戻る",

@@ -20,6 +20,18 @@ public sealed class App : Application
     /// <summary>Starts the selected desktop-style instance in the native mobile game activity.</summary>
     public static Func<string, string, string?, IProgress<MobileLaunchProgress>?, CancellationToken, Task>? MobileLaunchRequested { get; set; }
 
+    /// <summary>
+    /// Lets the native single-view host recover the software keyboard when its window reports a
+    /// hardware keyboard. Avalonia still owns text composition; the host only shows or hides the IME.
+    /// </summary>
+    public static Action<bool>? MobileTextInputFocusChanged { get; set; }
+
+    /// <summary>
+    /// Gives Android's system Back gesture to the single-view launcher before the native Activity
+    /// is backgrounded. The view returns false at its root so Android can keep its normal behavior.
+    /// </summary>
+    public static Func<bool>? MobileBackRequested { get; set; }
+
     public override void Initialize()
     {
         StartupTrace.Mark("platform");
