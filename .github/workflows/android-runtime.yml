@@ -36,7 +36,7 @@ on:
         options: [all, arm64-v8a, x86_64]
         default: all
       publish_runtime:
-        description: Publish the verified android-runtime-v2 assets (main + all architectures only)
+        description: Publish the verified android-runtime-v3 assets (main + all architectures only)
         type: boolean
         default: false
 
@@ -202,7 +202,7 @@ jobs:
             "$output" \
             "${{ matrix.architecture }}" \
             "${{ github.server_url }}/${{ github.repository }}/tree/$JAY_SOURCE_SHA" \
-            "${{ github.server_url }}/${{ github.repository }}/releases/download/android-runtime-v2/$(basename "$output")" \
+            "${{ github.server_url }}/${{ github.repository }}/releases/download/android-runtime-v3/$(basename "$output")" \
             "runtime-artifact/runtime25-${{ matrix.architecture }}.json"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -248,9 +248,9 @@ jobs:
             archive_hash="$(sha256sum "$archive" | cut -d' ' -f1)"
             metadata_archive="$(sed -n 's/^archive-bytes=//p' "$metadata")"
             extracted_size="$(sed -n 's/^extracted-bytes=//p' "$metadata")"
-            expected_id="jay-android-runtime25-v2-$architecture"
+            expected_id="jay-android-runtime25-v3-$architecture"
             expected_source="${{ github.server_url }}/${{ github.repository }}/tree/$JAY_SOURCE_SHA"
-            expected_download="${{ github.server_url }}/${{ github.repository }}/releases/download/android-runtime-v2/$(basename "$archive")"
+            expected_download="${{ github.server_url }}/${{ github.repository }}/releases/download/android-runtime-v3/$(basename "$archive")"
             test "$metadata_archive" = "$archive_size"
             [[ "$extracted_size" =~ ^[0-9]+$ ]]
             jq -e \
@@ -276,7 +276,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          tag=android-runtime-v2
+          tag=android-runtime-v3
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "::error::Release $tag already exists; refusing to replace immutable runtime assets."
             exit 1
@@ -284,5 +284,5 @@ jobs:
           gh release create "$tag" release-assets/* \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
-            --title "Jay Android Java 25 runtime v2" \
+            --title "Jay Android Java 25 runtime v3" \
             --notes "Verified Java 25 game runtimes for ARM64 and x86_64. Built from $JAY_SOURCE_SHA; includes exact checksums, extracted-size limits and source/license metadata."

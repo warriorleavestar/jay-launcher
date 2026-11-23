@@ -269,26 +269,26 @@ jobs:
           catalog="Amber.Android/obj/jay-runtime-catalog"
           rm -rf "$catalog"
           mkdir -p "$catalog"
-          if ! gh release download android-runtime-v2 \
+          if ! gh release download android-runtime-v3 \
             --repo "$GITHUB_REPOSITORY" \
             --pattern 'runtime25-*.json' \
             --dir "$catalog"; then
             rm -f "$catalog"/*
             if [[ "${{ github.event_name }}" == pull_request ]]; then
-              echo "::notice::android-runtime-v2 is not published yet; PR APK omits the Java 25 catalog."
+              echo "::notice::android-runtime-v3 is not published yet; PR APK omits the Java 25 catalog."
               exit 0
             fi
-            echo "::error::android-runtime-v2 descriptors are required for downloadable Android builds."
+            echo "::error::android-runtime-v3 descriptors are required for downloadable Android builds."
             exit 1
           fi
           for architecture in arm64-v8a x86_64; do
             descriptor="$catalog/runtime25-$architecture.json"
             archive="jay-android-runtime25-$architecture.tar.xz"
-            expected_download="${{ github.server_url }}/${{ github.repository }}/releases/download/android-runtime-v2/$archive"
+            expected_download="${{ github.server_url }}/${{ github.repository }}/releases/download/android-runtime-v3/$archive"
             test -f "$descriptor"
             jq -e \
               --arg architecture "$architecture" \
-              --arg id "jay-android-runtime25-v2-$architecture" \
+              --arg id "jay-android-runtime25-v3-$architecture" \
               --arg downloadUrl "$expected_download" \
               '.Format == 1 and .Id == $id and .Architecture == $architecture and
                .ArchiveSize > 0 and (.ArchiveSha256 | test("^[0-9a-f]{64}$")) and
