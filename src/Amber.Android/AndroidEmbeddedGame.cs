@@ -241,7 +241,13 @@ internal static class AndroidEmbeddedGame
         var path = Path.Combine(gameRoot, "options.txt");
         var marker = Path.Combine(gameRoot, MobileGameOptions.MigrationMarkerName);
         var existing = File.Exists(path) ? await File.ReadAllTextAsync(path, ct) : null;
-        var prepared = MobileGameOptions.Prepare(existing, migrateLegacyScale: !File.Exists(marker));
+        var defaultLanguage = L.MinecraftCodes.TryGetValue(L.Language, out var minecraftLanguage)
+            ? minecraftLanguage
+            : "zh_cn";
+        var prepared = MobileGameOptions.Prepare(
+            existing,
+            migrateLegacyScale: !File.Exists(marker),
+            defaultLanguage);
         if (!string.Equals(existing, prepared, StringComparison.Ordinal))
             await File.WriteAllTextAsync(path, prepared, ct);
         if (!File.Exists(marker))

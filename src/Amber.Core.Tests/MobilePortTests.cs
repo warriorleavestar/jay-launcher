@@ -1893,6 +1893,41 @@ public sealed class MobilePortTests
         Assert.DoesNotContain("guiScale:3", options, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("en_us")]
+    [InlineData("ja_jp")]
+    [InlineData("zh_tw")]
+    [InlineData("lzh")]
+    [InlineData("en_ud")]
+    public void FreshAndroidOptionsFollowTheSelectedLauncherLanguage(string language)
+    {
+        var options = MobileGameOptions.Prepare(
+            existing: null,
+            migrateLegacyScale: true,
+            defaultLanguage: language);
+
+        Assert.Contains($"lang:{language}", options, StringComparison.Ordinal);
+        Assert.DoesNotContain("lang:zh_cn", options, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AndroidOptionsRejectAnInvalidDefaultLanguageWithoutChangingAnExistingChoice()
+    {
+        var fresh = MobileGameOptions.Prepare(
+            existing: null,
+            migrateLegacyScale: true,
+            defaultLanguage: "en_us\nmaxFps:999");
+        var existing = MobileGameOptions.Prepare(
+            "guiScale:0\nlang:en_us\nmaxFps:90\n",
+            migrateLegacyScale: false,
+            defaultLanguage: "ja_jp");
+
+        Assert.Contains("lang:zh_cn", fresh, StringComparison.Ordinal);
+        Assert.DoesNotContain("maxFps:999", fresh, StringComparison.Ordinal);
+        Assert.Contains("lang:en_us", existing, StringComparison.Ordinal);
+        Assert.DoesNotContain("lang:ja_jp", existing, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void AndroidGuiScaleMigrationRunsOnceAndPreservesPlayerChoices()
     {
