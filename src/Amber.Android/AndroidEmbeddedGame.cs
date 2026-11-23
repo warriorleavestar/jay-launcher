@@ -169,12 +169,15 @@ internal static class AndroidEmbeddedGame
         var mobileGluesRoot = Path.Combine(game.WorkingDirectory, "mobileglues");
         Directory.CreateDirectory(mobileGluesRoot);
         var mobileGlues = Path.Combine(nativeRoot, "libmobileglues.so");
-        bool emulatorAngle = game.Sdl && global::Android.OS.Build.Hardware is ("ranchu" or "goldfish") &&
-            File.Exists(Path.Combine(nativeRoot, "libEGL_angle.so"));
+        var angleRoot = AndroidNativeLibraries.ResolveEmulatorAngleRoot(
+            nativeRoot,
+            "/system/lib64",
+            game.Sdl && global::Android.OS.Build.Hardware is ("ranchu" or "goldfish"));
+        bool emulatorAngle = angleRoot is not null;
         foreach (var (name, value) in new (string Name, string Value)[]
         {
             ("MG_DIR_PATH", mobileGluesRoot),
-            ("MG_ANGLE_DIR", emulatorAngle ? nativeRoot : ""),
+            ("MG_ANGLE_DIR", angleRoot ?? ""),
             ("JAY_EMULATOR_ANGLE", emulatorAngle ? "1" : "0"),
             ("JAY_EGL_LIBRARY", mobileGlues),
             ("JAY_GL_LIBRARY", mobileGlues),

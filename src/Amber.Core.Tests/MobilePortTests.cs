@@ -115,6 +115,41 @@ public sealed class MobilePortTests
     }
 
     [Fact]
+    public void AndroidEmulatorAngleUsesACompleteRuntimeOrSystemLibrarySet()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "jay-angle-layout-" + Guid.NewGuid().ToString("N"));
+        var runtime = Path.Combine(root, "runtime");
+        var system = Path.Combine(root, "system");
+        Directory.CreateDirectory(runtime);
+        Directory.CreateDirectory(system);
+        try
+        {
+            Assert.Null(AndroidNativeLibraries.ResolveEmulatorAngleRoot(runtime, system, true));
+            File.WriteAllBytes(Path.Combine(system, "libEGL_angle.so"), [1]);
+            File.WriteAllBytes(Path.Combine(system, "libGLESv2_angle.so"), [1]);
+            Assert.Equal(system, AndroidNativeLibraries.ResolveEmulatorAngleRoot(runtime, system, true));
+            Assert.Null(AndroidNativeLibraries.ResolveEmulatorAngleRoot(runtime, system, false));
+
+            File.WriteAllBytes(Path.Combine(runtime, "libEGL_angle.so"), [1]);
+            File.WriteAllBytes(Path.Combine(runtime, "libGLESv2_angle.so"), [1]);
+            Assert.Equal(runtime, AndroidNativeLibraries.ResolveEmulatorAngleRoot(runtime, system, true));
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
+    public void AndroidMobileGluesBuildAppliesTheEmulatorAnglePatch()
+    {
+        var root = FindRepositoryRoot();
+        var script = File.ReadAllText(Path.Combine(root, "scripts", "build-android-mobileglues.sh"));
+
+        Assert.Contains("emulator-angle.patch", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AndroidJava25CatalogSelectsBothModernAbisAndQuarantinesTheLegacyBundle()
     {
         var armDescriptor = "runtime25-arm64-v8a.json";
@@ -2668,6 +2703,19 @@ public sealed class MobilePortTests
         var end = source.IndexOf(endMarker, start + startMarker.Length, StringComparison.Ordinal);
         Assert.True(end > start, $"Missing Java method end marker: {endMarker}");
         return source[start..end];
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        foreach (var start in new[] { AppContext.BaseDirectory, Directory.GetCurrentDirectory() })
+        {
+            for (var directory = new DirectoryInfo(start); directory is not null; directory = directory.Parent)
+            {
+                if (File.Exists(Path.Combine(directory.FullName, "scripts", "build-android-mobileglues.sh")))
+                    return directory.FullName;
+            }
+        }
+        throw new DirectoryNotFoundException("Could not locate the Jay repository root.");
     }
 
     private const string RuntimeXzFixture = """

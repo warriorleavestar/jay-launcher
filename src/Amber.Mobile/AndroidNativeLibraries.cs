@@ -40,4 +40,19 @@ internal static class AndroidNativeLibraries
         var preferred = Path.Combine(preferredRoot, name);
         return File.Exists(preferred) ? preferred : Path.Combine(packagedRoot, name);
     }
+
+    public static string? ResolveEmulatorAngleRoot(
+        string runtimeNativeRoot,
+        string systemLibraryRoot,
+        bool emulator)
+    {
+        if (!emulator) return null;
+        foreach (var root in new[] { runtimeNativeRoot, systemLibraryRoot })
+        {
+            if (File.Exists(Path.Combine(root, "libEGL_angle.so")) &&
+                File.Exists(Path.Combine(root, "libGLESv2_angle.so")))
+                return root;
+        }
+        return null;
+    }
 }
