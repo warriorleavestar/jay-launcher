@@ -38,6 +38,19 @@ public sealed class MainActivity : AvaloniaMainActivity
         base.OnPause();
     }
 
+    public override bool DispatchKeyEvent(KeyEvent? e)
+    {
+        // Three-button navigation and physical Back arrive as key events instead of the Android
+        // 13 predictive-back callback. Consume the full gesture so its key-up cannot background
+        // the Activity after the launcher has already closed its current panel.
+        if (e?.KeyCode == Keycode.Back)
+        {
+            if (e.Action == KeyEventActions.Down && e.RepeatCount == 0) HandleActivityBack();
+            return true;
+        }
+        return base.DispatchKeyEvent(e);
+    }
+
 #pragma warning disable CS0672, CS0618
     public override void OnBackPressed() => HandleActivityBack();
 #pragma warning restore CS0672, CS0618
