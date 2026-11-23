@@ -913,12 +913,17 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     private void LoadProfile()
     {
         var layoutVersion = _preferences.GetInt("layout-version", 1);
-        _profile.Mode = Enum.TryParse<TouchControlMode>(_preferences.GetString("mode", null), out var mode)
-            ? mode : TouchControlMode.DPadAndTap;
+        _profile.Mode = Enum.TryParse<TouchControlMode>(_preferences.GetString("mode", null), out var mode) &&
+                        Enum.IsDefined(mode)
+            ? mode
+            : TouchControlMode.DPadAndTap;
         _profile.Scale = Math.Clamp(_preferences.GetFloat("scale", 1f), 0.70, 1.35);
         _profile.LookSensitivity = Math.Clamp(_preferences.GetFloat("look-sensitivity", 1.65f), 0.50, 3.00);
-        _profile.AttackArea = Enum.TryParse<TouchAttackArea>(_preferences.GetString("attack-area", null), out var attackArea)
-            ? attackArea : TouchAttackArea.Anywhere;
+        _profile.AttackArea = Enum.TryParse<TouchAttackArea>(
+                                  _preferences.GetString("attack-area", null), out var attackArea) &&
+                              Enum.IsDefined(attackArea)
+            ? attackArea
+            : TouchAttackArea.Anywhere;
         _profile.ForcedSprint = _preferences.GetBoolean("forced-sprint", true);
         _controlOpacity = Math.Clamp(_preferences.GetFloat("opacity", 0.74f), 0.30f, 1f);
         foreach (var modeValue in Enum.GetValues<TouchControlMode>())

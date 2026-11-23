@@ -537,6 +537,22 @@ public sealed class MobilePortTests
     }
 
     [Fact]
+    public void AndroidRejectsUndefinedPersistedTouchModes()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var activity = File.ReadAllText(Path.Combine(repository, "src", "Amber.Android",
+            "GameActivity.cs"));
+        var loadProfile = JavaMethod(activity, "private void LoadProfile()",
+            "private void SaveProfile()");
+
+        Assert.Contains("Enum.IsDefined(mode)", loadProfile, StringComparison.Ordinal);
+        Assert.Contains("Enum.IsDefined(attackArea)", loadProfile, StringComparison.Ordinal);
+        Assert.Contains(": TouchControlMode.DPadAndTap;", loadProfile, StringComparison.Ordinal);
+        Assert.Contains(": TouchAttackArea.Anywhere;", loadProfile, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void TouchProfileOffersIndependentAttackAreas()
     {
         var profile = new TouchControlProfile { ViewportAspectRatio = 1.6 };
