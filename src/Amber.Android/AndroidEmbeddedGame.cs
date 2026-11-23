@@ -16,6 +16,7 @@ internal sealed record AndroidPreparedGame(
     string RuntimeRoot,
     string WorkingDirectory,
     string NativeRoot,
+    string PackagedNativeRoot,
     bool Sdl,
     EmbeddedJavaInvocation Invocation);
 
@@ -160,7 +161,7 @@ internal static class AndroidEmbeddedGame
             sdl ? "nz.work.minecraft.jay.SdlMenuBootstrap" : "nz.work.minecraft.jay.AndroidGameBootstrap",
             [invocation.MainClass, .. invocation.Arguments],
             invocation.TransientDirectory);
-        return new AndroidPreparedGame(runtimeRoot, gameRoot, nativeRoot, sdl, invocation);
+        return new AndroidPreparedGame(runtimeRoot, gameRoot, nativeRoot, packagedNativeRoot, sdl, invocation);
     }
 
     public static void Run(AndroidPreparedGame game)
@@ -171,7 +172,7 @@ internal static class AndroidEmbeddedGame
         var mobileGlues = Path.Combine(nativeRoot, "libmobileglues.so");
         var angleRoot = AndroidNativeLibraries.ResolveEmulatorAngleRoot(
             nativeRoot,
-            "/system/lib64",
+            game.PackagedNativeRoot,
             game.Sdl && global::Android.OS.Build.Hardware is ("ranchu" or "goldfish"));
         bool emulatorAngle = angleRoot is not null;
         foreach (var (name, value) in new (string Name, string Value)[]

@@ -260,6 +260,9 @@ jobs:
             "${{ runner.temp }}/jdk" \
             Amber.Android/obj/jay-sdl
 
+      - name: Stage standalone ANGLE for emulator graphics
+        run: python3 ../scripts/fetch-android-angle.py Amber.Android/obj/jay-angle
+
       - name: Fetch pinned Java 25 runtime catalog
         shell: bash
         env:
@@ -327,6 +330,7 @@ jobs:
           -p:AndroidSdkDirectory=${{ runner.temp }}/android-sdk
           -p:JavaSdkDirectory=${{ runner.temp }}/jdk
           -p:JaySdlRuntimeDir=${{ github.workspace }}/src/Amber.Android/obj/jay-sdl
+          -p:JayAngleRuntimeDir=${{ github.workspace }}/src/Amber.Android/obj/jay-angle
           -p:JayAndroidRuntimeCatalogDir=${{ github.workspace }}/src/Amber.Android/obj/jay-runtime-catalog
           -p:AndroidPackageFormats=apk
 
@@ -342,6 +346,7 @@ jobs:
           -p:AndroidSdkDirectory=${{ runner.temp }}/android-sdk
           -p:JavaSdkDirectory=${{ runner.temp }}/jdk
           -p:JaySdlRuntimeDir=${{ github.workspace }}/src/Amber.Android/obj/jay-sdl
+          -p:JayAngleRuntimeDir=${{ github.workspace }}/src/Amber.Android/obj/jay-angle
           -p:JayAndroidRuntimeCatalogDir=${{ github.workspace }}/src/Amber.Android/obj/jay-runtime-catalog
           -p:AndroidPackageFormats=apk
           -p:AndroidKeyStore=true

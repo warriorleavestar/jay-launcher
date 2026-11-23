@@ -115,24 +115,24 @@ public sealed class MobilePortTests
     }
 
     [Fact]
-    public void AndroidEmulatorAngleUsesACompleteRuntimeOrSystemLibrarySet()
+    public void AndroidEmulatorAngleUsesACompleteRuntimeOrPackagedLibrarySet()
     {
         var root = Path.Combine(Path.GetTempPath(), "jay-angle-layout-" + Guid.NewGuid().ToString("N"));
         var runtime = Path.Combine(root, "runtime");
-        var system = Path.Combine(root, "system");
+        var packaged = Path.Combine(root, "packaged");
         Directory.CreateDirectory(runtime);
-        Directory.CreateDirectory(system);
+        Directory.CreateDirectory(packaged);
         try
         {
-            Assert.Null(AndroidNativeLibraries.ResolveEmulatorAngleRoot(runtime, system, true));
-            File.WriteAllBytes(Path.Combine(system, "libEGL_angle.so"), [1]);
-            File.WriteAllBytes(Path.Combine(system, "libGLESv2_angle.so"), [1]);
-            Assert.Equal(system, AndroidNativeLibraries.ResolveEmulatorAngleRoot(runtime, system, true));
-            Assert.Null(AndroidNativeLibraries.ResolveEmulatorAngleRoot(runtime, system, false));
+            Assert.Null(AndroidNativeLibraries.ResolveEmulatorAngleRoot(runtime, packaged, true));
+            File.WriteAllBytes(Path.Combine(packaged, "libEGL_angle.so"), [1]);
+            File.WriteAllBytes(Path.Combine(packaged, "libGLESv2_angle.so"), [1]);
+            Assert.Equal(packaged, AndroidNativeLibraries.ResolveEmulatorAngleRoot(runtime, packaged, true));
+            Assert.Null(AndroidNativeLibraries.ResolveEmulatorAngleRoot(runtime, packaged, false));
 
             File.WriteAllBytes(Path.Combine(runtime, "libEGL_angle.so"), [1]);
             File.WriteAllBytes(Path.Combine(runtime, "libGLESv2_angle.so"), [1]);
-            Assert.Equal(runtime, AndroidNativeLibraries.ResolveEmulatorAngleRoot(runtime, system, true));
+            Assert.Equal(runtime, AndroidNativeLibraries.ResolveEmulatorAngleRoot(runtime, packaged, true));
         }
         finally
         {

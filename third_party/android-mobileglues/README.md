@@ -16,8 +16,9 @@ OpenGL ES requires the attachment index to be a constant expression.
 The graphics runtime workflow runs the focused host regression test included in
 the patch before cross-compiling the Android library.
 
-`emulator-angle.patch` lets Jay explicitly select Android's system ANGLE
-libraries on emulator hardware. This avoids presenting an incomplete translated
+`emulator-angle.patch` lets Jay explicitly select the APK's standalone ANGLE
+libraries on emulator hardware. The Android build fetches the four EGL/GLES binaries
+listed in `build/pins.json` and ships their BSD license alongside the SDL license. This avoids presenting an incomplete translated
 frame while preserving MobileGlues' default renderer selection on physical
 devices.
 

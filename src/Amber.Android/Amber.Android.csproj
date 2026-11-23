@@ -39,6 +39,12 @@
     <AndroidAsset Include="$(JaySdlRuntimeDir)/SDL-LICENSE.txt" LogicalName="licenses/SDL-LICENSE.txt" />
   </ItemGroup>
 
+  <ItemGroup Condition="'$(JayAngleRuntimeDir)' != ''">
+    <AndroidNativeLibrary Include="$(JayAngleRuntimeDir)/arm64-v8a/libEGL_angle.so;$(JayAngleRuntimeDir)/arm64-v8a/libGLESv2_angle.so" Abi="arm64-v8a" />
+    <AndroidNativeLibrary Include="$(JayAngleRuntimeDir)/x86_64/libEGL_angle.so;$(JayAngleRuntimeDir)/x86_64/libGLESv2_angle.so" Abi="x86_64" />
+    <AndroidAsset Include="../../third_party/android-angle/LICENSE.txt" LogicalName="licenses/ANGLE-LICENSE.txt" />
+  </ItemGroup>
+
   <ItemGroup Condition="'$(JayAndroidRuntimeCatalogDir)' != ''">
     <AndroidAsset Include="$(JayAndroidRuntimeCatalogDir)/runtime25-*.json" LogicalName="%(Filename)%(Extension)" />
     <!-- Local/emulator verification may place the matching archives beside the descriptors.
