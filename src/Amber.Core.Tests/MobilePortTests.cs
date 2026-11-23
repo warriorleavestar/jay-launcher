@@ -1840,6 +1840,21 @@ public sealed class MobilePortTests
     }
 
     [Fact]
+    public void AndroidSdlContextualTapIsSingleAndMenuButtonsKeepEdges()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var sdl = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "Sdl", "SdlTouchInput.cs"));
+
+        Assert.Contains("playing && JavaPointer(1)", sdl, StringComparison.Ordinal);
+        Assert.DoesNotContain("JavaPointer(3)", sdl, StringComparison.Ordinal);
+        Assert.Contains("EntryPoint = \"jay_java_mouse_button\"", sdl, StringComparison.Ordinal);
+        Assert.Contains("JavaButton(button, pressed)", sdl, StringComparison.Ordinal);
+        Assert.DoesNotContain("pressed ? 1u : 2u", sdl, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void TouchOverlayReleasesHeldInputAcrossBothGlfwAndSdlWindowFocusChanges()
     {
         var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
