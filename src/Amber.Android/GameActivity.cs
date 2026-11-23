@@ -30,6 +30,8 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
     public const string ServerAddressExtra = "nz.work.minecraft.jay.SERVER_ADDRESS";
     public const string VersionIdExtra = "nz.work.minecraft.jay.VERSION_ID";
     public const string PlayerNameExtra = "nz.work.minecraft.jay.PLAYER_NAME";
+    public const string TouchSettingsSelfTestExtra = "nz.work.minecraft.jay.TOUCH_SETTINGS_SELF_TEST";
+    public const string PseudoLocalizationSelfTestExtra = "nz.work.minecraft.jay.PSEUDO_LOCALIZATION_SELF_TEST";
     private CancellationTokenSource? _gameSetup;
     private TouchControlOverlay? _touchOverlay;
     private readonly object _surfaceSync = new();
@@ -42,6 +44,13 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
         base.OnCreate(savedInstanceState);
         Window?.AddFlags(WindowManagerFlags.Fullscreen | WindowManagerFlags.KeepScreenOn);
         RegisterBackInvokedCallback();
+
+        if (Intent?.GetBooleanExtra(TouchSettingsSelfTestExtra, false) == true)
+        {
+            ShowTouchSettingsSelfTest(
+                Intent.GetBooleanExtra(PseudoLocalizationSelfTestExtra, false));
+            return;
+        }
 
         var root = new FrameLayout(this);
         var surface = new SurfaceView(this);
@@ -58,6 +67,23 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
         EnterImmersiveMode();
         _gameSetup = new CancellationTokenSource();
         _ = RunPreparedGameAsync(_gameSetup.Token);
+    }
+
+    private void ShowTouchSettingsSelfTest(bool pseudoLocalization)
+    {
+        L.SetLanguage("en");
+        L.Pseudo = pseudoLocalization;
+        var root = new FrameLayout(this);
+        root.SetBackgroundColor(Color.Rgb(65, 94, 71));
+        _touchOverlay = new TouchControlOverlay(this)
+        {
+            Visibility = ViewStates.Visible,
+            Alpha = 1
+        };
+        _touchOverlay.OpenSettingsForSelfTest();
+        root.AddView(_touchOverlay, MatchParent());
+        SetContentView(root);
+        EnterImmersiveMode();
     }
 
     public override void OnWindowFocusChanged(bool hasFocus)
@@ -358,6 +384,13 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         Clickable = true;
         Focusable = true;
         FocusableInTouchMode = true;
+    }
+
+    internal void OpenSettingsForSelfTest()
+    {
+        _settingsOpen = true;
+        _layoutEditing = false;
+        _profile.LookSensitivity = 1.65;
     }
 
     // Only advertise an Android text editor while Minecraft actually owns a text field.

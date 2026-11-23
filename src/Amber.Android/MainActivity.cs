@@ -20,6 +20,16 @@ public sealed class MainActivity : AvaloniaMainActivity
     protected override void OnCreate(Bundle? savedInstanceState)
     {
         base.OnCreate(savedInstanceState);
+        if (Intent?.GetBooleanExtra(GameActivity.TouchSettingsSelfTestExtra, false) == true)
+        {
+            var selfTest = new Intent(this, typeof(GameActivity));
+            selfTest.PutExtra(GameActivity.TouchSettingsSelfTestExtra, true);
+            selfTest.PutExtra(GameActivity.PseudoLocalizationSelfTestExtra,
+                Intent.GetBooleanExtra(GameActivity.PseudoLocalizationSelfTestExtra, false));
+            StartActivity(selfTest);
+            Finish();
+            return;
+        }
         // Avalonia coordinates predictive Back through AndroidX and exposes the result here.
         // Registering a second platform callback races that dispatcher and can background the
         // Activity before the launcher has a chance to close its current page.

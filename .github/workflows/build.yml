@@ -384,6 +384,7 @@ jobs:
 
   android-smoke:
     if: >-
+      github.event_name == 'pull_request' ||
       (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.publish_android_preview)
     needs: android
@@ -428,6 +429,28 @@ jobs:
             sleep 2
             test -n "$(adb shell pidof nz.work.minecraft.jay)"
             adb exec-out screencap -p > android-tablet.png
+            adb shell am force-stop nz.work.minecraft.jay
+            adb shell wm size 600x420
+            adb shell wm density 160
+            launcher_component="$(adb shell cmd package resolve-activity --brief \
+              -a android.intent.action.MAIN -c android.intent.category.LAUNCHER \
+              nz.work.minecraft.jay | tr -d '\r' | tail -n 1)"
+            test -n "$launcher_component"
+            adb shell am start -W -n "$launcher_component" \
+              --ez nz.work.minecraft.jay.TOUCH_SETTINGS_SELF_TEST true \
+              --ez nz.work.minecraft.jay.PSEUDO_LOCALIZATION_SELF_TEST false
+            sleep 3
+            test -n "$(adb shell pidof nz.work.minecraft.jay:game)"
+            adb exec-out screencap -p > android-touch-settings-en.png
+            adb shell am force-stop nz.work.minecraft.jay
+            adb shell am start -W -n "$launcher_component" \
+              --ez nz.work.minecraft.jay.TOUCH_SETTINGS_SELF_TEST true \
+              --ez nz.work.minecraft.jay.PSEUDO_LOCALIZATION_SELF_TEST true
+            sleep 3
+            test -n "$(adb shell pidof nz.work.minecraft.jay:game)"
+            adb exec-out screencap -p > android-touch-settings-pseudo.png
+            file android-touch-settings-en.png | grep -F '600 x 420'
+            file android-touch-settings-pseudo.png | grep -F '600 x 420'
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
