@@ -1612,6 +1612,21 @@ public sealed class MobilePortTests
     }
 
     [Fact]
+    public void AndroidBackClosesLauncherNavigationBeforeBackgroundingTheActivity()
+    {
+        var root = RepoRoot();
+        var app = File.ReadAllText(Path.Combine(root, "src", "Amber.App", "App.axaml.cs"));
+        var shell = File.ReadAllText(Path.Combine(root, "src", "Amber.App", "Views", "MobileLauncherView.axaml.cs"));
+        var activity = File.ReadAllText(Path.Combine(root, "src", "Amber.Android", "MainActivity.cs"));
+
+        Assert.Contains("Func<bool>? MobileBackRequested", app, StringComparison.Ordinal);
+        Assert.Contains("MobileBackRequested = HandleMobileBack", shell, StringComparison.Ordinal);
+        Assert.Contains("main.Shell.Router.Back()", shell, StringComparison.Ordinal);
+        Assert.Contains("MobileBackRequested?.Invoke() == true", activity, StringComparison.Ordinal);
+        Assert.Contains("RegisterOnBackInvokedCallback", activity, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void MissingAndroidActionButtonIsRecoveredFromButtonState()
     {
         var tracker = new HardwareMouseButtonTracker();

@@ -26,6 +26,12 @@ public sealed class App : Application
     /// </summary>
     public static Action<bool>? MobileTextInputFocusChanged { get; set; }
 
+    /// <summary>
+    /// Gives Android's system Back gesture to the single-view launcher before the native Activity
+    /// is backgrounded. The view returns false at its root so Android can keep its normal behavior.
+    /// </summary>
+    public static Func<bool>? MobileBackRequested { get; set; }
+
     public override void Initialize()
     {
         StartupTrace.Mark("platform");

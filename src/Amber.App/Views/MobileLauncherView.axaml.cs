@@ -18,7 +18,15 @@ public sealed partial class MobileLauncherView : UserControl
             ?? throw new InvalidOperationException("Mobile launcher shell grid is missing.");
         AddHandler(GotFocusEvent, OnElementGotFocus, RoutingStrategies.Bubble, handledEventsToo: true);
         SizeChanged += (_, e) => ApplyResponsiveShell(e.NewSize.Width, e.NewSize.Height);
-        AttachedToVisualTree += (_, _) => ApplyResponsiveShell(Bounds.Width, Bounds.Height);
+        AttachedToVisualTree += (_, _) =>
+        {
+            ApplyResponsiveShell(Bounds.Width, Bounds.Height);
+            App.MobileBackRequested = HandleMobileBack;
+        };
+        DetachedFromVisualTree += (_, _) =>
+        {
+            if (App.MobileBackRequested == HandleMobileBack) App.MobileBackRequested = null;
+        };
     }
 
     private void ApplyResponsiveShell(double width, double height)
@@ -34,5 +42,26 @@ public sealed partial class MobileLauncherView : UserControl
         var textInput = e.Source is TextBox
             || e.Source is Visual visual && visual.FindAncestorOfType<TextBox>() is not null;
         App.MobileTextInputFocusChanged?.Invoke(textInput);
+    }
+
+    private bool HandleMobileBack()
+    {
+        if (DataContext is not ViewModels.MainViewModel main) return false;
+        if (main.Activity.IsOpen)
+        {
+            main.Activity.Close();
+            return true;
+        }
+        if (main.Help.IsOpen)
+        {
+            main.Help.Close();
+            return true;
+        }
+        if (main.Palette.IsOpen)
+        {
+            main.Palette.Close();
+            return true;
+        }
+        return main.Shell.Router.Back();
     }
 }
