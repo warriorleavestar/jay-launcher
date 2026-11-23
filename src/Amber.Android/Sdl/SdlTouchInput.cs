@@ -16,10 +16,7 @@ internal sealed partial class SdlTouchInput(Activity activity)
     private int _buttons;
 
     [LibraryImport("jayjvm", EntryPoint = "jay_java_pointer")]
-    private static partial int DispatchJavaPointer(float x, float y, uint clicks);
-
-    [LibraryImport("jayjvm", EntryPoint = "jay_java_mouse_button")]
-    private static partial int DispatchJavaMouseButton(int button, int action);
+    private static partial int DispatchMenuPointer(float x, float y, uint action);
 
     [LibraryImport("jayjvm", EntryPoint = "jay_inventory_stack_count")]
     private static partial int GetInventoryStackCount(float x, float y);
@@ -33,11 +30,8 @@ internal sealed partial class SdlTouchInput(Activity activity)
     [LibraryImport("jayjvm", EntryPoint = "jay_gui_scale_get")]
     private static partial int GetGuiScale();
 
-    private bool JavaPointer(uint clicks) => GetFocus() != 0 &&
-        DispatchJavaPointer(_mouseX / Math.Max(1, Width), _mouseY / Math.Max(1, Height), clicks) != 0;
-
-    private bool JavaButton(int button, bool pressed) => GetFocus() != 0 &&
-        DispatchJavaMouseButton(button, pressed ? 1 : 0) != 0;
+    private bool MenuPointer(uint action) => GetFocus() != 0 &&
+        DispatchMenuPointer(_mouseX / Math.Max(1, Width), _mouseY / Math.Max(1, Height), action) != 0;
 
     public int InventoryStackCount(double x, double y) => InventorySlotState(x, y).Count;
     public InventorySlotState InventorySlotState(double x, double y) =>
@@ -149,11 +143,10 @@ internal sealed partial class SdlTouchInput(Activity activity)
         _mouseX = (float)(x * Width);
         _mouseY = (float)(y * Height);
         var playing = InWorld;
-        if (!playing && !JavaPointer(0)) Mouse(_buttons, MotionEventActions.Move, _mouseX, _mouseY, false);
+        if (!playing && !MenuPointer(0)) Mouse(_buttons, MotionEventActions.Move, _mouseX, _mouseY, false);
         if (!click) return;
         // Mobile taps are contextual: use the targeted block, otherwise attack.
-        // jay_java_pointer's last argument is a click count, not an Android action code.
-        if (playing && JavaPointer(1)) return;
+        if (playing && MenuPointer(3)) return;
         var action = playing ? TouchControlAction.SecondaryAction : TouchControlAction.PrimaryAction;
         Action(action, true);
         Action(action, false);
@@ -179,10 +172,7 @@ internal sealed partial class SdlTouchInput(Activity activity)
             };
             _buttons = pressed ? _buttons | mask : _buttons & ~mask;
             var relative = InWorld;
-            var button = mask == 1 ? 0 : mask == 2 ? 1 : 2;
-            // Menus need separate press/release edges for sliders and drag-and-drop. Passing
-            // 1/2 to jay_java_pointer used to create one click on DOWN and two more on UP.
-            if (!relative && JavaButton(button, pressed)) return;
+            if (!relative && mask == 1 && MenuPointer(pressed ? 1u : 2u)) return;
             Mouse(_buttons, pressed ? MotionEventActions.Down : MotionEventActions.Up,
                 relative ? 0 : _mouseX, relative ? 0 : _mouseY, relative);
             return;
