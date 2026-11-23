@@ -1622,6 +1622,7 @@ public sealed class MobilePortTests
 
         Assert.Contains("Func<bool>? MobileBackRequested", app, StringComparison.Ordinal);
         Assert.Contains("MobileBackRequested = HandleMobileBack", shell, StringComparison.Ordinal);
+        Assert.Contains("download.CloseAfterStart?.Invoke()", shell, StringComparison.Ordinal);
         Assert.Contains("main.Shell.Router.Back()", shell, StringComparison.Ordinal);
         Assert.Contains("MobileBackRequested?.Invoke() == true", activity, StringComparison.Ordinal);
         Assert.Contains("RegisterOnBackInvokedCallback", activity, StringComparison.Ordinal);

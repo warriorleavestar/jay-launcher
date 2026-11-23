@@ -62,6 +62,14 @@ public sealed partial class MobileLauncherView : UserControl
             main.Palette.Close();
             return true;
         }
+        // The new-instance panel can be opened from a fresh library without creating a history
+        // entry. Its visible X and Escape key both use CloseAfterStart, so Android Back must use
+        // that same route instead of relying only on Router.Back().
+        if (main.CurrentPage is ViewModels.DownloadViewModel { IsBusy: false } download)
+        {
+            download.CloseAfterStart?.Invoke();
+            return true;
+        }
         return main.Shell.Router.Back();
     }
 }
