@@ -1614,10 +1614,11 @@ public sealed class MobilePortTests
     [Fact]
     public void AndroidBackClosesLauncherNavigationBeforeBackgroundingTheActivity()
     {
-        var root = RepoRoot();
-        var app = File.ReadAllText(Path.Combine(root, "src", "Amber.App", "App.axaml.cs"));
-        var shell = File.ReadAllText(Path.Combine(root, "src", "Amber.App", "Views", "MobileLauncherView.axaml.cs"));
-        var activity = File.ReadAllText(Path.Combine(root, "src", "Amber.Android", "MainActivity.cs"));
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var app = File.ReadAllText(Path.Combine(repository, "src", "Amber.App", "App.axaml.cs"));
+        var shell = File.ReadAllText(Path.Combine(repository, "src", "Amber.App", "Views", "MobileLauncherView.axaml.cs"));
+        var activity = File.ReadAllText(Path.Combine(repository, "src", "Amber.Android", "MainActivity.cs"));
 
         Assert.Contains("Func<bool>? MobileBackRequested", app, StringComparison.Ordinal);
         Assert.Contains("MobileBackRequested = HandleMobileBack", shell, StringComparison.Ordinal);
