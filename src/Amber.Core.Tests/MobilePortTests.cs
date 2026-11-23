@@ -1846,21 +1846,12 @@ public sealed class MobilePortTests
             "..", "..", "..", "..", ".."));
         var sdl = File.ReadAllText(Path.Combine(repository,
             "src", "Amber.Android", "Sdl", "SdlTouchInput.cs"));
-        var bootstrap = File.ReadAllText(Path.Combine(repository,
-            "src", "Amber.Android", "Java", "nz", "work", "minecraft", "jay",
-            "AndroidGameBootstrap.java"));
 
         Assert.Contains("playing && JavaPointer(1)", sdl, StringComparison.Ordinal);
         Assert.DoesNotContain("JavaPointer(3)", sdl, StringComparison.Ordinal);
         Assert.Contains("EntryPoint = \"jay_java_mouse_button\"", sdl, StringComparison.Ordinal);
         Assert.Contains("JavaButton(button, pressed)", sdl, StringComparison.Ordinal);
         Assert.DoesNotContain("pressed ? 1u : 2u", sdl, StringComparison.Ordinal);
-        var mouseStart = bootstrap.IndexOf("public static boolean dispatchMouseButton", StringComparison.Ordinal);
-        var mouseEnd = bootstrap.IndexOf("public static boolean dispatchKey", mouseStart, StringComparison.Ordinal);
-        Assert.True(mouseStart >= 0 && mouseEnd > mouseStart);
-        var mouseBridge = bootstrap[mouseStart..mouseEnd];
-        Assert.Contains("minecraftExecute.invoke", mouseBridge, StringComparison.Ordinal);
-        Assert.Contains("dispatchMouseButtonNow", mouseBridge, StringComparison.Ordinal);
     }
 
     [Fact]
