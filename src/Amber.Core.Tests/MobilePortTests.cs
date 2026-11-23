@@ -1612,6 +1612,29 @@ public sealed class MobilePortTests
     }
 
     [Fact]
+    public void AndroidGameProcessUsesTheSavedLanguageForTouchControls()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var application = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "Application.cs"));
+        var activity = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "GameActivity.cs"));
+
+        Assert.Contains("var settings = AppSettings.Load();", application, StringComparison.Ordinal);
+        Assert.Contains("L.SetLanguage(settings.Language ?? \"zh-Hans\")", application,
+            StringComparison.Ordinal);
+        Assert.Contains("L.T(\"mobile.touch.settings.title\")", activity,
+            StringComparison.Ordinal);
+        Assert.Contains("L.F(\"mobile.touch.attack_area\"", activity,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("canvas.DrawText(\"触控设置\"", activity,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("value = \"输入聊天或指令…\"", activity,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AndroidBackClosesLauncherNavigationBeforeBackgroundingTheActivity()
     {
         var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,

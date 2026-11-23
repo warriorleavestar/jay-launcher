@@ -1,6 +1,7 @@
 using Android.App;
 using Android.Content;
 using Android.Runtime;
+using Amber.App.Services;
 using Amber.Core.Install;
 using Amber.Core.Localization;
 using Amber.Mobile;
@@ -19,6 +20,12 @@ public sealed class Application : AvaloniaAndroidApplication<Amber.App.App>
     {
         var files = FilesDir!.AbsolutePath;
         Environment.SetEnvironmentVariable("AMBER_DATA_DIR", Path.Combine(files, "amber"));
+        // The dedicated :game process does not create Avalonia's launcher view model, so it
+        // never reaches App.OnFrameworkInitializationCompleted where the saved language is
+        // normally applied. Load it at process startup as well, otherwise every in-game touch
+        // setting remains in the fallback language after the player changes Jay's language.
+        var settings = AppSettings.Load();
+        L.SetLanguage(settings.Language ?? "zh-Hans");
         Amber.App.App.MobileGameDirectory = Path.Combine(files, "minecraft");
         Amber.App.App.MobileLaunchRequested = async (versionId, playerName, serverAddress, progress, ct) =>
         {
