@@ -3,6 +3,18 @@
   "about": "Every binary Jay bundles or downloads with a fixed hash: where it comes from and its SHA-256. Jay reads its pins from this file (embedded in Amber.Core), and the unit tests in CI's validate job fail when a pin written anywhere else (code, scripts) disagrees with it. Change a pin here first. See docs/pins.md.",
   "pins": [
     {
+      "id": "windows-update-compiler",
+      "name": "Inno Setup compiler (CI only)",
+      "version": "6.7.4",
+      "file": "innosetup-6.7.4.exe",
+      "urls": ["https://github.com/jrsoftware/issrc/releases/download/is-6_7_4/innosetup-6.7.4.exe"],
+      "source": "https://github.com/jrsoftware/issrc/tree/is-6_7_4",
+      "license": "Inno Setup License",
+      "size": 10604576,
+      "sha256": "a549929319f9120716677c685535ca4671e4b937b5fdc87e2585f32d8eb30e8c",
+      "usedBy": [".github/workflows/build.yml"]
+    },
+    {
       "id": "android-angle-egl-arm64-v8a",
       "name": "ANGLE EGL for Android",
       "version": "2.1.1",

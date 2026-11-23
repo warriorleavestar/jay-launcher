@@ -96,16 +96,20 @@
       </Grid>
     </Border>
 
-    <Grid Grid.Column="1" RowDefinitions="Auto,*">
+    <Grid Grid.Column="1" RowDefinitions="Auto,Auto,*">
       <Border BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="0,0,0,1" Padding="14,10">
-        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10">
+        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
           <Button Classes="ghost icon-only" Command="{Binding Shell.BackCommand}" IsEnabled="{Binding Shell.CanGoBack}">
             <Path Data="{StaticResource Icon.ArrowLeft}" Width="18" Height="18" />
+          </Button>
+          <Button Grid.Column="2" Classes="ghost icon-only" Command="{Binding Activity.ToggleCommand}" IsVisible="{Binding Activity.HasTasks}" AutomationProperties.Name="{l:T activity.title}">
+            <Path Classes="icon" Data="{StaticResource Icon.Bell}" Width="20" Height="20" />
           </Button>
           <TextBlock Grid.Column="1" Text="{Binding Shell.Heading}" FontSize="20" FontWeight="SemiBold" VerticalAlignment="Center" />
         </Grid>
       </Border>
-      <ContentControl Grid.Row="1" Content="{Binding CurrentPage}" Margin="18,12,18,18" />
+      <ContentControl Grid.Row="1" Content="{Binding Activity.FirstRequest}" IsVisible="{Binding Activity.HasRequests}" Margin="12,4" />
+      <ContentControl Grid.Row="2" Content="{Binding CurrentPage}" Margin="18,12,18,18" />
     </Grid>
     <Border Grid.ColumnSpan="2" Background="{DynamicResource Overlay}" Padding="16"
             IsVisible="{Binding Activity.IsOpen}">
@@ -121,6 +125,8 @@
                 <StackPanel Classes="card" Margin="0,4" Spacing="4">
                   <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
                   <TextBlock Text="{Binding Detail}" TextWrapping="Wrap" />
+                  <ProgressBar Minimum="0" Maximum="100" Value="{Binding Percent}" IsIndeterminate="{Binding Indeterminate}" IsVisible="{Binding IsRunning}" />
+                  <Button Classes="secondary" HorizontalAlignment="Left" Content="{l:T common.cancel}" Command="{Binding CancelCommand}" IsVisible="{Binding CanCancel}" />
                   <TextBlock Text="{Binding DownloadSpeedText}" IsVisible="{Binding IsRunning}" />
                   <ItemsControl ItemsSource="{Binding ActiveFiles}">
                     <ItemsControl.ItemTemplate>

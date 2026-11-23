@@ -225,12 +225,23 @@ public sealed partial class ToolsViewModel : PageViewModel
         return (page is null ? status + " " + L.T("tools.update.no_page") : status, page);
     }
 
+    [ObservableProperty] public partial bool CanInstallUpdate { get; set; }
+    private VerifiedUpdate? _installOffer;
+
+    [RelayCommand]
+    private void InstallUpdate()
+    {
+        if (_installOffer is not null) LauncherUpdate.Start(service, _installOffer);
+    }
+
     [RelayCommand]
     private async Task CheckUpdateAsync()
     {
+        _installOffer = null;
+        CanInstallUpdate = false;
         UpdateUrl = null;
         // A blank update address means the official Jay releases.
-        // Phones and tablets update through the stores: without an own address they don't ask the desktop releases.
+        // Store-managed platforms with no custom feed leave the update to the store.
         if (AutoUpdateCheck.ManualFeed(service.Settings.UpdateFeedUrl, AutoUpdateCheck.IsSupported) is not { } feed)
         {
             UpdateStatus = L.T("tools.update.store");
@@ -241,8 +252,15 @@ public sealed partial class ToolsViewModel : PageViewModel
             // Privacy plan item 2: a newer release is offered only when enough Jay release keys signed it.
             var update = await new UpdateCheck(service.Http, AppSettings.DataDir).CheckAsync(feed, UpdateChecker.CurrentVersion);
             (UpdateStatus, UpdateUrl) = DescribeUpdate(feed, update);
+            if (update != null && LauncherUpdate.PackageFor(update) != null)
+            {
+                _installOffer = update;
+                CanInstallUpdate = true;
+                UpdateUrl = null;
+                UpdateStatus = L.F("tools.update.available", update.Info.Version, UpdateChecker.CurrentVersion);
+            }
         }
-        catch (Exception e) when (e is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException or InvalidDataException)
+        catch (Exception e) when (e is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException or InvalidDataException or IOException or UnauthorizedAccessException)
         {
             UpdateStatus = L.F("tools.update.failed", e.Message);
         }
