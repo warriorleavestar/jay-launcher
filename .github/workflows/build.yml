@@ -260,6 +260,9 @@ jobs:
             "${{ runner.temp }}/jdk" \
             Amber.Android/obj/jay-sdl
 
+      - name: Stage standalone ANGLE for emulator graphics
+        run: python3 ../scripts/fetch-android-angle.py Amber.Android/obj/jay-angle
+
       - name: Fetch pinned Java 25 runtime catalog
         shell: bash
         env:
@@ -269,26 +272,26 @@ jobs:
           catalog="Amber.Android/obj/jay-runtime-catalog"
           rm -rf "$catalog"
           mkdir -p "$catalog"
-          if ! gh release download android-runtime-v2 \
+          if ! gh release download android-runtime-v3 \
             --repo "$GITHUB_REPOSITORY" \
             --pattern 'runtime25-*.json' \
             --dir "$catalog"; then
             rm -f "$catalog"/*
             if [[ "${{ github.event_name }}" == pull_request ]]; then
-              echo "::notice::android-runtime-v2 is not published yet; PR APK omits the Java 25 catalog."
+              echo "::notice::android-runtime-v3 is not published yet; PR APK omits the Java 25 catalog."
               exit 0
             fi
-            echo "::error::android-runtime-v2 descriptors are required for downloadable Android builds."
+            echo "::error::android-runtime-v3 descriptors are required for downloadable Android builds."
             exit 1
           fi
           for architecture in arm64-v8a x86_64; do
             descriptor="$catalog/runtime25-$architecture.json"
             archive="jay-android-runtime25-$architecture.tar.xz"
-            expected_download="${{ github.server_url }}/${{ github.repository }}/releases/download/android-runtime-v2/$archive"
+            expected_download="${{ github.server_url }}/${{ github.repository }}/releases/download/android-runtime-v3/$archive"
             test -f "$descriptor"
             jq -e \
               --arg architecture "$architecture" \
-              --arg id "jay-android-runtime25-v2-$architecture" \
+              --arg id "jay-android-runtime25-v3-$architecture" \
               --arg downloadUrl "$expected_download" \
               '.Format == 1 and .Id == $id and .Architecture == $architecture and
                .ArchiveSize > 0 and (.ArchiveSha256 | test("^[0-9a-f]{64}$")) and
@@ -327,6 +330,7 @@ jobs:
           -p:AndroidSdkDirectory=${{ runner.temp }}/android-sdk
           -p:JavaSdkDirectory=${{ runner.temp }}/jdk
           -p:JaySdlRuntimeDir=${{ github.workspace }}/src/Amber.Android/obj/jay-sdl
+          -p:JayAngleRuntimeDir=${{ github.workspace }}/src/Amber.Android/obj/jay-angle
           -p:JayAndroidRuntimeCatalogDir=${{ github.workspace }}/src/Amber.Android/obj/jay-runtime-catalog
           -p:AndroidPackageFormats=apk
 
@@ -342,6 +346,7 @@ jobs:
           -p:AndroidSdkDirectory=${{ runner.temp }}/android-sdk
           -p:JavaSdkDirectory=${{ runner.temp }}/jdk
           -p:JaySdlRuntimeDir=${{ github.workspace }}/src/Amber.Android/obj/jay-sdl
+          -p:JayAngleRuntimeDir=${{ github.workspace }}/src/Amber.Android/obj/jay-angle
           -p:JayAndroidRuntimeCatalogDir=${{ github.workspace }}/src/Amber.Android/obj/jay-runtime-catalog
           -p:AndroidPackageFormats=apk
           -p:AndroidKeyStore=true
@@ -375,21 +380,30 @@ jobs:
           bash ../scripts/check-android-16k.sh "$APK_PATH" "${{ runner.temp }}/android-sdk"
           mkdir -p ../packages
           cp "$APK_PATH" ../packages/Jay-android-experimental.apk
+          zip -X -j ../packages/Jay-Vanilla-26.3.mrpack ../instances/vanilla-26.3/modrinth.index.json
+          unzip -tq ../packages/Jay-Vanilla-26.3.mrpack
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: jay-android
-          path: packages/Jay-android-experimental.apk
+          path: |
+            packages/Jay-android-experimental.apk
+            packages/Jay-Vanilla-26.3.mrpack
           if-no-files-found: error
 
   android-smoke:
     if: >-
+      github.event_name == 'pull_request' ||
       (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.publish_android_preview)
     needs: android
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: jay-android
@@ -409,25 +423,7 @@ jobs:
           profile: pixel_7
           disable-animations: true
           script: |
-            adb install android-assets/Jay-android-experimental.apk
-            adb shell wm size 1080x2400
-            adb shell wm density 420
-            adb shell monkey -p nz.work.minecraft.jay -c android.intent.category.LAUNCHER 1
-            sleep 8
-            test -n "$(adb shell pidof nz.work.minecraft.jay)"
-            adb shell input swipe 540 1900 540 700 500
-            adb exec-out screencap -p > android-phone.png
-            adb shell am force-stop nz.work.minecraft.jay
-            adb shell wm size 2560x1600
-            adb shell wm density 320
-            adb shell monkey -p nz.work.minecraft.jay -c android.intent.category.LAUNCHER 1
-            sleep 5
-            test -n "$(adb shell pidof nz.work.minecraft.jay)"
-            adb shell input tap 1280 800
-            adb shell input swipe 2100 1300 2100 500 500
-            sleep 2
-            test -n "$(adb shell pidof nz.work.minecraft.jay)"
-            adb exec-out screencap -p > android-tablet.png
+            bash scripts/check-android-emulator-smoke.sh android-assets/Jay-android-experimental.apk
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -475,11 +471,11 @@ jobs:
           fi
           cd android-assets
           test -s Jay-android-experimental.apk
-          sha256sum Jay-android-experimental.apk > SHA256SUMS.txt
+          sha256sum Jay-android-experimental.apk Jay-Vanilla-26.3.mrpack > SHA256SUMS.txt
           cat > release-notes.md <<'NOTES'
           直接下载 Jay-android-experimental.apk。支持 Android 8.0 及以上的 ARM64 和 x86_64 设备。
 
-          Jay 内置独立 JVM、MobileGlues 图形桥和 Minecraft 1.21.11 安装流程，不需要 FCL 或其他启动器。已经可以创建并进入世界。
+          下载 Jay-Vanilla-26.3.mrpack 后，在启动器的「发现」页点「导入整合包文件」，选中下载的文件。导入完成后，在游戏库启动 Jay Vanilla 26.3。首次安装需要联网下载游戏资源和 Java 运行环境。
 
           支持摇杆移动、滑动转向、攻击、使用、跳跃、疾跑、潜行、背包、丢弃、聊天键盘和快捷栏切换。游戏菜单使用直接触摸，操作按钮会自动隐藏，只保留 Esc。
 
@@ -490,7 +486,7 @@ jobs:
             # exact commit that produced the APK instead of failing after the first publication.
             gh api --method PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/android-preview" \
               -f sha="$GITHUB_SHA" -F force=true >/dev/null
-            gh release upload android-preview Jay-android-experimental.apk SHA256SUMS.txt \
+            gh release upload android-preview Jay-android-experimental.apk Jay-Vanilla-26.3.mrpack SHA256SUMS.txt \
               --repo "$GITHUB_REPOSITORY" --clobber
             gh release edit android-preview \
               --repo "$GITHUB_REPOSITORY" \
@@ -498,7 +494,7 @@ jobs:
               --notes-file release-notes.md \
               --prerelease
           else
-            gh release create android-preview Jay-android-experimental.apk SHA256SUMS.txt \
+            gh release create android-preview Jay-android-experimental.apk Jay-Vanilla-26.3.mrpack SHA256SUMS.txt \
               --repo "$GITHUB_REPOSITORY" \
               --target "$GITHUB_SHA" \
               --title "Jay Android 预览版" \
@@ -579,7 +575,8 @@ jobs:
             Jay-osx-x64.dmg \
             Jay-linux-x64.tar.gz \
             Jay-linux-arm64.tar.gz \
-            Jay-android-experimental.apk
+            Jay-android-experimental.apk \
+            Jay-Vanilla-26.3.mrpack
           do
             test -s "$asset"
           done
@@ -590,6 +587,7 @@ jobs:
             Jay-linux-x64.tar.gz \
             Jay-linux-arm64.tar.gz \
             Jay-android-experimental.apk \
+            Jay-Vanilla-26.3.mrpack \
             > SHA256SUMS.txt
 
       - name: Publish rolling website downloads
@@ -624,6 +622,7 @@ jobs:
             release-assets/Jay-linux-x64.tar.gz
             release-assets/Jay-linux-arm64.tar.gz
             release-assets/Jay-android-experimental.apk
+            release-assets/Jay-Vanilla-26.3.mrpack
             release-assets/SHA256SUMS.txt
           )
           if gh release view experimental --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then

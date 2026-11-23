@@ -42,7 +42,7 @@ mkdir -p "$(dirname "$output")"
 temporary="$output.tmp"
 trap 'rm -f "$temporary"' EXIT
 jq -n -S \
-  --arg id "jay-android-runtime25-v2-$architecture" \
+  --arg id "jay-android-runtime25-v3-$architecture" \
   --arg architecture "$architecture" \
   --argjson archiveSize "$archive_size" \
   --arg archiveSha256 "$checksum" \

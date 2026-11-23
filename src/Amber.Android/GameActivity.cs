@@ -8,6 +8,7 @@ using Android.Views;
 using Android.Views.InputMethods;
 using Android.Widget;
 using Android.Window;
+using Amber.Core.Localization;
 using Amber.Mobile;
 
 namespace Amber.Android;
@@ -29,6 +30,8 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
     public const string ServerAddressExtra = "nz.work.minecraft.jay.SERVER_ADDRESS";
     public const string VersionIdExtra = "nz.work.minecraft.jay.VERSION_ID";
     public const string PlayerNameExtra = "nz.work.minecraft.jay.PLAYER_NAME";
+    public const string TouchSettingsSelfTestExtra = "nz.work.minecraft.jay.TOUCH_SETTINGS_SELF_TEST";
+    public const string PseudoLocalizationSelfTestExtra = "nz.work.minecraft.jay.PSEUDO_LOCALIZATION_SELF_TEST";
     private CancellationTokenSource? _gameSetup;
     private TouchControlOverlay? _touchOverlay;
     private readonly object _surfaceSync = new();
@@ -41,6 +44,13 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
         base.OnCreate(savedInstanceState);
         Window?.AddFlags(WindowManagerFlags.Fullscreen | WindowManagerFlags.KeepScreenOn);
         RegisterBackInvokedCallback();
+
+        if (Intent?.GetBooleanExtra(TouchSettingsSelfTestExtra, false) == true)
+        {
+            ShowTouchSettingsSelfTest(
+                Intent.GetBooleanExtra(PseudoLocalizationSelfTestExtra, false));
+            return;
+        }
 
         var root = new FrameLayout(this);
         var surface = new SurfaceView(this);
@@ -57,6 +67,23 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
         EnterImmersiveMode();
         _gameSetup = new CancellationTokenSource();
         _ = RunPreparedGameAsync(_gameSetup.Token);
+    }
+
+    private void ShowTouchSettingsSelfTest(bool pseudoLocalization)
+    {
+        L.SetLanguage("en");
+        L.Pseudo = pseudoLocalization;
+        var root = new FrameLayout(this);
+        root.SetBackgroundColor(Color.Rgb(65, 94, 71));
+        _touchOverlay = new TouchControlOverlay(this)
+        {
+            Visibility = ViewStates.Visible,
+            Alpha = 1
+        };
+        _touchOverlay.OpenSettingsForSelfTest();
+        root.AddView(_touchOverlay, MatchParent());
+        SetContentView(root);
+        EnterImmersiveMode();
     }
 
     public override void OnWindowFocusChanged(bool hasFocus)
@@ -340,6 +367,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     private readonly SoftKeyboardInputSession _softKeyboardSession = new();
     private readonly SoftKeyboardPreviewBuffer _softKeyboardPreview = new();
     private bool GameplayActive => _sdl?.InWorld ?? NativeJvmHost.GameplayControlsActive;
+    private bool HasBlockTarget => _sdl?.HasBlockTarget ?? NativeJvmHost.HasBlockTarget;
 
     public TouchControlOverlay(Context context, SdlTouchInput? sdl = null) : base(context)
     {
@@ -357,6 +385,13 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         Clickable = true;
         Focusable = true;
         FocusableInTouchMode = true;
+    }
+
+    internal void OpenSettingsForSelfTest()
+    {
+        _settingsOpen = true;
+        _layoutEditing = false;
+        _profile.LookSensitivity = 1.65;
     }
 
     // Only advertise an Android text editor while Minecraft actually owns a text field.
@@ -435,10 +470,13 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
             if (control.Action == TouchControlAction.Move)
                 DrawMovementPad(canvas, x, y, radius);
             else
+            {
+                var inventorySplit = !gameplayControlsActive &&
+                    control.Action == TouchControlAction.SecondaryAction;
                 DrawActionButton(canvas, control, x, y, radius,
-                    !gameplayControlsActive && control.Action == TouchControlAction.SecondaryAction
-                        ? "拆分"
-                        : control.Label);
+                    inventorySplit ? L.T("mobile.touch.inventory.split") : control.Label,
+                    inventorySplit);
+            }
         }
         var animatingHoldFeedback = DrawLongPressIndicators(canvas);
         DrawInventorySplitSelection(canvas);
@@ -487,7 +525,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         if (string.IsNullOrEmpty(value))
         {
             _keyboardPreviewText.Color = Color.Argb(190, 210, 214, 220);
-            value = "输入聊天或指令…";
+            value = L.T("mobile.touch.chat_hint");
         }
         else
         {
@@ -584,9 +622,9 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     {
         _hint.TextSize = Math.Max(18, Math.Min(Width, Height) * 0.021f);
         canvas.DrawRect(Width * 0.35f, Height * 0.115f, Width * 0.65f, Height * 0.185f, _fill);
-        canvas.DrawText("拖动按键调整位置", Width * 0.5f, Height * 0.160f, _hint);
+        canvas.DrawText(L.T("mobile.touch.edit.drag"), Width * 0.5f, Height * 0.160f, _hint);
         canvas.DrawRect(Width * 0.87f, Height * 0.02f, Width * 0.98f, Height * 0.10f, _activeFill);
-        canvas.DrawText("完成", Width * 0.925f, Height * 0.075f, _hint);
+        canvas.DrawText(L.T("mobile.touch.done"), Width * 0.925f, Height * 0.075f, _hint);
     }
 
     private void DrawSettings(Canvas canvas)
@@ -596,20 +634,22 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         canvas.DrawRect(0, 0, Width, Height, _scrim);
         canvas.DrawRect(left, Height * 0.08f, right, Height * 0.96f, _panel);
         _hint.TextSize = Math.Max(17, Math.Min(Width, Height) * 0.021f);
-        canvas.DrawText("触控设置", (left + right) / 2, Height * 0.14f, _hint);
-        DrawSettingRow(canvas, "摇杆 + 点击互动", 0.18f, _profile.Mode == TouchControlMode.JoystickAndTap);
-        DrawSettingRow(canvas, "方向键 + 点击互动", 0.25f, _profile.Mode == TouchControlMode.DPadAndTap);
-        DrawSettingRow(canvas, "摇杆 + 准星", 0.32f, _profile.Mode == TouchControlMode.JoystickAndCrosshair);
-        DrawSettingRow(canvas, "外接键盘鼠标", 0.39f, _profile.Mode == TouchControlMode.ExternalKeyboardMouse);
-        DrawSettingRow(canvas, $"攻击区域：{AttackAreaLabel(_profile.AttackArea)}", 0.47f, true);
-        DrawStepper(canvas, $"视角灵敏度  {Math.Round(_profile.LookSensitivity * 100):0}%", 0.55f);
-        DrawStepper(canvas, $"按键大小  {Math.Round(_profile.Scale * 100):0}%", 0.63f);
-        DrawStepper(canvas, $"透明度  {Math.Round(_controlOpacity * 100):0}%", 0.71f);
-        DrawSettingRow(canvas, _profile.ForcedSprint ? "强制疾跑：开" : "强制疾跑：关", 0.79f,
+        canvas.DrawText(L.T("mobile.touch.settings.title"), (left + right) / 2, Height * 0.14f, _hint);
+        DrawSettingRow(canvas, L.T("mobile.touch.mode.joystick_tap"), 0.18f, _profile.Mode == TouchControlMode.JoystickAndTap);
+        DrawSettingRow(canvas, L.T("mobile.touch.mode.dpad_tap"), 0.25f, _profile.Mode == TouchControlMode.DPadAndTap);
+        DrawSettingRow(canvas, L.T("mobile.touch.mode.joystick_crosshair"), 0.32f, _profile.Mode == TouchControlMode.JoystickAndCrosshair);
+        DrawSettingRow(canvas, L.T("mobile.touch.mode.external"), 0.39f, _profile.Mode == TouchControlMode.ExternalKeyboardMouse);
+        DrawSettingRow(canvas, L.F("mobile.touch.attack_area", AttackAreaLabel(_profile.AttackArea)), 0.47f, true);
+        DrawStepper(canvas, L.F("mobile.touch.look_sensitivity", Math.Round(_profile.LookSensitivity * 100)), 0.55f);
+        DrawStepper(canvas, L.F("mobile.touch.button_size", Math.Round(_profile.Scale * 100)), 0.63f);
+        DrawStepper(canvas, L.F("mobile.touch.opacity", Math.Round(_controlOpacity * 100)), 0.71f);
+        DrawSettingRow(canvas, L.T(_profile.ForcedSprint
+                ? "mobile.touch.forced_sprint.on"
+                : "mobile.touch.forced_sprint.off"), 0.79f,
             _profile.ForcedSprint);
-        DrawPanelButton(canvas, "恢复默认", 0.615f, 0.84f, 0.77f, 0.90f);
-        DrawPanelButton(canvas, "编辑布局", 0.80f, 0.84f, 0.955f, 0.90f);
-        DrawPanelButton(canvas, "完成", 0.70f, 0.91f, 0.87f, 0.955f);
+        DrawPanelButton(canvas, L.T("mobile.touch.reset"), 0.615f, 0.84f, 0.77f, 0.90f);
+        DrawPanelButton(canvas, L.T("mobile.touch.edit_layout"), 0.80f, 0.84f, 0.955f, 0.90f);
+        DrawPanelButton(canvas, L.T("mobile.touch.done"), 0.70f, 0.91f, 0.87f, 0.955f);
     }
 
     private void DrawSettingRow(Canvas canvas, string text, float y, bool selected)
@@ -617,14 +657,18 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         var bounds = new RectF(Width * 0.615f, Height * (y - 0.038f), Width * 0.955f, Height * (y + 0.038f));
         canvas.DrawRect(bounds, selected ? _activeFill : _buttonFace);
         canvas.DrawRect(bounds, _buttonBorder);
-        canvas.DrawText(text, Width * 0.785f, Height * (y + 0.012f), _hint);
+        DrawFittedCenteredText(canvas, text, bounds.CenterX(), Height * (y + 0.012f),
+            bounds.Width() * 0.90f);
     }
 
     private void DrawStepper(Canvas canvas, string text, float y)
     {
         DrawPanelButton(canvas, "−", 0.615f, y - 0.038f, 0.675f, y + 0.038f);
         DrawPanelButton(canvas, "+", 0.895f, y - 0.038f, 0.955f, y + 0.038f);
-        canvas.DrawText(text, Width * 0.785f, Height * (y + 0.012f), _hint);
+        var textLeft = Width * 0.685f;
+        var textRight = Width * 0.885f;
+        DrawFittedCenteredText(canvas, text, (textLeft + textRight) / 2,
+            Height * (y + 0.012f), textRight - textLeft);
     }
 
     private void DrawPanelButton(Canvas canvas, string text, float left, float top, float right, float bottom)
@@ -632,7 +676,34 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         var bounds = new RectF(Width * left, Height * top, Width * right, Height * bottom);
         canvas.DrawRect(bounds, _buttonFace);
         canvas.DrawRect(bounds, _buttonBorder);
-        canvas.DrawText(text, Width * ((left + right) / 2), Height * ((top + bottom) / 2 + 0.012f), _hint);
+        DrawFittedCenteredText(canvas, text, bounds.CenterX(),
+            Height * ((top + bottom) / 2 + 0.012f), bounds.Width() * 0.84f);
+    }
+
+    private void DrawFittedCenteredText(
+        Canvas canvas,
+        string text,
+        float centerX,
+        float baseline,
+        float availableWidth)
+    {
+        var preferredSize = _hint.TextSize;
+        _hint.TextSize = TouchTextLayout.FitTextSize(
+            preferredSize,
+            _hint.MeasureText(text),
+            availableWidth,
+            minimumSize: 10f);
+        if (_hint.MeasureText(text) > availableWidth)
+        {
+            const string ellipsis = "…";
+            var runes = text.EnumerateRunes().ToList();
+            while (runes.Count > 0 &&
+                   _hint.MeasureText(string.Concat(runes) + ellipsis) > availableWidth)
+                runes.RemoveAt(runes.Count - 1);
+            text = string.Concat(runes) + ellipsis;
+        }
+        canvas.DrawText(text, centerX, baseline, _hint);
+        _hint.TextSize = preferredSize;
     }
 
     private void ApplyControlOpacity()
@@ -665,7 +736,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         {
             // Match the mobile interaction: an ordinary touch has no decoration. The ring starts
             // only after the gesture has become a mining hold and the crosshair is on a block.
-            if (!_router.IsLongPress(pointerId) || !NativeJvmHost.HasBlockTarget) continue;
+            if (!_router.IsLongPress(pointerId) || !HasBlockTarget) continue;
             drewAnimatedFeedback = true;
             var miningElapsed = now - indicator.DownAt - LongPressDelayMs;
             var x = (float)(indicator.X * Width);
@@ -705,7 +776,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     }
 
     private void DrawActionButton(Canvas canvas, TouchControlDefinition control,
-        float x, float y, float radius, string label)
+        float x, float y, float radius, string label, bool inventorySplit = false)
     {
         var compact = control.Action is TouchControlAction.PreviousSlot or TouchControlAction.NextSlot;
         var utility = control.Action is TouchControlAction.Menu or TouchControlAction.Keyboard or
@@ -722,7 +793,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
               control.Action == TouchControlAction.Sneak);
         DrawBlockButton(canvas, bounds, pressed, radius * 0.10f, castShadow);
         DrawGlyph(canvas, control.Action, x, y + pressOffset,
-            Math.Min(halfWidth, halfHeight) * 0.68f, label);
+            Math.Min(halfWidth, halfHeight) * 0.68f, label, inventorySplit);
     }
 
     private void DrawBlockButton(Canvas canvas, RectF bounds, bool pressed, float depth,
@@ -749,7 +820,8 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         }
     }
 
-    private void DrawGlyph(Canvas canvas, TouchControlAction action, float x, float y, float size, string fallback)
+    private void DrawGlyph(Canvas canvas, TouchControlAction action, float x, float y, float size,
+        string fallback, bool inventorySplit)
     {
         _glyph.SetStyle(Paint.Style.Stroke);
         _glyph.StrokeWidth = Math.Max(3, size * 0.12f);
@@ -828,7 +900,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
                 canvas.Restore();
                 break;
             case TouchControlAction.SecondaryAction:
-                if (fallback == "拆分")
+                if (inventorySplit)
                 {
                     canvas.DrawRect(x - size * 0.62f, y - size * 0.44f,
                         x - size * 0.08f, y + size * 0.10f, _glyph);
@@ -906,14 +978,19 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     private void LoadProfile()
     {
         var layoutVersion = _preferences.GetInt("layout-version", 1);
-        _profile.Mode = Enum.TryParse<TouchControlMode>(_preferences.GetString("mode", null), out var mode)
-            ? mode : TouchControlMode.DPadAndTap;
-        _profile.Scale = Math.Clamp(_preferences.GetFloat("scale", 1f), 0.70, 1.35);
-        _profile.LookSensitivity = Math.Clamp(_preferences.GetFloat("look-sensitivity", 1.65f), 0.50, 3.00);
-        _profile.AttackArea = Enum.TryParse<TouchAttackArea>(_preferences.GetString("attack-area", null), out var attackArea)
-            ? attackArea : TouchAttackArea.Anywhere;
+        _profile.Mode = Enum.TryParse<TouchControlMode>(_preferences.GetString("mode", null), out var mode) &&
+                        Enum.IsDefined(mode)
+            ? mode
+            : TouchControlMode.DPadAndTap;
+        _profile.Scale = ReadFinitePreference("scale", 1f, 0.70f, 1.35f);
+        _profile.LookSensitivity = ReadFinitePreference("look-sensitivity", 1.65f, 0.50f, 3.00f);
+        _profile.AttackArea = Enum.TryParse<TouchAttackArea>(
+                                  _preferences.GetString("attack-area", null), out var attackArea) &&
+                              Enum.IsDefined(attackArea)
+            ? attackArea
+            : TouchAttackArea.Anywhere;
         _profile.ForcedSprint = _preferences.GetBoolean("forced-sprint", true);
-        _controlOpacity = Math.Clamp(_preferences.GetFloat("opacity", 0.74f), 0.30f, 1f);
+        _controlOpacity = ReadFinitePreference("opacity", 0.74f, 0.30f, 1f);
         foreach (var modeValue in Enum.GetValues<TouchControlMode>())
         foreach (var action in Enum.GetValues<TouchControlAction>())
         {
@@ -937,6 +1014,12 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         }
     }
 
+    private float ReadFinitePreference(string key, float fallback, float minimum, float maximum)
+    {
+        var value = _preferences.GetFloat(key, fallback);
+        return float.IsFinite(value) ? Math.Clamp(value, minimum, maximum) : fallback;
+    }
+
     private void SaveProfile()
     {
         using var editor = _preferences.Edit()!;
@@ -950,9 +1033,21 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         foreach (var modeValue in Enum.GetValues<TouchControlMode>())
         foreach (var action in Enum.GetValues<TouchControlAction>())
         {
-            if (!_profile.TryGetPosition(modeValue, action, out var position)) continue;
-            editor.PutFloat($"position-{modeValue}-{action}-x", (float)position.X);
-            editor.PutFloat($"position-{modeValue}-{action}-y", (float)position.Y);
+            var xKey = $"position-{modeValue}-{action}-x";
+            var yKey = $"position-{modeValue}-{action}-y";
+            if (_profile.TryGetPosition(modeValue, action, out var position))
+            {
+                editor.PutFloat(xKey, (float)position.X);
+                editor.PutFloat(yKey, (float)position.Y);
+            }
+            else
+            {
+                // ResetPositions removes overrides from the in-memory profile. Remove their
+                // persisted values too, otherwise the supposedly reset layout returns the next
+                // time the dedicated game process starts.
+                editor.Remove(xKey);
+                editor.Remove(yKey);
+            }
         }
         editor.Apply();
     }
@@ -1014,10 +1109,10 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
 
     private static string AttackAreaLabel(TouchAttackArea area) => area switch
     {
-        TouchAttackArea.Anywhere => "全屏任意位置",
-        TouchAttackArea.RightSide => "右侧视角区",
-        TouchAttackArea.Crosshair => "准星附近",
-        _ => "全屏任意位置"
+        TouchAttackArea.Anywhere => L.T("mobile.touch.attack_area.anywhere"),
+        TouchAttackArea.RightSide => L.T("mobile.touch.attack_area.right"),
+        TouchAttackArea.Crosshair => L.T("mobile.touch.attack_area.crosshair"),
+        _ => L.T("mobile.touch.attack_area.anywhere")
     };
 
     private bool HandleLayoutEditTouch(MotionEvent e)

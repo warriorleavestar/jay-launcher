@@ -31,9 +31,12 @@ git -C "$work/source" submodule update --init --depth 1 \
   MobileGlues-cpp/3rdparty/SPIRV-Cross \
   MobileGlues-cpp/include/ska
 
-patch_file="$(cd "$(dirname "$0")/../third_party/android-mobileglues" && pwd)/jay-android.patch"
-git -C "$work/source" apply --check "$patch_file"
-git -C "$work/source" apply "$patch_file"
+patch_directory="$(cd "$(dirname "$0")/../third_party/android-mobileglues" && pwd)"
+for patch_name in jay-android.patch emulator-angle.patch; do
+  patch_file="$patch_directory/$patch_name"
+  git -C "$work/source" apply --check "$patch_file"
+  git -C "$work/source" apply "$patch_file"
+done
 
 if [[ "${JAY_RUN_HOST_TESTS:-0}" == 1 ]]; then
   "${CXX:-c++}" -std=c++17 -O2 \

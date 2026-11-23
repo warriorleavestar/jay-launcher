@@ -1039,7 +1039,9 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
     }
 
     /// <summary>导入本地整合包文件（由界面的文件选择器调用）。Returns the new instance's id, or null when it did not finish.</summary>
-    public async Task<string?> ImportLocalPackAsync(string path)
+    public Task<string?> ImportLocalPackAsync(string path) => ImportLocalPackAsync(new PackSelection(path));
+
+    internal async Task<string?> ImportLocalPackAsync(PackSelection selection)
     {
         string? imported = null;
         ManualDownloadUrl = null;
@@ -1049,12 +1051,13 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
         if (IsSearching) SetSearchState(false);
         IsBusy = true;
         var cts = _workCts = new CancellationTokenSource();
-        var task = _importTask = _service.Tasks.Track("import", L.F("activity.kind.import", Path.GetFileName(path)), () => { try { cts.Cancel(); } catch (ObjectDisposedException) { } });
+        var task = _importTask = _service.Tasks.Track("import", L.F("activity.kind.import", selection.Name), () => { try { cts.Cancel(); } catch (ObjectDisposedException) { } });
         try
         {
+            var path = await selection.GetPathAsync(cts.Token);
             var info = ModpackService.Inspect(path);
             task.Rename(L.F("activity.kind.import", SafeName(info.Name)));
-            imported = await ImportCoreAsync(path, SafeName(info.Name), _workCts.Token);
+            imported = await ImportCoreAsync(path, SafeName(info.Name), cts.Token);
             task.Succeed(Status);
         }
         catch (ManualDownloadRequiredException e)
@@ -1063,7 +1066,7 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
             task.Fail(L.T("activity.task.manual"));
             ShowManualDownload(e.File, ManualDownloadContext.ModpackImport);
         }
-        catch (OperationCanceledException) when (_workCts?.IsCancellationRequested == true)
+        catch (OperationCanceledException) when (cts.IsCancellationRequested)
         {
             task.Cancelled();
             SetStatus(StatusMessage.Warning("common.cancelled"));
@@ -1075,6 +1078,7 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
         }
         finally
         {
+            selection.Dispose();
             task.Cancelled();
             _importTask = null;
             IsBusy = false;

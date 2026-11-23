@@ -10,6 +10,10 @@ import java.util.concurrent.TimeoutException;
 
 /** Deliver touchscreen menu gestures on modern SDL Minecraft's client thread in scaled GUI coordinates. */
 public final class SdlMenuBootstrap {
+    private static final int MOVE_ACTION = 0;
+    private static final int DOWN_ACTION = 1;
+    private static final int UP_ACTION = 2;
+    private static final int GAMEPLAY_CONTEXTUAL_ACTION = 3;
     private static volatile Menu menu;
     private static boolean held;
     private static Object previousScreen;
@@ -26,7 +30,8 @@ public final class SdlMenuBootstrap {
         final Field guiField = client.getField("gui");
         final Method current = gui.getMethod("screen");
         final Field hitResult = client.getField("hitResult");
-        final Class<?> blockHit = Class.forName("net.minecraft.world.phys.BlockHitResult");
+        final Method hitType = hitResult.getType().getMethod("getType");
+        final Object blockType = hitType.getReturnType().getField("BLOCK").get(null);
         final Method attack = client.getDeclaredMethod("startAttack");
         final Method use = client.getDeclaredMethod("startUseItem");
         final Class<?> container = Class.forName("net.minecraft.client.gui.screens.inventory.AbstractContainerScreen");
@@ -51,6 +56,11 @@ public final class SdlMenuBootstrap {
             use.setAccessible(true);
             findSlot.setAccessible(true);
             slotClicked.setAccessible(true);
+        }
+
+        // Minecraft also represents a ray that missed as a BlockHitResult.
+        boolean targetsBlock(Object hit) throws ReflectiveOperationException {
+            return hit != null && hitType.invoke(hit) == blockType;
         }
 
         int stackCount(Object game, float nx, float ny) throws ReflectiveOperationException {
@@ -90,10 +100,10 @@ public final class SdlMenuBootstrap {
 
         void deliver(Object game, float nx, float ny, int action) throws ReflectiveOperationException {
             Object active = current.invoke(guiField.get(game));
-            if (action == 3) {
+            if (action == GAMEPLAY_CONTEXTUAL_ACTION) {
                 if (active != null) return;
                 Object hit = hitResult.get(game);
-                if (hit != null && blockHit.isInstance(hit)) use.invoke(game);
+                if (targetsBlock(hit)) use.invoke(game);
                 else attack.invoke(game);
                 return;
             }
@@ -102,13 +112,13 @@ public final class SdlMenuBootstrap {
             if (active == null) return;
             double x = nx * width.getInt(active), y = ny * height.getInt(active);
             Object click = makeEvent.newInstance(x, y, left);
-            if (action == 1) {
+            if (action == DOWN_ACTION) {
                 down.invoke(active, click, false);
                 held = true;
-            } else if (action == 2) {
+            } else if (action == UP_ACTION) {
                 if (held) up.invoke(active, click);
                 held = false;
-            } else {
+            } else if (action == MOVE_ACTION) {
                 move.invoke(active, x, y);
                 if (held) drag.invoke(active, click, x - previousX, y - previousY);
             }
@@ -193,7 +203,7 @@ public final class SdlMenuBootstrap {
             if (game == null) return false;
             Object active = input.current.invoke(input.guiField.get(game));
             Object hit = input.hitResult.get(game);
-            return active == null && hit != null && input.blockHit.isInstance(hit);
+            return active == null && input.targetsBlock(hit);
         } catch (ReflectiveOperationException | RuntimeException error) {
             return false;
         }

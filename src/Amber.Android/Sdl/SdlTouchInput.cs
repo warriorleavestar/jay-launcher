@@ -8,6 +8,12 @@ namespace Amber.Android;
 
 internal sealed partial class SdlTouchInput(Activity activity)
 {
+    // SdlMenuBootstrap interprets the bridge value as a gesture action, unlike the legacy
+    // AndroidGameBootstrap bridge where the same native slot contains a completed-click count.
+    private const uint MenuMoveAction = 0;
+    private const uint MenuDownAction = 1;
+    private const uint MenuUpAction = 2;
+    private const uint GameplayContextualAction = 3;
     private readonly Java.Lang.Class _sdlActivity = Java.Lang.Class.ForName("org.libsdl.app.SDLActivity", true, activity.ClassLoader)!;
     private readonly Java.Lang.Class _sdlInputConnection = Java.Lang.Class.ForName("org.libsdl.app.SDLInputConnection", true, activity.ClassLoader)!;
     private readonly HashSet<Keycode> _managedHeld = [];
@@ -30,6 +36,9 @@ internal sealed partial class SdlTouchInput(Activity activity)
     [LibraryImport("jayjvm", EntryPoint = "jay_gui_scale_get")]
     private static partial int GetGuiScale();
 
+    [LibraryImport("jayjvm", EntryPoint = "jay_block_target_get")]
+    private static partial int GetBlockTarget();
+
     private bool MenuPointer(uint action) => GetFocus() != 0 &&
         DispatchMenuPointer(_mouseX / Math.Max(1, Width), _mouseY / Math.Max(1, Height), action) != 0;
 
@@ -39,6 +48,15 @@ internal sealed partial class SdlTouchInput(Activity activity)
     public void SplitInventoryStack(double x, double y, int count) =>
         DispatchInventorySplit((float)x, (float)y, count);
     public bool TextInputAt(double x, double y) => GetTextInputAt((float)x, (float)y) != 0;
+    public bool HasBlockTarget
+    {
+        get
+        {
+            try { return GetBlockTarget() != 0; }
+            catch (EntryPointNotFoundException) { return false; }
+            catch (DllNotFoundException) { return false; }
+        }
+    }
     public int GuiScale
     {
         get
@@ -143,10 +161,10 @@ internal sealed partial class SdlTouchInput(Activity activity)
         _mouseX = (float)(x * Width);
         _mouseY = (float)(y * Height);
         var playing = InWorld;
-        if (!playing && !MenuPointer(0)) Mouse(_buttons, MotionEventActions.Move, _mouseX, _mouseY, false);
+        if (!playing && !MenuPointer(MenuMoveAction)) Mouse(_buttons, MotionEventActions.Move, _mouseX, _mouseY, false);
         if (!click) return;
         // Mobile taps are contextual: use the targeted block, otherwise attack.
-        if (playing && MenuPointer(3)) return;
+        if (playing && MenuPointer(GameplayContextualAction)) return;
         var action = playing ? TouchControlAction.SecondaryAction : TouchControlAction.PrimaryAction;
         Action(action, true);
         Action(action, false);
@@ -172,7 +190,7 @@ internal sealed partial class SdlTouchInput(Activity activity)
             };
             _buttons = pressed ? _buttons | mask : _buttons & ~mask;
             var relative = InWorld;
-            if (!relative && mask == 1 && MenuPointer(pressed ? 1u : 2u)) return;
+            if (!relative && mask == 1 && MenuPointer(pressed ? MenuDownAction : MenuUpAction)) return;
             Mouse(_buttons, pressed ? MotionEventActions.Down : MotionEventActions.Up,
                 relative ? 0 : _mouseX, relative ? 0 : _mouseY, relative);
             return;

@@ -9,6 +9,7 @@ using System.Security.Cryptography;
 using System.Formats.Tar;
 using System.IO.Compression;
 using System.Collections.Concurrent;
+using System.Text.Json;
 
 namespace Amber.Core.Tests;
 
@@ -111,6 +112,115 @@ public sealed class MobilePortTests
         {
             Directory.Delete(root, true);
         }
+    }
+
+    [Fact]
+    public void AndroidEmulatorAngleUsesACompleteRuntimeOrPackagedLibrarySet()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "jay-angle-layout-" + Guid.NewGuid().ToString("N"));
+        var runtime = Path.Combine(root, "runtime");
+        var packaged = Path.Combine(root, "packaged");
+        Directory.CreateDirectory(runtime);
+        Directory.CreateDirectory(packaged);
+        try
+        {
+            Assert.Null(AndroidNativeLibraries.ResolveEmulatorAngleRoot(runtime, packaged, true));
+            File.WriteAllBytes(Path.Combine(packaged, "libEGL_angle.so"), [1]);
+            File.WriteAllBytes(Path.Combine(packaged, "libGLESv2_angle.so"), [1]);
+            Assert.Equal(packaged, AndroidNativeLibraries.ResolveEmulatorAngleRoot(runtime, packaged, true));
+            Assert.Null(AndroidNativeLibraries.ResolveEmulatorAngleRoot(runtime, packaged, false));
+
+            File.WriteAllBytes(Path.Combine(runtime, "libEGL_angle.so"), [1]);
+            File.WriteAllBytes(Path.Combine(runtime, "libGLESv2_angle.so"), [1]);
+            Assert.Equal(runtime, AndroidNativeLibraries.ResolveEmulatorAngleRoot(runtime, packaged, true));
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
+    [Theory]
+    [InlineData(17f, 120f, 132f, 17f)]
+    [InlineData(17f, 170f, 132f, 13.2f)]
+    [InlineData(17f, 500f, 132f, 10f)]
+    public void AndroidTouchSettingsLabelsFitBetweenStepperButtons(
+        float preferred,
+        float measured,
+        float available,
+        float expected)
+    {
+        Assert.Equal(expected,
+            TouchTextLayout.FitTextSize(preferred, measured, available, minimumSize: 10f),
+            precision: 3);
+    }
+
+    [Fact]
+    public void AndroidTouchSettingsTrimLabelsThatRemainTooWideAtMinimumSize()
+    {
+        var repository = FindRepositoryRoot();
+        var activity = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "GameActivity.cs"));
+        var draw = JavaMethod(activity, "private void DrawStepper",
+            "private void ApplyControlOpacity");
+
+        Assert.Contains("DrawFittedCenteredText", draw, StringComparison.Ordinal);
+        Assert.Contains("TouchTextLayout.FitTextSize", draw, StringComparison.Ordinal);
+        Assert.Contains("const string ellipsis = \"…\"", draw, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AndroidEmulatorRunnerInvokesOneRepositorySmokeScript()
+    {
+        var repository = FindRepositoryRoot();
+        var workflow = File.ReadAllText(Path.Combine(repository,
+            ".github", "workflows", "build.yml")).Replace("\r\n", "\n", StringComparison.Ordinal);
+        var smokeStart = workflow.IndexOf("  android-smoke:\n", StringComparison.Ordinal);
+        var smokeEnd = workflow.IndexOf("\n  publish-android-preview:\n", smokeStart,
+            StringComparison.Ordinal);
+
+        Assert.True(smokeStart >= 0 && smokeEnd > smokeStart);
+        var smoke = workflow[smokeStart..smokeEnd];
+        Assert.Contains("persist-credentials: false", smoke, StringComparison.Ordinal);
+        Assert.Contains(
+            "bash scripts/check-android-emulator-smoke.sh android-assets/Jay-android-experimental.apk",
+            smoke, StringComparison.Ordinal);
+        Assert.DoesNotContain("launcher_component=", smoke, StringComparison.Ordinal);
+
+        var script = File.ReadAllText(Path.Combine(repository,
+            "scripts", "check-android-emulator-smoke.sh"));
+        Assert.Contains("launcher_component=", script, StringComparison.Ordinal);
+        Assert.Contains("dismiss_immersive_confirmation", script, StringComparison.Ordinal);
+        Assert.Contains("text=\"Got it\"", script, StringComparison.Ordinal);
+        Assert.Contains("android-touch-settings-en.png", script, StringComparison.Ordinal);
+        Assert.Contains("android-touch-settings-pseudo.png", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AndroidMiningIndicatorUsesTheActiveGameBridge()
+    {
+        var repository = FindRepositoryRoot();
+        var activity = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "GameActivity.cs"));
+        var sdl = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "Sdl", "SdlTouchInput.cs"));
+
+        Assert.Contains(
+            "private bool HasBlockTarget => _sdl?.HasBlockTarget ?? NativeJvmHost.HasBlockTarget;",
+            activity, StringComparison.Ordinal);
+        Assert.Contains("!HasBlockTarget", activity, StringComparison.Ordinal);
+        Assert.DoesNotContain("!NativeJvmHost.HasBlockTarget", activity, StringComparison.Ordinal);
+        Assert.Contains("EntryPoint = \"jay_block_target_get\"", sdl, StringComparison.Ordinal);
+        Assert.Contains("public bool HasBlockTarget", sdl, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AndroidMobileGluesBuildAppliesTheEmulatorAnglePatch()
+    {
+        var root = FindRepositoryRoot();
+        var script = File.ReadAllText(Path.Combine(root, "scripts", "build-android-mobileglues.sh"));
+
+        Assert.Contains("emulator-angle.patch", script, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -518,6 +628,38 @@ public sealed class MobilePortTests
             StringComparison.Ordinal);
         Assert.Contains("if (control.Action == TouchControlAction.Inventory) return true;", activity,
             StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AndroidSavingTouchProfileRemovesResetPositionOverrides()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var activity = File.ReadAllText(Path.Combine(repository, "src", "Amber.Android",
+            "GameActivity.cs"));
+        var saveProfile = JavaMethod(activity, "private void SaveProfile()",
+            "private bool HandleSettingsTouch");
+
+        Assert.Contains("if (_profile.TryGetPosition(modeValue, action, out var position))",
+            saveProfile, StringComparison.Ordinal);
+        Assert.Contains("editor.Remove(xKey);", saveProfile, StringComparison.Ordinal);
+        Assert.Contains("editor.Remove(yKey);", saveProfile, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AndroidRejectsUndefinedPersistedTouchModes()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var activity = File.ReadAllText(Path.Combine(repository, "src", "Amber.Android",
+            "GameActivity.cs"));
+        var loadProfile = JavaMethod(activity, "private void LoadProfile()",
+            "private void SaveProfile()");
+
+        Assert.Contains("Enum.IsDefined(mode)", loadProfile, StringComparison.Ordinal);
+        Assert.Contains("Enum.IsDefined(attackArea)", loadProfile, StringComparison.Ordinal);
+        Assert.Contains(": TouchControlMode.DPadAndTap;", loadProfile, StringComparison.Ordinal);
+        Assert.Contains(": TouchAttackArea.Anywhere;", loadProfile, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1612,6 +1754,59 @@ public sealed class MobilePortTests
     }
 
     [Fact]
+    public void AndroidGameProcessUsesTheSavedLanguageForTouchControls()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var application = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "Application.cs"));
+        var app = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.App", "App.axaml.cs"));
+        var activity = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "GameActivity.cs"));
+
+        Assert.Contains("var settings = AppSettings.Load();", application, StringComparison.Ordinal);
+        Assert.Contains("L.SetLanguage(settings.Language);", application,
+            StringComparison.Ordinal);
+        Assert.Contains("L.SetLanguage(settings.Language);", app, StringComparison.Ordinal);
+        Assert.DoesNotContain("settings.Language ?? \"zh-Hans\"", application,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("settings.Language ?? \"zh-Hans\"", app,
+            StringComparison.Ordinal);
+        var freshDefault = app.IndexOf("settings.Language = \"zh-Hans\"", StringComparison.Ordinal);
+        var applyLanguage = app.IndexOf("L.SetLanguage(settings.Language);", freshDefault,
+            StringComparison.Ordinal);
+        Assert.True(freshDefault >= 0 && applyLanguage > freshDefault,
+            "A fresh mobile install should save Chinese before applying the nullable system-language preference.");
+        Assert.Contains("L.T(\"mobile.touch.settings.title\")", activity,
+            StringComparison.Ordinal);
+        Assert.Contains("L.F(\"mobile.touch.attack_area\"", activity,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("canvas.DrawText(\"触控设置\"", activity,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("value = \"输入聊天或指令…\"", activity,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AndroidTouchPreferencesRejectNonFiniteNumericValues()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var activity = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "GameActivity.cs"));
+
+        Assert.Contains("float.IsFinite(value) ? Math.Clamp(value, minimum, maximum) : fallback",
+            activity, StringComparison.Ordinal);
+        Assert.Contains("ReadFinitePreference(\"scale\", 1f, 0.70f, 1.35f)", activity,
+            StringComparison.Ordinal);
+        Assert.Contains("ReadFinitePreference(\"look-sensitivity\", 1.65f, 0.50f, 3.00f)",
+            activity, StringComparison.Ordinal);
+        Assert.Contains("ReadFinitePreference(\"opacity\", 0.74f, 0.30f, 1f)", activity,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AndroidBackClosesLauncherNavigationBeforeBackgroundingTheActivity()
     {
         var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
@@ -1687,6 +1882,35 @@ public sealed class MobilePortTests
         Assert.Contains("#define JAY_ACTION_COUNT 13", native, StringComparison.Ordinal);
         Assert.Contains("GLFW_MOUSE_BUTTON_MIDDLE", glfw, StringComparison.Ordinal);
         Assert.Contains("action <= 2 || action == 12", glfw, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AndroidSdlTouchAndJavaMenuBridgeShareGestureProtocol()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var sdl = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "Sdl", "SdlTouchInput.cs"));
+        var bootstrap = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "Java", "nz", "work", "minecraft", "jay",
+            "SdlMenuBootstrap.java"));
+        var embedded = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "AndroidEmbeddedGame.cs"));
+
+        Assert.Contains("MenuMoveAction = 0", sdl, StringComparison.Ordinal);
+        Assert.Contains("MenuDownAction = 1", sdl, StringComparison.Ordinal);
+        Assert.Contains("MenuUpAction = 2", sdl, StringComparison.Ordinal);
+        Assert.Contains("GameplayContextualAction = 3", sdl, StringComparison.Ordinal);
+        Assert.Contains("MenuPointer(pressed ? MenuDownAction : MenuUpAction)", sdl,
+            StringComparison.Ordinal);
+        Assert.Contains("MenuPointer(GameplayContextualAction)", sdl, StringComparison.Ordinal);
+        Assert.Contains("MOVE_ACTION = 0", bootstrap, StringComparison.Ordinal);
+        Assert.Contains("DOWN_ACTION = 1", bootstrap, StringComparison.Ordinal);
+        Assert.Contains("UP_ACTION = 2", bootstrap, StringComparison.Ordinal);
+        Assert.Contains("GAMEPLAY_CONTEXTUAL_ACTION = 3", bootstrap, StringComparison.Ordinal);
+        Assert.Contains("if (held) drag.invoke", bootstrap, StringComparison.Ordinal);
+        Assert.Contains("sdl ? \"nz.work.minecraft.jay.SdlMenuBootstrap\"", embedded,
+            StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1856,7 +2080,8 @@ public sealed class MobilePortTests
 
         Assert.Contains("input.current.invoke", blockTarget, StringComparison.Ordinal);
         Assert.Contains("input.hitResult.get", blockTarget, StringComparison.Ordinal);
-        Assert.Contains("input.blockHit.isInstance", blockTarget, StringComparison.Ordinal);
+        Assert.Contains("input.targetsBlock(hit)", blockTarget, StringComparison.Ordinal);
+        Assert.Contains("hitType.invoke(hit) == blockType", sdl, StringComparison.Ordinal);
         Assert.DoesNotContain("return false; }", blockTarget, StringComparison.Ordinal);
     }
 
@@ -1868,6 +2093,41 @@ public sealed class MobilePortTests
         Assert.Contains("guiScale:0", options, StringComparison.Ordinal);
         Assert.Contains("lang:zh_cn", options, StringComparison.Ordinal);
         Assert.DoesNotContain("guiScale:3", options, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("en_us")]
+    [InlineData("ja_jp")]
+    [InlineData("zh_tw")]
+    [InlineData("lzh")]
+    [InlineData("en_ud")]
+    public void FreshAndroidOptionsFollowTheSelectedLauncherLanguage(string language)
+    {
+        var options = MobileGameOptions.Prepare(
+            existing: null,
+            migrateLegacyScale: true,
+            defaultLanguage: language);
+
+        Assert.Contains($"lang:{language}", options, StringComparison.Ordinal);
+        Assert.DoesNotContain("lang:zh_cn", options, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AndroidOptionsRejectAnInvalidDefaultLanguageWithoutChangingAnExistingChoice()
+    {
+        var fresh = MobileGameOptions.Prepare(
+            existing: null,
+            migrateLegacyScale: true,
+            defaultLanguage: "en_us\nmaxFps:999");
+        var existing = MobileGameOptions.Prepare(
+            "guiScale:0\nlang:en_us\nmaxFps:90\n",
+            migrateLegacyScale: false,
+            defaultLanguage: "ja_jp");
+
+        Assert.Contains("lang:zh_cn", fresh, StringComparison.Ordinal);
+        Assert.DoesNotContain("maxFps:999", fresh, StringComparison.Ordinal);
+        Assert.Contains("lang:en_us", existing, StringComparison.Ordinal);
+        Assert.DoesNotContain("lang:ja_jp", existing, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -2142,6 +2402,25 @@ public sealed class MobilePortTests
         {
             Directory.Delete(root, true);
         }
+    }
+
+    [Fact]
+    public void AndroidRuntimeValidationRejectsNullJsonFieldsWithoutCrashing()
+    {
+        var nullFiles = JsonSerializer.Deserialize<RuntimeBundleManifest>(
+            """{"format":1,"id":"broken","architecture":"arm64-v8a","files":null}""")!;
+        var nullFileFields = new RuntimeBundleManifest(1, "broken", "arm64-v8a",
+            [new RuntimeBundleFile("lib/libjvm.so", 1, null!, null!, null!)]);
+        var nullArchiveHash = new RuntimeArchiveDescriptor(
+            1, "broken", "arm64-v8a", 1, null!, 1,
+            "GPL-2.0-with-classpath-exception",
+            "https://example.invalid/source",
+            "https://example.invalid/runtime.tar.xz");
+
+        Assert.NotEmpty(nullFiles.Validate());
+        Assert.False(RuntimeBundleVerifier.VerifyLayout("unused", nullFiles, "arm64-v8a"));
+        Assert.NotEmpty(nullFileFields.Validate());
+        Assert.NotEmpty(nullArchiveHash.Validate());
     }
 
     [Fact]
@@ -2528,6 +2807,19 @@ public sealed class MobilePortTests
         var end = source.IndexOf(endMarker, start + startMarker.Length, StringComparison.Ordinal);
         Assert.True(end > start, $"Missing Java method end marker: {endMarker}");
         return source[start..end];
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        foreach (var start in new[] { AppContext.BaseDirectory, Directory.GetCurrentDirectory() })
+        {
+            for (var directory = new DirectoryInfo(start); directory is not null; directory = directory.Parent)
+            {
+                if (File.Exists(Path.Combine(directory.FullName, "scripts", "build-android-mobileglues.sh")))
+                    return directory.FullName;
+            }
+        }
+        throw new DirectoryNotFoundException("Could not locate the Jay repository root.");
     }
 
     private const string RuntimeXzFixture = """
