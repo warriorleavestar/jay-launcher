@@ -16,17 +16,13 @@ public sealed partial class MobileLauncherView : UserControl
         AvaloniaXamlLoader.Load(this);
         _shellGrid = this.FindControl<Grid>("ShellGrid")
             ?? throw new InvalidOperationException("Mobile launcher shell grid is missing.");
+        // The Android single-view root lives for the process lifetime. Register immediately:
+        // Avalonia.Android can install the root without raising the desktop-style visual-tree
+        // attach event, which would otherwise leave native Back with no launcher callback.
+        App.MobileBackRequested = HandleMobileBack;
         AddHandler(GotFocusEvent, OnElementGotFocus, RoutingStrategies.Bubble, handledEventsToo: true);
         SizeChanged += (_, e) => ApplyResponsiveShell(e.NewSize.Width, e.NewSize.Height);
-        AttachedToVisualTree += (_, _) =>
-        {
-            ApplyResponsiveShell(Bounds.Width, Bounds.Height);
-            App.MobileBackRequested = HandleMobileBack;
-        };
-        DetachedFromVisualTree += (_, _) =>
-        {
-            if (App.MobileBackRequested == HandleMobileBack) App.MobileBackRequested = null;
-        };
+        AttachedToVisualTree += (_, _) => ApplyResponsiveShell(Bounds.Width, Bounds.Height);
     }
 
     private void ApplyResponsiveShell(double width, double height)
