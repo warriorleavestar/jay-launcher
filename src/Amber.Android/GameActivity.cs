@@ -917,15 +917,15 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
                         Enum.IsDefined(mode)
             ? mode
             : TouchControlMode.DPadAndTap;
-        _profile.Scale = Math.Clamp(_preferences.GetFloat("scale", 1f), 0.70, 1.35);
-        _profile.LookSensitivity = Math.Clamp(_preferences.GetFloat("look-sensitivity", 1.65f), 0.50, 3.00);
+        _profile.Scale = ReadFinitePreference("scale", 1f, 0.70f, 1.35f);
+        _profile.LookSensitivity = ReadFinitePreference("look-sensitivity", 1.65f, 0.50f, 3.00f);
         _profile.AttackArea = Enum.TryParse<TouchAttackArea>(
                                   _preferences.GetString("attack-area", null), out var attackArea) &&
                               Enum.IsDefined(attackArea)
             ? attackArea
             : TouchAttackArea.Anywhere;
         _profile.ForcedSprint = _preferences.GetBoolean("forced-sprint", true);
-        _controlOpacity = Math.Clamp(_preferences.GetFloat("opacity", 0.74f), 0.30f, 1f);
+        _controlOpacity = ReadFinitePreference("opacity", 0.74f, 0.30f, 1f);
         foreach (var modeValue in Enum.GetValues<TouchControlMode>())
         foreach (var action in Enum.GetValues<TouchControlAction>())
         {
@@ -947,6 +947,12 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
             editor.PutInt("layout-version", 3);
             editor.Apply();
         }
+    }
+
+    private float ReadFinitePreference(string key, float fallback, float minimum, float maximum)
+    {
+        var value = _preferences.GetFloat(key, fallback);
+        return float.IsFinite(value) ? Math.Clamp(value, minimum, maximum) : fallback;
     }
 
     private void SaveProfile()

@@ -1680,6 +1680,24 @@ public sealed class MobilePortTests
     }
 
     [Fact]
+    public void AndroidTouchPreferencesRejectNonFiniteNumericValues()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var activity = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "GameActivity.cs"));
+
+        Assert.Contains("float.IsFinite(value) ? Math.Clamp(value, minimum, maximum) : fallback",
+            activity, StringComparison.Ordinal);
+        Assert.Contains("ReadFinitePreference(\"scale\", 1f, 0.70f, 1.35f)", activity,
+            StringComparison.Ordinal);
+        Assert.Contains("ReadFinitePreference(\"look-sensitivity\", 1.65f, 0.50f, 3.00f)",
+            activity, StringComparison.Ordinal);
+        Assert.Contains("ReadFinitePreference(\"opacity\", 0.74f, 0.30f, 1f)", activity,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AndroidBackClosesLauncherNavigationBeforeBackgroundingTheActivity()
     {
         var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
