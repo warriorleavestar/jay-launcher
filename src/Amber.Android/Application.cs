@@ -25,7 +25,7 @@ public sealed class Application : AvaloniaAndroidApplication<Amber.App.App>
         // normally applied. Load it at process startup as well, otherwise every in-game touch
         // setting remains in the fallback language after the player changes Jay's language.
         var settings = AppSettings.Load();
-        L.SetLanguage(settings.Language ?? "zh-Hans");
+        L.SetLanguage(settings.Language);
         Amber.App.App.MobileGameDirectory = Path.Combine(files, "minecraft");
         Amber.App.App.MobileLaunchRequested = async (versionId, playerName, serverAddress, progress, ct) =>
         {

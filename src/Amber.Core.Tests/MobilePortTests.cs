@@ -1651,12 +1651,24 @@ public sealed class MobilePortTests
             "..", "..", "..", "..", ".."));
         var application = File.ReadAllText(Path.Combine(repository,
             "src", "Amber.Android", "Application.cs"));
+        var app = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.App", "App.axaml.cs"));
         var activity = File.ReadAllText(Path.Combine(repository,
             "src", "Amber.Android", "GameActivity.cs"));
 
         Assert.Contains("var settings = AppSettings.Load();", application, StringComparison.Ordinal);
-        Assert.Contains("L.SetLanguage(settings.Language ?? \"zh-Hans\")", application,
+        Assert.Contains("L.SetLanguage(settings.Language);", application,
             StringComparison.Ordinal);
+        Assert.Contains("L.SetLanguage(settings.Language);", app, StringComparison.Ordinal);
+        Assert.DoesNotContain("settings.Language ?? \"zh-Hans\"", application,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("settings.Language ?? \"zh-Hans\"", app,
+            StringComparison.Ordinal);
+        var freshDefault = app.IndexOf("settings.Language = \"zh-Hans\"", StringComparison.Ordinal);
+        var applyLanguage = app.IndexOf("L.SetLanguage(settings.Language);", freshDefault,
+            StringComparison.Ordinal);
+        Assert.True(freshDefault >= 0 && applyLanguage > freshDefault,
+            "A fresh mobile install should save Chinese before applying the nullable system-language preference.");
         Assert.Contains("L.T(\"mobile.touch.settings.title\")", activity,
             StringComparison.Ordinal);
         Assert.Contains("L.F(\"mobile.touch.attack_area\"", activity,

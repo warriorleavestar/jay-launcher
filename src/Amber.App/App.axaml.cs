@@ -111,7 +111,7 @@ public sealed class App : Application
             if (!string.IsNullOrWhiteSpace(MobileGameDirectory))
                 settings.GameDirectory = MobileGameDirectory;
             settings.Save();
-            Amber.Core.Localization.L.SetLanguage(settings.Language ?? "zh-Hans");
+            Amber.Core.Localization.L.SetLanguage(settings.Language);
             settings.ReduceMotionMode = Amber.Core.Layout.MotionPreference.Migrate(settings.ReduceMotionMode, settings.ReduceMotion);
             DensityService.Apply(settings.Density);
             _mobileService = new LauncherService(settings);
