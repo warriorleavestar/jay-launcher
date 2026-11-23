@@ -10,6 +10,19 @@ apk="$1"
 test -f "$apk"
 command -v adb >/dev/null
 
+dismiss_immersive_confirmation() {
+  local hierarchy=/sdcard/jay-window.xml
+  if adb shell uiautomator dump "$hierarchy" >/dev/null 2>&1 &&
+      adb shell cat "$hierarchy" | tr -d '\r' | grep -q 'text="Got it"'; then
+    # API 35's first immersive Activity displays a SystemUI education card. At the
+    # fixed 600x420 smoke-test viewport this is the centre of its confirmation button.
+    adb shell input tap 490 190
+    sleep 1
+  fi
+  adb shell uiautomator dump "$hierarchy" >/dev/null
+  ! adb shell cat "$hierarchy" | tr -d '\r' | grep -q 'text="Got it"'
+}
+
 adb install "$apk"
 
 adb shell wm size 1080x2400
@@ -44,6 +57,7 @@ adb shell am start -W -n "$launcher_component" \
   --ez nz.work.minecraft.jay.PSEUDO_LOCALIZATION_SELF_TEST false
 sleep 3
 test -n "$(adb shell pidof nz.work.minecraft.jay:game)"
+dismiss_immersive_confirmation
 adb exec-out screencap -p > android-touch-settings-en.png
 
 adb shell am force-stop nz.work.minecraft.jay

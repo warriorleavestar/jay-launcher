@@ -190,6 +190,8 @@ public sealed class MobilePortTests
         var script = File.ReadAllText(Path.Combine(repository,
             "scripts", "check-android-emulator-smoke.sh"));
         Assert.Contains("launcher_component=", script, StringComparison.Ordinal);
+        Assert.Contains("dismiss_immersive_confirmation", script, StringComparison.Ordinal);
+        Assert.Contains("text=\"Got it\"", script, StringComparison.Ordinal);
         Assert.Contains("android-touch-settings-en.png", script, StringComparison.Ordinal);
         Assert.Contains("android-touch-settings-pseudo.png", script, StringComparison.Ordinal);
     }
