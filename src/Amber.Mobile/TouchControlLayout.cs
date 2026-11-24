@@ -122,6 +122,15 @@ public sealed class TouchControlProfile
 /// <summary>Built-in schemes modelled after the interaction choices familiar on mobile Minecraft.</summary>
 public static class TouchControlLayout
 {
+    // TouchMajor is the contact ellipse's full major axis in pixels. Leave clearance
+    // beyond it, including when the digitizer supplies no useful contact measurement.
+    public static float MiningRingRadius(float density, float shortEdge, float touchMajor)
+    {
+        var minimum = Math.Max(80f * density, shortEdge * 0.085f);
+        var contact = float.IsFinite(touchMajor) ? Math.Clamp(touchMajor, 0, 160f * density) : 0;
+        return Math.Max(minimum, contact / 2f + 18f * density);
+    }
+
     private static readonly TouchControlDefinition[] Shared =
     [
         new(TouchControlAction.Keyboard, 0.475, 0.050, 0.026, "聊天与指令", MenuVisible: true),

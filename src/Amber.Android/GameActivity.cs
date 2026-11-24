@@ -727,11 +727,10 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     {
         var drewAnimatedFeedback = false;
         var scale = Math.Min(Width, Height);
-        // The indicator must remain visible around a resting fingertip on a tablet.
-        var radius = scale * 0.058f;
+        var density = Resources!.DisplayMetrics!.Density;
         _progressTrack.SetStyle(Paint.Style.Stroke);
         _progress.SetStyle(Paint.Style.Stroke);
-        _progressTrack.StrokeWidth = Math.Max(5, scale * 0.0045f);
+        _progressTrack.StrokeWidth = Math.Max(4f * density, scale * 0.005f);
         _progress.StrokeWidth = _progressTrack.StrokeWidth;
 
         foreach (var (pointerId, indicator) in _longPressIndicators.ToArray())
@@ -744,12 +743,11 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
             if (progress < 0) continue;
             var x = (float)(indicator.X * Width);
             var y = (float)(indicator.Y * Height);
-            var bounds = new RectF(x - radius, y - radius, x + radius, y + radius);
+            var radius = TouchControlLayout.MiningRingRadius(density, scale, indicator.TouchMajor);
             canvas.DrawCircle(x, y, radius, _progressTrack);
             var amount = progress / 1000f;
-            canvas.DrawArc(bounds, -90, (float)(amount * 360), false, _progress);
-            canvas.DrawCircle(x, y, radius * 0.16f,
-                _router.IsLongPress(pointerId) ? _activeFill : _fill);
+            canvas.DrawArc(x - radius, y - radius, x + radius, y + radius,
+                -90, amount * 360, false, _progress);
         }
         return drewAnimatedFeedback;
     }
@@ -1214,7 +1212,10 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
                     var longPressToken = ++_nextLongPressToken;
                     _longPressTokens[pointerId] = longPressToken;
                     if (gameplay)
-                        _longPressIndicators[pointerId] = new(x, y);
+                    {
+                        var major = e.GetTouchMajor(actionIndex);
+                        _longPressIndicators[pointerId] = new(x, y, float.IsFinite(major) ? major : 0);
+                    }
                     PostDelayed(() =>
                     {
                         if (!_longPressTokens.TryGetValue(pointerId, out var currentToken) ||
@@ -1239,11 +1240,20 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
                         moved = true;
                         continue;
                     }
-                    moved |= _router.Move(movingId, e.GetX(i) / Width, e.GetY(i) / Height);
+                    var movingX = e.GetX(i) / Width;
+                    var movingY = e.GetY(i) / Height;
+                    moved |= _router.Move(movingId, movingX, movingY);
                     if (!_router.IsLongPressCandidate(movingId))
                     {
                         _longPressTokens.Remove(movingId);
                         _longPressIndicators.Remove(movingId);
+                    }
+                    else if (_longPressIndicators.TryGetValue(movingId, out var indicator))
+                    {
+                        // Keep the outline steady when a resting finger changes pressure.
+                        var major = e.GetTouchMajor(i);
+                        _longPressIndicators[movingId] = new(movingX, movingY,
+                            float.IsFinite(major) && major > indicator.TouchMajor ? major : indicator.TouchMajor);
                     }
                 }
                 return moved;
@@ -1883,5 +1893,5 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         }
     }
 
-    private readonly record struct LongPressIndicator(double X, double Y);
+    private readonly record struct LongPressIndicator(double X, double Y, float TouchMajor);
 }
