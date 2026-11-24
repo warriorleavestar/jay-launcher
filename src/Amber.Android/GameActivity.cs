@@ -749,7 +749,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
                 canvas.DrawCircle(x, y, radius, _progress);
             else
                 canvas.DrawArc(x - radius, y - radius, x + radius, y + radius,
-                    -90, progress * 0.36f, false, _progress);
+                    -90, MiningRingProgress.PartialSweep(progress, radius, _progress.StrokeWidth), false, _progress);
         }
         return drewAnimatedFeedback;
     }

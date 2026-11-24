@@ -218,12 +218,14 @@ public sealed class MobilePortTests
         Assert.Equal(-1, ring.Observe(-1, 30));
         Assert.Equal(-1, ring.Observe(1000, 35));
         Assert.Equal(947, ring.Observe(947, 40));
-        Assert.Equal(1000, ring.Observe(1000, 50));
+        Assert.Equal(947, ring.Observe(1000, 50));
         Assert.Equal(1000, ring.Observe(-1, 66));
-        Assert.Equal(-1, ring.Observe(1000, 150));
+        Assert.Equal(-1, ring.Observe(1000, 166));
         Assert.Equal(500, ring.Observe(500, 200));
-        Assert.Equal(1000, ring.Observe(1000, 210));
+        Assert.Equal(500, ring.Observe(1000, 210));
         Assert.Equal(200, ring.Observe(200, 225));
+        Assert.Equal(180f, MiningRingProgress.PartialSweep(500, 80, 4), 2);
+        Assert.InRange(MiningRingProgress.PartialSweep(999, 80, 4), 354f, 355f);
     }
 
     [Fact]
