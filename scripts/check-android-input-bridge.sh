@@ -46,6 +46,17 @@ require_any() {
 if "$javap_bin" -classpath "$jar_path" -private net.minecraft.client.Minecraft \
     >/dev/null 2>&1; then
   dump net.minecraft.client.Minecraft minecraft.txt
+  dump net.minecraft.client.multiplayer.MultiPlayerGameMode game-mode.txt
+  require minecraft.txt 'net.minecraft.client.multiplayer.MultiPlayerGameMode gameMode;'
+  require minecraft.txt 'void pauseGame(boolean);'
+  require game-mode.txt 'float destroyProgress;'
+  require game-mode.txt 'boolean isDestroying;'
+  named_input=net.minecraft.world.inventory.ContainerInput
+  if ! "$javap_bin" -classpath "$jar_path" "$named_input" >/dev/null 2>&1; then
+    named_input=net.minecraft.world.inventory.ClickType
+  fi
+  dump "$named_input" click-type.txt
+  require click-type.txt "$named_input PICKUP_ALL;"
   dump net.minecraft.client.MouseHandler mouse.txt
   dump net.minecraft.client.KeyboardHandler keyboard.txt
   dump net.minecraft.client.gui.Gui gui.txt
@@ -96,6 +107,11 @@ if "$javap_bin" -classpath "$jar_path" -private net.minecraft.client.Minecraft \
   require stack.txt "int getCount();"
 elif "$javap_bin" -classpath "$jar_path" -private gfj >/dev/null 2>&1; then
   dump gfj minecraft.txt
+  dump hio game-mode.txt
+  require minecraft.txt "hio q;"
+  require minecraft.txt "void b(boolean);"
+  require game-mode.txt "float f;"
+  require game-mode.txt "boolean i;"
   dump gfk mouse.txt
   dump gfi keyboard.txt
   dump fyk window.txt
@@ -135,9 +151,15 @@ elif "$javap_bin" -classpath "$jar_path" -private gfj >/dev/null 2>&1; then
   require stack.txt "int r;"
   require mouse-button.txt "gzd(int, int);"
   require click-type.txt "dhu a;"
+  require click-type.txt "dhu g;"
 else
   # Mojang 1.20.1 (official client mappings 1.20.1-20230612.114412).
   dump enn minecraft.txt
+  dump ffa game-mode.txt
+  require minecraft.txt "ffa r;"
+  require minecraft.txt "void c(boolean);"
+  require game-mode.txt "float f;"
+  require game-mode.txt "boolean i;"
   dump eno mouse.txt
   dump enm keyboard.txt
   dump ehn window.txt
@@ -174,6 +196,7 @@ else
   require slot.txt "cfz e();"
   require stack.txt "int s;"
   require click-type.txt "cbo a;"
+  require click-type.txt "cbo g;"
 fi
 
 echo "Android input bridge signatures match $(basename "$jar_path")."

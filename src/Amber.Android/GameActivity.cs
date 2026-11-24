@@ -315,7 +315,6 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
 {
     private const int GlfwKeyEscape = 256;
     private const long LongPressDelayMs = 340;
-    private const long LongPressRingMs = 1150;
     private readonly Paint _fill = new() { AntiAlias = true, Color = Color.Argb(142, 48, 53, 59) };
     private readonly Paint _activeFill = new() { AntiAlias = true, Color = Color.Argb(218, 105, 112, 120) };
     private readonly Paint _buttonFace = new() { AntiAlias = false, Color = Color.Argb(168, 55, 59, 63) };
@@ -367,7 +366,6 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     private readonly SoftKeyboardInputSession _softKeyboardSession = new();
     private readonly SoftKeyboardPreviewBuffer _softKeyboardPreview = new();
     private bool GameplayActive => _sdl?.InWorld ?? NativeJvmHost.GameplayControlsActive;
-    private bool HasBlockTarget => _sdl?.HasBlockTarget ?? NativeJvmHost.HasBlockTarget;
 
     public TouchControlOverlay(Context context, SdlTouchInput? sdl = null) : base(context)
     {
@@ -422,6 +420,11 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         // JaySdlActivity. Keep the lifecycle cleanup on the view so both hosts release held
         // movement/mining keys when backgrounded and reacquire pointer capture on return.
         if (!hasWindowFocus) CancelAllInput();
+        else {
+            _lastGameplayControlsActive = null;
+            _nextGuiScalePoll = 0;
+            PostInvalidateOnAnimation();
+        }
         UpdateHardwareCapture(hasWindowFocus);
     }
 
@@ -722,7 +725,6 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
 
     private bool DrawLongPressIndicators(Canvas canvas)
     {
-        var now = SystemClock.UptimeMillis();
         var drewAnimatedFeedback = false;
         var scale = Math.Min(Width, Height);
         // The indicator must remain visible around a resting fingertip on a tablet.
@@ -736,14 +738,15 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         {
             // Match the mobile interaction: an ordinary touch has no decoration. The ring starts
             // only after the gesture has become a mining hold and the crosshair is on a block.
-            if (!_router.IsLongPress(pointerId) || !HasBlockTarget) continue;
+            if (!_router.IsLongPress(pointerId)) continue;
             drewAnimatedFeedback = true;
-            var miningElapsed = now - indicator.DownAt - LongPressDelayMs;
+            var progress = NativeJvmHost.MiningProgress();
+            if (progress < 0) continue;
             var x = (float)(indicator.X * Width);
             var y = (float)(indicator.Y * Height);
             var bounds = new RectF(x - radius, y - radius, x + radius, y + radius);
             canvas.DrawCircle(x, y, radius, _progressTrack);
-            var amount = Math.Clamp(miningElapsed / (double)LongPressRingMs, 0, 1);
+            var amount = progress / 1000f;
             canvas.DrawArc(bounds, -90, (float)(amount * 360), false, _progress);
             canvas.DrawCircle(x, y, radius * 0.16f,
                 _router.IsLongPress(pointerId) ? _activeFill : _fill);
@@ -1211,7 +1214,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
                     var longPressToken = ++_nextLongPressToken;
                     _longPressTokens[pointerId] = longPressToken;
                     if (gameplay)
-                        _longPressIndicators[pointerId] = new(x, y, SystemClock.UptimeMillis());
+                        _longPressIndicators[pointerId] = new(x, y);
                     PostDelayed(() =>
                     {
                         if (!_longPressTokens.TryGetValue(pointerId, out var currentToken) ||
@@ -1299,6 +1302,8 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
             }
             return;
         }
+        if (action == TouchControlAction.Menu && pressed && NativeJvmHost.TryPause())
+            return;
         if (action == TouchControlAction.Close)
             action = TouchControlAction.Menu;
         ApplyActionChange(_actionLatch.Set(action, TouchActionSource, pressed));
@@ -1320,7 +1325,13 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         DispatchCombinedMovement();
     }
 
-    public void AddLook(double x, double y) => DispatchLook(x, y);
+    public void AddLook(double x, double y)
+    {
+        // A swipe across the same fraction of a tablet should turn by the same angle at
+        // native or reduced render resolution. Physical mice keep their unscaled deltas.
+        var scale = 800d / Math.Max(1, Math.Min(Width, Height));
+        DispatchLook(x * scale, y * scale);
+    }
 
     public void SetPointer(double x, double y, bool click)
         => DispatchPointer(x, y, click);
@@ -1378,18 +1389,15 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         else _sdl.SplitInventoryStack(x, y, count);
     }
 
-    public void ReturnCarriedInventoryItems(double x, double y, int count)
-    {
-        if (count < 1) return;
-        // A negative operation is internal to the native/Java bridge: it means that the
-        // first tap already carries the stack and this many right-clicks must return items.
-        if (_sdl is null) NativeJvmHost.SplitInventoryStack(x, y, -count);
-        else _sdl.SplitInventoryStack(x, y, -count);
-    }
+    // Positive counts select a quantity. Zero requests vanilla PICKUP_ALL.
+    public void CollectMatchingItems(double x, double y) => SplitInventoryStack(x, y, 0);
+
+    public void PlaceOneItem(double x, double y) => SplitInventoryStack(x, y, -1);
 
     public void HandleSystemBack()
     {
         CancelAllInput();
+        if (NativeJvmHost.TryPause()) return;
         if (_sdl is not null)
         {
             _sdl.KeyEvent(Keycode.Escape, true);
@@ -1875,5 +1883,5 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         }
     }
 
-    private readonly record struct LongPressIndicator(double X, double Y, long DownAt);
+    private readonly record struct LongPressIndicator(double X, double Y);
 }

@@ -42,6 +42,7 @@ public final class SdlMenuBootstrap {
         final Field slotIndex = slot.getField("index");
         final Method slotItem = slot.getMethod("getItem");
         final Method itemCount = Class.forName("net.minecraft.world.item.ItemStack").getMethod("getCount");
+        final Object pickupAll = clickType.getField("PICKUP_ALL").get(null);
         final Object pickup = clickType.getField("PICKUP").get(null);
         final Field width = screen.getField("width"), height = screen.getField("height");
         final Constructor<?> makeEvent = event.getConstructor(double.class, double.class, info);
@@ -83,17 +84,20 @@ public final class SdlMenuBootstrap {
             Object stack = slotItem.invoke(hovered);
             int total = stack == null ? 0 : Math.max(0, (Integer)itemCount.invoke(stack));
             int index = slotIndex.getInt(hovered);
-            if (requested < 0) {
-                // A preceding tap already carries the whole stack. Right-clicking the empty
-                // source slot returns one item at a time, leaving exactly half on the cursor.
-                for (int returned = 0; returned < -requested; returned++)
-                    slotClicked.invoke(active, hovered, index, 1, pickup);
+            if (requested == -1) {
+                slotClicked.invoke(active, hovered, index, 1, pickup);
+                return true;
+            }
+            if (requested == 0) {
+                slotClicked.invoke(active, hovered, index, 0, pickupAll);
                 return true;
             }
             if (total == 0) return false;
             int selected = Math.max(1, Math.min(total, requested));
-            slotClicked.invoke(active, hovered, index, 0, pickup);
-            for (int remaining = total; remaining > selected; remaining--)
+            int half = (total + 1) / 2;
+            int button = selected <= half ? 1 : 0;
+            slotClicked.invoke(active, hovered, index, button, pickup);
+            for (int remaining = button == 1 ? half : total; remaining > selected; remaining--)
                 slotClicked.invoke(active, hovered, index, 1, pickup);
             return true;
         }
@@ -172,6 +176,11 @@ public final class SdlMenuBootstrap {
             return -1;
         }
     }
+
+    public static int miningProgress() { return AndroidGameBootstrap.miningProgress(); }
+    public static boolean requestPause() { return AndroidGameBootstrap.requestPause(); }
+
+    public static int gameplayControlsState() { return AndroidGameBootstrap.gameplayControlsState(); }
 
     /** Current Minecraft GUI scale, cached while transitioning from a menu into gameplay. */
     public static int guiScale() {

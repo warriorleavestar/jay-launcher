@@ -27,6 +27,8 @@ public final class AndroidGameBootstrap {
     private static Field minecraftKeyboard;
     private static Field minecraftWindow;
     private static Field minecraftScreen;
+    private static Field gameMode, destroyProgress, isDestroying;
+    private static Method pauseGame;
     private static Field minecraftGui;
     private static Method guiScreen;
     private static Field minecraftHitResult;
@@ -64,6 +66,7 @@ public final class AndroidGameBootstrap {
     private static Field itemStackCount;
     private static Method itemStackGetCount;
     private static Object pickupClickType;
+    private static Object pickupAllClickType;
     private static boolean inputBridgeReady;
     private static boolean inputBridgeFailed;
     private static boolean inputDispatchErrorLogged;
@@ -197,9 +200,49 @@ public final class AndroidGameBootstrap {
         }
     }
 
+    private static void prepareGameplayState(Class<?> client, String mode, String progress,
+                                             String destroying, String pause) {
+        try {
+            gameMode = accessible(client.getDeclaredField(mode));
+            destroyProgress = accessible(gameMode.getType().getDeclaredField(progress));
+            isDestroying = accessible(gameMode.getType().getDeclaredField(destroying));
+            pauseGame = accessible(client.getDeclaredMethod(pause, boolean.class));
+        } catch (ReflectiveOperationException unavailable) {
+            System.err.println("Jay gameplay state: " + unavailable);
+        }
+    }
+
+    /** -1 while idle, otherwise Minecraft's actual accumulated damage in thousandths. */
+    public static int miningProgress() {
+        if (!prepareInputBridge() || isDestroying == null) return -1;
+        try {
+            Object game = minecraft();
+            Object mode = game == null ? null : gameMode.get(game);
+            if (mode == null || screen(game) != null || !isDestroying.getBoolean(mode)) return -1;
+            return Math.min(1000, Math.max(0, Math.round(1000 * destroyProgress.getFloat(mode))));
+        } catch (ReflectiveOperationException error) {
+            return -1;
+        }
+    }
+
+    public static boolean requestPause() {
+        if (!prepareInputBridge() || pauseGame == null) return false;
+        try {
+            final Object game = minecraft();
+            if (!(game instanceof java.util.concurrent.Executor) || screen(game) != null) return false;
+            ((java.util.concurrent.Executor)game).execute(() -> {
+                try {
+                    if (screen(game) == null) pauseGame.invoke(game, false);
+                } catch (ReflectiveOperationException error) { reportInputError(error); }
+            });
+            return true;
+        } catch (ReflectiveOperationException error) { return false; }
+    }
+
     /** Minecraft 26.1 and newer ship unobfuscated client class and member names. */
     private static void prepareNamedInputBridge() throws ReflectiveOperationException {
         Class<?> minecraftType = Class.forName("net.minecraft.client.Minecraft");
+        prepareGameplayState(minecraftType, "gameMode", "destroyProgress", "isDestroying", "pauseGame");
         Class<?> mouseType = Class.forName("net.minecraft.client.MouseHandler");
         Class<?> keyboardType = Class.forName("net.minecraft.client.KeyboardHandler");
         Class<?> windowType = Class.forName("com.mojang.blaze3d.platform.Window");
@@ -293,6 +336,17 @@ public final class AndroidGameBootstrap {
             slotId = accessible(slotType.getDeclaredField("index"));
             slotGetItem = accessible(slotType.getDeclaredMethod("getItem"));
             itemStackGetCount = accessible(itemStackType.getDeclaredMethod("getCount"));
+            try {
+                Class<?> input;
+                try { input = Class.forName("net.minecraft.world.inventory.ContainerInput"); }
+                catch (ClassNotFoundException older) { input = Class.forName("net.minecraft.world.inventory.ClickType"); }
+                containerSlotClicked = accessible(containerScreenType.getDeclaredMethod(
+                    "slotClicked", slotType, int.class, int.class, input));
+                pickupClickType = input.getField("PICKUP").get(null);
+                pickupAllClickType = input.getField("PICKUP_ALL").get(null);
+            } catch (ReflectiveOperationException unavailable) {
+                // Basic inventory input can still use the window's mouse callbacks.
+            }
         } catch (ReflectiveOperationException optionalInventoryApiUnavailable) {
             // Basic movement, camera, menus and ordinary inventory clicks must keep working
             // when a future client changes only its optional exact-stack-splitting API.
@@ -327,6 +381,7 @@ public final class AndroidGameBootstrap {
 
     private static void prepareLegacyInputBridge() throws ReflectiveOperationException {
             Class<?> minecraftType = Class.forName("gfj");
+            prepareGameplayState(minecraftType, "q", "f", "i", "b");
             Class<?> mouseType = Class.forName("gfk");
             Class<?> keyboardType = Class.forName("gfi");
             Class<?> windowType = Class.forName("fyk");
@@ -374,11 +429,13 @@ public final class AndroidGameBootstrap {
             slotGetItem = accessible(slotType.getDeclaredMethod("g"));
             itemStackCount = accessible(itemStackType.getDeclaredField("r"));
             pickupClickType = accessible(clickType.getDeclaredField("a")).get(null);
+            pickupAllClickType = accessible(clickType.getDeclaredField("g")).get(null);
     }
 
     /** Official Mojang 1.20.1 client mappings (1.20.1-20230612.114412). */
     private static void prepareLegacy1201InputBridge() throws ReflectiveOperationException {
             Class<?> minecraftType = Class.forName("enn");
+            prepareGameplayState(minecraftType, "r", "f", "i", "c");
             Class<?> mouseType = Class.forName("eno");
             Class<?> keyboardType = Class.forName("enm");
             Class<?> windowType = Class.forName("ehn");
@@ -425,6 +482,7 @@ public final class AndroidGameBootstrap {
             slotGetItem = accessible(slotType.getDeclaredMethod("e"));
             itemStackCount = accessible(itemStackType.getDeclaredField("s"));
             pickupClickType = accessible(clickType.getDeclaredField("a")).get(null);
+            pickupAllClickType = accessible(clickType.getDeclaredField("g")).get(null);
     }
 
     private static <T extends java.lang.reflect.AccessibleObject> T accessible(T value) {
@@ -715,29 +773,13 @@ public final class AndroidGameBootstrap {
         double y = Math.max(0.0, Math.min(1.0, normalizedY)) * screenHeight.getInt(screen);
         Object slot = containerHoveredSlot.invoke(screen, x, y);
         if (slot == null) return false;
-        if (requested < 0) {
-            int returned = -requested;
-            if (containerSlotClicked == null || pickupClickType == null) {
-                Object window = window(minecraft);
-                Object mouse = minecraftMouse.get(minecraft);
-                if (window == null || mouse == null) return false;
-                double windowX = Math.max(0.0, Math.min(1.0, normalizedX)) *
-                    (Integer)windowWidth.invoke(window);
-                double windowY = Math.max(0.0, Math.min(1.0, normalizedY)) *
-                    (Integer)windowHeight.invoke(window);
-                long handle = handle(window);
-                mouseX.setDouble(mouse, windowX);
-                mouseY.setDouble(mouse, windowY);
-                moveMouse(mouse, handle, windowX, windowY, 0.0, 0.0);
-                for (int index = 0; index < returned; index++) {
-                    pressMouse(mouse, handle, 1, 1);
-                    pressMouse(mouse, handle, 1, 0);
-                }
-                return true;
-            }
-            int id = slotId.getInt(slot);
-            for (int index = 0; index < returned; index++)
-                containerSlotClicked.invoke(screen, slot, id, 1, pickupClickType);
+        if (requested == -1 && containerSlotClicked != null && pickupClickType != null) {
+            containerSlotClicked.invoke(screen, slot, slotId.getInt(slot), 1, pickupClickType);
+            return true;
+        }
+        if (requested == 0) {
+            if (containerSlotClicked == null || pickupAllClickType == null) return false;
+            containerSlotClicked.invoke(screen, slot, slotId.getInt(slot), 0, pickupAllClickType);
             return true;
         }
         Object stack = slotGetItem.invoke(slot);
@@ -746,10 +788,11 @@ public final class AndroidGameBootstrap {
             : itemStackCount.getInt(stack));
         int selected = Math.max(1, Math.min(total, requested));
         if (total <= 0) return false;
+        int half = (total + 1) / 2;
+        int button = selected <= half ? 1 : 0;
+        int picked = button == 1 ? half : total;
         if (containerSlotClicked == null || pickupClickType == null) {
-            // Newer clients removed the old ClickType API. Route the exact same sequence
-            // through the normal screen input path: left pickup, then return one item per
-            // right click until the requested quantity remains on the cursor.
+            // Fall back to the screen mouse callbacks when direct slot input is unavailable.
             Object window = window(minecraft);
             Object mouse = minecraftMouse.get(minecraft);
             if (window == null || mouse == null) return false;
@@ -761,19 +804,18 @@ public final class AndroidGameBootstrap {
             mouseX.setDouble(mouse, windowX);
             mouseY.setDouble(mouse, windowY);
             moveMouse(mouse, handle, windowX, windowY, 0.0, 0.0);
-            pressMouse(mouse, handle, 0, 1);
-            pressMouse(mouse, handle, 0, 0);
-            for (int index = selected; index < total; index++) {
+            pressMouse(mouse, handle, button, 1);
+            pressMouse(mouse, handle, button, 0);
+            for (int index = selected; index < picked; index++) {
                 pressMouse(mouse, handle, 1, 1);
                 pressMouse(mouse, handle, 1, 0);
             }
             return true;
         }
         int id = slotId.getInt(slot);
-        // Left pickup takes the whole stack. Each right pickup on the source returns one,
-        // leaving precisely "selected" items on the cursor for the next finger tap.
-        containerSlotClicked.invoke(screen, slot, id, 0, pickupClickType);
-        for (int index = selected; index < total; index++)
+        // A half-stack selection takes one vanilla click, including odd-sized stacks.
+        containerSlotClicked.invoke(screen, slot, id, button, pickupClickType);
+        for (int index = selected; index < picked; index++)
             containerSlotClicked.invoke(screen, slot, id, 1, pickupClickType);
         return true;
     }
@@ -800,7 +842,8 @@ public final class AndroidGameBootstrap {
         if (!prepareInputBridge()) return -1;
         try {
             Object minecraft = minecraft();
-            return minecraft != null && screen(minecraft) == null ? 1 : 0;
+            return minecraft != null && screen(minecraft) == null &&
+                (gameMode == null || gameMode.get(minecraft) != null) ? 1 : 0;
         } catch (ReflectiveOperationException | RuntimeException error) {
             return -1;
         }
