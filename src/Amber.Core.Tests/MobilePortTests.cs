@@ -202,16 +202,8 @@ public sealed class MobilePortTests
         var repository = FindRepositoryRoot();
         var activity = File.ReadAllText(Path.Combine(repository,
             "src", "Amber.Android", "GameActivity.cs"));
-        var sdl = File.ReadAllText(Path.Combine(repository,
-            "src", "Amber.Android", "Sdl", "SdlTouchInput.cs"));
-
-        Assert.Contains(
-            "private bool HasBlockTarget => _sdl?.HasBlockTarget ?? NativeJvmHost.HasBlockTarget;",
-            activity, StringComparison.Ordinal);
-        Assert.Contains("!HasBlockTarget", activity, StringComparison.Ordinal);
-        Assert.DoesNotContain("!NativeJvmHost.HasBlockTarget", activity, StringComparison.Ordinal);
-        Assert.Contains("EntryPoint = \"jay_block_target_get\"", sdl, StringComparison.Ordinal);
-        Assert.Contains("public bool HasBlockTarget", sdl, StringComparison.Ordinal);
+        Assert.Contains("NativeJvmHost.MiningProgress()", activity, StringComparison.Ordinal);
+        Assert.DoesNotContain("LongPressRingMs", activity, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -908,8 +900,7 @@ public sealed class MobilePortTests
         Assert.Equal(-0.06 * 1.65, sink.LastLook.Y, 6);
         Assert.True(router.Release(20));
         Assert.Empty(sink.Actions);
-        Assert.Equal((0.60, 0.39, false), sink.LastPointer);
-        Assert.DoesNotContain(sink.Pointers, pointer => pointer.Click);
+        Assert.Empty(sink.Pointers);
     }
 
     [Fact]
@@ -1011,10 +1002,23 @@ public sealed class MobilePortTests
     }
 
     [Fact]
-    public void TouchInputRouterDoubleTapSplitsTheCarriedStackInHalf()
+    public void HoldingAnEmptyCraftingCellPlacesOneIngredientOnlyOnRelease()
     {
         var sink = new RecordingTouchSink();
-        var count = 64;
+        var router = new TouchInputRouter(sink, inventoryStackCount: (_, _) => 0);
+        router.Press(1, 0.48, 0.36, controlsEnabled: false);
+        Assert.True(router.BeginLongPress(1));
+        Assert.Empty(sink.SinglePlacements);
+        router.Release(1);
+        Assert.Equal([(0.48, 0.36)], sink.SinglePlacements);
+        Assert.DoesNotContain(sink.Pointers, pointer => pointer.Click);
+    }
+
+    [Fact]
+    public void TouchInputRouterDoubleTapCollectsIntoASingleCarriedItem()
+    {
+        var sink = new RecordingTouchSink();
+        var count = 1;
         var router = new TouchInputRouter(sink, inventoryStackCount: (_, _) => count);
 
         Assert.True(router.Press(40, 0.48, 0.36, controlsEnabled: false));
@@ -1028,7 +1032,7 @@ public sealed class MobilePortTests
         Assert.True(router.Release(41));
         Assert.Empty(sink.Actions);
         Assert.Single(sink.Pointers, pointer => pointer.Click);
-        Assert.Equal([(0.48, 0.36, 32)], sink.ReturnedInventoryItems);
+        Assert.Equal([(0.48, 0.36)], sink.CollectedItems);
         Assert.DoesNotContain(TouchControlLayout.Default,
             control => control.Action == TouchControlAction.SecondaryAction);
     }
@@ -1049,7 +1053,7 @@ public sealed class MobilePortTests
         router.Press(141, 0.51, 0.36, controlsEnabled: false);
         router.Release(141);
 
-        Assert.Empty(sink.ReturnedInventoryItems);
+        Assert.Empty(sink.CollectedItems);
         Assert.Equal(2, sink.Pointers.Count(pointer => pointer.Click));
     }
 
@@ -1072,7 +1076,7 @@ public sealed class MobilePortTests
         router.Press(152, 0.48, 0.36, controlsEnabled: false);
         router.Release(152);
 
-        Assert.Empty(sink.ReturnedInventoryItems);
+        Assert.Empty(sink.CollectedItems);
         Assert.Equal(2, sink.Pointers.Count(pointer => pointer.Click));
     }
 
@@ -1091,7 +1095,7 @@ public sealed class MobilePortTests
         router.Press(154, 0.48, 0.36, controlsEnabled: false);
         router.Release(154);
 
-        Assert.Empty(sink.ReturnedInventoryItems);
+        Assert.Empty(sink.CollectedItems);
         Assert.Equal(2, sink.Pointers.Count(pointer => pointer.Click));
     }
 
@@ -1123,7 +1127,7 @@ public sealed class MobilePortTests
         router.Press(47, 0.48, 0.36, controlsEnabled: false);
         router.Release(47);
 
-        Assert.Empty(sink.ReturnedInventoryItems);
+        Assert.Empty(sink.CollectedItems);
         Assert.Equal(2, sink.Pointers.Count(pointer => pointer.Click));
     }
 
@@ -2295,7 +2299,7 @@ public sealed class MobilePortTests
     }
 
     [Fact]
-    public void AndroidInventoryBridgesPreserveTheCarriedStackReturnOperation()
+    public void AndroidInventoryBridgesForwardCollectAndSinglePlacementToMinecraft()
     {
         var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", ".."));
@@ -2306,11 +2310,11 @@ public sealed class MobilePortTests
         var sdl = File.ReadAllText(Path.Combine(repository, "src", "Amber.Android", "Java",
             "nz", "work", "minecraft", "jay", "SdlMenuBootstrap.java"));
 
-        Assert.Contains("if (count == 0) return;", native, StringComparison.Ordinal);
-        Assert.Contains("if (requested < 0)", glfw, StringComparison.Ordinal);
-        Assert.Contains("if (requested < 0)", sdl, StringComparison.Ordinal);
-        Assert.Contains("for (int returned = 0; returned < -requested; returned++)", sdl,
-            StringComparison.Ordinal);
+        Assert.DoesNotContain("if (count == 0) return;", native, StringComparison.Ordinal);
+        Assert.Contains("slot, slotId.getInt(slot), 0, pickupAllClickType", glfw, StringComparison.Ordinal);
+        Assert.Contains("hovered, index, 0, pickupAll", sdl, StringComparison.Ordinal);
+        Assert.Contains("slot, slotId.getInt(slot), 1, pickupClickType", glfw, StringComparison.Ordinal);
+        Assert.Contains("hovered, index, 1, pickup", sdl, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -2902,7 +2906,7 @@ public sealed class MobilePortTests
         public (double X, double Y, bool Click) LastPointer { get; private set; }
         public List<(double X, double Y, bool Click)> Pointers { get; } = [];
         public List<(double X, double Y, int Count)> InventorySplits { get; } = [];
-        public List<(double X, double Y, int Count)> ReturnedInventoryItems { get; } = [];
+        public List<(double X, double Y)> CollectedItems { get; } = [];
 
         public void SetAction(TouchControlAction action, bool pressed) => Actions.Add((action, pressed));
         public void CancelAction(TouchControlAction action) => CanceledActions.Add(action);
@@ -2915,8 +2919,9 @@ public sealed class MobilePortTests
         }
         public void SplitInventoryStack(double x, double y, int count) =>
             InventorySplits.Add((x, y, count));
-        public void ReturnCarriedInventoryItems(double x, double y, int count) =>
-            ReturnedInventoryItems.Add((x, y, count));
+        public List<(double X, double Y)> SinglePlacements { get; } = [];
+        public void PlaceOneItem(double x, double y) => SinglePlacements.Add((x, y));
+        public void CollectMatchingItems(double x, double y) => CollectedItems.Add((x, y));
     }
 
 }

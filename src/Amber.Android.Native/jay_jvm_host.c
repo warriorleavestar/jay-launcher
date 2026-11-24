@@ -57,6 +57,8 @@ static jmethodID g_dispatch_char;
 static jmethodID g_dispatch_look;
 static jmethodID g_is_gameplay_controls_active;
 static jmethodID g_is_block_target;
+static jmethodID g_mining_progress;
+static jmethodID g_request_pause;
 static jmethodID g_is_text_input_focused;
 static jmethodID g_is_text_input_at;
 static jmethodID g_gui_scale;
@@ -289,6 +291,8 @@ int jay_jvm_run_main(JNIEnv *env, const char *class_name, int argc, const char *
         JAY_INPUT_METHOD(g_dispatch_char, "dispatchChar", "(I)Z");
         JAY_INPUT_METHOD(g_dispatch_look, "dispatchLook", "(FF)Z");
         JAY_INPUT_METHOD(g_is_gameplay_controls_active, "gameplayControlsState", "()I");
+        JAY_INPUT_METHOD(g_mining_progress, "miningProgress", "()I");
+        JAY_INPUT_METHOD(g_request_pause, "requestPause", "()Z");
         JAY_INPUT_METHOD(g_is_block_target, "isBlockTarget", "()Z");
         JAY_INPUT_METHOD(g_is_text_input_focused, "textInputFocusState", "()I");
         JAY_INPUT_METHOD(g_is_text_input_at, "isTextInputAt", "(FF)Z");
@@ -340,20 +344,20 @@ static int jay_finish_input_call(JNIEnv *env, int attached, jboolean delivered) 
     return success;
 }
 
-static int jay_query_gameplay_mode(void) {
+/* A modded client can lack the screen reflection bridge. Report that separately
+ * so SDL and GLFW can each use their own cursor mode as the fallback. */
+__attribute__((visibility("default")))
+int jay_gameplay_state_get(void) {
     int attached;
     JNIEnv *env = jay_input_environment(&attached);
-    if (env == NULL || g_is_gameplay_controls_active == NULL)
-        return atomic_load(&g_gameplay_mode);
-    jint state = (*env)->CallStaticIntMethod(env, g_input_bridge_class,
-        g_is_gameplay_controls_active);
-    if ((*env)->ExceptionCheck(env)) {
-        if (!atomic_exchange(&g_input_bridge_error_logged, 1))
-            (*env)->ExceptionDescribe(env);
-        (*env)->ExceptionClear(env);
-        state = -1;
-    }
-    if (attached && g_vm != NULL) (*g_vm)->DetachCurrentThread(g_vm);
+    if (env == NULL) return -1;
+    jint state = g_is_gameplay_controls_active == NULL ? -1 :
+        (*env)->CallStaticIntMethod(env, g_input_bridge_class, g_is_gameplay_controls_active);
+    return jay_finish_input_call(env, attached, JNI_TRUE) ? state : -1;
+}
+
+static int jay_query_gameplay_mode(void) {
+    int state = jay_gameplay_state_get();
     if (state < 0) return atomic_load(&g_gameplay_mode);
     int active = state > 0 ? 1 : 0;
     atomic_store(&g_gameplay_mode, active);
@@ -408,6 +412,26 @@ int jay_java_inventory_split(float x, float y, int count) {
     if (env == NULL || g_dispatch_inventory_split == NULL) return 0;
     jboolean delivered = (*env)->CallStaticBooleanMethod(env, g_input_bridge_class,
         g_dispatch_inventory_split, (jfloat)x, (jfloat)y, (jint)count);
+    return jay_finish_input_call(env, attached, delivered);
+}
+
+__attribute__((visibility("default")))
+int jay_mining_progress_get(void) {
+    int attached;
+    JNIEnv *env = jay_input_environment(&attached);
+    if (env == NULL) return -1;
+    jint value = g_mining_progress == NULL ? -1 :
+        (*env)->CallStaticIntMethod(env, g_input_bridge_class, g_mining_progress);
+    return jay_finish_input_call(env, attached, JNI_TRUE) ? value : -1;
+}
+
+__attribute__((visibility("default")))
+int jay_request_pause(void) {
+    int attached;
+    JNIEnv *env = jay_input_environment(&attached);
+    if (env == NULL) return 0;
+    jboolean delivered = g_request_pause != NULL &&
+        (*env)->CallStaticBooleanMethod(env, g_input_bridge_class, g_request_pause);
     return jay_finish_input_call(env, attached, delivered);
 }
 
@@ -601,7 +625,6 @@ void jay_input_set_pointer(float x, float y, int click) {
 
 __attribute__((visibility("default")))
 void jay_input_split_inventory(float x, float y, int count) {
-    if (count == 0) return;
     if (x < 0.f) x = 0.f;
     if (x > 1.f) x = 1.f;
     if (y < 0.f) y = 0.f;
@@ -642,9 +665,6 @@ void jay_input_add_key(int32_t key) {
 __attribute__((visibility("default")))
 void jay_input_read(jay_input_snapshot *snapshot) {
     if (snapshot == NULL) return;
-    // GLFW polls this function on Minecraft's game thread. Refresh the reflected hit result
-    // here; the Android drawing thread only reads the atomic cache above.
-    jay_refresh_block_target();
     snapshot->move_x = atomic_load(&g_move_x);
     snapshot->move_y = atomic_load(&g_move_y);
     snapshot->look_x = atomic_exchange(&g_look_x, 0.f);

@@ -15,6 +15,7 @@ internal sealed partial class SdlTouchInput(Activity activity)
     private const uint MenuUpAction = 2;
     private const uint GameplayContextualAction = 3;
     private readonly Java.Lang.Class _sdlActivity = Java.Lang.Class.ForName("org.libsdl.app.SDLActivity", true, activity.ClassLoader)!;
+    private nint _mouseMethod;
     private readonly Java.Lang.Class _sdlInputConnection = Java.Lang.Class.ForName("org.libsdl.app.SDLInputConnection", true, activity.ClassLoader)!;
     private readonly HashSet<Keycode> _managedHeld = [];
     private readonly HashSet<Keycode> _hardwareHeld = [];
@@ -36,10 +37,7 @@ internal sealed partial class SdlTouchInput(Activity activity)
     [LibraryImport("jayjvm", EntryPoint = "jay_gui_scale_get")]
     private static partial int GetGuiScale();
 
-    [LibraryImport("jayjvm", EntryPoint = "jay_block_target_get")]
-    private static partial int GetBlockTarget();
-
-    private bool MenuPointer(uint action) => GetFocus() != 0 &&
+    private bool MenuPointer(uint action) =>
         DispatchMenuPointer(_mouseX / Math.Max(1, Width), _mouseY / Math.Max(1, Height), action) != 0;
 
     public int InventoryStackCount(double x, double y) => InventorySlotState(x, y).Count;
@@ -48,15 +46,6 @@ internal sealed partial class SdlTouchInput(Activity activity)
     public void SplitInventoryStack(double x, double y, int count) =>
         DispatchInventorySplit((float)x, (float)y, count);
     public bool TextInputAt(double x, double y) => GetTextInputAt((float)x, (float)y) != 0;
-    public bool HasBlockTarget
-    {
-        get
-        {
-            try { return GetBlockTarget() != 0; }
-            catch (EntryPointNotFoundException) { return false; }
-            catch (DllNotFoundException) { return false; }
-        }
-    }
     public int GuiScale
     {
         get
@@ -74,15 +63,22 @@ internal sealed partial class SdlTouchInput(Activity activity)
     [LibraryImport("SDL3", EntryPoint = "SDL_GetKeyboardFocus")]
     private static partial nint GetFocus();
 
-    [LibraryImport("SDL3", EntryPoint = "SDL_GetWindowRelativeMouseMode")]
-    [return: MarshalAs(UnmanagedType.I1)]
-    private static partial bool IsRelative(nint window);
-
     [LibraryImport("SDL3", EntryPoint = "SDL_TextInputActive")]
     [return: MarshalAs(UnmanagedType.I1)]
     private static partial bool IsTextInputActive(nint window);
 
-    public bool InWorld => GetFocus() is var window && window != 0 && IsRelative(window);
+    [LibraryImport("jayjvm", EntryPoint = "jay_gameplay_state_get")]
+    private static partial int GetScreenState();
+
+    [LibraryImport("SDL3", EntryPoint = "SDL_GetWindowRelativeMouseMode")]
+    [return: MarshalAs(UnmanagedType.I1)]
+    private static partial bool IsRelative(nint window);
+
+    public bool InWorld => GetScreenState() switch {
+        0 => false,
+        1 => true,
+        _ => GetFocus() is var window && window != 0 && IsRelative(window)
+    };
     public bool TextInputActive => GetFocus() is var window && window != 0 && IsTextInputActive(window);
 
     public void Move(double x, double y)
@@ -146,8 +142,8 @@ internal sealed partial class SdlTouchInput(Activity activity)
 
     private void Mouse(int button, MotionEventActions action, float x, float y, bool relative)
     {
-        var method = JNIEnv.GetStaticMethodID(_sdlActivity.Handle, "onNativeMouse", "(IIFFZ)V");
-        JNIEnv.CallStaticVoidMethod(_sdlActivity.Handle, method, new JValue(button), new JValue((int)action),
+        if (_mouseMethod == 0) _mouseMethod = JNIEnv.GetStaticMethodID(_sdlActivity.Handle, "onNativeMouse", "(IIFFZ)V");
+        JNIEnv.CallStaticVoidMethod(_sdlActivity.Handle, _mouseMethod, new JValue(button), new JValue((int)action),
             new JValue(x), new JValue(y), new JValue(relative));
     }
 

@@ -14,8 +14,9 @@ public interface ITouchInputSink
     void AddLook(double x, double y);
     void SetPointer(double x, double y, bool click);
     void SplitInventoryStack(double x, double y, int count);
-    /// <summary>Returns <paramref name="count"/> items from the carried stack to this slot.</summary>
-    void ReturnCarriedInventoryItems(double x, double y, int count);
+    /// <summary>Collect matching items into the carried stack using the game’s container rules.</summary>
+    void CollectMatchingItems(double x, double y);
+    void PlaceOneItem(double x, double y);
 }
 
 /// <summary>Maps independent Android pointer IDs to Jay controls without coupling input to a View.</summary>
@@ -38,7 +39,7 @@ public sealed class TouchInputRouter
     {
         _sink = sink;
         Profile = profile ?? new TouchControlProfile();
-        _inventoryStackCount = inventoryStackCount ?? ((_, _) => 0);
+        _inventoryStackCount = inventoryStackCount ?? ((_, _) => -1);
         _inventorySlotState = inventorySlotState ?? ((x, y) =>
         {
             var count = _inventoryStackCount(x, y);
@@ -91,7 +92,7 @@ public sealed class TouchInputRouter
             TouchControlAction? heldAction = null;
             _pointers[pointerId] = new(null, x, y, clickOnRelease, pointerHeld,
                 heldAction: heldAction, menuInteraction: !controlsEnabled);
-            _sink.SetPointer(x, y, false);
+            if (!controlsEnabled) _sink.SetPointer(x, y, false);
             return true;
         }
         // Any explicit overlay control interrupts a pending menu double tap. Otherwise a
@@ -123,7 +124,13 @@ public sealed class TouchInputRouter
         if (pointer.MenuInteraction)
         {
             _lastMenuTap = null;
-            var stackSize = Math.Clamp(_inventoryStackCount(pointer.StartX, pointer.StartY), 0, 64);
+            var stackSize = _inventoryStackCount(pointer.StartX, pointer.StartY);
+            if (stackSize == 0)
+            {
+                // An empty crafting cell accepts one carried ingredient on finger-up.
+                _pointers[pointerId] = pointer with { ClickOnRelease = false, LongPressAction = true };
+                return true;
+            }
             if (stackSize <= 1) return false;
             _pointers[pointerId] = pointer with
             {
@@ -174,9 +181,13 @@ public sealed class TouchInputRouter
             var dragged = pointer.HasDragged ||
                 physicalTotalX * physicalTotalX + totalY * totalY >= DragThreshold * DragThreshold;
             if (pointer.MenuInteraction && dragged) _lastMenuTap = null;
+            // The first drag decision needs one client-thread slot lookup. Later motion
+            // packets already know whether they belong to a slot or a scrollable menu.
+            var sourceCount = pointer.MenuInteraction && dragged && pointer.ClickOnRelease && !pointer.LongPressAction
+                ? _inventoryStackCount(pointer.StartX, pointer.StartY) : -1;
             if (pointer.LongPressAction)
             {
-                if (pointer.MenuInteraction)
+                if (pointer.MenuInteraction && pointer.InventoryStackSize > 1)
                 {
                     // Like Bedrock mobile, the finger starts at one item and a rightward swipe
                     // selects progressively more of the source stack. Sliding left returns to 1.
@@ -184,7 +195,7 @@ public sealed class TouchInputRouter
                     var selected = 1 + (int)Math.Round(progress * (pointer.InventoryStackSize - 1));
                     pointer = pointer with { InventorySelectedCount = selected };
                 }
-                else if (dragged)
+                else if (!pointer.MenuInteraction && dragged)
                 {
                     _sink.CancelAction(TouchControlAction.PrimaryAction);
                     AddLook(x - pointer.X, y - pointer.Y);
@@ -196,8 +207,7 @@ public sealed class TouchInputRouter
                     };
                 }
             }
-            else if (pointer.DraggingStack || (pointer.MenuInteraction && pointer.ClickOnRelease && dragged &&
-                _inventoryStackCount(pointer.StartX, pointer.StartY) > 0))
+            else if (pointer.DraggingStack || sourceCount > 0)
             {
                 // Take the stack on release. Both endpoints are independent of how many
                 // Android movement events the render thread processes during the gesture.
@@ -206,7 +216,7 @@ public sealed class TouchInputRouter
             else if (pointer.MenuInteraction && pointer.ClickOnRelease && dragged)
             {
                 var verticalScroll = Math.Abs(totalY) > Math.Abs(physicalTotalX) * 1.25;
-                if (verticalScroll)
+                if (verticalScroll && sourceCount < 0)
                 {
                     var remainder = pointer.ScrollRemainder + (y - pointer.Y);
                     while (Math.Abs(remainder) >= ScrollStep)
@@ -235,6 +245,7 @@ public sealed class TouchInputRouter
                     pointer = pointer with
                     {
                         ClickOnRelease = false,
+                        SlotDrag = sourceCount == 0,
                         PointerHeld = true,
                         HeldAction = TouchControlAction.PrimaryAction
                     };
@@ -244,7 +255,7 @@ public sealed class TouchInputRouter
             {
                 _sink.SetPointer(x, y, false);
                 var verticalScroll = pointer.Scrolling ||
-                    (dragged && Math.Abs(totalY) > Math.Abs(physicalTotalX) * 1.25);
+                    (!pointer.SlotDrag && dragged && Math.Abs(totalY) > Math.Abs(physicalTotalX) * 1.25);
                 if (verticalScroll)
                 {
                     if (!pointer.Scrolling)
@@ -264,8 +275,8 @@ public sealed class TouchInputRouter
             }
             else
             {
-                _sink.SetPointer(x, y, false);
-                AddLook(x - pointer.X, y - pointer.Y);
+                if (pointer.MenuInteraction) _sink.SetPointer(x, y, false);
+                else AddLook(x - pointer.X, y - pointer.Y);
             }
             _pointers[pointerId] = pointer with { X = x, Y = y, HasDragged = dragged };
         }
@@ -302,6 +313,10 @@ public sealed class TouchInputRouter
                 _lastMenuTap = null;
                 _sink.SplitInventoryStack(pointer.StartX, pointer.StartY,
                     pointer.InventorySelectedCount);
+            }
+            else if (!cancelled && pointer.MenuInteraction && pointer.LongPressAction && !pointer.HasDragged)
+            {
+                _sink.PlaceOneItem(pointer.StartX, pointer.StartY);
             }
             else if (pointer.PointerHeld && pointer.HeldAction is { } heldAction)
             {
@@ -395,17 +410,14 @@ public sealed class TouchInputRouter
                 current.SlotId >= 0 && current.SlotId == previous.SlotId)
             {
                 _lastMenuTap = null;
-                // The first tap has already picked the source stack up. Return its lower half
-                // to the same slot so 64 becomes a carried 32 and a slotted 32 immediately.
-                _sink.ReturnCarriedInventoryItems(x, y, previous.Total / 2);
+                _sink.CollectMatchingItems(x, y);
                 return;
             }
         }
 
-        var count = Math.Clamp(current.Count, 0, 64);
         _sink.SetPointer(x, y, true);
-        _lastMenuTap = count > 1 && current.SlotId >= 0
-            ? new(x, y, current.SlotId, count, now)
+        _lastMenuTap = current.Count > 0 && current.SlotId >= 0
+            ? new(x, y, current.SlotId, now)
             : null;
     }
 
@@ -455,7 +467,8 @@ public sealed class TouchInputRouter
         bool LongPressAction,
         int InventoryStackSize,
         int InventorySelectedCount,
-        bool DraggingStack = false)
+        bool DraggingStack = false,
+        bool SlotDrag = false)
     {
         public PointerState(TouchControlAction? action, double x, double y,
             bool clickOnRelease = true, bool pointerHeld = false,
@@ -465,7 +478,7 @@ public sealed class TouchInputRouter
                 heldAction, menuInteraction, toggleAction, false, 0, 0) { }
     }
 
-    private readonly record struct MenuTap(double X, double Y, int SlotId, int Total, long Timestamp);
+    private readonly record struct MenuTap(double X, double Y, int SlotId, long Timestamp);
 }
 
 public readonly record struct InventorySplitSelection(double X, double Y, int Count, int Total);

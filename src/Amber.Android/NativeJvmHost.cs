@@ -10,14 +10,17 @@ internal static partial class NativeJvmHost
     private const int ExpectedAbiVersion = 20;
     public static bool GameplayControlsActive => IsAvailable && GetNativeGameplayMode() != 0;
 
-    public static bool HasBlockTarget
+    [LibraryImport("jayjvm", EntryPoint = "jay_mining_progress_get")]
+    internal static partial int MiningProgress();
+
+    [LibraryImport("jayjvm", EntryPoint = "jay_request_pause")]
+    private static partial int RequestPause();
+
+    internal static bool TryPause()
     {
-        get
-        {
-            if (!IsAvailable) return false;
-            try { return GetNativeBlockTarget() != 0; }
-            catch (EntryPointNotFoundException) { return false; }
-        }
+        if (!IsAvailable) return false;
+        try { return RequestPause() != 0; }
+        catch (EntryPointNotFoundException) { return false; }
     }
 
     public static int TextInputFocusState
@@ -245,9 +248,6 @@ internal static partial class NativeJvmHost
 
     [LibraryImport("jayjvm", EntryPoint = "jay_gameplay_mode_get")]
     private static partial int GetNativeGameplayMode();
-
-    [LibraryImport("jayjvm", EntryPoint = "jay_block_target_get")]
-    private static partial int GetNativeBlockTarget();
 
     [LibraryImport("jayjvm", EntryPoint = "jay_text_input_focused_get")]
     private static partial int GetNativeTextInputFocused();
