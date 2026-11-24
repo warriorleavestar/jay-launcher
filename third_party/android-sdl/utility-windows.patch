@@ -63,3 +63,18 @@ index 4652b5f..5e9e4f4 100644
      }
  
      Android_UnlockActivityMutex();
+diff --git a/src/video/SDL_video.c b/src/video/SDL_video.c
+--- a/src/video/SDL_video.c
++++ b/src/video/SDL_video.c
+@@ -6237,7 +6237,10 @@
+     if (_this) {
+         SDL_Window *window;
+         for (window = _this->windows; window; window = window->next) {
+-            SDL_SetKeyboardFocus(window);
++            // Offscreen utility windows must never receive the game's keyboard focus.
++            if (!(window->flags & SDL_WINDOW_NOT_FOCUSABLE)) {
++                SDL_SetKeyboardFocus(window);
++            }
+             SDL_SendWindowEvent(window, SDL_EVENT_WINDOW_RESTORED, 0, 0);
+         }
+     }
