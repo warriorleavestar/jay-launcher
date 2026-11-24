@@ -196,6 +196,19 @@ public sealed class MobilePortTests
         Assert.Contains("android-touch-settings-pseudo.png", script, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData(1, 800, 0, 80)]
+    [InlineData(2.5f, 1080, 0, 200)]
+    [InlineData(1, 800, 140, 88)]
+    [InlineData(2, 1600, 280, 176)]
+    [InlineData(1, 1200, float.NaN, 102)]
+    [InlineData(1, 800, 1600, 98)]
+    public void MiningRingClearsTheFingerAcrossDensities(float density, float shortEdge,
+        float touchMajor, float expectedRadius)
+    {
+        Assert.Equal(expectedRadius, TouchControlLayout.MiningRingRadius(density, shortEdge, touchMajor), 3);
+    }
+
     [Fact]
     public void AndroidMiningIndicatorUsesTheActiveGameBridge()
     {
