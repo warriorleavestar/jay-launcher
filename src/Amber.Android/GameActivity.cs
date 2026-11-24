@@ -739,15 +739,17 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
             // only after the gesture has become a mining hold and the crosshair is on a block.
             if (!_router.IsLongPress(pointerId)) continue;
             drewAnimatedFeedback = true;
-            var progress = NativeJvmHost.MiningProgress();
+            var progress = indicator.Feedback.Observe(NativeJvmHost.MiningProgress(), SystemClock.UptimeMillis());
             if (progress < 0) continue;
             var x = (float)(indicator.X * Width);
             var y = (float)(indicator.Y * Height);
             var radius = TouchControlLayout.MiningRingRadius(density, scale, indicator.TouchMajor);
             canvas.DrawCircle(x, y, radius, _progressTrack);
-            var amount = progress / 1000f;
-            canvas.DrawArc(x - radius, y - radius, x + radius, y + radius,
-                -90, amount * 360, false, _progress);
+            if (progress == 1000)
+                canvas.DrawCircle(x, y, radius, _progress);
+            else
+                canvas.DrawArc(x - radius, y - radius, x + radius, y + radius,
+                    -90, progress * 0.36f, false, _progress);
         }
         return drewAnimatedFeedback;
     }
@@ -1252,8 +1254,10 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
                     {
                         // Keep the outline steady when a resting finger changes pressure.
                         var major = e.GetTouchMajor(i);
-                        _longPressIndicators[movingId] = new(movingX, movingY,
-                            float.IsFinite(major) && major > indicator.TouchMajor ? major : indicator.TouchMajor);
+                        indicator.X = movingX;
+                        indicator.Y = movingY;
+                        if (float.IsFinite(major) && major > indicator.TouchMajor)
+                            indicator.TouchMajor = major;
                     }
                 }
                 return moved;
@@ -1893,5 +1897,11 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         }
     }
 
-    private readonly record struct LongPressIndicator(double X, double Y, float TouchMajor);
+    private sealed class LongPressIndicator(double x, double y, float touchMajor)
+    {
+        public double X = x;
+        public double Y = y;
+        public float TouchMajor = touchMajor;
+        public readonly MiningRingProgress Feedback = new();
+    }
 }

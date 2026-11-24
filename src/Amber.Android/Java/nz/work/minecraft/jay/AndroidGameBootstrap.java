@@ -27,7 +27,7 @@ public final class AndroidGameBootstrap {
     private static Field minecraftKeyboard;
     private static Field minecraftWindow;
     private static Field minecraftScreen;
-    private static Field gameMode, destroyProgress, isDestroying;
+    private static Field gameMode, destroyProgress, destroyDelay, isDestroying;
     private static Method pauseGame;
     private static Field minecraftGui;
     private static Method guiScreen;
@@ -201,25 +201,30 @@ public final class AndroidGameBootstrap {
     }
 
     private static void prepareGameplayState(Class<?> client, String mode, String progress,
-                                             String destroying, String pause) {
+                                             String destroying, String delay, String pause) {
         try {
             gameMode = accessible(client.getDeclaredField(mode));
             destroyProgress = accessible(gameMode.getType().getDeclaredField(progress));
             isDestroying = accessible(gameMode.getType().getDeclaredField(destroying));
             pauseGame = accessible(client.getDeclaredMethod(pause, boolean.class));
+            destroyDelay = accessible(gameMode.getType().getDeclaredField(delay));
         } catch (ReflectiveOperationException unavailable) {
             System.err.println("Jay gameplay state: " + unavailable);
         }
     }
 
-    /** -1 while idle, otherwise Minecraft's actual accumulated damage in thousandths. */
+    /** Damage in thousandths. Minecraft clears the damage in the same tick as the break.
+     * Its post-break cooldown distinguishes that transition from letting go or losing the target.
+     * The overlay accepts the cooldown only after seeing active mining on the same hold. */
     public static int miningProgress() {
         if (!prepareInputBridge() || isDestroying == null) return -1;
         try {
             Object game = minecraft();
             Object mode = game == null ? null : gameMode.get(game);
-            if (mode == null || screen(game) != null || !isDestroying.getBoolean(mode)) return -1;
-            return Math.min(1000, Math.max(0, Math.round(1000 * destroyProgress.getFloat(mode))));
+            if (mode == null || screen(game) != null) return -1;
+            if (isDestroying.getBoolean(mode))
+                return Math.min(999, Math.max(0, Math.round(1000 * destroyProgress.getFloat(mode))));
+            return destroyDelay != null && destroyDelay.getInt(mode) > 0 ? 1000 : -1;
         } catch (ReflectiveOperationException error) {
             return -1;
         }
@@ -242,7 +247,7 @@ public final class AndroidGameBootstrap {
     /** Minecraft 26.1 and newer ship unobfuscated client class and member names. */
     private static void prepareNamedInputBridge() throws ReflectiveOperationException {
         Class<?> minecraftType = Class.forName("net.minecraft.client.Minecraft");
-        prepareGameplayState(minecraftType, "gameMode", "destroyProgress", "isDestroying", "pauseGame");
+        prepareGameplayState(minecraftType, "gameMode", "destroyProgress", "isDestroying", "destroyDelay", "pauseGame");
         Class<?> mouseType = Class.forName("net.minecraft.client.MouseHandler");
         Class<?> keyboardType = Class.forName("net.minecraft.client.KeyboardHandler");
         Class<?> windowType = Class.forName("com.mojang.blaze3d.platform.Window");
@@ -381,7 +386,7 @@ public final class AndroidGameBootstrap {
 
     private static void prepareLegacyInputBridge() throws ReflectiveOperationException {
             Class<?> minecraftType = Class.forName("gfj");
-            prepareGameplayState(minecraftType, "q", "f", "i", "b");
+            prepareGameplayState(minecraftType, "q", "f", "i", "h", "b");
             Class<?> mouseType = Class.forName("gfk");
             Class<?> keyboardType = Class.forName("gfi");
             Class<?> windowType = Class.forName("fyk");
@@ -435,7 +440,7 @@ public final class AndroidGameBootstrap {
     /** Official Mojang 1.20.1 client mappings (1.20.1-20230612.114412). */
     private static void prepareLegacy1201InputBridge() throws ReflectiveOperationException {
             Class<?> minecraftType = Class.forName("enn");
-            prepareGameplayState(minecraftType, "r", "f", "i", "c");
+            prepareGameplayState(minecraftType, "r", "f", "i", "h", "c");
             Class<?> mouseType = Class.forName("eno");
             Class<?> keyboardType = Class.forName("enm");
             Class<?> windowType = Class.forName("ehn");

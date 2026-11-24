@@ -651,7 +651,7 @@ jobs:
           fi
 
           cat > release-notes.md <<'NOTES'
-          Jay 滚动实验版。此下载通道随 main 构建自动更新，供网站访客直接下载。
+          Jay 0.8.0 滚动实验版。此下载通道随 main 构建自动更新，供网站访客直接下载。
 
           包含 Windows x64、macOS Apple 芯片、macOS Intel、Linux x64、Linux ARM64 与 Android。
           NOTES
@@ -673,14 +673,14 @@ jobs:
               --repo "$GITHUB_REPOSITORY" --clobber
             gh release edit experimental \
               --repo "$GITHUB_REPOSITORY" \
-              --title "Jay 滚动实验版" \
+              --title "Jay 0.8.0 滚动实验版" \
               --notes-file release-notes.md \
               --prerelease
           else
             gh release create experimental "${assets[@]}" \
               --repo "$GITHUB_REPOSITORY" \
               --target "$GITHUB_SHA" \
-              --title "Jay 滚动实验版" \
+              --title "Jay 0.8.0 滚动实验版" \
               --notes-file release-notes.md \
               --prerelease
           fi
