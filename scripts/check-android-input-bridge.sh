@@ -50,6 +50,7 @@ if "$javap_bin" -classpath "$jar_path" -private net.minecraft.client.Minecraft \
   require minecraft.txt 'net.minecraft.client.multiplayer.MultiPlayerGameMode gameMode;'
   require minecraft.txt 'void pauseGame(boolean);'
   require game-mode.txt 'float destroyProgress;'
+  require game-mode.txt 'int destroyDelay;'
   require game-mode.txt 'boolean isDestroying;'
   named_input=net.minecraft.world.inventory.ContainerInput
   if ! "$javap_bin" -classpath "$jar_path" "$named_input" >/dev/null 2>&1; then
@@ -111,6 +112,7 @@ elif "$javap_bin" -classpath "$jar_path" -private gfj >/dev/null 2>&1; then
   require minecraft.txt "hio q;"
   require minecraft.txt "void b(boolean);"
   require game-mode.txt "float f;"
+  require game-mode.txt "int h;"
   require game-mode.txt "boolean i;"
   dump gfk mouse.txt
   dump gfi keyboard.txt
@@ -159,6 +161,7 @@ else
   require minecraft.txt "ffa r;"
   require minecraft.txt "void c(boolean);"
   require game-mode.txt "float f;"
+  require game-mode.txt "int h;"
   require game-mode.txt "boolean i;"
   dump eno mouse.txt
   dump enm keyboard.txt
