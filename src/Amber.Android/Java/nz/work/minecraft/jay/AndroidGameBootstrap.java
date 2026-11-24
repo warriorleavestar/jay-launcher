@@ -28,6 +28,9 @@ public final class AndroidGameBootstrap {
     private static Field minecraftWindow;
     private static Field minecraftScreen;
     private static Field gameMode, destroyProgress, destroyDelay, isDestroying;
+    private static volatile boolean miningSamplePending;
+    private static volatile int lastMiningDamage = -1;
+    private static volatile long lastMiningSampleAt;
     private static Method pauseGame;
     private static Field minecraftGui;
     private static Method guiScreen;
@@ -216,18 +219,42 @@ public final class AndroidGameBootstrap {
     /** Damage in thousandths. Minecraft clears the damage in the same tick as the break.
      * Its post-break cooldown distinguishes that transition from letting go or losing the target.
      * The overlay accepts the cooldown only after seeing active mining on the same hold. */
-    public static int miningProgress() {
+    public static synchronized int miningProgress() {
         if (!prepareInputBridge() || isDestroying == null) return -1;
-        try {
-            Object game = minecraft();
-            Object mode = game == null ? null : gameMode.get(game);
-            if (mode == null || screen(game) != null) return -1;
-            if (isDestroying.getBoolean(mode))
-                return Math.min(999, Math.max(0, Math.round(1000 * destroyProgress.getFloat(mode))));
-            return destroyDelay != null && destroyDelay.getInt(mode) > 0 ? 1000 : -1;
-        } catch (ReflectiveOperationException error) {
-            return -1;
+        if (!miningSamplePending) {
+            try {
+                final Object game = minecraft();
+                if (!(game instanceof java.util.concurrent.Executor)) return -1;
+                miningSamplePending = true;
+                // isDestroying, damage and cooldown are written at different points within
+                // one client tick. Reading them on Android's drawing thread can mistake
+                // a half-applied break for cancellation and lose its completed frame.
+                ((java.util.concurrent.Executor)game).execute(() -> {
+                    int damage = -1;
+                    try {
+                        Object mode = gameMode.get(game);
+                        if (mode != null && screen(game) == null) {
+                            if (isDestroying.getBoolean(mode))
+                                damage = Math.min(999, Math.max(0, Math.round(1000 * destroyProgress.getFloat(mode))));
+                            else if (destroyDelay != null && destroyDelay.getInt(mode) > 0)
+                                damage = 1000;
+                        }
+                    } catch (ReflectiveOperationException error) {
+                        reportInputError(error);
+                    } finally {
+                        lastMiningDamage = damage;
+                        lastMiningSampleAt = System.nanoTime();
+                        miningSamplePending = false;
+                    }
+                });
+            } catch (ReflectiveOperationException | RuntimeException unavailable) {
+                miningSamplePending = false;
+                return -1;
+            }
         }
+        // A new long press (340 ms) must never inherit a sample from the previous one.
+        return System.nanoTime() - lastMiningSampleAt < TimeUnit.MILLISECONDS.toNanos(200)
+            ? lastMiningDamage : -1;
     }
 
     public static boolean requestPause() {
