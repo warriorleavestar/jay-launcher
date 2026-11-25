@@ -1778,6 +1778,43 @@ public sealed class MobilePortTests
     }
 
     [Fact]
+    public void MobileLauncherOffersReturnOnlyDuringALiveGame() => UiTestThread.Run(() =>
+    {
+        var previousBack = Amber.App.App.MobileBackRequested;
+        try
+        {
+            var view = new Amber.App.Views.MobileLauncherView();
+            var button = view.FindControl<Button>("ResumeGameButton")!;
+            var resumed = 0;
+            view.UpdateGameNavigation(null, false);
+            Assert.False(button.IsVisible);
+            view.UpdateGameNavigation(() => resumed++, false);
+            Assert.True(button.IsVisible);
+            button.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+            Assert.Equal(1, resumed);
+            view.UpdateGameNavigation(null, false);
+            Assert.False(button.IsVisible);
+        }
+        finally { Amber.App.App.MobileBackRequested = previousBack; }
+    });
+
+    [Fact]
+    public void BothAndroidGameHostsOwnATaskSeparateFromTheLauncher()
+    {
+        var directory = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "src", "Amber.Android"));
+        var manifest = System.Xml.Linq.XDocument.Load(Path.Combine(directory, "Properties", "AndroidManifest.xml"));
+        System.Xml.Linq.XNamespace android = "http://schemas.android.com/apk/res/android";
+        var sdl = manifest.Descendants("activity").Single(activity =>
+            (string?)activity.Attribute(android + "name") == "nz.work.minecraft.jay.JaySdlActivity");
+        var affinity = (string?)sdl.Attribute(android + "taskAffinity");
+        Assert.Equal("nz.work.minecraft.jay.game", affinity);
+        Assert.Contains($"TaskAffinity = \"{affinity}\"", File.ReadAllText(Path.Combine(directory, "GameActivity.cs")));
+        Assert.DoesNotContain($"TaskAffinity = \"{affinity}\"", File.ReadAllText(Path.Combine(directory, "MainActivity.cs")));
+        Assert.Equal("singleTask", (string?)sdl.Attribute(android + "launchMode"));
+    }
+
+    [Fact]
     public void GameActivityHandlesPhysicalKeyboardChangesWithoutKillingTheWorld()
     {
         var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,

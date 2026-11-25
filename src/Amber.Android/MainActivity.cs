@@ -15,10 +15,12 @@ namespace Amber.Android;
     Theme = "@style/MyTheme.NoActionBar",
     Icon = "@drawable/jay",
     MainLauncher = true,
+    LaunchMode = LaunchMode.SingleTop,
     WindowSoftInputMode = SoftInput.AdjustResize,
     ConfigurationChanges = ConfigChanges.Orientation | ConfigChanges.ScreenSize | ConfigChanges.UiMode)]
 public sealed class MainActivity : AvaloniaMainActivity
 {
+    internal const string MultiplayerAction = "nz.work.minecraft.jay.MULTIPLAYER";
     private const int InstallPermissionRequest = 3821;
     private TaskCompletionSource<bool>? _installPermission;
 
@@ -46,6 +48,44 @@ public sealed class MainActivity : AvaloniaMainActivity
         base.OnResume();
         Amber.App.App.MobileTextInputFocusChanged = SetLauncherKeyboardVisible;
         LauncherUpdate.AndroidInstall = InstallUpdate;
+        UpdateGameNavigation();
+    }
+
+    protected override void OnNewIntent(Intent? intent)
+    {
+        base.OnNewIntent(intent);
+        Intent = intent;
+        UpdateGameNavigation();
+    }
+
+    private void UpdateGameNavigation()
+    {
+        if (Avalonia.Application.Current?.ApplicationLifetime is not
+            Avalonia.Controls.ApplicationLifetimes.ISingleViewApplicationLifetime
+            { MainView: Amber.App.Views.MobileLauncherView launcher }) return;
+        var openMultiplayer = Intent?.Action == MultiplayerAction;
+        if (openMultiplayer) Intent!.SetAction(null);
+        launcher.UpdateGameNavigation(FindGameTask(this) is null ? null : ResumeGame, openMultiplayer);
+    }
+
+    internal static ActivityManager.AppTask? FindGameTask(Context context)
+    {
+        var manager = (ActivityManager?)context.GetSystemService(ActivityService);
+        return manager?.AppTasks?.FirstOrDefault(task =>
+            task.TaskInfo?.TopActivity?.ClassName is { } name &&
+            (name.EndsWith(".GameActivity", StringComparison.Ordinal) ||
+             name.EndsWith(".JaySdlActivity", StringComparison.Ordinal)));
+    }
+
+    private void ResumeGame()
+    {
+        var game = FindGameTask(this);
+        if (game is not null)
+        {
+            try { game.MoveToFront(); return; }
+            catch (Java.Lang.IllegalArgumentException) { } // Task finished between lookup and tap.
+        }
+        UpdateGameNavigation();
     }
 
     protected override void OnPause()
@@ -89,10 +129,7 @@ public sealed class MainActivity : AvaloniaMainActivity
 
     private async Task InstallUpdate(string path, CancellationToken ct)
     {
-        var manager = (ActivityManager?)GetSystemService(ActivityService);
-        if (manager?.AppTasks?.Any(task =>
-            task.TaskInfo?.TopActivity?.ClassName is { } name &&
-            (name.EndsWith(".GameActivity", StringComparison.Ordinal) || name.EndsWith(".JaySdlActivity", StringComparison.Ordinal))) == true)
+        if (FindGameTask(this) is not null)
             throw new InvalidOperationException(L.T("tools.update.finish_game"));
         var pm = PackageManager!;
         // Check the installed identity before opening the installer. Android enforces the

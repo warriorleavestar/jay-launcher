@@ -29,6 +29,8 @@ public sealed class Application : AvaloniaAndroidApplication<Amber.App.App>
         Amber.App.App.MobileGameDirectory = Path.Combine(files, "minecraft");
         Amber.App.App.MobileLaunchRequested = async (options, progress, ct) =>
         {
+            if (MainActivity.FindGameTask(this) is not null)
+                throw new InvalidOperationException(L.T("mobile.game.already_running"));
             var versionId = options.VersionId;
             var gameProgress = new Progress<AndroidGameInstallProgress>(value =>
             {

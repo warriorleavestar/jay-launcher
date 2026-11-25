@@ -16,6 +16,8 @@ namespace Amber.Android;
 [Activity(
     Label = "Jay Game",
     Process = ":game",
+    TaskAffinity = "nz.work.minecraft.jay.game",
+    AutoRemoveFromRecents = true,
     LaunchMode = LaunchMode.SingleTask,
     Theme = "@style/MyTheme.NoActionBar",
     // Minecraft owns an independent OpenGL SurfaceView. Disabling Android HWUI for the
@@ -639,7 +641,8 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
             _profile.ForcedSprint);
         DrawPanelButton(canvas, L.T("mobile.touch.reset"), 0.615f, 0.84f, 0.77f, 0.90f);
         DrawPanelButton(canvas, L.T("mobile.touch.edit_layout"), 0.80f, 0.84f, 0.955f, 0.90f);
-        DrawPanelButton(canvas, L.T("mobile.touch.done"), 0.70f, 0.91f, 0.87f, 0.955f);
+        DrawPanelButton(canvas, L.T("mobile.game.launcher_multiplayer"), 0.615f, 0.91f, 0.82f, 0.955f);
+        DrawPanelButton(canvas, L.T("mobile.touch.done"), 0.83f, 0.91f, 0.955f, 0.955f);
     }
 
     private void DrawSettingRow(Canvas canvas, string text, float y, bool selected)
@@ -1093,7 +1096,18 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
             _settingsOpen = false;
             _layoutEditing = true;
         }
-        else if (y > 0.90f)
+        else if (y is >= 0.91f and <= 0.955f && x is >= 0.615f and <= 0.82f)
+        {
+            _settingsOpen = false;
+            CancelAllInput();
+            Invalidate();
+            var intent = new Intent(Context!, typeof(MainActivity));
+            intent.SetAction(MainActivity.MultiplayerAction);
+            intent.AddFlags(ActivityFlags.NewTask | ActivityFlags.SingleTop);
+            Context!.StartActivity(intent);
+            return true;
+        }
+        else if (y > 0.90f && x >= 0.83f)
             _settingsOpen = false;
         if (_profile.Mode != previousMode &&
             (previousMode == TouchControlMode.ExternalKeyboardMouse ||

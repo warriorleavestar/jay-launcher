@@ -10,12 +10,16 @@ public sealed partial class MobileLauncherView : UserControl
 {
     private const double CompactBelow = 720;
     private readonly Grid _shellGrid;
+    private readonly Button _resumeGameButton;
+    private Action? _resumeGame;
 
     public MobileLauncherView()
     {
         AvaloniaXamlLoader.Load(this);
         _shellGrid = this.FindControl<Grid>("ShellGrid")
             ?? throw new InvalidOperationException("Mobile launcher shell grid is missing.");
+        _resumeGameButton = this.FindControl<Button>("ResumeGameButton")
+            ?? throw new InvalidOperationException("Mobile return-to-game button is missing.");
         // The Android single-view root lives for the process lifetime. Register immediately:
         // Avalonia.Android can install the root without raising the desktop-style visual-tree
         // attach event, which would otherwise leave native Back with no launcher callback.
@@ -24,6 +28,17 @@ public sealed partial class MobileLauncherView : UserControl
         SizeChanged += (_, e) => ApplyResponsiveShell(e.NewSize.Width, e.NewSize.Height);
         AttachedToVisualTree += (_, _) => ApplyResponsiveShell(Bounds.Width, Bounds.Height);
     }
+
+    public void UpdateGameNavigation(Action? resumeGame, bool openMultiplayer)
+    {
+        _resumeGame = resumeGame;
+        _resumeGameButton.IsVisible = resumeGame is not null;
+        if (openMultiplayer && DataContext is ViewModels.MainViewModel main &&
+            main.CurrentPage is not ViewModels.MultiplayerViewModel)
+            main.Shell.Navigate("play");
+    }
+
+    private void OnResumeGame(object? sender, RoutedEventArgs e) => _resumeGame?.Invoke();
 
     private void ApplyResponsiveShell(double width, double height)
     {
