@@ -301,6 +301,9 @@ jobs:
             "${{ runner.temp }}/jdk" \
             Amber.Android/obj/jay-sdl
 
+      - name: Stage the signed multiplayer component for both Android ABIs
+        run: bash ../scripts/stage-android-easytier.sh Amber.Android/obj/jay-easytier
+
       - name: Stage standalone ANGLE for emulator graphics
         run: python3 ../scripts/fetch-android-angle.py Amber.Android/obj/jay-angle
 

@@ -9,6 +9,7 @@
                android:allowNativeHeapPointerTagging="false"
                android:enableOnBackInvokedCallback="true">
     <activity android:name="nz.work.minecraft.jay.JaySdlActivity" android:process=":sdlgame"
+              android:taskAffinity="nz.work.minecraft.jay.game" android:autoRemoveFromRecents="true"
               android:exported="false" android:launchMode="singleTask" android:screenOrientation="sensorLandscape"
               android:windowSoftInputMode="adjustResize"
               android:configChanges="orientation|screenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode"

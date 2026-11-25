@@ -18,6 +18,7 @@ public sealed class Application : AvaloniaAndroidApplication<Amber.App.App>
 
     public override void OnCreate()
     {
+        AppContext.SetData(Amber.Core.Multiplayer.EasyTierInstaller.AndroidNativeDirectoryKey, ApplicationInfo!.NativeLibraryDir);
         var files = FilesDir!.AbsolutePath;
         Environment.SetEnvironmentVariable("AMBER_DATA_DIR", Path.Combine(files, "amber"));
         // The dedicated :game process does not create Avalonia's launcher view model, so it
@@ -29,6 +30,8 @@ public sealed class Application : AvaloniaAndroidApplication<Amber.App.App>
         Amber.App.App.MobileGameDirectory = Path.Combine(files, "minecraft");
         Amber.App.App.MobileLaunchRequested = async (options, progress, ct) =>
         {
+            if (MainActivity.FindGameTask(this) is not null)
+                throw new InvalidOperationException(L.T("mobile.game.already_running"));
             var versionId = options.VersionId;
             var gameProgress = new Progress<AndroidGameInstallProgress>(value =>
             {
