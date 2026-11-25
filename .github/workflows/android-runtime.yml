@@ -28,6 +28,7 @@ on:
       - 'scripts/check-android-scalar-queue.sh'
       - 'tests/android-native/jay_menu_queue_test.c'
       - 'tests/android-native/jay_scalar_queue_test.c'
+      - 'tests/android-native/jay_mining_frame_test.c'
   workflow_dispatch:
     inputs:
       architecture:
@@ -89,6 +90,11 @@ jobs:
         run: |
           bash scripts/check-android-menu-queue.sh
           bash scripts/check-android-scalar-queue.sh
+
+      - name: Verify mining feedback against game-frame boundaries
+        run: |
+          cc -std=c17 -Wall -Wextra -Werror -Isrc/Amber.Android.Native tests/android-native/jay_mining_frame_test.c -o "$RUNNER_TEMP/mining-frame-test"
+          "$RUNNER_TEMP/mining-frame-test"
 
       - name: Install Android NDK
         shell: bash

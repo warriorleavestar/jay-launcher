@@ -4,7 +4,6 @@ namespace Amber.Mobile;
 public sealed class MiningRingProgress
 {
     private int _lastPartial = -1;
-    private bool _completionPending;
     private long _fullUntil;
 
     public int Observe(int damage, long nowMs)
@@ -12,27 +11,16 @@ public sealed class MiningRingProgress
         if (damage is >= 0 and < 1000)
         {
             _lastPartial = damage;
-            _completionPending = false;
             _fullUntil = 0;
             return damage;
         }
 
-        // Minecraft has completed the tick, but its surface still needs to present it.
-        // Keep the last partial for this draw, then show the closed stroke on the next draw.
+        // The break tick can precede the terrain upload. Keep the existing arc until
+        // the renderer has a replacement, then close it in this very draw.
+        if (damage == -2) return _lastPartial;
         if (damage == 1000 && _lastPartial >= 0)
-        {
-            int partial = _lastPartial;
-            _lastPartial = -1;
-            _completionPending = true;
-            return partial;
-        }
-
-        _lastPartial = -1;
-        if (_completionPending)
-        {
-            _completionPending = false;
             _fullUntil = nowMs + 100;
-        }
+        _lastPartial = -1;
         return nowMs < _fullUntil ? 1000 : -1;
     }
 

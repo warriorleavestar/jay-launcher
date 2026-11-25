@@ -96,7 +96,7 @@ internal static class AndroidEmbeddedGame
             requiredJava, allowPackagedFallback: sdl);
         RequireNativeFiles(nativeRoot, AndroidNativeLibraries.RequiredForJava(requiredJava));
         var sdlLibrary = sdl
-            ? AndroidNativeLibraries.ResolveLibrary("libSDL3.so", nativeRoot, packagedNativeRoot)
+            ? AndroidNativeLibraries.ResolveSdlLibrary(packagedNativeRoot, nativeRoot)
             : null;
         if (sdlLibrary is not null && !File.Exists(sdlLibrary))
             throw new FileNotFoundException("The Android SDL bridge is missing.", sdlLibrary);

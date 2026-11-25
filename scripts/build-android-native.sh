@@ -29,7 +29,7 @@ build_one() {
   "$toolchain/bin/$compiler" \
     -std=c17 -O2 -fPIC -fvisibility=hidden -Wall -Wextra -Werror \
     -shared "$source_dir/jay_jvm_host.c" \
-    "$source_dir/jay_menu_queue.c" "$source_dir/jay_scalar_queue.c" \
+    "$source_dir/jay_menu_queue.c" "$source_dir/jay_scalar_queue.c" "$source_dir/jay_mining_ring.c" \
     -Wl,-z,max-page-size=16384 \
     -landroid -llog -ldl \
     -o "$output/$abi/libjayjvm.so"

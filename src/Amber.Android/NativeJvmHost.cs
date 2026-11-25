@@ -10,6 +10,10 @@ internal static partial class NativeJvmHost
     private const int ExpectedAbiVersion = 20;
     public static bool GameplayControlsActive => IsAvailable && GetNativeGameplayMode() != 0;
 
+    [LibraryImport("jayjvm", EntryPoint = "jay_mining_ring_hold")]
+    internal static partial int SetMiningRing(long gesture, float x, float y, float radius,
+        float stroke, int width, int height);
+
     [LibraryImport("jayjvm", EntryPoint = "jay_mining_progress_get")]
     internal static partial int MiningProgress();
 
