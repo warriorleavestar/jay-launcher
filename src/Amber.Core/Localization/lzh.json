@@ -1723,6 +1723,7 @@
   "mobile.server.connect": "啟本機之閘",
   "mobile.server.connected": "已連",
   "mobile.game.already_running": "遊戲已啟，請返之，或先退而後另啟。",
+  "mobile.game.component_missing": "聯機之件有缺，或校驗未合。請重裝以復之。",
   "mobile.game.launcher_multiplayer": "啟器聯機",
   "mobile.game.resume": "返遊戲",
   "mobile.game.title": "以觸操戲 Minecraft",

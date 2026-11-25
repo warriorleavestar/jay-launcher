@@ -22,6 +22,10 @@
     <AndroidNativeLibrary Include="$(BaseIntermediateOutputPath)jay-native/x86_64/libjayjvm.so" Abi="x86_64" Condition="Exists('$(BaseIntermediateOutputPath)jay-native/x86_64/libjayjvm.so')" />
     <AndroidNativeLibrary Include="$(BaseIntermediateOutputPath)jay-glfw/arm64-v8a/libglfw.so" Abi="arm64-v8a" Condition="Exists('$(BaseIntermediateOutputPath)jay-glfw/arm64-v8a/libglfw.so')" />
     <AndroidNativeLibrary Include="$(BaseIntermediateOutputPath)jay-glfw/x86_64/libglfw.so" Abi="x86_64" Condition="Exists('$(BaseIntermediateOutputPath)jay-glfw/x86_64/libglfw.so')" />
+    <AndroidNativeLibrary Include="$(BaseIntermediateOutputPath)jay-easytier/arm64-v8a/*.so" Abi="arm64-v8a" />
+    <AndroidNativeLibrary Include="$(BaseIntermediateOutputPath)jay-easytier/x86_64/*.so" Abi="x86_64" />
+    <AndroidAsset Include="$(BaseIntermediateOutputPath)jay-easytier/LICENSE" LogicalName="licenses/EasyTier-LICENSE" Condition="Exists('$(BaseIntermediateOutputPath)jay-easytier/LICENSE')" />
+    <AndroidAsset Include="$(BaseIntermediateOutputPath)jay-easytier/NOTICE-*.txt" LogicalName="licenses/EasyTier-%(Filename)%(Extension)" />
     <AndroidAsset Include="$(IntermediateOutputPath)jay-runtime-probe.jar" LogicalName="jay-runtime-probe.jar" />
     <AndroidAsset Include="..\..\third_party\android-glfw\LICENSE.md" LogicalName="licenses/GLFW-LICENSE.md" />
   </ItemGroup>
@@ -75,6 +79,7 @@
   </Target>
 
   <Target Name="RequireJayJvmHost" BeforeTargets="Build" Condition="'$(Configuration)' == 'Release'">
+    <Error Condition="!Exists('$(BaseIntermediateOutputPath)jay-easytier/arm64-v8a/libeasytier-core.so') Or !Exists('$(BaseIntermediateOutputPath)jay-easytier/x86_64/libeasytier-core.so') Or !Exists('$(BaseIntermediateOutputPath)jay-easytier/arm64-v8a/libeasytier-cli.so') Or !Exists('$(BaseIntermediateOutputPath)jay-easytier/x86_64/libeasytier-cli.so')" Text="Stage the verified multiplayer binaries with scripts/stage-android-easytier.sh src/Amber.Android/obj/jay-easytier before publishing." />
     <Error Condition="('$(RuntimeIdentifier)' == '' Or '$(RuntimeIdentifier)' == 'android-arm64') And !Exists('$(BaseIntermediateOutputPath)jay-native/arm64-v8a/libjayjvm.so')" Text="Build the arm64 Jay Android native host with scripts/build-android-native.sh before a Release build." />
     <Error Condition="('$(RuntimeIdentifier)' == '' Or '$(RuntimeIdentifier)' == 'android-x64') And !Exists('$(BaseIntermediateOutputPath)jay-native/x86_64/libjayjvm.so')" Text="Build the x86_64 Jay Android native host with scripts/build-android-native.sh before a Release build." />
     <Error Condition="('$(RuntimeIdentifier)' == '' Or '$(RuntimeIdentifier)' == 'android-arm64') And !Exists('$(BaseIntermediateOutputPath)jay-glfw/arm64-v8a/libglfw.so')" Text="Build the arm64 Jay Android GLFW bridge with scripts/build-android-glfw.sh before a Release build." />

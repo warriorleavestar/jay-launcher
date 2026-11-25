@@ -1773,6 +1773,7 @@
   "mobile.server.connect": "啟用本機網關",
   "mobile.server.connected": "已連線",
   "mobile.game.already_running": "已有遊戲正在執行。可以回到遊戲，或結束後再啟動其他實例。",
+  "mobile.game.component_missing": "連線元件遺失或驗證失敗。請覆蓋安裝 Android 版以還原元件。",
   "mobile.game.launcher_multiplayer": "啟動器連線",
   "mobile.game.resume": "回到遊戲",
   "mobile.game.title": "用觸控玩 Minecraft",

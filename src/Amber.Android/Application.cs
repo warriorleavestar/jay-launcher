@@ -18,6 +18,7 @@ public sealed class Application : AvaloniaAndroidApplication<Amber.App.App>
 
     public override void OnCreate()
     {
+        AppContext.SetData(Amber.Core.Multiplayer.EasyTierInstaller.AndroidNativeDirectoryKey, ApplicationInfo!.NativeLibraryDir);
         var files = FilesDir!.AbsolutePath;
         Environment.SetEnvironmentVariable("AMBER_DATA_DIR", Path.Combine(files, "amber"));
         // The dedicated :game process does not create Avalonia's launcher view model, so it

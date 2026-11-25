@@ -1773,6 +1773,7 @@
   "mobile.server.connect": "ローカルゲートウェイを開始",
   "mobile.server.connected": "接続済み",
   "mobile.game.already_running": "ゲームを実行中です。ゲームに戻るか、終了してから別のゲームを起動してください。",
+  "mobile.game.component_missing": "マルチプレイ用の部品が見つからないか、検証に失敗しました。Android 版を上書きインストールしてください。",
   "mobile.game.launcher_multiplayer": "ランチャーのマルチプレイ",
   "mobile.game.resume": "ゲームに戻る",
   "mobile.game.title": "タッチ操作で Minecraft をプレイ",
