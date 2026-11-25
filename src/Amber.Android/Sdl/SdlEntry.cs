@@ -36,7 +36,7 @@ public sealed class SdlEntry : Java.Lang.Object
             // before reclaiming only this isolated game process; the launcher stays alive.
             activity.RunOnUiThread(() =>
             {
-                activity.Finish();
+                GameActivity.FinishGame(activity);
                 var handler = new Handler(Looper.MainLooper!);
                 handler.PostDelayed(() =>
                     global::Android.OS.Process.KillProcess(global::Android.OS.Process.MyPid()), 400);
