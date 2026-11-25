@@ -2040,7 +2040,10 @@ public sealed class MobilePortTests
 
         Assert.Contains("android:process=\":sdlgame\"", manifest, StringComparison.Ordinal);
         Assert.Contains("finally", entry, StringComparison.Ordinal);
-        Assert.Contains("activity.Finish();", entry, StringComparison.Ordinal);
+        var game = File.ReadAllText(Path.Combine(repository, "src", "Amber.Android", "GameActivity.cs"));
+        Assert.Contains("GameActivity.FinishGame(activity);", entry, StringComparison.Ordinal);
+        Assert.Contains("activity.Finish();", game, StringComparison.Ordinal);
+        Assert.Contains("if (wasInFront)", game, StringComparison.Ordinal);
         Assert.Contains("Process.KillProcess", entry, StringComparison.Ordinal);
         Assert.Contains("Process.MyPid()", entry, StringComparison.Ordinal);
     }

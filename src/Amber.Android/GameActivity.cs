@@ -236,7 +236,7 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
                 _touchOverlay.UpdateHardwareCapture(HasWindowFocus);
             }
             await runTask;
-            Finish();
+            FinishGame(this);
         }
         catch (System.OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -246,10 +246,24 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
         {
             global::Android.Util.Log.Error("JayGame", exception.ToString());
             Toast.MakeText(this, exception.Message, ToastLength.Long)?.Show();
-            Finish();
+            FinishGame(this);
         }
     }
 
+
+    internal static void FinishGame(Activity activity)
+    {
+        var wasInFront = activity.HasWindowFocus;
+        activity.Finish();
+        // A resumed game is the root of its own task. On normal quit, Android can otherwise
+        // reveal Home. Only restore Jay if the game itself was in front when the user quit.
+        if (wasInFront)
+        {
+            var launcher = new Intent(activity, typeof(MainActivity));
+            launcher.AddFlags(ActivityFlags.NewTask | ActivityFlags.SingleTop);
+            activity.StartActivity(launcher);
+        }
+    }
 
     public void SurfaceCreated(ISurfaceHolder holder)
     {
