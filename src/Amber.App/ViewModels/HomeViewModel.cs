@@ -615,13 +615,25 @@ public sealed partial class HomeViewModel : PageViewModel
                 Toasts.Show(L.T("home.status.preparing_other"), Avalonia.Controls.Notifications.NotificationType.Warning);
                 return;
             }
-            var mobileSettings = _service.EffectiveSettings(_service.Context, id);
+            var mobileContext = request.ExpectedContext ?? _service.Context;
+            var mobileSettings = _service.EffectiveSettings(mobileContext, id);
             using var mobileCts = new CancellationTokenSource();
             var mobileTask = _service.Tasks.Track("install", L.F("activity.kind.install", id),
                 () => mobileCts.Cancel(), $"android-launch:{id}");
             try
             {
-                await mobileLaunch(id, account.Name, request.JoinServer ?? mobileSettings.JoinServer,
+                mobileTask.Report(null, L.T("mobile.game.preserving_worlds"));
+                await Task.Run(() => _service.PreserveLegacyAndroidWorlds(mobileContext, mobileCts.Token), mobileCts.Token);
+                var login = await _service.Accounts.ResolveAsync(account, mobileCts.Token);
+                var mobileOptions = mobileSettings.ToLaunchOptions(mobileContext.Directory, id, "", login.Session, login.ExtraJvmArgs) with
+                {
+                    // The embedded runtime owns platform flags. Only authentication JVM options transfer from desktop.
+                    ExtraJvmArgs = login.ExtraJvmArgs,
+                    ExtraGameArgs = [],
+                    JoinServer = request.JoinServer ?? mobileSettings.JoinServer,
+                    JoinWorld = request.JoinWorld
+                };
+                await mobileLaunch(mobileOptions,
                     new Progress<Amber.App.MobileLaunchProgress>(value =>
                         mobileTask.Report(value.Fraction, value.Detail, value.Bytes, value.ActiveFiles)), mobileCts.Token);
                 mobileTask.Succeed();
@@ -633,7 +645,8 @@ public sealed partial class HomeViewModel : PageViewModel
                 mobileTask.Cancelled();
             }
             catch (Exception e) when (e is IOException or InvalidDataException or HttpRequestException
-                                       or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
+                                       or UnauthorizedAccessException or ArgumentException or InvalidOperationException
+                                       or LoginRequiredException or System.Text.Json.JsonException)
             {
                 mobileTask.Fail(e.Message);
                 SetStatus(StatusMessage.Error("common.raw", e.Message));

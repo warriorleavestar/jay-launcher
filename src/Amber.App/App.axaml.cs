@@ -18,7 +18,7 @@ public sealed class App : Application
     public static string? MobileGameDirectory { get; set; }
 
     /// <summary>Starts the selected desktop-style instance in the native mobile game activity.</summary>
-    public static Func<string, string, string?, IProgress<MobileLaunchProgress>?, CancellationToken, Task>? MobileLaunchRequested { get; set; }
+    public static Func<Amber.Core.Launch.LaunchOptions, IProgress<MobileLaunchProgress>?, CancellationToken, Task>? MobileLaunchRequested { get; set; }
 
     /// <summary>
     /// Lets the native single-view host recover the software keyboard when its window reports a
@@ -115,6 +115,15 @@ public sealed class App : Application
             settings.ReduceMotionMode = Amber.Core.Layout.MotionPreference.Migrate(settings.ReduceMotionMode, settings.ReduceMotion);
             DensityService.Apply(settings.Density);
             _mobileService = new LauncherService(settings);
+            if (OperatingSystem.IsAndroid())
+            {
+                // Freeze the pre-upgrade roster before the library can create any new instances.
+                try { _mobileService.PreserveLegacyAndroidWorlds(_mobileService.Context, CancellationToken.None, planOnly: true); }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+                {
+                    // First launch retries and reports any persistent storage error in the task center.
+                }
+            }
             UpdateNotifier.Start(_mobileService);
             singleView.MainView = new MobileLauncherView
             {

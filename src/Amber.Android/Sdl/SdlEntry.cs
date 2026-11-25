@@ -15,11 +15,7 @@ public sealed class SdlEntry : Java.Lang.Object
     {
         try
         {
-            var intent = activity.Intent ?? throw new InvalidOperationException("Missing game request.");
-            var version = intent.GetStringExtra(GameActivity.VersionIdExtra) ?? throw new InvalidOperationException("Missing game version.");
-            var name = intent.GetStringExtra(GameActivity.PlayerNameExtra) ?? throw new InvalidOperationException("Missing player.");
-            var prepared = AndroidEmbeddedGame.PrepareAsync(activity, version, name,
-                intent.GetStringExtra(GameActivity.ServerAddressExtra), null, CancellationToken.None).GetAwaiter().GetResult();
+            var prepared = GameLaunchProvider.Read(activity);
             activity.RunOnUiThread(() =>
             {
                 var overlay = new TouchControlOverlay(activity, new SdlTouchInput(activity));

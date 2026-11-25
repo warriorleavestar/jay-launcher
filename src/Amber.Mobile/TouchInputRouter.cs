@@ -16,6 +16,7 @@ public interface ITouchInputSink
     void SplitInventoryStack(double x, double y, int count);
     /// <summary>Collect matching items into the carried stack using the game’s container rules.</summary>
     void CollectMatchingItems(double x, double y);
+    void ReturnHalfOfPickup(double x, double y, int originalCount);
     void PlaceOneItem(double x, double y);
 }
 
@@ -410,14 +411,16 @@ public sealed class TouchInputRouter
                 current.SlotId >= 0 && current.SlotId == previous.SlotId)
             {
                 _lastMenuTap = null;
-                _sink.CollectMatchingItems(x, y);
+                if (previous.Count == 1) _sink.CollectMatchingItems(x, y);
+                else if (current.Count == 0) _sink.ReturnHalfOfPickup(x, y, previous.Count);
+                else _sink.SetPointer(x, y, true);
                 return;
             }
         }
 
         _sink.SetPointer(x, y, true);
         _lastMenuTap = current.Count > 0 && current.SlotId >= 0
-            ? new(x, y, current.SlotId, now)
+            ? new(x, y, current.SlotId, current.Count, now)
             : null;
     }
 
@@ -478,7 +481,7 @@ public sealed class TouchInputRouter
                 heldAction, menuInteraction, toggleAction, false, 0, 0) { }
     }
 
-    private readonly record struct MenuTap(double X, double Y, int SlotId, long Timestamp);
+    private readonly record struct MenuTap(double X, double Y, int SlotId, int Count, long Timestamp);
 }
 
 public readonly record struct InventorySplitSelection(double X, double Y, int Count, int Total);

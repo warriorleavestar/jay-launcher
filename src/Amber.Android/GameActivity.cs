@@ -27,9 +27,6 @@ namespace Amber.Android;
         ConfigChanges.Keyboard | ConfigChanges.KeyboardHidden | ConfigChanges.Navigation)]
 public sealed class GameActivity : Activity, ISurfaceHolderCallback
 {
-    public const string ServerAddressExtra = "nz.work.minecraft.jay.SERVER_ADDRESS";
-    public const string VersionIdExtra = "nz.work.minecraft.jay.VERSION_ID";
-    public const string PlayerNameExtra = "nz.work.minecraft.jay.PLAYER_NAME";
     public const string TouchSettingsSelfTestExtra = "nz.work.minecraft.jay.TOUCH_SETTINGS_SELF_TEST";
     public const string PseudoLocalizationSelfTestExtra = "nz.work.minecraft.jay.PSEUDO_LOCALIZATION_SELF_TEST";
     private CancellationTokenSource? _gameSetup;
@@ -217,17 +214,7 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
     {
         try
         {
-            var versionId = Intent?.GetStringExtra(VersionIdExtra);
-            if (string.IsNullOrWhiteSpace(versionId))
-                throw new InvalidOperationException("No Minecraft instance was selected.");
-            var playerName = Intent?.GetStringExtra(PlayerNameExtra);
-            if (string.IsNullOrWhiteSpace(playerName))
-                throw new InvalidOperationException("No Minecraft account was selected.");
-
-            // The launcher has already completed all network work. This second pass only rebuilds the invocation
-            // inside the isolated game process, then switches directly to Minecraft without a setup screen.
-            var prepared = await AndroidEmbeddedGame.PrepareAsync(this, versionId, playerName,
-                Intent?.GetStringExtra(ServerAddressExtra), progress: null, ct);
+            var prepared = await Task.Run(() => GameLaunchProvider.Read(this), ct);
             await WaitForSurfaceAsync(ct);
             // A freshly installed/cold Android process is still draining ART and UI finalizers
             // when the surface first appears. Starting HotSpot in that window can replace signal
@@ -1426,6 +1413,8 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
 
     // Positive counts select a quantity. Zero requests vanilla PICKUP_ALL.
     public void CollectMatchingItems(double x, double y) => SplitInventoryStack(x, y, 0);
+
+    public void ReturnHalfOfPickup(double x, double y, int originalCount) => SplitInventoryStack(x, y, -originalCount);
 
     public void PlaceOneItem(double x, double y) => SplitInventoryStack(x, y, -1);
 

@@ -1738,6 +1738,7 @@
   "mobile.game.fetching_assets": "正讀官方資源索引…",
   "mobile.game.downloading": "正取遊戲檔：{0}/{1}",
   "mobile.game.preparing": "正備內置之戲…",
+  "mobile.game.preserving_worlds": "正核舊世存檔…",
   "mobile.game.exited": "Minecraft 已止，可復啟之。",
   "mobile.touch.attack_area": "擊之域：{0}",
   "mobile.touch.attack_area.anywhere": "滿幕",

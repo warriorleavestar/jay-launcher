@@ -1819,6 +1819,7 @@
   "mobile.game.fetching_assets": "Reading the official asset index…",
   "mobile.game.downloading": "Downloading game files: {0}/{1}",
   "mobile.game.preparing": "Preparing the embedded game…",
+  "mobile.game.preserving_worlds": "Checking saved worlds from earlier versions…",
   "mobile.game.exited": "Minecraft exited. You can start it again.",
   "mobile.touch.attack_area": "Attack area: {0}",
   "mobile.touch.attack_area.anywhere": "anywhere",

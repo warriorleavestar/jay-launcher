@@ -55,14 +55,12 @@ internal static class AndroidEmbeddedGame
 
     public static async Task<AndroidPreparedGame> PrepareAsync(
         Context context,
-        string versionId,
-        string playerName,
-        string? serverAddress,
+        LaunchOptions options,
         IProgress<AndroidGameInstallProgress>? progress,
         CancellationToken ct)
     {
-        versionId = GameDirectory.CheckId(versionId);
-        playerName = playerName.Trim();
+        var versionId = GameDirectory.CheckId(options.VersionId);
+        var playerName = options.Session.PlayerName;
         if (playerName.Length is < 1 or > 16 || playerName.Any(c => !(char.IsAsciiLetterOrDigit(c) || c == '_')))
             throw new ArgumentException("Minecraft names must use 1-16 letters, numbers or underscores.");
         var gameRoot = Path.Combine(context.FilesDir!.AbsolutePath, "minecraft");
@@ -88,7 +86,9 @@ internal static class AndroidEmbeddedGame
                 versionId, requiredJava, installedJava));
 
         await installer.CompleteAsync(versionId, forwardedProgress, ct);
-        await CreateMobileOptionsIfMissingAsync(gameRoot, ct);
+        var workDir = options.WorkingDirectory ?? gameRoot;
+        Directory.CreateDirectory(workDir);
+        await CreateMobileOptionsIfMissingAsync(workDir, ct);
 
         var sdl = UsesSdl(context, versionId);
         var packagedNativeRoot = context.ApplicationInfo!.NativeLibraryDir!;
@@ -135,19 +135,14 @@ internal static class AndroidEmbeddedGame
         }
         else extraJvm.Add("-Dorg.lwjgl.opengl.explicitInit=true");
         var launcher = new GameLauncher(gameDirectory) { BaseRules = rules };
-        var invocation = launcher.BuildEmbeddedInvocation(new LaunchOptions
+        var invocation = launcher.BuildEmbeddedInvocation(options with
         {
-            VersionId = versionId,
             JavaPath = Path.Combine(runtimeRoot, "bin", "java"),
-            Session = OfflineAccount.Create(playerName),
-            WorkingDirectory = gameRoot,
-            MaxMemoryMb = 1024,
-            MinMemoryMb = 256,
+            WorkingDirectory = workDir,
             WindowWidth = 1280,
             WindowHeight = 720,
             Fullscreen = true,
-            JoinServer = string.IsNullOrWhiteSpace(serverAddress) ? null : serverAddress,
-            ExtraJvmArgs = extraJvm,
+            ExtraJvmArgs = [.. options.ExtraJvmArgs, .. extraJvm],
             LauncherName = "Jay Android",
         });
         var bootstrap = Path.Combine(cache, "jay-runtime-probe.jar");
@@ -161,7 +156,7 @@ internal static class AndroidEmbeddedGame
             sdl ? "nz.work.minecraft.jay.SdlMenuBootstrap" : "nz.work.minecraft.jay.AndroidGameBootstrap",
             [invocation.MainClass, .. invocation.Arguments],
             invocation.TransientDirectory);
-        return new AndroidPreparedGame(runtimeRoot, gameRoot, nativeRoot, packagedNativeRoot, sdl, invocation);
+        return new AndroidPreparedGame(runtimeRoot, workDir, nativeRoot, packagedNativeRoot, sdl, invocation);
     }
 
     public static void Run(AndroidPreparedGame game)

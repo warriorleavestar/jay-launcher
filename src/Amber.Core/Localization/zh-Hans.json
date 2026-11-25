@@ -1788,6 +1788,7 @@
   "mobile.game.fetching_assets": "正在读取官方资源索引…",
   "mobile.game.downloading": "正在下载游戏文件：{0}/{1}",
   "mobile.game.preparing": "正在准备内置游戏…",
+  "mobile.game.preserving_worlds": "正在检查旧版存档，首次升级时会为原实例保留副本…",
   "mobile.game.exited": "Minecraft 已退出，可以再次启动。",
   "mobile.touch.attack_area": "攻击区域：{0}",
   "mobile.touch.attack_area.anywhere": "全屏任意位置",

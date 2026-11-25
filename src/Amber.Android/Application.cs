@@ -27,8 +27,9 @@ public sealed class Application : AvaloniaAndroidApplication<Amber.App.App>
         var settings = AppSettings.Load();
         L.SetLanguage(settings.Language);
         Amber.App.App.MobileGameDirectory = Path.Combine(files, "minecraft");
-        Amber.App.App.MobileLaunchRequested = async (versionId, playerName, serverAddress, progress, ct) =>
+        Amber.App.App.MobileLaunchRequested = async (options, progress, ct) =>
         {
+            var versionId = options.VersionId;
             var gameProgress = new Progress<AndroidGameInstallProgress>(value =>
             {
                 var fraction = value.Total <= 0 ? null : (double?)value.Completed / value.Total;
@@ -71,20 +72,13 @@ public sealed class Application : AvaloniaAndroidApplication<Amber.App.App>
                 }), ct);
             }
 
-            // Complete the selected instance before changing Activity. GameActivity repeats only the cheap invocation
-            // construction in its isolated process; all network work stays visible in the launcher's task line.
-            await AndroidEmbeddedGame.PrepareAsync(this, versionId, playerName, serverAddress,
-                gameProgress, ct);
-
+            var prepared = await AndroidEmbeddedGame.PrepareAsync(this, options, gameProgress, ct);
             ct.ThrowIfCancellationRequested();
             var intent = new Intent(this, typeof(GameActivity));
-            if (AndroidEmbeddedGame.UsesSdl(this, versionId))
+            if (prepared.Sdl)
                 intent.SetClassName(this, "nz.work.minecraft.jay.JaySdlActivity");
             intent.AddFlags(ActivityFlags.NewTask);
-            intent.PutExtra(GameActivity.VersionIdExtra, versionId);
-            intent.PutExtra(GameActivity.PlayerNameExtra, playerName);
-            if (!string.IsNullOrWhiteSpace(serverAddress))
-                intent.PutExtra(GameActivity.ServerAddressExtra, serverAddress);
+            intent.SetData(GameLaunchProvider.Stage(prepared));
             StartActivity(intent);
         };
         base.OnCreate();

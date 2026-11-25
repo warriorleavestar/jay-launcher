@@ -1788,6 +1788,7 @@
   "mobile.game.fetching_assets": "公式アセット索引を読み込み中…",
   "mobile.game.downloading": "ゲームファイルをダウンロード中: {0}/{1}",
   "mobile.game.preparing": "内蔵ゲームを準備中…",
+  "mobile.game.preserving_worlds": "旧バージョンのワールドを確認しています…",
   "mobile.game.exited": "Minecraft が終了しました。もう一度起動できます。",
   "mobile.touch.attack_area": "攻撃範囲：{0}",
   "mobile.touch.attack_area.anywhere": "画面全体",
