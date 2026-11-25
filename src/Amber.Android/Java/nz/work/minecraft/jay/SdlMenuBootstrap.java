@@ -92,6 +92,15 @@ public final class SdlMenuBootstrap {
                 slotClicked.invoke(active, hovered, index, 0, pickupAll);
                 return true;
             }
+            if (requested < -1) {
+                // The first tap already picked up the stack. Put it back, then use vanilla's
+                // right click to take half. Output-only slots refuse the first placement.
+                if (total != 0) return false;
+                slotClicked.invoke(active, hovered, index, 0, pickup);
+                if ((Integer)itemCount.invoke(slotItem.invoke(hovered)) == -requested)
+                    slotClicked.invoke(active, hovered, index, 1, pickup);
+                return true;
+            }
             if (total == 0) return false;
             int selected = Math.max(1, Math.min(total, requested));
             int half = (total + 1) / 2;

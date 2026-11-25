@@ -1073,6 +1073,24 @@ public sealed class MobilePortTests
             control => control.Action == TouchControlAction.SecondaryAction);
     }
 
+    [Theory]
+    [InlineData(64)]
+    [InlineData(5)]
+    public void DoubleTapReturnsHalfOfTheStackTakenByTheFirstTap(int count)
+    {
+        var sink = new RecordingTouchSink();
+        var remaining = count;
+        var router = new TouchInputRouter(sink, inventorySlotState: (_, _) => new(3, remaining));
+        router.Press(1, .5, .4, controlsEnabled: false);
+        router.Release(1);
+        remaining = 0;
+        router.Press(2, .5, .4, controlsEnabled: false);
+        router.Release(2);
+        Assert.Equal((.5, .4, -count), Assert.Single(sink.InventorySplits));
+        Assert.Single(sink.Pointers, pointer => pointer.Click);
+        Assert.Empty(sink.CollectedItems);
+    }
+
     [Fact]
     public void TouchInputRouterDoesNotSplitAcrossAdjacentInventorySlots()
     {
@@ -2957,6 +2975,7 @@ public sealed class MobilePortTests
             InventorySplits.Add((x, y, count));
         public List<(double X, double Y)> SinglePlacements { get; } = [];
         public void PlaceOneItem(double x, double y) => SinglePlacements.Add((x, y));
+        public void ReturnHalfOfPickup(double x, double y, int originalCount) => InventorySplits.Add((x, y, -originalCount));
         public void CollectMatchingItems(double x, double y) => CollectedItems.Add((x, y));
     }
 

@@ -438,6 +438,14 @@ public sealed class LauncherService : IDisposable
         return own.Over(Settings.ToGlobalInstanceSettings());
     }
 
+    internal void PreserveLegacyAndroidWorlds(GameContext context, CancellationToken ct, bool planOnly = false)
+    {
+        var played = (Settings.RecentInstances ?? []).Concat(
+            (Settings.Instances ?? []).Where(pair => pair.Value.LastPlayed.HasValue).Select(pair => pair.Key));
+        LegacyAndroidWorlds.Preserve(context.Directory, AppSettings.DataDir, played,
+            id => !UsesSharedDir(context, id), ct, planOnly);
+    }
+
     public string WorkDirFor(string id) => WorkDirFor(Context, id);
 
     public string WorkDirFor(GameContext ctx, string id) => UsesSharedDir(ctx, id) ? ctx.Directory.Root : ctx.Directory.VersionDir(id);

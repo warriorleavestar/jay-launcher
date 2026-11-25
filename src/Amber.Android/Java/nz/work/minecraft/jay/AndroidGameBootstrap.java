@@ -888,6 +888,17 @@ public final class AndroidGameBootstrap {
         int total = stack == null ? 0 : Math.max(0, itemStackGetCount != null
             ? (Integer)itemStackGetCount.invoke(stack)
             : itemStackCount.getInt(stack));
+        if (requested < -1) {
+            if (total != 0 || containerSlotClicked == null || pickupClickType == null) return false;
+            int index = slotId.getInt(slot);
+            containerSlotClicked.invoke(screen, slot, index, 0, pickupClickType);
+            Object restored = slotGetItem.invoke(slot);
+            int restoredCount = itemStackGetCount != null ? (Integer)itemStackGetCount.invoke(restored)
+                : itemStackCount.getInt(restored);
+            if (restoredCount == -requested)
+                containerSlotClicked.invoke(screen, slot, index, 1, pickupClickType);
+            return true;
+        }
         int selected = Math.max(1, Math.min(total, requested));
         if (total <= 0) return false;
         int half = (total + 1) / 2;
