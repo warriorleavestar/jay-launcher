@@ -18,20 +18,23 @@ public sealed class GameLaunchProvider : ContentProvider
     private static string? _ticket;
     private static AndroidPreparedGame? _pending;
 
-    internal static Uri Stage(AndroidPreparedGame game)
+    private const string TicketExtra = "nz.work.minecraft.jay.LAUNCH_TICKET";
+
+    internal static void Stage(Intent intent, AndroidPreparedGame game)
     {
         lock (Gate)
         {
             _pending = game;
             _ticket = Guid.NewGuid().ToString("N");
-            return Uri.Parse($"content://{Authority}/{_ticket}")!;
+            intent.PutExtra(TicketExtra, _ticket);
         }
     }
 
     internal static AndroidPreparedGame Read(Activity activity)
     {
-        var uri = activity.Intent?.Data;
-        if (uri?.Authority != Authority) throw new InvalidOperationException("Open this game from the launcher.");
+        var ticket = activity.Intent?.GetStringExtra(TicketExtra);
+        if (!Guid.TryParseExact(ticket, "N", out _)) throw new InvalidOperationException("Open this game from the launcher.");
+        var uri = Uri.Parse($"content://{Authority}/{ticket}")!;
         using var input = activity.ContentResolver!.OpenInputStream(uri)
             ?? throw new IOException("Game launch expired.");
         return JsonSerializer.Deserialize(input, LaunchJson.Default.AndroidPreparedGame)
@@ -56,6 +59,7 @@ public sealed class GameLaunchProvider : ContentProvider
             try { writer.Write(JsonSerializer.SerializeToUtf8Bytes(game, LaunchJson.Default.AndroidPreparedGame)); }
             catch (Java.IO.IOException) { } // Game process exited before reading the invocation.
             catch (IOException) { }
+            finally { writer.Close(); }
         });
         return pipe[0];
     }

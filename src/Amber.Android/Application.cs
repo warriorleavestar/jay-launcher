@@ -78,7 +78,7 @@ public sealed class Application : AvaloniaAndroidApplication<Amber.App.App>
             if (prepared.Sdl)
                 intent.SetClassName(this, "nz.work.minecraft.jay.JaySdlActivity");
             intent.AddFlags(ActivityFlags.NewTask);
-            intent.SetData(GameLaunchProvider.Stage(prepared));
+            GameLaunchProvider.Stage(intent, prepared);
             StartActivity(intent);
         };
         base.OnCreate();
