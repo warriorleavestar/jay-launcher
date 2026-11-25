@@ -723,6 +723,14 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         _joystickMark.Color = WithAlpha(Color.Argb(145, 235, 238, 242), Math.Max(0.45f, _controlOpacity));
     }
 
+    private long _frameRingGesture;
+    private void ClearFrameRing()
+    {
+        if (_frameRingGesture == 0) return;
+        NativeJvmHost.SetMiningRing(0, 0, 0, 0, 0, 0, 0);
+        _frameRingGesture = 0;
+    }
+
     private bool DrawLongPressIndicators(Canvas canvas)
     {
         var drewAnimatedFeedback = false;
@@ -733,17 +741,25 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         _progressTrack.StrokeWidth = Math.Max(4f * density, scale * 0.005f);
         _progress.StrokeWidth = _progressTrack.StrokeWidth;
 
+        bool requested = false;
         foreach (var (pointerId, indicator) in _longPressIndicators.ToArray())
         {
             // Match the mobile interaction: an ordinary touch has no decoration. The ring starts
             // only after the gesture has become a mining hold and the crosshair is on a block.
             if (!_router.IsLongPress(pointerId)) continue;
             drewAnimatedFeedback = true;
-            var progress = indicator.Feedback.Observe(NativeJvmHost.MiningProgress(), SystemClock.UptimeMillis());
-            if (progress < 0) continue;
             var x = (float)(indicator.X * Width);
             var y = (float)(indicator.Y * Height);
             var radius = TouchControlLayout.MiningRingRadius(density, scale, indicator.TouchMajor);
+            if (!requested && _sdl != null && _longPressTokens.TryGetValue(pointerId, out var token))
+            {
+                requested = true;
+                _frameRingGesture = token;
+                if (NativeJvmHost.SetMiningRing(token, x, y, radius, _progress.StrokeWidth, Width, Height) != 0)
+                    continue;
+            }
+            var progress = indicator.Feedback.Observe(NativeJvmHost.MiningProgress(), SystemClock.UptimeMillis());
+            if (progress < 0) continue;
             canvas.DrawCircle(x, y, radius, _progressTrack);
             if (progress == 1000)
                 canvas.DrawCircle(x, y, radius, _progress);
@@ -751,6 +767,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
                 canvas.DrawArc(x - radius, y - radius, x + radius, y + radius,
                     -90, MiningRingProgress.PartialSweep(progress, radius, _progress.StrokeWidth), false, _progress);
         }
+        if (!requested) ClearFrameRing();
         return drewAnimatedFeedback;
     }
 
@@ -1267,6 +1284,8 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
                 var releasedX = e.GetX(actionIndex) / Width;
                 var releasedY = e.GetY(actionIndex) / Height;
                 var touchedTextInput = _textInputPointers.Remove(releasedId);
+                if (_longPressTokens.TryGetValue(releasedId, out var ending) && ending == _frameRingGesture)
+                    ClearFrameRing();
                 _longPressTokens.Remove(releasedId);
                 _longPressIndicators.Remove(releasedId);
                 if (_hotbarPointers.Remove(releasedId)) return true;
@@ -1278,6 +1297,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
                     PostDelayed(() => SyncSoftKeyboardAfterTap(releasedX, releasedY, touchedTextInput), 140);
                 return released;
             case MotionEventActions.Cancel:
+                ClearFrameRing();
                 _longPressTokens.Clear();
                 _longPressIndicators.Clear();
                 _hotbarPointers.Clear();
@@ -1306,6 +1326,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
             {
                 // Opening settings cancels every other finger. Releasing pending gestures here
                 // would turn them into clicks or commit an inventory split behind the panel.
+                ClearFrameRing();
                 _longPressTokens.Clear();
                 _longPressIndicators.Clear();
                 _hotbarPointers.Clear();
@@ -1616,6 +1637,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
 
     public void CancelAllInput()
     {
+        ClearFrameRing();
         _longPressTokens.Clear();
         _longPressIndicators.Clear();
         _hotbarPointers.Clear();

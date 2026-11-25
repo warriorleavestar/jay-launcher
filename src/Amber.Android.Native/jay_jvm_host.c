@@ -58,6 +58,7 @@ static jmethodID g_dispatch_look;
 static jmethodID g_is_gameplay_controls_active;
 static jmethodID g_is_block_target;
 static jmethodID g_mining_progress;
+static jmethodID g_frame_mining_progress;
 static jmethodID g_request_pause;
 static jmethodID g_is_text_input_focused;
 static jmethodID g_is_text_input_at;
@@ -291,6 +292,7 @@ int jay_jvm_run_main(JNIEnv *env, const char *class_name, int argc, const char *
         JAY_INPUT_METHOD(g_dispatch_char, "dispatchChar", "(I)Z");
         JAY_INPUT_METHOD(g_dispatch_look, "dispatchLook", "(FF)Z");
         JAY_INPUT_METHOD(g_is_gameplay_controls_active, "gameplayControlsState", "()I");
+        JAY_INPUT_METHOD(g_frame_mining_progress, "miningProgressOnGameThread", "()I");
         JAY_INPUT_METHOD(g_mining_progress, "miningProgress", "()I");
         JAY_INPUT_METHOD(g_request_pause, "requestPause", "()Z");
         JAY_INPUT_METHOD(g_is_block_target, "isBlockTarget", "()Z");
@@ -413,6 +415,15 @@ int jay_java_inventory_split(float x, float y, int count) {
     jboolean delivered = (*env)->CallStaticBooleanMethod(env, g_input_bridge_class,
         g_dispatch_inventory_split, (jfloat)x, (jfloat)y, (jint)count);
     return jay_finish_input_call(env, attached, delivered);
+}
+
+int jay_game_frame_mining_progress(void) {
+    // SDL presents on the already-attached Minecraft render thread.
+    JNIEnv *env = NULL;
+    if (!g_vm || !g_frame_mining_progress ||
+        (*g_vm)->GetEnv(g_vm, (void **)&env, JNI_VERSION_1_6) != JNI_OK) return -1;
+    jint value = (*env)->CallStaticIntMethod(env, g_input_bridge_class, g_frame_mining_progress);
+    return jay_finish_input_call(env, 0, JNI_TRUE) ? value : -1;
 }
 
 __attribute__((visibility("default")))

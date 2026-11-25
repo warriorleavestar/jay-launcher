@@ -1,5 +1,6 @@
 package nz.work.minecraft.jay;
 
+import java.lang.ref.WeakReference;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
@@ -18,6 +19,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicReference;
 
 /** Supplies LWJGL OpenGL entry points through Jay's EGL-backed GLFW bridge before Minecraft starts. */
 public final class AndroidGameBootstrap {
@@ -28,6 +30,10 @@ public final class AndroidGameBootstrap {
     private static Field minecraftWindow;
     private static Field minecraftScreen;
     private static Field gameMode, destroyProgress, destroyDelay, isDestroying;
+    private static Field destroyBlockPos, levelRenderer, viewArea, sectionMesh;
+    private static Method renderSectionAt;
+    private static MiningMesh minedMesh;
+    private static boolean breakAwaitingMesh;
     private static volatile boolean miningSamplePending;
     private static volatile int lastMiningDamage = -1;
     private static volatile long lastMiningSampleAt;
@@ -216,6 +222,51 @@ public final class AndroidGameBootstrap {
         }
     }
 
+    private static void prepareMiningMesh(Class<?> client, String position, String renderer,
+                                          String area, String lookup, String mesh) {
+        if (gameMode == null) return;
+        try {
+            destroyBlockPos = accessible(gameMode.getType().getDeclaredField(position));
+            levelRenderer = accessible(client.getDeclaredField(renderer));
+            viewArea = accessible(levelRenderer.getType().getDeclaredField(area));
+            renderSectionAt = accessible(viewArea.getType().getDeclaredMethod(lookup, destroyBlockPos.getType()));
+            Field source = renderSectionAt.getReturnType().getDeclaredField(mesh);
+            if (AtomicReference.class.isAssignableFrom(source.getType())) sectionMesh = accessible(source);
+        } catch (ReflectiveOperationException unavailable) {
+            // Renderer mods can supply different section metadata. Gameplay input remains usable.
+            sectionMesh = null;
+        }
+    }
+
+    // Read mutable Minecraft fields only on its own thread. The renderer publishes a
+    // replacement mesh atomically when the changed section is ready to draw.
+    private static void trackMinedSection(Object game, Object mode) throws ReflectiveOperationException {
+        if (sectionMesh == null) return;
+        Object area = viewArea.get(levelRenderer.get(game));
+        Object section = area == null ? null : renderSectionAt.invoke(area, destroyBlockPos.get(mode));
+        AtomicReference<?> ref = section == null ? null : (AtomicReference<?>)sectionMesh.get(section);
+        Object mesh = ref == null ? null : ref.get();
+        MiningMesh previous = minedMesh;
+        if (mesh == null) minedMesh = null;
+        else if (previous == null || previous.source.get() != ref || previous.before.get() != mesh)
+            minedMesh = new MiningMesh(ref, mesh);
+    }
+
+    private static final class MiningMesh {
+        final WeakReference<AtomicReference<?>> source;
+        final WeakReference<Object> before;
+
+        MiningMesh(AtomicReference<?> source, Object before) {
+            this.source = new WeakReference<>(source);
+            this.before = new WeakReference<>(before);
+        }
+
+        boolean awaitingUpload() {
+            AtomicReference<?> ref = source.get();
+            return ref != null && ref.get() == before.get();
+        }
+    }
+
     /** Damage in thousandths. Minecraft clears the damage in the same tick as the break.
      * Its post-break cooldown distinguishes that transition from letting go or losing the target.
      * The overlay accepts the cooldown only after seeing active mining on the same hold. */
@@ -230,20 +281,10 @@ public final class AndroidGameBootstrap {
                 // one client tick. Reading them on Android's drawing thread can mistake
                 // a half-applied break for cancellation and lose its completed frame.
                 ((java.util.concurrent.Executor)game).execute(() -> {
-                    int damage = -1;
                     try {
-                        Object mode = gameMode.get(game);
-                        if (mode != null && screen(game) == null) {
-                            if (isDestroying.getBoolean(mode))
-                                damage = Math.min(999, Math.max(0, Math.round(1000 * destroyProgress.getFloat(mode))));
-                            else if (destroyDelay != null && destroyDelay.getInt(mode) > 0)
-                                damage = 1000;
-                        }
-                    } catch (ReflectiveOperationException error) {
-                        reportInputError(error);
-                    } finally {
-                        lastMiningDamage = damage;
+                        lastMiningDamage = miningProgressOnGameThread();
                         lastMiningSampleAt = System.nanoTime();
+                    } finally {
                         miningSamplePending = false;
                     }
                 });
@@ -253,8 +294,34 @@ public final class AndroidGameBootstrap {
             }
         }
         // A new long press (340 ms) must never inherit a sample from the previous one.
-        return System.nanoTime() - lastMiningSampleAt < TimeUnit.MILLISECONDS.toNanos(200)
-            ? lastMiningDamage : -1;
+        if (System.nanoTime() - lastMiningSampleAt >= TimeUnit.MILLISECONDS.toNanos(200)) return -1;
+        return lastMiningDamage;
+    }
+
+    /** Called at swap on the game thread, or from the executor for a Canvas-only backend. */
+    public static int miningProgressOnGameThread() {
+        if (!prepareInputBridge() || isDestroying == null) return -1;
+        try {
+            Object game = minecraft();
+            Object mode = game == null ? null : gameMode.get(game);
+            if (mode != null && screen(game) == null) {
+                if (isDestroying.getBoolean(mode)) {
+                    breakAwaitingMesh = false;
+                    trackMinedSection(game, mode);
+                    return Math.min(999, Math.max(0, Math.round(1000 * destroyProgress.getFloat(mode))));
+                }
+                if (breakAwaitingMesh || (destroyDelay != null && destroyDelay.getInt(mode) > 0)) {
+                    // A slow terrain rebuild can outlast the game's short mining cooldown.
+                    breakAwaitingMesh = minedMesh != null && minedMesh.awaitingUpload();
+                    return breakAwaitingMesh ? -2 : 1000;
+                }
+            }
+        } catch (ReflectiveOperationException error) {
+            reportInputError(error);
+        }
+        minedMesh = null;
+        breakAwaitingMesh = false;
+        return -1;
     }
 
     public static boolean requestPause() {
@@ -275,6 +342,7 @@ public final class AndroidGameBootstrap {
     private static void prepareNamedInputBridge() throws ReflectiveOperationException {
         Class<?> minecraftType = Class.forName("net.minecraft.client.Minecraft");
         prepareGameplayState(minecraftType, "gameMode", "destroyProgress", "isDestroying", "destroyDelay", "pauseGame");
+        prepareMiningMesh(minecraftType, "destroyBlockPos", "levelRenderer", "viewArea", "getRenderSectionAt", "sectionMesh");
         Class<?> mouseType = Class.forName("net.minecraft.client.MouseHandler");
         Class<?> keyboardType = Class.forName("net.minecraft.client.KeyboardHandler");
         Class<?> windowType = Class.forName("com.mojang.blaze3d.platform.Window");
@@ -414,6 +482,7 @@ public final class AndroidGameBootstrap {
     private static void prepareLegacyInputBridge() throws ReflectiveOperationException {
             Class<?> minecraftType = Class.forName("gfj");
             prepareGameplayState(minecraftType, "q", "f", "i", "h", "b");
+            prepareMiningMesh(minecraftType, "d", "e", "w", "a", "c");
             Class<?> mouseType = Class.forName("gfk");
             Class<?> keyboardType = Class.forName("gfi");
             Class<?> windowType = Class.forName("fyk");
@@ -468,6 +537,7 @@ public final class AndroidGameBootstrap {
     private static void prepareLegacy1201InputBridge() throws ReflectiveOperationException {
             Class<?> minecraftType = Class.forName("enn");
             prepareGameplayState(minecraftType, "r", "f", "i", "h", "c");
+            prepareMiningMesh(minecraftType, "d", "f", "D", "a", "c");
             Class<?> mouseType = Class.forName("eno");
             Class<?> keyboardType = Class.forName("enm");
             Class<?> windowType = Class.forName("ehn");

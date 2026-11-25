@@ -35,10 +35,13 @@ internal static class AndroidNativeLibraries
         return packagedRoot;
     }
 
-    public static string ResolveLibrary(string name, string preferredRoot, string packagedRoot)
+    // SDLActivity owns the APK's SDL window and frame callback. LWJGL must swap that
+    // same window when the downloaded Java runtime still contains an older SDL copy.
+    public static string ResolveSdlLibrary(string packagedRoot, string runtimeRoot)
     {
-        var preferred = Path.Combine(preferredRoot, name);
-        return File.Exists(preferred) ? preferred : Path.Combine(packagedRoot, name);
+        const string name = "libSDL3.so";
+        var packaged = Path.Combine(packagedRoot, name);
+        return File.Exists(packaged) ? packaged : Path.Combine(runtimeRoot, name);
     }
 
     public static string? ResolveEmulatorAngleRoot(

@@ -51,6 +51,14 @@ if "$javap_bin" -classpath "$jar_path" -private net.minecraft.client.Minecraft \
   require minecraft.txt 'void pauseGame(boolean);'
   require game-mode.txt 'float destroyProgress;'
   require game-mode.txt 'int destroyDelay;'
+  dump 'net.minecraft.client.renderer.LevelRenderer' level-renderer.txt
+  dump 'net.minecraft.client.renderer.ViewArea' view-area.txt
+  dump 'net.minecraft.client.renderer.chunk.SectionRenderDispatcher$RenderSection' render-section.txt
+  require game-mode.txt 'net.minecraft.core.BlockPos destroyBlockPos;'
+  require minecraft.txt 'net.minecraft.client.renderer.LevelRenderer levelRenderer;'
+  require level-renderer.txt 'net.minecraft.client.renderer.ViewArea viewArea;'
+  require view-area.txt 'net.minecraft.client.renderer.chunk.SectionRenderDispatcher$RenderSection getRenderSectionAt(net.minecraft.core.BlockPos);'
+  require render-section.txt '> sectionMesh;'
   require game-mode.txt 'boolean isDestroying;'
   named_input=net.minecraft.world.inventory.ContainerInput
   if ! "$javap_bin" -classpath "$jar_path" "$named_input" >/dev/null 2>&1; then
@@ -115,6 +123,14 @@ elif "$javap_bin" -classpath "$jar_path" -private gfj >/dev/null 2>&1; then
   require game-mode.txt "int h;"
   require game-mode.txt "boolean i;"
   dump gfk mouse.txt
+  dump 'hoh' level-renderer.txt
+  dump 'hpr' view-area.txt
+  dump 'hts$a' render-section.txt
+  require game-mode.txt 'is d;'
+  require minecraft.txt 'hoh e;'
+  require level-renderer.txt 'hpr w;'
+  require view-area.txt 'hts$a a(is);'
+  require render-section.txt '> c;'
   dump gfi keyboard.txt
   dump fyk window.txt
   dump gsb screen.txt
@@ -164,6 +180,14 @@ else
   require game-mode.txt "int h;"
   require game-mode.txt "boolean i;"
   dump eno mouse.txt
+  dump 'fjv' level-renderer.txt
+  dump 'fkl' view-area.txt
+  dump 'fmp$c' render-section.txt
+  require game-mode.txt 'gu d;'
+  require minecraft.txt 'fjv f;'
+  require level-renderer.txt 'fkl D;'
+  require view-area.txt 'fmp$c a(gu);'
+  require render-section.txt '> c;'
   dump enm keyboard.txt
   dump ehn window.txt
   dump euq screen.txt

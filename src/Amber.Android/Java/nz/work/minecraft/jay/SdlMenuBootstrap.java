@@ -177,6 +177,10 @@ public final class SdlMenuBootstrap {
         }
     }
 
+    public static int miningProgressOnGameThread() {
+        return AndroidGameBootstrap.miningProgressOnGameThread();
+    }
+
     public static int miningProgress() { return AndroidGameBootstrap.miningProgress(); }
     public static boolean requestPause() { return AndroidGameBootstrap.requestPause(); }
 

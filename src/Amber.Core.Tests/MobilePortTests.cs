@@ -103,10 +103,12 @@ public sealed class MobilePortTests
 
             var packagedSdl = Path.Combine(packaged, "libSDL3.so");
             File.WriteAllBytes(packagedSdl, [1]);
-            Assert.Equal(packagedSdl, AndroidNativeLibraries.ResolveLibrary("libSDL3.so", native, packaged));
+            Assert.Equal(packagedSdl, AndroidNativeLibraries.ResolveSdlLibrary(packaged, native));
             var runtimeSdl = Path.Combine(native, "libSDL3.so");
             File.WriteAllBytes(runtimeSdl, [1]);
-            Assert.Equal(runtimeSdl, AndroidNativeLibraries.ResolveLibrary("libSDL3.so", native, packaged));
+            Assert.Equal(packagedSdl, AndroidNativeLibraries.ResolveSdlLibrary(packaged, native));
+            File.Delete(packagedSdl);
+            Assert.Equal(runtimeSdl, AndroidNativeLibraries.ResolveSdlLibrary(packaged, native));
         }
         finally
         {
@@ -213,16 +215,18 @@ public sealed class MobilePortTests
     public void MiningRingClosesOnBreakAndNeverOnCancelOrStaleCooldown()
     {
         var ring = new MiningRingProgress();
+        Assert.Equal(-1, ring.Observe(-2, 1));
         Assert.Equal(-1, ring.Observe(1000, 5));
         Assert.Equal(947, ring.Observe(947, 20));
         Assert.Equal(-1, ring.Observe(-1, 30));
         Assert.Equal(-1, ring.Observe(1000, 35));
         Assert.Equal(947, ring.Observe(947, 40));
-        Assert.Equal(947, ring.Observe(1000, 50));
+        Assert.Equal(947, ring.Observe(-2, 45));
+        Assert.Equal(1000, ring.Observe(1000, 50));
         Assert.Equal(1000, ring.Observe(-1, 66));
         Assert.Equal(-1, ring.Observe(1000, 166));
         Assert.Equal(500, ring.Observe(500, 200));
-        Assert.Equal(500, ring.Observe(1000, 210));
+        Assert.Equal(1000, ring.Observe(1000, 210));
         Assert.Equal(200, ring.Observe(200, 225));
         Assert.Equal(180f, MiningRingProgress.PartialSweep(500, 80, 4), 2);
         Assert.InRange(MiningRingProgress.PartialSweep(999, 80, 4), 354f, 355f);
