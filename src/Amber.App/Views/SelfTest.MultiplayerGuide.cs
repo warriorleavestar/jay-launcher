@@ -47,6 +47,10 @@ internal sealed partial class SelfTest
         // One lamp: no code → open-a-room is amber; a recognised code → join is amber.
         var host = Visible("LobbyHostButton");
         var join = Visible("LobbyJoinButton");
+        vm.IsScanning = true;
+        Check("Lobby: hosting waits for the current LAN world", host?.IsEffectivelyEnabled == false);
+        vm.IsScanning = false;
+        Check("Lobby: hosting is available after discovery", host?.IsEffectivelyEnabled == true);
         Check("一盏灯：没贴码时开房间是琥珀，加入是蓝色", host?.Classes.Contains("play") == true && join?.Classes.Contains("play") == false && join?.Classes.Contains("primary") == true);
         if (vm.StartsGameToHost)
             Check("Lobby: with no LAN world the button is [Play and open a room] and names the game it starts",

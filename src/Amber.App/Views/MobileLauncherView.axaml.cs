@@ -33,9 +33,11 @@ public sealed partial class MobileLauncherView : UserControl
     {
         _resumeGame = resumeGame;
         _resumeGameButton.IsVisible = resumeGame is not null;
-        if (openMultiplayer && DataContext is ViewModels.MainViewModel main &&
-            main.CurrentPage is not ViewModels.MultiplayerViewModel)
-            main.Shell.Navigate("play");
+        if (openMultiplayer && DataContext is ViewModels.MainViewModel main)
+        {
+            if (main.CurrentPage is not ViewModels.MultiplayerViewModel) main.Shell.Navigate("play");
+            if (main.Multiplayer.IsIdle) main.Multiplayer.ScanCommand.Execute(null);
+        }
     }
 
     private void OnResumeGame(object? sender, RoutedEventArgs e) => _resumeGame?.Invoke();
