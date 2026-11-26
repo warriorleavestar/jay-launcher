@@ -166,6 +166,10 @@ public sealed class TouchInputRouter
     public bool Move(int pointerId, double x, double y)
     {
         if (!_pointers.TryGetValue(pointerId, out var pointer)) return false;
+        // Android sends all pointers for each ACTION_MOVE. A stationary menu finger must
+        // not move the game's single mouse cursor back after a different finger dragged it.
+        if (pointer.MenuInteraction && pointer.X == x && pointer.Y == y) return true;
+
         if (pointer.Action == TouchControlAction.Move)
         {
             var vector = Profile.MovementVector(x, y);
@@ -198,7 +202,8 @@ public sealed class TouchInputRouter
                 }
                 else if (!pointer.MenuInteraction && dragged)
                 {
-                    _sink.CancelAction(TouchControlAction.PrimaryAction);
+                    if (!HasOtherActiveAction(TouchControlAction.PrimaryAction, pointerId))
+                        _sink.CancelAction(TouchControlAction.PrimaryAction);
                     AddLook(x - pointer.X, y - pointer.Y);
                     pointer = pointer with
                     {
@@ -241,7 +246,8 @@ public sealed class TouchInputRouter
                     // Start the held click at the original touch point before following the
                     // finger, so sliders and crafting slots see the same sequence as a mouse.
                     _sink.SetPointer(pointer.StartX, pointer.StartY, false);
-                    _sink.SetAction(TouchControlAction.PrimaryAction, true);
+                    if (!HasOtherActiveAction(TouchControlAction.PrimaryAction, pointerId))
+                        _sink.SetAction(TouchControlAction.PrimaryAction, true);
                     _sink.SetPointer(x, y, false);
                     pointer = pointer with
                     {
@@ -259,8 +265,8 @@ public sealed class TouchInputRouter
                     (!pointer.SlotDrag && dragged && Math.Abs(totalY) > Math.Abs(physicalTotalX) * 1.25);
                 if (verticalScroll)
                 {
-                    if (!pointer.Scrolling)
-                        if (pointer.HeldAction is { } heldAction) _sink.CancelAction(heldAction);
+                    if (pointer.HeldAction is { } heldAction && !HasOtherActiveAction(heldAction, pointerId))
+                        _sink.CancelAction(heldAction);
                     var remainder = pointer.ScrollRemainder + (y - pointer.Y);
                     while (Math.Abs(remainder) >= ScrollStep)
                     {
@@ -271,7 +277,7 @@ public sealed class TouchInputRouter
                         _sink.SetAction(action, false);
                         remainder -= Math.CopySign(ScrollStep, remainder);
                     }
-                    pointer = pointer with { Scrolling = true, PointerHeld = false, ScrollRemainder = remainder };
+                    pointer = pointer with { Scrolling = true, PointerHeld = false, HeldAction = null, ScrollRemainder = remainder };
                 }
             }
             else

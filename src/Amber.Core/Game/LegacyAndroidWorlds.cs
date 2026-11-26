@@ -62,16 +62,22 @@ public static class LegacyAndroidWorlds
             for (int i = 1; Exists(target) && !File.Exists(Path.Combine(target, marker)); i++)
                 target = Path.Combine(saves, $"{item.Target} (legacy {i})");
             if (File.Exists(Path.Combine(target, marker))) continue;
+            var source = new DirectoryInfo(Path.Combine(shared, item.Source));
             if (Directory.Exists(staging)) Directory.Delete(staging, true);
             try
             {
                 if (new DirectoryInfo(saves).LinkTarget is not null ||
                     new DirectoryInfo(game.VersionDir(item.Instance)).LinkTarget is not null)
                     throw new IOException(saves);
-                CopyWorld(new DirectoryInfo(Path.Combine(shared, item.Source)), staging, ct);
+                CopyWorld(source, staging, ct);
                 File.WriteAllText(Path.Combine(staging, marker), "");
                 Directory.CreateDirectory(saves);
                 Directory.Move(staging, target);
+            }
+            catch (DirectoryNotFoundException) when (!source.Exists && Directory.Exists(shared))
+            {
+                // The player may remove a shared world between planning and the first launch.
+                // Keep importing the remaining worlds; errors within an existing world still retry.
             }
             finally
             {

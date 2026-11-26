@@ -900,6 +900,24 @@ public sealed class MobilePortTests
     }
 
     [Fact]
+    public void DraggingOneMiningFingerKeepsTheOtherMining()
+    {
+        var sink = new RecordingTouchSink();
+        var router = new TouchInputRouter(sink);
+        router.Press(1, 0.55, 0.42);
+        router.BeginLongPress(1);
+        router.Press(2, 0.65, 0.42);
+        router.BeginLongPress(2);
+
+        router.Move(2, 0.75, 0.42);
+        router.Release(2);
+        Assert.DoesNotContain(TouchControlAction.PrimaryAction, sink.CanceledActions);
+        Assert.True(router.IsLongPress(1));
+        router.Release(1);
+        Assert.Single(sink.Actions, a => a == (TouchControlAction.PrimaryAction, false));
+    }
+
+    [Fact]
     public void TouchInputRouterLetsSecondFingerAimWhileMovementStaysHeld()
     {
         var sink = new RecordingTouchSink();
@@ -1007,6 +1025,29 @@ public sealed class MobilePortTests
         Assert.True(router.Release(30));
         Assert.Contains((TouchControlAction.PrimaryAction, false), sink.Actions);
         Assert.Equal((0.70, 0.55, false), sink.LastPointer);
+    }
+
+    [Fact]
+    public void ChangingASliderDragToScrollReleasesOnlyItsOwnHold()
+    {
+        var sink = new RecordingTouchSink();
+        var router = new TouchInputRouter(sink);
+        router.Press(1, 0.40, 0.40, controlsEnabled: false);
+        router.Move(1, 0.45, 0.40);
+        router.Press(2, 0.60, 0.40, controlsEnabled: false);
+        router.Move(2, 0.65, 0.40);
+        router.Move(2, 0.65, 0.75);
+
+        // Android reports every finger in each MOVE, including the resting scroll finger.
+        router.Move(1, 0.51, 0.40);
+        router.Move(2, 0.65, 0.75);
+        Assert.Equal((0.51, 0.40, false), sink.LastPointer);
+        Assert.DoesNotContain(TouchControlAction.PrimaryAction, sink.CanceledActions);
+        Assert.Single(sink.Actions, a => a == (TouchControlAction.PrimaryAction, true));
+        router.Release(1);
+        Assert.False(router.IsPressed(TouchControlAction.PrimaryAction));
+        Assert.Single(sink.Actions, a => a == (TouchControlAction.PrimaryAction, false));
+        router.Release(2);
     }
 
     [Fact]
