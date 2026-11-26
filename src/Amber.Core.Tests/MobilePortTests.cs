@@ -1038,6 +1038,10 @@ public sealed class MobilePortTests
         router.Move(2, 0.65, 0.40);
         router.Move(2, 0.65, 0.75);
 
+        // Android reports every finger in each MOVE, including the resting scroll finger.
+        router.Move(1, 0.51, 0.40);
+        router.Move(2, 0.65, 0.75);
+        Assert.Equal((0.51, 0.40, false), sink.LastPointer);
         Assert.DoesNotContain(TouchControlAction.PrimaryAction, sink.CanceledActions);
         Assert.Single(sink.Actions, a => a == (TouchControlAction.PrimaryAction, true));
         router.Release(1);

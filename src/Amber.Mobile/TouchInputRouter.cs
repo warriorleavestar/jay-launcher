@@ -166,6 +166,10 @@ public sealed class TouchInputRouter
     public bool Move(int pointerId, double x, double y)
     {
         if (!_pointers.TryGetValue(pointerId, out var pointer)) return false;
+        // Android sends all pointers for each ACTION_MOVE. A stationary menu finger must
+        // not move the game's single mouse cursor back after a different finger dragged it.
+        if (pointer.MenuInteraction && pointer.X == x && pointer.Y == y) return true;
+
         if (pointer.Action == TouchControlAction.Move)
         {
             var vector = Profile.MovementVector(x, y);
