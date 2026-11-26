@@ -31,6 +31,31 @@ public sealed class LegacyAndroidWorldsTests : IDisposable
         Assert.Contains("-Xmx1536m", invocation.VmOptions);
     }
 
+    [Fact]
+    public void RemovingAWorldAfterPlanningDoesNotBlockOtherWorldsOrLaunch()
+    {
+        var game = new GameDirectory(Path.Combine(_root, "game"));
+        Directory.CreateDirectory(game.VersionDir("test"));
+        File.WriteAllText(game.VersionJsonPath("test"), "{}");
+        var shared = Path.Combine(game.Root, "saves");
+        foreach (var name in new[] { "removed", "kept" })
+        {
+            Directory.CreateDirectory(Path.Combine(shared, name));
+            File.WriteAllText(Path.Combine(shared, name, "level.dat"), name);
+        }
+        void Preserve(bool planOnly) =>
+            LegacyAndroidWorlds.Preserve(game, _root, ["test"], _ => true, CancellationToken.None, planOnly);
+
+        Preserve(true);
+        Directory.Delete(Path.Combine(shared, "removed"), true);
+        Preserve(false);
+        Preserve(false);
+
+        var saves = Path.Combine(game.VersionDir("test"), "saves");
+        Assert.Equal("kept", File.ReadAllText(Path.Combine(saves, "kept", "level.dat")));
+        Assert.Single(Directory.GetDirectories(saves));
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
