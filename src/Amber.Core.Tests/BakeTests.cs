@@ -562,17 +562,40 @@ public sealed class BakeTests : IDisposable
             VersionId = "1.21.1",
             JavaPath = "unused-when-embedded",
             Session = new GameSession("Tester", Guid.NewGuid(), "0", "legacy"),
-            ExtraJvmArgs = ["-Djay.test=true"],
+            ExtraJvmArgs = ["-Djay.test=true", "--add-exports", "java.base/jdk.internal.misc=ALL-UNNAMED"],
             ExtraGameArgs = ["--demo"],
         });
 
         Assert.Equal("net.minecraft.client.main.Main", invocation.MainClass);
         Assert.Contains("-Djay.test=true", invocation.VmOptions);
+        Assert.Contains("--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED", invocation.VmOptions);
+        Assert.DoesNotContain("java.base/jdk.internal.misc=ALL-UNNAMED", invocation.VmOptions);
         Assert.Contains(invocation.VmOptions, value => value.StartsWith("-Djava.class.path=", StringComparison.Ordinal));
         Assert.DoesNotContain("-cp", invocation.VmOptions);
         Assert.DoesNotContain(invocation.VmOptions, value => value.StartsWith("-Djay.embedded.marker=", StringComparison.Ordinal));
         Assert.Equal("--demo", invocation.Arguments[^1]);
         Assert.Null(invocation.TransientDirectory);
+    }
+
+    [Fact]
+    public void EmbeddedLaunchJoinsPairedModuleOptionsForTheJniInvocationApi()
+    {
+        Version("26.3");
+        var jsonPath = Path.Combine(Game, "versions", "26.3", "26.3.json");
+        File.WriteAllText(jsonPath,
+            """{"id":"26.3","type":"release","mainClass":"net.minecraft.client.main.Main","libraries":[],"arguments":{"game":[],"jvm":["--add-exports","java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens","java.base/java.lang=ALL-UNNAMED","-cp","${classpath}"]}}""");
+
+        var invocation = new GameLauncher(new GameDirectory(Game)).BuildEmbeddedInvocation(new LaunchOptions
+        {
+            VersionId = "26.3",
+            JavaPath = "unused-when-embedded",
+            Session = new GameSession("Tester", Guid.NewGuid(), "0", "legacy"),
+        });
+
+        Assert.Contains("--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED", invocation.VmOptions);
+        Assert.Contains("--add-opens=java.base/java.lang=ALL-UNNAMED", invocation.VmOptions);
+        Assert.DoesNotContain("--add-exports", invocation.VmOptions);
+        Assert.DoesNotContain("--add-opens", invocation.VmOptions);
     }
 
     [Fact]

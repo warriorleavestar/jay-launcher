@@ -8,6 +8,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using Amber.Core.Launch;
+using Amber.Core.Multiplayer.Public;
 using Amber.Core.Net;
 
 namespace Amber.Core.Multiplayer;
@@ -62,6 +63,8 @@ public static class EasyTierRelease
 
     internal static Asset For(string os, Architecture arch) => (os, arch) switch
     {
+        // The APK carries the same verified, statically linked Linux executables for its ABI.
+        ("android", Architecture.Arm64 or Architecture.X64) => For("linux", arch),
         ("windows", Architecture.X64) => A("windows-x86_64", "cdb113651de1f37244f16d405447806a76cd9012780a4e519ed7eba062306888", 11_621_165, true),
         ("windows", Architecture.Arm64) => A("windows-arm64", "a5ce68a4a6f0e458e10ff3dbabadedacc6ddcf621bd5c4338efe613cabfceefa", 10_643_891, true),
         ("windows", Architecture.X86) => A("windows-i686", "32e8d1c6b06ba53614c5581295d317f1bcf1d044398631ab486c616e2e9cfe7b", 11_223_763, true),
@@ -86,9 +89,15 @@ public static class EasyTierRelease
     /// </summary>
     public static ReleaseCheck Signature => SignatureCheck.Value;
 
+    // This immutable EasyTier build was signed before the third release key was added. Keep verifying it against the
+    // exact 2-of-2 list named by its signed statement; Jay releases and future component builds still use TrustList.Jay
+    // (currently 2-of-3). The two keys remain in JayTrust.ReleaseKeys, so this grants no trust to a retired or unknown key.
+    internal static TrustList EmbeddedTrust => new(
+        [.. JayTrust.ReleaseKeys.Take(2).Select(Convert.FromBase64String)], 2);
+
     private static readonly Lazy<ReleaseCheck> SignatureCheck = new(() =>
         CheckSignature(Embedded(ReleaseSignature.SignatureFileName) is { } m ? Encoding.UTF8.GetString(m) : null,
-            Embedded(ReleaseSignature.SumsFileName) ?? [], TrustList.Jay, All));
+            Embedded(ReleaseSignature.SumsFileName) ?? [], EmbeddedTrust, All));
 
     /// <summary>
     /// Whether a package may be installed: always when this Jay has no release keys built in yet
@@ -146,7 +155,9 @@ public static class EasyTierRelease
     private static Asset ForCurrentPlatform()
     {
         var os = OperatingSystem.IsWindows() ? "windows" : OperatingSystem.IsMacOS() ? "macos" : OperatingSystem.IsLinux() ? "linux" : "unknown";
-        return For(os, RuntimeInformation.OSArchitecture);
+        return OperatingSystem.IsAndroid()
+            ? For("android", RuntimeInformation.ProcessArchitecture)
+            : For(os, RuntimeInformation.OSArchitecture);
     }
 
     private static Asset A(string platform, string sha256, long size, bool exe = false)
@@ -210,14 +221,21 @@ public sealed class EasyTierInstaller
 
     private EasyTierRelease.Asset Asset => _asset ?? EasyTierRelease.Current;
     public string InstallDir => Path.Combine(_dataDir, "easytier", EasyTierRelease.InstallTag, Asset.Platform);
-    public string CorePath => Path.Combine(InstallDir, Asset.CoreName);
-    public string CliPath => Path.Combine(InstallDir, Asset.CliName);
+    public const string AndroidNativeDirectoryKey = "Jay.AndroidNativeDirectory";
+    private string Executable(string name) => OperatingSystem.IsAndroid()
+        ? Path.Combine((string?)AppContext.GetData(AndroidNativeDirectoryKey)
+            ?? throw new InvalidOperationException(L.T("mobile.game.component_missing")), $"lib{name}.so")
+        : Path.Combine(InstallDir, name);
+
+    public string CorePath => Executable(Asset.CoreName);
+    public string CliPath => Executable(Asset.CliName);
     /// <summary>发布包里随程序附带的安装包（和 Jay 主程序同目录下的 easytier 文件夹）。</summary>
     public string BundledPath => Path.Combine(_bundledDir, Asset.Name);
     /// <summary>手动导入时需要的文件名。</summary>
     public string ExpectedFileName => Asset.Name;
     /// <summary>The WinDivert driver (full-LAN broadcast relay on Windows) must be there too; if it's missing, extract again.</summary>
-    public bool IsInstalled => File.Exists(CorePath) && File.Exists(CliPath)
+    public bool IsInstalled => (!OperatingSystem.IsAndroid() || EasyTierRelease.SignatureAllowsInstall)
+        && File.Exists(CorePath) && File.Exists(CliPath)
         && (!OperatingSystem.IsWindows() || Asset.DriverName is not { } driver || File.Exists(Path.Combine(InstallDir, driver)));
 
     /// <summary>下载来源，按尝试顺序排列。</summary>
@@ -253,6 +271,8 @@ public sealed class EasyTierInstaller
             await WhileLocked(ct);
             // Another install may have finished while this one waited.
             if (IsInstalled) return;
+            if (OperatingSystem.IsAndroid())
+                throw new InvalidDataException(L.T("mobile.game.component_missing"));
             await InstallAsync(progress, ct);
         }
         finally { gate.Release(); }
@@ -310,6 +330,11 @@ public sealed class EasyTierInstaller
     /// <summary>用户手动选的安装包：同样要求大小和 SHA-256 与固定值一致。</summary>
     public async Task ImportAsync(string zipPath, CancellationToken ct = default)
     {
+        if (OperatingSystem.IsAndroid())
+        {
+            await EnsureAsync(ct: ct);
+            return;
+        }
         var gate = InstallLock;
         await gate.WaitAsync(ct);
         try

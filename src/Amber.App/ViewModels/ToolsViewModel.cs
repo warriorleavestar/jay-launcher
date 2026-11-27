@@ -157,10 +157,10 @@ public sealed partial class ToolsViewModel : PageViewModel
     private void Cancel() => _cts?.Cancel();
 
     /// <summary>Progress goes to the activity center's task, and its speed and time left come back for the line on the page.</summary>
-    private void Report(double? fraction, long bytes)
+    private void Report(double? fraction, long bytes, IReadOnlyList<string>? activeFiles = null)
     {
         if (_task is not { } task) return;
-        task.Report(fraction, Status, bytes);
+        task.Report(fraction, Status, bytes, activeFiles);
         BytesPerSecond = task.BytesPerSecond;
         Remaining = task.Remaining;
     }
@@ -189,13 +189,26 @@ public sealed partial class ToolsViewModel : PageViewModel
     {
         var major = SelectedJavaMajor;
         SetStatus(StatusMessage.Info("tools.java.downloading", major));
-        var path = await new JavaRuntimeInstaller(service.Downloader, service.Directory.Root).InstallAsync(null, major, new Progress<DownloadProgress>(p =>
+        var java = service.Java;
+        java.Status = new Progress<string>(text => SetStatus(StatusMessage.Plain(text)));
+        java.FileProgress = new Progress<DownloadProgress>(p =>
         {
             Progress = 100.0 * p.CompletedFiles / Math.Max(1, p.TotalFiles);
             SetStatus(StatusMessage.Info("tools.java.progress", major, p.CompletedFiles, p.TotalFiles));
-            Report(Progress / 100, p.BytesDownloaded);
-        }), ct);
-        await service.Java.ScanAsync(true);
+            Report(Progress / 100, p.BytesDownloaded, p.ActiveFiles);
+        });
+        string path;
+        try
+        {
+            // JavaManager scans the current library and Jay's shared runtime cache first. Only a missing
+            // major is downloaded, so changing game directories never redownloads an installed runtime.
+            path = await java.ForMajorAsync(major, ct);
+        }
+        finally
+        {
+            java.Status = null;
+            java.FileProgress = null;
+        }
         await Ui.FlushAsync();
         SetStatus(StatusMessage.Success("tools.java.installed", path));
     }, L.F("tools.java.downloading", SelectedJavaMajor));
@@ -212,12 +225,23 @@ public sealed partial class ToolsViewModel : PageViewModel
         return (page is null ? status + " " + L.T("tools.update.no_page") : status, page);
     }
 
+    [ObservableProperty] public partial bool CanInstallUpdate { get; set; }
+    private VerifiedUpdate? _installOffer;
+
+    [RelayCommand]
+    private void InstallUpdate()
+    {
+        if (_installOffer is not null) LauncherUpdate.Start(service, _installOffer);
+    }
+
     [RelayCommand]
     private async Task CheckUpdateAsync()
     {
+        _installOffer = null;
+        CanInstallUpdate = false;
         UpdateUrl = null;
         // A blank update address means the official Jay releases.
-        // Phones and tablets update through the stores: without an own address they don't ask the desktop releases.
+        // Store-managed platforms with no custom feed leave the update to the store.
         if (AutoUpdateCheck.ManualFeed(service.Settings.UpdateFeedUrl, AutoUpdateCheck.IsSupported) is not { } feed)
         {
             UpdateStatus = L.T("tools.update.store");
@@ -228,8 +252,15 @@ public sealed partial class ToolsViewModel : PageViewModel
             // Privacy plan item 2: a newer release is offered only when enough Jay release keys signed it.
             var update = await new UpdateCheck(service.Http, AppSettings.DataDir).CheckAsync(feed, UpdateChecker.CurrentVersion);
             (UpdateStatus, UpdateUrl) = DescribeUpdate(feed, update);
+            if (update != null && LauncherUpdate.PackageFor(update) != null)
+            {
+                _installOffer = update;
+                CanInstallUpdate = true;
+                UpdateUrl = null;
+                UpdateStatus = L.F("tools.update.available", update.Info.Version, UpdateChecker.CurrentVersion);
+            }
         }
-        catch (Exception e) when (e is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException or InvalidDataException)
+        catch (Exception e) when (e is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException or InvalidDataException or IOException or UnauthorizedAccessException)
         {
             UpdateStatus = L.F("tools.update.failed", e.Message);
         }
