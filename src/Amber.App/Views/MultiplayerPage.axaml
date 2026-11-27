@@ -10,8 +10,9 @@
              x:Class="Amber.App.Views.MultiplayerPage"
              x:DataType="vm:MultiplayerViewModel">
   <Grid RowDefinitions="Auto,Auto,Auto,*,Auto">
-    <StackPanel Spacing="6" Margin="0,0,14,0">
-      <TextBlock svc:ThemeRegion.Name="multiplayer.title" Classes="h1" Text="{l:T multiplayer.title}" />
+    <!-- The title region holds the no-sandbox line too, so a theme layout that moves the title can't drop it. -->
+    <StackPanel svc:ThemeRegion.Name="multiplayer.title" Spacing="6" Margin="0,0,14,0">
+      <TextBlock Classes="h1" Text="{l:T multiplayer.title}" />
       <!-- Privacy plan item 15: while "Launch without sandbox" is on, this line stays on every tab. -->
       <Border x:Name="NoSandboxLine" Classes="callout warning" Padding="10,6" Margin="0,0,0,8" IsVisible="{Binding RunsWithoutSandbox}">
         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">

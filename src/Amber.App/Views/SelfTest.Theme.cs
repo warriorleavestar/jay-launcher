@@ -237,6 +237,18 @@ internal sealed class ThemeSelfTest(MainWindow window, MainViewModel main, strin
         mp.DiagnosticsOpen = false;
         await Task.Delay(300);
         await ShotAsync("layout-multiplayer-1280x800");
+        // Privacy plan item 15: the no-sandbox line moves with the title region, so a theme layout keeps it on screen.
+        var wasWithoutSandbox = main.Service.Settings.LaunchWithoutSandbox;
+        main.Service.Settings.LaunchWithoutSandbox = true;
+        main.Service.NotifySandboxChanged();
+        await Task.Delay(400);
+        var noSandbox = mpPage.GetVisualDescendants().OfType<Border>().FirstOrDefault(b => b.Name == "NoSandboxLine");
+        Check("主题布局下开着“不用沙盒启动”：隐私提示行还在联机页上看得见",
+            noSandbox is { IsEffectivelyVisible: true } && noSandbox.Bounds.Height > 10 && noSandbox.GetVisualAncestors().Contains(mpPage),
+            $"{noSandbox?.Bounds}");
+        await ShotAsync("layout-multiplayer-no-sandbox-1280x800");
+        main.Service.Settings.LaunchWithoutSandbox = wasWithoutSandbox;
+        main.Service.NotifySandboxChanged();
         main.CurrentPage = settings;
         await Task.Delay(300);
     }
