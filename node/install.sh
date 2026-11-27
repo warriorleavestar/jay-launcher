@@ -2,7 +2,7 @@
 # Jay 联机节点一键部署（Linux，x86_64 / arm64，systemd）
 # Jay relay node installer (Linux, x86_64 / arm64, systemd)
 #
-# 下载 Jay 加固版 EasyTier 的 easytier-core（固定版本，校验 SHA-256；源码 https://github.com/Yumao-Feather/jay-easytier），以普通用户身份作为 systemd 服务运行，
+# 下载 Jay 加固版 EasyTier 的 easytier-core（固定版本，校验 SHA-256；源码 https://github.com/warriorleavestar/jay-easytier），以普通用户身份作为 systemd 服务运行，
 # 只做中继（--no-tun，不建虚拟网卡，不需要 root 权限运行）。
 #
 # 用法 / usage（以 root 运行 / run as root）:
@@ -66,7 +66,7 @@ need unzip
 command -v sha256sum >/dev/null 2>&1 || die "需要 sha256sum（coreutils）"
 
 ASSET="easytier-linux-${ARCH}-v${VERSION}-jay-${COMMIT}.zip"
-URL="https://github.com/Yumao-Feather/jay-easytier/releases/download/${TAG}/${ASSET}"
+URL="https://github.com/warriorleavestar/jay-easytier/releases/download/${TAG}/${ASSET}"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -113,7 +113,7 @@ ARGS="${ARGS} --relay-network-whitelist '${WHITELIST}' --hostname amber-node --r
 cat > "${UNIT_DIR}/${SERVICE}.service" <<UNIT
 [Unit]
 Description=Jay relay node (EasyTier ${VERSION})
-Documentation=https://github.com/Yumao-Feather/jay-easytier
+Documentation=https://github.com/warriorleavestar/jay-easytier
 After=network-online.target
 Wants=network-online.target
 

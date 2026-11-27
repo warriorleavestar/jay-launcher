@@ -19,7 +19,7 @@ sudo bash install.sh
 
 脚本会：
 
-1. 从 [Yumao-Feather/jay-easytier](https://github.com/Yumao-Feather/jay-easytier) 的 GitHub 发布页下载 Jay 加固版 EasyTier 的固定版本（2.6.4），校验 SHA-256；
+1. 从 [warriorleavestar/jay-easytier](https://github.com/warriorleavestar/jay-easytier) 的 GitHub 发布页下载 Jay 加固版 EasyTier 的固定版本（2.6.4），校验 SHA-256；
 2. 建一个专用的系统用户 `amber-node`，注册 systemd 服务 `amber-node`（开机启动，挂了自动重启）；
 3. 如果开着 ufw 或 firewalld，放行 TCP 和 UDP 11010；
 4. 打印节点地址；`PUBLIC_HOST` 是域名时还会打印 **Jay 节点分享码**，在 Jay 联机设置的“中转服务器”里导入就能用（只有 IP 时见下面 `PUBLIC_HOST` 的说明）。
@@ -89,7 +89,7 @@ curl -fsSLO https://raw.githubusercontent.com/warriorleavestar/jay-launcher/main
 sudo bash install.sh
 ```
 
-The script downloads the pinned Jay-hardened EasyTier build (2.6.4) from the [Yumao-Feather/jay-easytier](https://github.com/Yumao-Feather/jay-easytier) GitHub releases and verifies its SHA-256, creates a dedicated `amber-node` system user and an `amber-node` systemd service, opens TCP and UDP 11010 in ufw or firewalld if active, and prints the node address. With a domain (`PUBLIC_HOST=<domain>`) it also prints a **node share code** to import in Jay (Multiplayer settings, relay servers). Share codes never carry an IP address: for a node with only an IP, add the address in Jay and press Export, and Jay makes a sealed code plus a passphrase to tell your friends another way.
+The script downloads the pinned Jay-hardened EasyTier build (2.6.4) from the [warriorleavestar/jay-easytier](https://github.com/warriorleavestar/jay-easytier) GitHub releases and verifies its SHA-256, creates a dedicated `amber-node` system user and an `amber-node` systemd service, opens TCP and UDP 11010 in ufw or firewalld if active, and prints the node address. With a domain (`PUBLIC_HOST=<domain>`) it also prints a **node share code** to import in Jay (Multiplayer settings, relay servers). Share codes never carry an IP address: for a node with only an IP, add the address in Jay and press Export, and Jay makes a sealed code plus a passphrase to tell your friends another way.
 
 Options (set them after `sudo`): `PORT` (default 11010), `RELAY` (`amber` = Jay rooms only, that is networks named `jay-*` and `amber-*`; `all` = every EasyTier network; a node installed with an older script only knows `amber-*` and refuses invite rooms, so uninstall it and install again), `NODE_NAME`, `PUBLIC_HOST` (public IP or domain; set it when the interface only has a private address), `BANDWIDTH_LIMIT` (bytes/s for relayed traffic, 0 = unlimited).
 

@@ -15,7 +15,7 @@ namespace Amber.Core.Multiplayer;
 
 /// <summary>
 /// 联机用的 EasyTier（开源组网工具，LGPL-3.0，https://github.com/EasyTier/EasyTier）。
-/// Jay uses its own hardened build of a pinned upstream tag (https://github.com/Yumao-Feather/jay-easytier, see JAY.md there):
+/// Jay uses its own hardened build of a pinned upstream tag (https://github.com/warriorleavestar/jay-easytier, see JAY.md there):
 /// ciphers fail closed, the management API is loopback-only, remote config, the VPN portal and http(s) peer lists are refused.
 /// 发布包里自带固定版本的安装包；单独拿到主程序时，第一次用联机再从 GitHub 或下载镜像下载。
 /// 无论哪种来源，都校验固定的大小和 SHA-256 后才解压到数据目录。
@@ -42,7 +42,7 @@ public static class EasyTierRelease
     public const string Component = "easytier";
     /// <summary>Install folder name: a new hardened build never reuses files from an older or an upstream install.</summary>
     public const string InstallTag = Version + "-jay-" + Commit;
-    public const string SourceUrl = "https://github.com/Yumao-Feather/jay-easytier";
+    public const string SourceUrl = "https://github.com/warriorleavestar/jay-easytier";
     private const string BaseUrl = SourceUrl + "/releases/download/" + ReleaseTag + "/";
     public const string License = "LGPL-3.0";
 
