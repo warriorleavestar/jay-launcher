@@ -124,7 +124,6 @@ public sealed class DirectSession : IAsyncDisposable
     public int LocalSpeedPort { get; } = EasyTierArgs.FreeTcpPort();
     public bool UsingFallbackNode { get; private set; }
     public NatKind LocalNat => _gathered?.Nat ?? NatKind.Unknown;
-    public string LocalNatDetail => _gathered?.NatDetail ?? "";
     public IPAddress? PublicIPv4 => _gathered?.Candidates.FirstOrDefault(c => c.Kind is PathKind.Punch or PathKind.Mapped)?.EndPoint.Address;
 
     /// <summary>Raised when the session's EasyTier or bridge state changes.</summary>

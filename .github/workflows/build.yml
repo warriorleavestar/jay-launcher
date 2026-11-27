@@ -37,6 +37,13 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
+      - name: Match the signed release tag to the launcher version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $version = dotnet msbuild Amber.App/Amber.App.csproj -getProperty:Version
+          if ("v$version" -ne $env:GITHUB_REF_NAME) { throw 'Release tag must match the launcher version' }
+
       - name: Restore
         run: dotnet restore Amber.slnx
 
@@ -60,7 +67,7 @@ jobs:
       fail-fast: false
       matrix:
         # PR 上不打 Intel Mac 包（GitHub 免费账号 Mac 机器很少，排队最久）；main 和发版标签照常打全部五个平台。
-        include: ${{ fromJSON(github.event_name == 'pull_request' && '[{"os":"windows-latest","rid":"win-x64","archive":"zip"},{"os":"macos-15","rid":"osx-arm64","archive":"tar"},{"os":"ubuntu-latest","rid":"linux-x64","archive":"tar"},{"os":"ubuntu-24.04-arm","rid":"linux-arm64","archive":"tar"}]' || '[{"os":"windows-latest","rid":"win-x64","archive":"zip"},{"os":"macos-15-intel","rid":"osx-x64","archive":"tar"},{"os":"macos-15","rid":"osx-arm64","archive":"tar"},{"os":"ubuntu-latest","rid":"linux-x64","archive":"tar"},{"os":"ubuntu-24.04-arm","rid":"linux-arm64","archive":"tar"}]') }}
+        include: ${{ fromJSON(github.event_name == 'pull_request' && '[{"os":"windows-latest","rid":"win-x64","archive":"zip"},{"os":"macos-15","rid":"osx-arm64","archive":"dmg"},{"os":"ubuntu-latest","rid":"linux-x64","archive":"tar"},{"os":"ubuntu-24.04-arm","rid":"linux-arm64","archive":"tar"}]' || '[{"os":"windows-latest","rid":"win-x64","archive":"zip"},{"os":"macos-15-intel","rid":"osx-x64","archive":"dmg"},{"os":"macos-15","rid":"osx-arm64","archive":"dmg"},{"os":"ubuntu-latest","rid":"linux-x64","archive":"tar"},{"os":"ubuntu-24.04-arm","rid":"linux-arm64","archive":"tar"}]') }}
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -106,7 +113,7 @@ jobs:
           -p:DebugType=none
           -o ../out/server-${{ matrix.rid }}
 
-      # 发布包自带 EasyTier 官方安装包（校验固定的 SHA-256），网络不好也能直接用联机。
+      # 发布包自带 EasyTier 的 Jay 加固版（校验固定的 SHA-256），网络不好也能直接用联机。
       - name: Bundle EasyTier
         shell: bash
         run: bash ../scripts/bundle-easytier.sh ${{ matrix.rid }} ../out/${{ matrix.rid }}/easytier
@@ -118,11 +125,55 @@ jobs:
           New-Item -ItemType Directory -Force ../packages | Out-Null
           Get-ChildItem ../out/${{ matrix.rid }} -Recurse -Filter *.pdb | Remove-Item
           Compress-Archive -Path ../out/${{ matrix.rid }}/* -DestinationPath ../packages/Jay-${{ matrix.rid }}.zip
+          $version = dotnet msbuild Amber.App/Amber.App.csproj -getProperty:Version
+          $pin = (Get-Content ../build/pins.json -Raw | ConvertFrom-Json).pins | Where-Object id -eq windows-update-compiler
+          $setup = Join-Path $env:RUNNER_TEMP $pin.file
+          Invoke-WebRequest $pin.urls[0] -OutFile $setup
+          if ((Get-FileHash $setup).Hash -ne $pin.sha256) { throw "Inno Setup checksum mismatch" }
+          $compiler = Join-Path $env:RUNNER_TEMP 'jay-inno'
+          $tool = Start-Process $setup -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/CURRENTUSER',"/DIR=`"$compiler`"") -PassThru -Wait
+          if ($tool.ExitCode -ne 0) { throw "Compiler setup failed: $($tool.ExitCode)" }
+          & "$compiler\ISCC.exe" "/DJayVersion=$version" ../scripts/jay-windows-update.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (!(Test-Path ../packages/Jay-win-x64-setup.exe)) { throw "Missing Windows update installer" }
+          # Exercise an existing portable install, including a save in a user-chosen sibling folder.
+          $fixture = Join-Path $env:RUNNER_TEMP 'Jay update test'
+          $world = Join-Path $fixture 'instances/test/saves/world'
+          New-Item -ItemType Directory -Force $world | Out-Null
+          Set-Content "$world/level.dat" 'existing-save' -NoNewline
+          Set-Content "$fixture/Jay.exe" 'old-launcher'
+          $up = Start-Process ../packages/Jay-win-x64-setup.exe -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',"/DIR=`"$fixture`"") -PassThru -Wait
+          if ($up.ExitCode -ne 0 -or (Get-FileHash "$fixture/Jay.exe").Hash -ne (Get-FileHash ../out/win-x64/Jay.exe).Hash -or (Get-Content "$world/level.dat" -Raw) -ne 'existing-save') { throw 'In-place Windows update failed' }
           Copy-Item ../server/README.md ../out/server-${{ matrix.rid }}/
           Copy-Item ../docs/network-server.md ../out/server-${{ matrix.rid }}/
           Compress-Archive -Path ../out/server-${{ matrix.rid }}/* -DestinationPath ../packages/JayServer-${{ matrix.rid }}.zip
 
-      - name: Package macOS/Linux
+      - name: Package macOS app and DMG
+        if: matrix.archive == 'dmg'
+        shell: bash
+        run: |
+          find ../out/${{ matrix.rid }} -name '*.pdb' -delete
+          bash ../scripts/publish-macos.sh "${{ matrix.rid }}" "../out/${{ matrix.rid }}" "../packages"
+          # Only the disposable CI runner gets this system-wide installation.
+          app=/Applications/Jay.app
+          test ! -e "$app"
+          sudo mkdir -p "$app/Contents/MacOS"
+          sudo cp /usr/bin/true "$app/Contents/MacOS/Jay"
+          sudo /usr/libexec/PlistBuddy -c 'Add :CFBundleIdentifier string nz.work.minecraft.jay' "$app/Contents/Info.plist"
+          sudo /usr/libexec/PlistBuddy -c 'Add :CFBundleVersion string 0.0.1' "$app/Contents/Info.plist"
+          sudo /usr/libexec/PlistBuddy -c 'Add :CFBundleExecutable string Jay' "$app/Contents/Info.plist"
+          save="$RUNNER_TEMP/Jay test game/saves/world/level.dat"
+          mkdir -p "$(dirname "$save")"
+          printf 'existing-save' > "$save"
+          sudo /usr/sbin/installer -pkg "../packages/Jay-${{ matrix.rid }}.pkg" -target /
+          test "$(cat "$save")" = existing-save
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app/Contents/Info.plist")" != 0.0.1
+          codesign --verify --deep --strict "$app"
+          chmod +x ../out/server-${{ matrix.rid }}/jay-server
+          cp ../server/README.md ../docs/network-server.md ../out/server-${{ matrix.rid }}/
+          tar -C ../out/server-${{ matrix.rid }} -czf ../packages/JayServer-${{ matrix.rid }}.tar.gz .
+
+      - name: Package Linux
         if: matrix.archive == 'tar'
         shell: bash
         run: |
@@ -130,7 +181,7 @@ jobs:
           find ../out/${{ matrix.rid }} -name '*.pdb' -delete
           chmod +x ../out/${{ matrix.rid }}/Jay
           # Linux 版内置了思源黑体，按 OFL 附上许可证。
-          if [[ "${{ matrix.rid }}" == linux-* ]]; then cp Amber.App/Assets/Fonts/OFL.txt ../out/${{ matrix.rid }}/NotoSansSC-OFL.txt; fi
+          cp Amber.App/Assets/Fonts/OFL.txt ../out/${{ matrix.rid }}/NotoSansSC-OFL.txt
           tar -C ../out/${{ matrix.rid }} -czf ../packages/Jay-${{ matrix.rid }}.tar.gz .
           chmod +x ../out/server-${{ matrix.rid }}/jay-server
           cp ../server/README.md ../server/jay-server.service ../server/jay-public-node.service ../server/install-network-node.sh ../docs/network-server.md ../out/server-${{ matrix.rid }}/
@@ -151,7 +202,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      RELEASE_SIGNED_ANDROID: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.publish_android_preview) }}
+      RELEASE_SIGNED_ANDROID: ${{ startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.publish_android_preview) }}
+      MINECRAFT_LEGACY_INPUT_VERSION: '1.21.11'
+      MINECRAFT_NAMED_INPUT_VERSION: '26.3'
     defaults:
       run:
         working-directory: src
@@ -164,6 +217,12 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
+      - name: Verify Android native input queues
+        shell: bash
+        run: |
+          bash ../scripts/check-android-menu-queue.sh
+          bash ../scripts/check-android-scalar-queue.sh
+
       - name: Install Android workload
         run: dotnet workload install android
 
@@ -175,12 +234,50 @@ jobs:
           -p:JavaSdkDirectory=${{ runner.temp }}/jdk
           -p:AcceptAndroidSdkLicenses=true
 
+      - name: Verify Minecraft touch bridge signatures
+        shell: bash
+        run: |
+          set -euo pipefail
+          manifest="$(curl --fail --silent --show-error \
+            https://piston-meta.mojang.com/mc/game/version_manifest_v2.json)"
+          javap_path="$(find "${{ runner.temp }}/jdk" -type f -name javap -print -quit)"
+          test -n "$javap_path"
+          check_version() {
+            local version_id=$1
+            local version_url version_json client_url client_sha1 client_jar
+            version_url="$(jq --raw-output --arg id "$version_id" \
+              '.versions[] | select(.id == $id) | .url' <<<"$manifest" | head -n 1)"
+            test -n "$version_url"
+            version_json="$(curl --fail --silent --show-error "$version_url")"
+            client_url="$(jq --raw-output '.downloads.client.url' <<<"$version_json")"
+            client_sha1="$(jq --raw-output '.downloads.client.sha1' <<<"$version_json")"
+            client_jar="${{ runner.temp }}/minecraft-$version_id-client.jar"
+            curl --fail --location --retry 2 --output "$client_jar" "$client_url"
+            echo "$client_sha1  $client_jar" | sha1sum --check --strict
+            JAVAP_BIN="$javap_path" bash ../scripts/check-android-input-bridge.sh "$client_jar"
+          }
+          check_version "$MINECRAFT_LEGACY_INPUT_VERSION"
+          check_version "$MINECRAFT_NAMED_INPUT_VERSION"
+
       - name: Install Android NDK and CMake
         shell: bash
         run: |
+          set -euo pipefail
+          sdk_root="${{ runner.temp }}/android-sdk"
+          sdkmanager="$(find "$sdk_root" -type f -name sdkmanager -print -quit 2>/dev/null || true)"
+          if [ -z "$sdkmanager" ] && command -v sdkmanager >/dev/null 2>&1; then
+            sdkmanager="$(command -v sdkmanager)"
+          fi
+          if [ -z "$sdkmanager" ] && [ -n "${ANDROID_HOME:-}" ] && [ -d "$ANDROID_HOME" ]; then
+            sdkmanager="$(find "$ANDROID_HOME" -type f -name sdkmanager -print -quit 2>/dev/null || true)"
+          fi
+          if [ -z "$sdkmanager" ] || [ ! -x "$sdkmanager" ]; then
+            echo "::error::Android sdkmanager was not installed by the .NET workload or runner image."
+            exit 1
+          fi
           # yes exits non-zero (EPIPE) once sdkmanager stops reading; pipefail would fail the step.
-          (yes || true) | "${{ runner.temp }}/android-sdk/cmdline-tools/latest/bin/sdkmanager" \
-            --sdk_root="${{ runner.temp }}/android-sdk" "ndk;28.2.13676358" "cmake;3.22.1"
+          (yes || true) | "$sdkmanager" \
+            --sdk_root="$sdk_root" "ndk;28.2.13676358" "cmake;3.22.1"
 
       - name: Build Jay native JVM host
         shell: bash
@@ -196,6 +293,59 @@ jobs:
             "${{ runner.temp }}/android-sdk" \
             Amber.Android/obj/jay-glfw
 
+      - name: Build pinned SDL Android bridge
+        shell: bash
+        run: |
+          bash ../scripts/build-android-sdl.sh \
+            "${{ runner.temp }}/android-sdk" \
+            "${{ runner.temp }}/jdk" \
+            Amber.Android/obj/jay-sdl
+
+      - name: Stage the signed multiplayer component for both Android ABIs
+        run: bash ../scripts/stage-android-easytier.sh Amber.Android/obj/jay-easytier
+
+      - name: Stage standalone ANGLE for emulator graphics
+        run: python3 ../scripts/fetch-android-angle.py Amber.Android/obj/jay-angle
+
+      - name: Fetch pinned Java 25 runtime catalog
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          catalog="Amber.Android/obj/jay-runtime-catalog"
+          rm -rf "$catalog"
+          mkdir -p "$catalog"
+          if ! gh release download android-runtime-v3 \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern 'runtime25-*.json' \
+            --dir "$catalog"; then
+            rm -f "$catalog"/*
+            if [[ "${{ github.event_name }}" == pull_request ]]; then
+              echo "::notice::android-runtime-v3 is not published yet; PR APK omits the Java 25 catalog."
+              exit 0
+            fi
+            echo "::error::android-runtime-v3 descriptors are required for downloadable Android builds."
+            exit 1
+          fi
+          for architecture in arm64-v8a x86_64; do
+            descriptor="$catalog/runtime25-$architecture.json"
+            archive="jay-android-runtime25-$architecture.tar.xz"
+            expected_download="${{ github.server_url }}/${{ github.repository }}/releases/download/android-runtime-v3/$archive"
+            test -f "$descriptor"
+            jq -e \
+              --arg architecture "$architecture" \
+              --arg id "jay-android-runtime25-v3-$architecture" \
+              --arg downloadUrl "$expected_download" \
+              '.Format == 1 and .Id == $id and .Architecture == $architecture and
+               .ArchiveSize > 0 and (.ArchiveSha256 | test("^[0-9a-f]{64}$")) and
+               .MaximumExtractedSize >= .ArchiveSize and .MaximumExtractedSize <= 1073741824 and
+               (.License | length) > 0 and (.SourceUrl | startswith("https://")) and
+               .DownloadUrl == $downloadUrl' \
+              "$descriptor" >/dev/null
+          done
+          test "$(find "$catalog" -maxdepth 1 -type f | wc -l | tr -d ' ')" = 2
+
       - name: Prepare stable preview signing key
         if: env.RELEASE_SIGNED_ANDROID == 'true'
         shell: bash
@@ -205,24 +355,43 @@ jobs:
           test -n "$ANDROID_RELEASE_KEYSTORE_BASE64"
           printf '%s' "$ANDROID_RELEASE_KEYSTORE_BASE64" | base64 --decode > "${{ runner.temp }}/jay-android-preview.p12"
 
+      - name: Require CurseForge key for downloadable Android builds
+        if: env.RELEASE_SIGNED_ANDROID == 'true'
+        shell: bash
+        env:
+          # Keep the key out of PRs, ordinary manual CI and every unrelated Android build step.
+          JAY_CURSEFORGE_API_KEY: ${{ secrets.CURSEFORGE_API_KEY }}
+        run: |
+          if [ -z "$JAY_CURSEFORGE_API_KEY" ]; then
+            echo "::error::CURSEFORGE_API_KEY secret is empty; downloadable Android builds must include the CurseForge key."
+            exit 1
+          fi
+
       - name: Publish CI APK
         if: env.RELEASE_SIGNED_ANDROID != 'true'
         run: >-
-          dotnet publish Amber.Android/Amber.Android.csproj -c Release
+          dotnet publish Amber.Android/Amber.Android.csproj -c Release -m:1
           -p:AndroidSdkDirectory=${{ runner.temp }}/android-sdk
           -p:JavaSdkDirectory=${{ runner.temp }}/jdk
+          -p:JaySdlRuntimeDir=${{ github.workspace }}/src/Amber.Android/obj/jay-sdl
+          -p:JayAngleRuntimeDir=${{ github.workspace }}/src/Amber.Android/obj/jay-angle
+          -p:JayAndroidRuntimeCatalogDir=${{ github.workspace }}/src/Amber.Android/obj/jay-runtime-catalog
           -p:AndroidPackageFormats=apk
 
       - name: Publish release-signed preview APK
         if: env.RELEASE_SIGNED_ANDROID == 'true'
         env:
+          JAY_CURSEFORGE_API_KEY: ${{ secrets.CURSEFORGE_API_KEY }}
           ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
           ANDROID_RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_STORE_PASSWORD }}
           ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
         run: >-
-          dotnet publish Amber.Android/Amber.Android.csproj -c Release
+          dotnet publish Amber.Android/Amber.Android.csproj -c Release -m:1
           -p:AndroidSdkDirectory=${{ runner.temp }}/android-sdk
           -p:JavaSdkDirectory=${{ runner.temp }}/jdk
+          -p:JaySdlRuntimeDir=${{ github.workspace }}/src/Amber.Android/obj/jay-sdl
+          -p:JayAngleRuntimeDir=${{ github.workspace }}/src/Amber.Android/obj/jay-angle
+          -p:JayAndroidRuntimeCatalogDir=${{ github.workspace }}/src/Amber.Android/obj/jay-runtime-catalog
           -p:AndroidPackageFormats=apk
           -p:AndroidKeyStore=true
           -p:AndroidSigningKeyStore=${{ runner.temp }}/jay-android-preview.p12
@@ -244,6 +413,10 @@ jobs:
           [[ "$BADGING" == *"versionName='$DISPLAY_VERSION'"* ]]
           [[ "$BADGING" == *"versionCode='$BUILD_VERSION'"* ]]
           "$APKSIGNER_PATH" verify "$APK_PATH"
+          if compgen -G 'Amber.Android/obj/jay-runtime-catalog/runtime25-*.json' >/dev/null; then
+            unzip -Z1 "$APK_PATH" | grep -Fx 'assets/runtime25-arm64-v8a.json'
+            unzip -Z1 "$APK_PATH" | grep -Fx 'assets/runtime25-x86_64.json'
+          fi
           if [[ "$RELEASE_SIGNED_ANDROID" == true ]]; then
             CERT_SHA256="$("$APKSIGNER_PATH" verify --print-certs "$APK_PATH" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')"
             test "$CERT_SHA256" = "595779309affcfebd61f591c3127a75c5471fbcd0f192539fbe5f52b951808e0"
@@ -251,21 +424,30 @@ jobs:
           bash ../scripts/check-android-16k.sh "$APK_PATH" "${{ runner.temp }}/android-sdk"
           mkdir -p ../packages
           cp "$APK_PATH" ../packages/Jay-android-experimental.apk
+          zip -X -j ../packages/Jay-Vanilla-26.3.mrpack ../instances/vanilla-26.3/modrinth.index.json
+          unzip -tq ../packages/Jay-Vanilla-26.3.mrpack
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: jay-android
-          path: packages/Jay-android-experimental.apk
+          path: |
+            packages/Jay-android-experimental.apk
+            packages/Jay-Vanilla-26.3.mrpack
           if-no-files-found: error
 
   android-smoke:
     if: >-
+      github.event_name == 'pull_request' ||
       (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.publish_android_preview)
     needs: android
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: jay-android
@@ -285,25 +467,7 @@ jobs:
           profile: pixel_7
           disable-animations: true
           script: |
-            adb install android-assets/Jay-android-experimental.apk
-            adb shell wm size 1080x2400
-            adb shell wm density 420
-            adb shell monkey -p nz.work.minecraft.jay -c android.intent.category.LAUNCHER 1
-            sleep 8
-            test -n "$(adb shell pidof nz.work.minecraft.jay)"
-            adb shell input swipe 540 1900 540 700 500
-            adb exec-out screencap -p > android-phone.png
-            adb shell am force-stop nz.work.minecraft.jay
-            adb shell wm size 2560x1600
-            adb shell wm density 320
-            adb shell monkey -p nz.work.minecraft.jay -c android.intent.category.LAUNCHER 1
-            sleep 5
-            test -n "$(adb shell pidof nz.work.minecraft.jay)"
-            adb shell input tap 1280 800
-            adb shell input swipe 2100 1300 2100 500 500
-            sleep 2
-            test -n "$(adb shell pidof nz.work.minecraft.jay)"
-            adb exec-out screencap -p > android-tablet.png
+            bash scripts/check-android-emulator-smoke.sh android-assets/Jay-android-experimental.apk
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -351,11 +515,11 @@ jobs:
           fi
           cd android-assets
           test -s Jay-android-experimental.apk
-          sha256sum Jay-android-experimental.apk > SHA256SUMS.txt
+          sha256sum Jay-android-experimental.apk Jay-Vanilla-26.3.mrpack > SHA256SUMS.txt
           cat > release-notes.md <<'NOTES'
           直接下载 Jay-android-experimental.apk。支持 Android 8.0 及以上的 ARM64 和 x86_64 设备。
 
-          Jay 内置独立 JVM、MobileGlues 图形桥和 Minecraft 1.21.11 安装流程，不需要 FCL 或其他启动器。已经可以创建并进入世界。
+          下载 Jay-Vanilla-26.3.mrpack 后，在启动器的「发现」页点「导入整合包文件」，选中下载的文件。导入完成后，在游戏库启动 Jay Vanilla 26.3。首次安装需要联网下载游戏资源和 Java 运行环境。
 
           支持摇杆移动、滑动转向、攻击、使用、跳跃、疾跑、潜行、背包、丢弃、聊天键盘和快捷栏切换。游戏菜单使用直接触摸，操作按钮会自动隐藏，只保留 Esc。
 
@@ -366,7 +530,7 @@ jobs:
             # exact commit that produced the APK instead of failing after the first publication.
             gh api --method PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/android-preview" \
               -f sha="$GITHUB_SHA" -F force=true >/dev/null
-            gh release upload android-preview Jay-android-experimental.apk SHA256SUMS.txt \
+            gh release upload android-preview Jay-android-experimental.apk Jay-Vanilla-26.3.mrpack SHA256SUMS.txt \
               --repo "$GITHUB_REPOSITORY" --clobber
             gh release edit android-preview \
               --repo "$GITHUB_REPOSITORY" \
@@ -374,7 +538,7 @@ jobs:
               --notes-file release-notes.md \
               --prerelease
           else
-            gh release create android-preview Jay-android-experimental.apk SHA256SUMS.txt \
+            gh release create android-preview Jay-android-experimental.apk Jay-Vanilla-26.3.mrpack SHA256SUMS.txt \
               --repo "$GITHUB_REPOSITORY" \
               --target "$GITHUB_SHA" \
               --title "Jay Android 预览版" \
@@ -428,81 +592,125 @@ jobs:
           path: packages/Jay-ios-simulator-arm64-experimental.tar.gz
           if-no-files-found: error
 
-  # Windows 代码签名（SignPath Foundation）。只在发布标签上跑，并且要先在仓库设置里配好
-  # 变量 SIGNPATH_ORGANIZATION_ID 和密钥 SIGNPATH_API_TOKEN，没配时整个任务跳过，发布照旧（未签名）。
-  # 每次签名都要在 SignPath 网页上人工批准，所以等待时间放宽到 1 小时。
-  # 签名范围见 .signpath/artifact-configuration.xml，政策见 docs/code-signing-policy.md。
-  sign-windows:
-    if: startsWith(github.ref, 'refs/tags/v') && vars.SIGNPATH_ORGANIZATION_ID != ''
-    needs: publish
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
-    permissions:
-      actions: read
-      contents: read
-    steps:
-      - name: Find unsigned Windows artifact
-        id: unsigned
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          id="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts" \
-            --jq '.artifacts[] | select(.name == "jay-win-x64") | .id')"
-          test -n "$id"
-          echo "artifact-id=$id" >> "$GITHUB_OUTPUT"
-          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-
-      - name: Submit signing request
-        uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3.0
-        with:
-          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
-          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'jay-launcher' }}
-          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG || 'release-signing' }}
-          artifact-configuration-slug: ${{ vars.SIGNPATH_ARTIFACT_CONFIGURATION_SLUG }}
-          github-artifact-id: ${{ steps.unsigned.outputs.artifact-id }}
-          wait-for-completion: true
-          wait-for-completion-timeout-in-seconds: 3600
-          output-artifact-directory: signed
-          parameters: |
-            version: ${{ toJSON(steps.unsigned.outputs.version) }}
-
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: signed-jay-win-x64
-          path: signed/*
-          if-no-files-found: error
-
-  release:
-    # 签名任务跳过（没配置 SignPath）时照常发布；签名失败或被拒时不发布，避免把未签名的包当成正式版发出去。
-    if: >-
-      always() && startsWith(github.ref, 'refs/tags/v') &&
-      needs.publish.result == 'success' &&
-      (needs.sign-windows.result == 'success' || needs.sign-windows.result == 'skipped')
-    needs: [publish, sign-windows]
+  publish-experimental:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [publish, android]
+    # Never let an older main build overwrite a newer rolling download.
+    concurrency:
+      group: experimental-publish
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
-          # Desktop and server packages only; the Android and iOS simulator builds are not release assets.
+          pattern: 'jay-*'
+          path: release-assets
+          merge-multiple: true
+
+      - name: Validate rolling download assets
+        shell: bash
+        run: |
+          cd release-assets
+          for asset in \
+            Jay-win-x64.zip \
+            Jay-osx-arm64.dmg \
+            Jay-osx-x64.dmg \
+            Jay-linux-x64.tar.gz \
+            Jay-linux-arm64.tar.gz \
+            Jay-android-experimental.apk \
+            Jay-Vanilla-26.3.mrpack
+          do
+            test -s "$asset"
+          done
+          sha256sum \
+            Jay-win-x64.zip \
+            Jay-osx-arm64.dmg \
+            Jay-osx-x64.dmg \
+            Jay-linux-x64.tar.gz \
+            Jay-linux-arm64.tar.gz \
+            Jay-android-experimental.apk \
+            Jay-Vanilla-26.3.mrpack \
+            > SHA256SUMS.txt
+
+      - name: Publish rolling website downloads
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          current=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/experimental" --jq .object.sha 2>/dev/null || true)
+          if [ -n "$current" ] && [ "$current" != "$GITHUB_SHA" ]; then
+            status=$(gh api "repos/$GITHUB_REPOSITORY/compare/$current...$GITHUB_SHA" --jq .status)
+            case "$status" in
+              ahead) ;;
+              behind)
+                echo "experimental is already newer than $GITHUB_SHA; skipping."
+                exit 0 ;;
+              *)
+                echo "::warning::experimental and $GITHUB_SHA diverged ($status); skipping."
+                exit 0 ;;
+            esac
+          fi
+
+          cat > release-notes.md <<'NOTES'
+          Jay 0.8.0 滚动实验版。此下载通道随 main 构建自动更新，供网站访客直接下载。
+
+          包含 Windows x64、macOS Apple 芯片、macOS Intel、Linux x64、Linux ARM64 与 Android。
+          NOTES
+
+          assets=(
+            release-assets/Jay-win-x64.zip
+            release-assets/Jay-osx-arm64.dmg
+            release-assets/Jay-osx-x64.dmg
+            release-assets/Jay-linux-x64.tar.gz
+            release-assets/Jay-linux-arm64.tar.gz
+            release-assets/Jay-android-experimental.apk
+            release-assets/Jay-Vanilla-26.3.mrpack
+            release-assets/SHA256SUMS.txt
+          )
+          if gh release view experimental --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/experimental" \
+              -f sha="$GITHUB_SHA" -F force=true >/dev/null
+            gh release upload experimental "${assets[@]}" \
+              --repo "$GITHUB_REPOSITORY" --clobber
+            gh release edit experimental \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "Jay 0.8.0 滚动实验版" \
+              --notes-file release-notes.md \
+              --prerelease
+          else
+            gh release create experimental "${assets[@]}" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "Jay 0.8.0 滚动实验版" \
+              --notes-file release-notes.md \
+              --prerelease
+          fi
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [publish, android]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          # Desktop installers, portable packages and servers.
           pattern: 'jay-{win,osx,linux}-*'
           path: release-assets
           merge-multiple: true
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
-        if: needs.sign-windows.result == 'success'
         with:
-          name: signed-jay-win-x64
-          path: signed-assets
-
-      - name: Use signed Windows packages
-        if: needs.sign-windows.result == 'success'
+          name: jay-android
+          path: android-release
+      - name: Stage the channel-signed Android update
         run: |
-          for f in Jay-win-x64.zip JayServer-win-x64.zip; do
-            test -f "signed-assets/$f"
-            cp -f "signed-assets/$f" "release-assets/$f"
+          cp android-release/Jay-android-experimental.apk release-assets/Jay-android.apk
+          for installer in Jay-win-x64-setup.exe Jay-osx-arm64.pkg Jay-osx-x64.pkg Jay-android.apk; do
+            test -s "release-assets/$installer"
           done
 
       # Jay release signature (privacy plan item 2): 2 of the 3 trustees sign this list offline
