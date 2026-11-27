@@ -86,7 +86,7 @@ public sealed class Idna2003Tests : IDisposable
     /// java.net.IDN.toASCII itself. Without Java (or with one too old to run a source file) there is nothing to compare.
     /// </summary>
     [Fact]
-    public void MatchesJavaWhenInstalled()
+    public async Task MatchesJavaWhenInstalled()
     {
         var java = FindJava();
         if (java is null) return;
@@ -121,12 +121,26 @@ public sealed class Idna2003Tests : IDisposable
         info.ArgumentList.Add(source);
         info.ArgumentList.Add(inputFile);
         using var process = Process.Start(info)!;
-        var stderr = process.StandardError.ReadToEndAsync();
-        var output = process.StandardOutput.ReadToEnd();
-        Assert.True(process.WaitForExit(60_000), "java did not finish");
+        // One deadline for the exit and both streams: a Java that hangs with its output open must not hang the test run.
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        var stderr = process.StandardError.ReadToEndAsync(deadline.Token);
+        var stdout = process.StandardOutput.ReadToEndAsync(deadline.Token);
+        string output;
+        try
+        {
+            await process.WaitForExitAsync(deadline.Token);
+            output = await stdout;
+        }
+        catch (OperationCanceledException)
+        {
+            try { process.Kill(entireProcessTree: true); } catch (InvalidOperationException) { }
+            process.WaitForExit(10_000);
+            Assert.Fail("java did not finish");
+            return;
+        }
         // A stub launcher without a runtime, or a Java before 11 that can't run a source file: nothing to compare with.
         if (process.ExitCode != 0 && !output.Contains('!') && !output.Contains('=')) return;
-        Assert.True(process.ExitCode == 0, stderr.Result);
+        Assert.True(process.ExitCode == 0, await stderr);
 
         var results = output.Split('\n').Select(l => l.TrimEnd('\r')).Where(l => l.Length > 0).ToArray();
         Assert.Equal(inputs.Count, results.Length);
