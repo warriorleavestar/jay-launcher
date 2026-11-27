@@ -274,6 +274,16 @@ internal sealed class ThemeSelfTest(MainWindow window, MainViewModel main, strin
                 && compactJoin.TranslatePoint(default, mpPage) is { } at && at.Y + compactJoin.Bounds.Height <= mpPage.Bounds.Height + 1,
             $"{compactJoin?.Bounds} tab={mp.IsPlayTab} idle={mp.IsIdle}");
         await ShotAsync("layout-multiplayer-600x420");
+        // Back to the default theme in this small window: the drawers keep the size the page gave them for it, not the
+        // one they had when the theme was turned on in the wide window.
+        settings.ResetThemePackCommand.Execute(null);
+        await Task.Delay(500);
+        Check("小窗口里恢复默认主题：抽屉保持铺满的尺寸",
+            !mpPage.ThemeLayout.UsingThemeLayout && double.IsNaN(mpPage.DiagnosticsDrawer.Width)
+            && mpPage.DiagnosticsDrawer.HorizontalAlignment == Avalonia.Layout.HorizontalAlignment.Stretch,
+            $"width {mpPage.DiagnosticsDrawer.Width} align {mpPage.DiagnosticsDrawer.HorizontalAlignment}");
+        settings.ImportThemePack(path);
+        await Task.Delay(500);
         window.Width = 1280;
         window.Height = 800;
         main.CurrentPage = settings;

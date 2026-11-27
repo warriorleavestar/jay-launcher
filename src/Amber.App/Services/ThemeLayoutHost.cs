@@ -125,6 +125,9 @@ public sealed class ThemeLayoutHost
         foreach (var (region, snap) in _snapshots.OrderBy(p => p.Value.Index))
         {
             Insert(snap.Parent, snap.Index, region);
+            // A theme never changes an overlay's own properties; the page may have resized it meanwhile (drawers follow
+            // the window width), so only its place is put back.
+            if (_overlays.Contains(region)) continue;
             foreach (var prop in Touched) region.ClearValue(prop);
             foreach (var (prop, value) in snap.Values) region.SetValue(prop, value);
         }
