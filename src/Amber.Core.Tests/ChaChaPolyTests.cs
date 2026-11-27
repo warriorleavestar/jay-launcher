@@ -72,6 +72,17 @@ public sealed class ChaChaPolyTests
     }
 
     [Fact]
+    public void EmptyHandshakePayloadAuthenticatesAcrossProviders()
+    {
+        var (cipher, tag) = Seal(bouncyCastle: true, []);
+        Assert.Empty(cipher);
+        Assert.Empty(Open(bouncyCastle: false, cipher, tag));
+        Assert.Equal(Seal(bouncyCastle: false, []).Tag, tag);
+        tag[0] ^= 1;
+        Assert.Throws<AuthenticationTagMismatchException>(() => Open(bouncyCastle: true, cipher, tag));
+    }
+
+    [Fact]
     public void TheFallbackRejectsAlteredData()
     {
         var (cipher, tag) = Seal(bouncyCastle: true, Plain);

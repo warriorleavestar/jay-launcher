@@ -95,6 +95,7 @@ public class ReverificationFixTests
     public async Task R3_StaleDiscoveryDoesNotReenable()
     {
         var gate = new TaskCompletionSource<bool>();
+        var asking = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var first = true;
         using var policy = new ExitPolicy([], [])
         {
@@ -102,6 +103,7 @@ public class ReverificationFixTests
             {
                 if (!first) return Task.FromResult(false);
                 first = false;
+                asking.TrySetResult();
                 return gate.Task;
             },
             ReadyInterval = TimeSpan.FromMinutes(10),
@@ -110,7 +112,8 @@ public class ReverificationFixTests
         };
         policy.SetReady(false);
         policy.Start();
-        await Task.Delay(50);
+        // The background loop can start late on a busy machine: change the network only once the query is under way.
+        await asking.Task.WaitAsync(TimeSpan.FromSeconds(10));
         policy.SimulateAddressChange();   // 查询进行中，网络变了
         gate.SetResult(true);            // 旧的查询成功返回
         await Task.Delay(100);

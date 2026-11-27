@@ -40,17 +40,42 @@ public static class MacSandbox
         sb.AppendLine("(allow default)");
         var denied = grants.Hidden.Concat(PrivateHomeFolders.Select(f => Path.Combine(home, f))).ToList();
         foreach (var path in denied)
-            sb.AppendLine($"(deny file-read* file-write* (subpath {Quote(path)}))");
+        {
+            // sandbox-exec deny rules always win: a later allow cannot punch a hole through a denied parent.
+            // Java normally lives below Amber's hidden data folder, so exclude its path and the parent directories
+            // Java must traverse from the deny itself.
+            AppendDeny(sb, "file-read*", path, grants.ReadOnly.Concat(grants.ReadWrite));
+            AppendDeny(sb, "file-write*", path, grants.ReadWrite);
+        }
         // The keychain is reached through these services, not only through files.
         sb.AppendLine("(deny mach-lookup (global-name \"com.apple.SecurityServer\") (global-name \"com.apple.securityd.xpc\") (global-name \"com.apple.security.agent\"))");
-        // Grants inside a denied folder (one file Jay hands over, a cache next to the data folder) are allowed again.
-        foreach (var path in grants.ReadOnly)
-            if (denied.Any(d => GameSandbox.IsInside(path, d)))
-                sb.AppendLine($"(allow file-read* ({(File.Exists(path) ? "literal" : "subpath")} {Quote(path)}))");
-        foreach (var path in grants.ReadWrite)
-            if (denied.Any(d => GameSandbox.IsInside(path, d)))
-                sb.AppendLine($"(allow file-read* file-write* ({(File.Exists(path) ? "literal" : "subpath")} {Quote(path)}))");
         return sb.ToString();
+    }
+
+    private static void AppendDeny(StringBuilder sb, string operation, string hidden, IEnumerable<string> grants)
+    {
+        var inside = grants.Where(p => GameSandbox.IsInside(p, hidden) && !GameSandbox.SamePath(p, hidden)).ToList();
+        if (inside.Count == 0)
+        {
+            sb.AppendLine($"(deny {operation} (subpath {Quote(hidden)}))");
+            return;
+        }
+
+        var filters = new List<string>
+        {
+            $"(subpath {Quote(hidden)})",
+            $"(require-not (literal {Quote(hidden)}))",
+        };
+        foreach (var grant in inside)
+        {
+            for (var parent = Path.GetDirectoryName(grant); parent is not null && !GameSandbox.SamePath(parent, hidden); parent = Path.GetDirectoryName(parent))
+            {
+                if (!GameSandbox.IsInside(parent, hidden)) break;
+                filters.Add($"(require-not (literal {Quote(parent)}))");
+            }
+            filters.Add($"(require-not ({(File.Exists(grant) ? "literal" : "subpath")} {Quote(grant)}))");
+        }
+        sb.AppendLine($"(deny {operation} (require-all {string.Join(' ', filters.Distinct(StringComparer.Ordinal))}))");
     }
 
     /// <summary>sandbox-exec's arguments (without the executable) to run the command under the profile.</summary>

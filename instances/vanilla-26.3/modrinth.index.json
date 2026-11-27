@@ -1,0 +1,8 @@
+{
+  "formatVersion": 1,
+  "game": "minecraft",
+  "versionId": "1",
+  "name": "Jay Vanilla 26.3",
+  "files": [],
+  "dependencies": { "minecraft": "26.3" }
+}

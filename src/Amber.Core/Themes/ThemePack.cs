@@ -249,7 +249,6 @@ public static partial class ThemePackReader
         if (format > FormatVersion) problems.Add(new("newer_format", $"{format}"));
         var minJay = Str(m, "minJay") is { } mj ? Clip(mj, 32) : null;
         if (minJay is not null && ThemeFormat.NeedsNewerJay(minJay, JayVersion)) problems.Add(new("needs_newer_jay", minJay));
-        var migration = new List<ThemeProblem>();
 
         // tokens.json 先读成中间结果，再组装 ThemePack（ThemePack 的部分属性是 init）。
         var tokensBytes = open("tokens.json");
@@ -327,7 +326,6 @@ public static partial class ThemePackReader
             HeroScrim = heroScrim,
         };
         pack.Problems.AddRange(problems);
-        pack.Migration.AddRange(migration);
         foreach (var (k, val) in uiFonts) pack.UiFonts[k] = val;
 
         if (has("seed", out var seed) && seed.ValueKind == JsonValueKind.Object)
