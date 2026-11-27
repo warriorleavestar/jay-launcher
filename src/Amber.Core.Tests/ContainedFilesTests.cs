@@ -254,4 +254,17 @@ public sealed class ContainedFilesTests : IDisposable
         GameLauncher.CreateInside(_work, Path.Combine(state, "legacy-1.12.2", "k1"));
         Assert.True(Directory.Exists(Path.Combine(state, "legacy-1.12.2", "k1")));
     }
+
+    [Fact]
+    public void ACacheFolderRecordedUnderTheRealPathIsMadeWhenTheLaunchRunsThroughAnAlias()
+    {
+        // The launch runs from an ASCII alias of the instance, while the bake recorded the cache under the real path.
+        var alias = Path.Combine(Path.GetTempPath(), "amber-alias-" + Guid.NewGuid().ToString("N")[..8]);
+        var aliasWork = Path.Combine(alias, "versions", "f1122");
+        var cache = Path.Combine(_work, BakeService.StateFolder, "legacy-1.12.2", "k1");
+        Assert.Throws<IOException>(() => GameLauncher.CreateInside(aliasWork, cache));
+        GameLauncher.CreateWritableCache(aliasWork, alias, _root, cache);
+        Assert.True(Directory.Exists(cache));
+        Assert.False(Directory.Exists(alias));
+    }
 }

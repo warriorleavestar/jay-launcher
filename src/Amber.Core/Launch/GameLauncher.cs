@@ -346,6 +346,11 @@ public sealed class GameLauncher(GameDirectory dir)
     /// Creates the transformer cache folder, which must be inside the working directory: level by level, never through
     /// a link the game left there (an <see cref="IOException"/> then). Another caller cannot skip the check.
     /// </summary>
+    // The bake recorded the cache under the instance's real path; when the launch runs through an ASCII alias,
+    // map the working directory back to that real path so both name the same folder.
+    internal static void CreateWritableCache(string workDir, string launchRoot, string? realRoot, string folder) =>
+        CreateInside(realRoot is { } real ? AsciiPaths.Remap(workDir, launchRoot, real) : workDir, folder);
+
     internal static void CreateInside(string workDir, string folder)
     {
         var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(workDir));
@@ -406,7 +411,7 @@ public sealed class GameLauncher(GameDirectory dir)
         try
         {
             // forge-1.12.2's transformer cache folder (inside the instance) exists before the game starts.
-            if (options.Baked?.WritableCache is { Length: > 0 } writableCache) CreateInside(workDir, writableCache);
+            if (options.Baked?.WritableCache is { Length: > 0 } writableCache) CreateWritableCache(workDir, dir.Root, RealRoot, writableCache);
             if (options.Sandbox.Enabled && GameSandbox.IsSupported)
             {
                 windowsLevel = Sandbox(psi, options.Sandbox, workDir, legacyHome, onOutput);
