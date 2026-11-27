@@ -18,10 +18,14 @@
     <AndroidResource Include="..\Amber.App\Assets\jay.png">
       <Link>Resources\drawable\jay.png</Link>
     </AndroidResource>
-    <AndroidNativeLibrary Include="$(BaseIntermediateOutputPath)jay-native/arm64-v8a/libjayjvm.so" Abi="arm64-v8a" />
-    <AndroidNativeLibrary Include="$(BaseIntermediateOutputPath)jay-native/x86_64/libjayjvm.so" Abi="x86_64" />
-    <AndroidNativeLibrary Include="$(BaseIntermediateOutputPath)jay-glfw/arm64-v8a/libglfw.so" Abi="arm64-v8a" />
-    <AndroidNativeLibrary Include="$(BaseIntermediateOutputPath)jay-glfw/x86_64/libglfw.so" Abi="x86_64" />
+    <AndroidNativeLibrary Include="$(BaseIntermediateOutputPath)jay-native/arm64-v8a/libjayjvm.so" Abi="arm64-v8a" Condition="Exists('$(BaseIntermediateOutputPath)jay-native/arm64-v8a/libjayjvm.so')" />
+    <AndroidNativeLibrary Include="$(BaseIntermediateOutputPath)jay-native/x86_64/libjayjvm.so" Abi="x86_64" Condition="Exists('$(BaseIntermediateOutputPath)jay-native/x86_64/libjayjvm.so')" />
+    <AndroidNativeLibrary Include="$(BaseIntermediateOutputPath)jay-glfw/arm64-v8a/libglfw.so" Abi="arm64-v8a" Condition="Exists('$(BaseIntermediateOutputPath)jay-glfw/arm64-v8a/libglfw.so')" />
+    <AndroidNativeLibrary Include="$(BaseIntermediateOutputPath)jay-glfw/x86_64/libglfw.so" Abi="x86_64" Condition="Exists('$(BaseIntermediateOutputPath)jay-glfw/x86_64/libglfw.so')" />
+    <AndroidNativeLibrary Include="$(BaseIntermediateOutputPath)jay-easytier/arm64-v8a/*.so" Abi="arm64-v8a" />
+    <AndroidNativeLibrary Include="$(BaseIntermediateOutputPath)jay-easytier/x86_64/*.so" Abi="x86_64" />
+    <AndroidAsset Include="$(BaseIntermediateOutputPath)jay-easytier/LICENSE" LogicalName="licenses/EasyTier-LICENSE" Condition="Exists('$(BaseIntermediateOutputPath)jay-easytier/LICENSE')" />
+    <AndroidAsset Include="$(BaseIntermediateOutputPath)jay-easytier/NOTICE-*.txt" LogicalName="licenses/EasyTier-%(Filename)%(Extension)" />
     <AndroidAsset Include="$(IntermediateOutputPath)jay-runtime-probe.jar" LogicalName="jay-runtime-probe.jar" />
     <AndroidAsset Include="..\..\third_party\android-glfw\LICENSE.md" LogicalName="licenses/GLFW-LICENSE.md" />
   </ItemGroup>
@@ -31,15 +35,37 @@
     <AndroidJavaSource Remove="Sdl/JaySdlActivity.java" />
   </ItemGroup>
 
-  <ItemGroup Condition="'$(JayModernRuntimeDir)' != ''">
+  <ItemGroup Condition="'$(JaySdlRuntimeDir)' != ''">
     <AndroidJavaSource Include="Sdl/JaySdlActivity.java" />
+    <AndroidLibrary Include="$(JaySdlRuntimeDir)/sdl-classes.jar" Bind="false" />
+    <AndroidNativeLibrary Include="$(JaySdlRuntimeDir)/arm64-v8a/libSDL3.so" Abi="arm64-v8a" />
+    <AndroidNativeLibrary Include="$(JaySdlRuntimeDir)/x86_64/libSDL3.so" Abi="x86_64" />
+    <AndroidAsset Include="$(JaySdlRuntimeDir)/SDL-LICENSE.txt" LogicalName="licenses/SDL-LICENSE.txt" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(JayAngleRuntimeDir)' != ''">
+    <AndroidNativeLibrary Include="$(JayAngleRuntimeDir)/arm64-v8a/libEGL_angle.so;$(JayAngleRuntimeDir)/arm64-v8a/libGLESv2_angle.so" Abi="arm64-v8a" />
+    <AndroidNativeLibrary Include="$(JayAngleRuntimeDir)/x86_64/libEGL_angle.so;$(JayAngleRuntimeDir)/x86_64/libGLESv2_angle.so" Abi="x86_64" />
+    <AndroidAsset Include="../../third_party/android-angle/LICENSE.txt" LogicalName="licenses/ANGLE-LICENSE.txt" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(JayAndroidRuntimeCatalogDir)' != ''">
+    <AndroidAsset Include="$(JayAndroidRuntimeCatalogDir)/runtime25-*.json" LogicalName="%(Filename)%(Extension)" />
+    <!-- Local/emulator verification may place the matching archives beside the descriptors.
+         Release APKs fetch only the descriptors, so they continue downloading the verified archive on demand. -->
+    <AndroidAsset Include="$(JayAndroidRuntimeCatalogDir)/jay-android-runtime25-*.tar.xz" LogicalName="%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(JayModernRuntimeDir)' != ''">
     <AndroidAsset Include="$(JayModernRuntimeDir)/licenses/*" LogicalName="licenses/%(Filename)%(Extension)" />
-    <AndroidLibrary Include="$(JayModernRuntimeDir)/sdl-classes.jar" Bind="false" />
     <AndroidNativeLibrary Include="$(JayModernRuntimeDir)/lwjgl/*.so" Abi="arm64-v8a" />
-    <AndroidNativeLibrary Include="$(JayModernRuntimeDir)/libSDL3.so" Abi="arm64-v8a" />
-    <AndroidAsset Include="$(JayModernRuntimeDir)/SDL-LICENSE.txt" LogicalName="licenses/SDL-LICENSE.txt" />
     <AndroidAsset Include="$(JayModernRuntimeDir)/jre25-arm64-v8a.tar.xz" LogicalName="jre25-arm64-v8a.tar.xz" />
     <AndroidAsset Include="$(JayModernRuntimeDir)/jre25.json" LogicalName="jre25.json" />
+    <!-- Keep the old one-directory experimental input working for local bisects. -->
+    <AndroidJavaSource Include="Sdl/JaySdlActivity.java" Condition="'$(JaySdlRuntimeDir)' == ''" />
+    <AndroidLibrary Include="$(JayModernRuntimeDir)/sdl-classes.jar" Bind="false" Condition="'$(JaySdlRuntimeDir)' == ''" />
+    <AndroidNativeLibrary Include="$(JayModernRuntimeDir)/libSDL3.so" Abi="arm64-v8a" Condition="'$(JaySdlRuntimeDir)' == ''" />
+    <AndroidAsset Include="$(JayModernRuntimeDir)/SDL-LICENSE.txt" LogicalName="licenses/SDL-LICENSE.txt" Condition="'$(JaySdlRuntimeDir)' == ''" />
   </ItemGroup>
 
   <Target Name="BuildJayRuntimeProbe" AfterTargets="_ResolveAndroidTooling" BeforeTargets="_BuildApkEmbed">
@@ -53,10 +79,11 @@
   </Target>
 
   <Target Name="RequireJayJvmHost" BeforeTargets="Build" Condition="'$(Configuration)' == 'Release'">
-    <Error Condition="!Exists('$(BaseIntermediateOutputPath)jay-native/arm64-v8a/libjayjvm.so')" Text="Build the Jay Android native host with scripts/build-android-native.sh before a Release build." />
-    <Error Condition="!Exists('$(BaseIntermediateOutputPath)jay-native/x86_64/libjayjvm.so')" Text="Build the Jay Android native host with scripts/build-android-native.sh before a Release build." />
-    <Error Condition="!Exists('$(BaseIntermediateOutputPath)jay-glfw/arm64-v8a/libglfw.so')" Text="Build the Jay Android GLFW bridge with scripts/build-android-glfw.sh before a Release build." />
-    <Error Condition="!Exists('$(BaseIntermediateOutputPath)jay-glfw/x86_64/libglfw.so')" Text="Build the Jay Android GLFW bridge with scripts/build-android-glfw.sh before a Release build." />
+    <Error Condition="!Exists('$(BaseIntermediateOutputPath)jay-easytier/arm64-v8a/libeasytier-core.so') Or !Exists('$(BaseIntermediateOutputPath)jay-easytier/x86_64/libeasytier-core.so') Or !Exists('$(BaseIntermediateOutputPath)jay-easytier/arm64-v8a/libeasytier-cli.so') Or !Exists('$(BaseIntermediateOutputPath)jay-easytier/x86_64/libeasytier-cli.so')" Text="Stage the verified multiplayer binaries with scripts/stage-android-easytier.sh src/Amber.Android/obj/jay-easytier before publishing." />
+    <Error Condition="('$(RuntimeIdentifier)' == '' Or '$(RuntimeIdentifier)' == 'android-arm64') And !Exists('$(BaseIntermediateOutputPath)jay-native/arm64-v8a/libjayjvm.so')" Text="Build the arm64 Jay Android native host with scripts/build-android-native.sh before a Release build." />
+    <Error Condition="('$(RuntimeIdentifier)' == '' Or '$(RuntimeIdentifier)' == 'android-x64') And !Exists('$(BaseIntermediateOutputPath)jay-native/x86_64/libjayjvm.so')" Text="Build the x86_64 Jay Android native host with scripts/build-android-native.sh before a Release build." />
+    <Error Condition="('$(RuntimeIdentifier)' == '' Or '$(RuntimeIdentifier)' == 'android-arm64') And !Exists('$(BaseIntermediateOutputPath)jay-glfw/arm64-v8a/libglfw.so')" Text="Build the arm64 Jay Android GLFW bridge with scripts/build-android-glfw.sh before a Release build." />
+    <Error Condition="('$(RuntimeIdentifier)' == '' Or '$(RuntimeIdentifier)' == 'android-x64') And !Exists('$(BaseIntermediateOutputPath)jay-glfw/x86_64/libglfw.so')" Text="Build the x86_64 Jay Android GLFW bridge with scripts/build-android-glfw.sh before a Release build." />
   </Target>
 
   <ItemGroup>

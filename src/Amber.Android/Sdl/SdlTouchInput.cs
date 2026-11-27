@@ -8,9 +8,17 @@ namespace Amber.Android;
 
 internal sealed partial class SdlTouchInput(Activity activity)
 {
+    // SdlMenuBootstrap interprets the bridge value as a gesture action, unlike the legacy
+    // AndroidGameBootstrap bridge where the same native slot contains a completed-click count.
+    private const uint MenuMoveAction = 0;
+    private const uint MenuDownAction = 1;
+    private const uint MenuUpAction = 2;
+    private const uint GameplayContextualAction = 3;
     private readonly Java.Lang.Class _sdlActivity = Java.Lang.Class.ForName("org.libsdl.app.SDLActivity", true, activity.ClassLoader)!;
+    private nint _mouseMethod;
     private readonly Java.Lang.Class _sdlInputConnection = Java.Lang.Class.ForName("org.libsdl.app.SDLInputConnection", true, activity.ClassLoader)!;
-    private readonly HashSet<Keycode> _held = [];
+    private readonly HashSet<Keycode> _managedHeld = [];
+    private readonly HashSet<Keycode> _hardwareHeld = [];
     private float _mouseX, _mouseY;
     private int _buttons;
 
@@ -23,12 +31,30 @@ internal sealed partial class SdlTouchInput(Activity activity)
     [LibraryImport("jayjvm", EntryPoint = "jay_java_inventory_split")]
     private static partial int DispatchInventorySplit(float x, float y, int count);
 
-    private bool MenuPointer(uint action) => GetFocus() != 0 &&
+    [LibraryImport("jayjvm", EntryPoint = "jay_text_input_at_get")]
+    private static partial int GetTextInputAt(float x, float y);
+
+    [LibraryImport("jayjvm", EntryPoint = "jay_gui_scale_get")]
+    private static partial int GetGuiScale();
+
+    private bool MenuPointer(uint action) =>
         DispatchMenuPointer(_mouseX / Math.Max(1, Width), _mouseY / Math.Max(1, Height), action) != 0;
 
-    public int InventoryStackCount(double x, double y) => GetInventoryStackCount((float)x, (float)y);
+    public int InventoryStackCount(double x, double y) => InventorySlotState(x, y).Count;
+    public InventorySlotState InventorySlotState(double x, double y) =>
+        Amber.Mobile.InventorySlotState.FromPacked(GetInventoryStackCount((float)x, (float)y));
     public void SplitInventoryStack(double x, double y, int count) =>
         DispatchInventorySplit((float)x, (float)y, count);
+    public bool TextInputAt(double x, double y) => GetTextInputAt((float)x, (float)y) != 0;
+    public int GuiScale
+    {
+        get
+        {
+            try { return Math.Max(0, GetGuiScale()); }
+            catch (EntryPointNotFoundException) { return 0; }
+            catch (DllNotFoundException) { return 0; }
+        }
+    }
 
     [LibraryImport("SDL3", EntryPoint = "SDL_SetHint", StringMarshalling = StringMarshalling.Utf8)]
     [return: MarshalAs(UnmanagedType.I1)]
@@ -37,11 +63,23 @@ internal sealed partial class SdlTouchInput(Activity activity)
     [LibraryImport("SDL3", EntryPoint = "SDL_GetKeyboardFocus")]
     private static partial nint GetFocus();
 
+    [LibraryImport("SDL3", EntryPoint = "SDL_TextInputActive")]
+    [return: MarshalAs(UnmanagedType.I1)]
+    private static partial bool IsTextInputActive(nint window);
+
+    [LibraryImport("jayjvm", EntryPoint = "jay_gameplay_state_get")]
+    private static partial int GetScreenState();
+
     [LibraryImport("SDL3", EntryPoint = "SDL_GetWindowRelativeMouseMode")]
     [return: MarshalAs(UnmanagedType.I1)]
     private static partial bool IsRelative(nint window);
 
-    public bool InWorld => GetFocus() is var window && window != 0 && IsRelative(window);
+    public bool InWorld => GetScreenState() switch {
+        0 => false,
+        1 => true,
+        _ => GetFocus() is var window && window != 0 && IsRelative(window)
+    };
+    public bool TextInputActive => GetFocus() is var window && window != 0 && IsTextInputActive(window);
 
     public void Move(double x, double y)
     {
@@ -51,10 +89,16 @@ internal sealed partial class SdlTouchInput(Activity activity)
         Key(Keycode.S, y > 0.22);
     }
 
-    private void Key(Keycode code, bool down)
+    private void Key(Keycode code, bool down) => SetKey(_managedHeld, code, down);
+
+    private void HardwareKey(Keycode code, bool down) => SetKey(_hardwareHeld, code, down);
+
+    private void SetKey(HashSet<Keycode> source, Keycode code, bool down)
     {
-        if (down ? !_held.Add(code) : !_held.Remove(code)) return;
-        SendKey(code, down);
+        var wasHeld = _managedHeld.Contains(code) || _hardwareHeld.Contains(code);
+        if (down ? !source.Add(code) : !source.Remove(code)) return;
+        var isHeld = _managedHeld.Contains(code) || _hardwareHeld.Contains(code);
+        if (wasHeld != isHeld) SendKey(code, isHeld);
     }
 
     private void SendKey(Keycode code, bool down)
@@ -66,7 +110,7 @@ internal sealed partial class SdlTouchInput(Activity activity)
     public void KeyEvent(Keycode code, bool pressed, bool repeat = false)
     {
         if (pressed && repeat) SendKey(code, true);
-        else Key(code, pressed);
+        else HardwareKey(code, pressed);
     }
 
     public void CommitText(string text)
@@ -78,12 +122,28 @@ internal sealed partial class SdlTouchInput(Activity activity)
     }
 
     public void Backspace() { Key(Keycode.Del, true); Key(Keycode.Del, false); }
+    public void ForwardDelete() { Key(Keycode.ForwardDel, true); Key(Keycode.ForwardDel, false); }
     public void Enter() { Key(Keycode.Enter, true); Key(Keycode.Enter, false); }
+    public void Tab() { Key(Keycode.Tab, true); Key(Keycode.Tab, false); }
+
+    public void ReleaseHardware()
+    {
+        foreach (var code in _hardwareHeld.ToArray()) HardwareKey(code, false);
+    }
+
+    public void ReleaseAll()
+    {
+        ReleaseHardware();
+        foreach (var code in _managedHeld.ToArray()) Key(code, false);
+        if ((_buttons & 1) != 0) Action(TouchControlAction.PrimaryAction, false);
+        if ((_buttons & 2) != 0) Action(TouchControlAction.SecondaryAction, false);
+        if ((_buttons & 4) != 0) Action(TouchControlAction.PickBlock, false);
+    }
 
     private void Mouse(int button, MotionEventActions action, float x, float y, bool relative)
     {
-        var method = JNIEnv.GetStaticMethodID(_sdlActivity.Handle, "onNativeMouse", "(IIFFZ)V");
-        JNIEnv.CallStaticVoidMethod(_sdlActivity.Handle, method, new JValue(button), new JValue((int)action),
+        if (_mouseMethod == 0) _mouseMethod = JNIEnv.GetStaticMethodID(_sdlActivity.Handle, "onNativeMouse", "(IIFFZ)V");
+        JNIEnv.CallStaticVoidMethod(_sdlActivity.Handle, _mouseMethod, new JValue(button), new JValue((int)action),
             new JValue(x), new JValue(y), new JValue(relative));
     }
 
@@ -97,10 +157,10 @@ internal sealed partial class SdlTouchInput(Activity activity)
         _mouseX = (float)(x * Width);
         _mouseY = (float)(y * Height);
         var playing = InWorld;
-        if (!playing && !MenuPointer(0)) Mouse(_buttons, MotionEventActions.Move, _mouseX, _mouseY, false);
+        if (!playing && !MenuPointer(MenuMoveAction)) Mouse(_buttons, MotionEventActions.Move, _mouseX, _mouseY, false);
         if (!click) return;
         // Mobile taps are contextual: use the targeted block, otherwise attack.
-        if (playing && MenuPointer(3)) return;
+        if (playing && MenuPointer(GameplayContextualAction)) return;
         var action = playing ? TouchControlAction.SecondaryAction : TouchControlAction.PrimaryAction;
         Action(action, true);
         Action(action, false);
@@ -115,12 +175,18 @@ internal sealed partial class SdlTouchInput(Activity activity)
 
     public void Action(TouchControlAction action, bool pressed)
     {
-        if (action is TouchControlAction.PrimaryAction or TouchControlAction.SecondaryAction)
+        if (action is TouchControlAction.PrimaryAction or TouchControlAction.SecondaryAction or
+            TouchControlAction.PickBlock)
         {
-            int mask = action == TouchControlAction.PrimaryAction ? 1 : 2;
+            int mask = action switch
+            {
+                TouchControlAction.PrimaryAction => 1,
+                TouchControlAction.SecondaryAction => 2,
+                _ => 4
+            };
             _buttons = pressed ? _buttons | mask : _buttons & ~mask;
             var relative = InWorld;
-            if (!relative && mask == 1 && MenuPointer(pressed ? 1u : 2u)) return;
+            if (!relative && mask == 1 && MenuPointer(pressed ? MenuDownAction : MenuUpAction)) return;
             Mouse(_buttons, pressed ? MotionEventActions.Down : MotionEventActions.Up,
                 relative ? 0 : _mouseX, relative ? 0 : _mouseY, relative);
             return;

@@ -178,6 +178,9 @@ public sealed class LauncherService : IDisposable
         && (!freshSettings || (selfTest is { Length: > 0 } && scope != "firstrun"));
 
     /// <summary>所有长任务（活动中心“进行中”）。</summary>
+    internal event Action? ShowUpdateTask;
+    internal void RevealUpdateTask() => ShowUpdateTask?.Invoke();
+
     public Amber.Core.Activity.TaskCenter Tasks { get; } = new();
 
     /// <summary>所有要你处理的请求（请求条、房间卡、小窗共用，一处处理处处撤掉）。</summary>
@@ -433,6 +436,14 @@ public sealed class LauncherService : IDisposable
         var own = InstanceSettings.Load(ctx.Directory, id);
         own.Isolate ??= OtherLauncherSettings.Isolation(ctx.Directory, id);
         return own.Over(Settings.ToGlobalInstanceSettings());
+    }
+
+    internal void PreserveLegacyAndroidWorlds(GameContext context, CancellationToken ct, bool planOnly = false)
+    {
+        var played = (Settings.RecentInstances ?? []).Concat(
+            (Settings.Instances ?? []).Where(pair => pair.Value.LastPlayed.HasValue).Select(pair => pair.Key));
+        LegacyAndroidWorlds.Preserve(context.Directory, AppSettings.DataDir, played,
+            id => !UsesSharedDir(context, id), ct, planOnly);
     }
 
     public string WorkDirFor(string id) => WorkDirFor(Context, id);

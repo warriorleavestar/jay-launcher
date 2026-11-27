@@ -65,6 +65,7 @@ public sealed partial class HomeViewModel : PageViewModel
     private string[] _lastRunOutput = [];
     private CrashAttachment[] _lastRunAttachments = [];
     private bool _refreshingAccounts;
+    private int _mobileLaunchInProgress;
     private CrashInput? _crashInput;
     /// <summary>每次显示新的崩溃结果（或清掉）加一：换语言的重新分析只在期间没有新结果时才替换。</summary>
     private int _crashGeneration;
@@ -606,13 +607,33 @@ public sealed partial class HomeViewModel : PageViewModel
         // after that succeeds, so Android never replaces the launcher with a separate full-screen setup/download page.
         if (Amber.App.App.MobileLaunchRequested is { } mobileLaunch)
         {
-            var mobileSettings = _service.EffectiveSettings(_service.Context, id);
+            // TaskCenter.Track deduplicates only the progress card; it deliberately does not
+            // suppress the caller's operation. Guard the operation itself so a second tap cannot
+            // download into the same runtime/game folders or start another embedded JVM.
+            if (Interlocked.CompareExchange(ref _mobileLaunchInProgress, 1, 0) != 0)
+            {
+                Toasts.Show(L.T("home.status.preparing_other"), Avalonia.Controls.Notifications.NotificationType.Warning);
+                return;
+            }
+            var mobileContext = request.ExpectedContext ?? _service.Context;
+            var mobileSettings = _service.EffectiveSettings(mobileContext, id);
             using var mobileCts = new CancellationTokenSource();
             var mobileTask = _service.Tasks.Track("install", L.F("activity.kind.install", id),
                 () => mobileCts.Cancel(), $"android-launch:{id}");
             try
             {
-                await mobileLaunch(id, account.Name, request.JoinServer ?? mobileSettings.JoinServer,
+                mobileTask.Report(null, L.T("mobile.game.preserving_worlds"));
+                await Task.Run(() => _service.PreserveLegacyAndroidWorlds(mobileContext, mobileCts.Token), mobileCts.Token);
+                var login = await _service.Accounts.ResolveAsync(account, mobileCts.Token);
+                var mobileOptions = mobileSettings.ToLaunchOptions(mobileContext.Directory, id, "", login.Session, login.ExtraJvmArgs) with
+                {
+                    // The embedded runtime owns platform flags. Only authentication JVM options transfer from desktop.
+                    ExtraJvmArgs = login.ExtraJvmArgs,
+                    ExtraGameArgs = [],
+                    JoinServer = request.JoinServer ?? mobileSettings.JoinServer,
+                    JoinWorld = request.JoinWorld
+                };
+                await mobileLaunch(mobileOptions,
                     new Progress<Amber.App.MobileLaunchProgress>(value =>
                         mobileTask.Report(value.Fraction, value.Detail, value.Bytes, value.ActiveFiles)), mobileCts.Token);
                 mobileTask.Succeed();
@@ -624,10 +645,15 @@ public sealed partial class HomeViewModel : PageViewModel
                 mobileTask.Cancelled();
             }
             catch (Exception e) when (e is IOException or InvalidDataException or HttpRequestException
-                                       or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
+                                       or UnauthorizedAccessException or ArgumentException or InvalidOperationException
+                                       or LoginRequiredException or System.Text.Json.JsonException)
             {
                 mobileTask.Fail(e.Message);
                 SetStatus(StatusMessage.Error("common.raw", e.Message));
+            }
+            finally
+            {
+                Volatile.Write(ref _mobileLaunchInProgress, 0);
             }
             return;
         }

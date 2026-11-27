@@ -150,6 +150,7 @@ public sealed partial class ActivityViewModel : ObservableObject
     public ActivityViewModel(LauncherService service)
     {
         _service = service;
+        service.ShowUpdateTask += () => { Tab = 0; IsOpen = true; };
         service.Tasks.Changed += _ => Dispatcher.UIThread.Post(SyncTasks);
         service.Tasks.Completed += t => Dispatcher.UIThread.Post(() =>
         {

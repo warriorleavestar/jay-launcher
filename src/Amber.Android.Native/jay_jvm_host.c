@@ -10,10 +10,17 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define JAY_JVM_ABI_VERSION 11
-#define JAY_ACTION_COUNT 12
-#define JAY_TEXT_CAPACITY 64
-#define JAY_KEY_CAPACITY 16
+#include "jay_menu_queue.h"
+#include "jay_scalar_queue.h"
+
+#define JAY_JVM_ABI_VERSION 20
+#define JAY_ACTION_COUNT 13
+#define JAY_EVENT_CAPACITY 80
+#define JAY_MENU_EVENT_CAPACITY 32
+#define JAY_EVENT_CHAR 1
+#define JAY_EVENT_KEY 2
+#define JAY_MENU_EVENT_POINTER 1
+#define JAY_MENU_EVENT_SPLIT 2
 
 typedef jint (*jay_create_jvm_fn)(JavaVM **, void **, void *);
 
@@ -24,18 +31,17 @@ typedef struct {
     float look_y;
     float pointer_x;
     float pointer_y;
-    uint32_t pointer_clicks;
     uint32_t actions;
     uint32_t action_taps;
-    uint32_t text_count;
-    uint32_t key_count;
-    uint32_t text[JAY_TEXT_CAPACITY];
-    int32_t keys[JAY_KEY_CAPACITY];
+    uint32_t event_count;
+    uint32_t event_types[JAY_EVENT_CAPACITY];
+    int32_t event_values[JAY_EVENT_CAPACITY];
+    uint32_t menu_event_count;
+    uint32_t menu_event_types[JAY_MENU_EVENT_CAPACITY];
+    float menu_event_x[JAY_MENU_EVENT_CAPACITY];
+    float menu_event_y[JAY_MENU_EVENT_CAPACITY];
+    int32_t menu_event_values[JAY_MENU_EVENT_CAPACITY];
     uint64_t pointer_generation;
-    float inventory_split_x;
-    float inventory_split_y;
-    int32_t inventory_split_count;
-    uint64_t inventory_split_generation;
     uint64_t generation;
 } jay_input_snapshot;
 
@@ -49,7 +55,14 @@ static jmethodID g_dispatch_key;
 static jmethodID g_dispatch_scroll;
 static jmethodID g_dispatch_char;
 static jmethodID g_dispatch_look;
+static jmethodID g_is_gameplay_controls_active;
 static jmethodID g_is_block_target;
+static jmethodID g_mining_progress;
+static jmethodID g_frame_mining_progress;
+static jmethodID g_request_pause;
+static jmethodID g_is_text_input_focused;
+static jmethodID g_is_text_input_at;
+static jmethodID g_gui_scale;
 static jmethodID g_inventory_stack_count;
 static jmethodID g_dispatch_inventory_split;
 static _Atomic int g_input_bridge_error_logged;
@@ -63,22 +76,35 @@ static _Atomic float g_look_x;
 static _Atomic float g_look_y;
 static _Atomic float g_pointer_x;
 static _Atomic float g_pointer_y;
-static _Atomic uint32_t g_pointer_clicks;
 static _Atomic uint64_t g_pointer_generation;
 static _Atomic uint32_t g_actions;
 static _Atomic uint32_t g_action_taps;
 static _Atomic int g_gameplay_mode;
 static _Atomic int g_block_target;
-static _Atomic float g_inventory_split_x;
-static _Atomic float g_inventory_split_y;
-static _Atomic int g_inventory_split_count;
-static _Atomic uint64_t g_inventory_split_generation;
 static _Atomic uint64_t g_generation;
 static pthread_mutex_t g_event_mutex = PTHREAD_MUTEX_INITIALIZER;
-static uint32_t g_text[JAY_TEXT_CAPACITY];
-static uint32_t g_text_count;
-static int32_t g_keys[JAY_KEY_CAPACITY];
-static uint32_t g_key_count;
+static jay_scalar_queue g_events;
+static jay_menu_queue g_menu_events;
+
+static int jay_query_gameplay_mode(void);
+static void jay_refresh_block_target(void);
+
+static void jay_logcat_write(JNIEnv *env, jclass owner, jint priority, jbyteArray message) {
+    (void)owner;
+    if (message == NULL) return;
+    jsize length = (*env)->GetArrayLength(env, message);
+    if (length <= 0) return;
+    jbyte *bytes = (*env)->GetByteArrayElements(env, message, NULL);
+    if (bytes == NULL) return;
+    char *text = malloc((size_t)length + 1);
+    if (text != NULL) {
+        memcpy(text, bytes, (size_t)length);
+        text[length] = '\0';
+        __android_log_write(priority, "JayMinecraft", text);
+        free(text);
+    }
+    (*env)->ReleaseByteArrayElements(env, message, bytes, JNI_ABORT);
+}
 
 __attribute__((visibility("default")))
 int jay_jvm_abi_version(void) {
@@ -92,7 +118,7 @@ void jay_gameplay_mode_set(int active) {
 
 __attribute__((visibility("default")))
 int jay_gameplay_mode_get(void) {
-    return atomic_load(&g_gameplay_mode);
+    return jay_query_gameplay_mode();
 }
 
 __attribute__((visibility("default")))
@@ -215,6 +241,28 @@ int jay_jvm_run_main(JNIEnv *env, const char *class_name, int argc, const char *
         jay_capture_exception(env, "FindClass(main)");
         return JNI_ERR;
     }
+    // Loader-based SDL instances run their original main class without the bootstrap jar.
+    // Register console logging only for the two launchers that install that jar.
+    int uses_bootstrap =
+        strcmp(class_name, "nz/work/minecraft/jay/AndroidGameBootstrap") == 0 ||
+        strcmp(class_name, "nz/work/minecraft/jay/SdlMenuBootstrap") == 0;
+    if (uses_bootstrap) {
+        jclass log_class = (*env)->FindClass(
+            env, "nz/work/minecraft/jay/AndroidGameBootstrap$LogcatOutputStream");
+        if (log_class == NULL) {
+            jay_capture_exception(env, "FindClass(LogcatOutputStream)");
+            return JNI_ERR;
+        }
+        JNINativeMethod log_methods[] = {
+            { "writeLogcat", "(I[B)V", (void *)jay_logcat_write },
+        };
+        if ((*env)->RegisterNatives(env, log_class, log_methods, 1) != JNI_OK) {
+            jay_capture_exception(env, "RegisterNatives(LogcatOutputStream)");
+            (*env)->DeleteLocalRef(env, log_class);
+            return JNI_ERR;
+        }
+        (*env)->DeleteLocalRef(env, log_class);
+    }
     jmethodID main_method = (*env)->GetStaticMethodID(env, main_class, "main", "([Ljava/lang/String;)V");
     if (main_method == NULL) {
         jay_capture_exception(env, "GetStaticMethodID(main)");
@@ -243,7 +291,14 @@ int jay_jvm_run_main(JNIEnv *env, const char *class_name, int argc, const char *
         JAY_INPUT_METHOD(g_dispatch_scroll, "dispatchScroll", "(DD)Z");
         JAY_INPUT_METHOD(g_dispatch_char, "dispatchChar", "(I)Z");
         JAY_INPUT_METHOD(g_dispatch_look, "dispatchLook", "(FF)Z");
+        JAY_INPUT_METHOD(g_is_gameplay_controls_active, "gameplayControlsState", "()I");
+        JAY_INPUT_METHOD(g_frame_mining_progress, "miningProgressOnGameThread", "()I");
+        JAY_INPUT_METHOD(g_mining_progress, "miningProgress", "()I");
+        JAY_INPUT_METHOD(g_request_pause, "requestPause", "()Z");
         JAY_INPUT_METHOD(g_is_block_target, "isBlockTarget", "()Z");
+        JAY_INPUT_METHOD(g_is_text_input_focused, "textInputFocusState", "()I");
+        JAY_INPUT_METHOD(g_is_text_input_at, "isTextInputAt", "(FF)Z");
+        JAY_INPUT_METHOD(g_gui_scale, "guiScale", "()I");
         JAY_INPUT_METHOD(g_inventory_stack_count, "inventoryStackCount", "(FF)I");
         JAY_INPUT_METHOD(g_dispatch_inventory_split, "dispatchInventorySplit", "(FFI)Z");
 #undef JAY_INPUT_METHOD
@@ -291,6 +346,26 @@ static int jay_finish_input_call(JNIEnv *env, int attached, jboolean delivered) 
     return success;
 }
 
+/* A modded client can lack the screen reflection bridge. Report that separately
+ * so SDL and GLFW can each use their own cursor mode as the fallback. */
+__attribute__((visibility("default")))
+int jay_gameplay_state_get(void) {
+    int attached;
+    JNIEnv *env = jay_input_environment(&attached);
+    if (env == NULL) return -1;
+    jint state = g_is_gameplay_controls_active == NULL ? -1 :
+        (*env)->CallStaticIntMethod(env, g_input_bridge_class, g_is_gameplay_controls_active);
+    return jay_finish_input_call(env, attached, JNI_TRUE) ? state : -1;
+}
+
+static int jay_query_gameplay_mode(void) {
+    int state = jay_gameplay_state_get();
+    if (state < 0) return atomic_load(&g_gameplay_mode);
+    int active = state > 0 ? 1 : 0;
+    atomic_store(&g_gameplay_mode, active);
+    return active;
+}
+
 __attribute__((visibility("default")))
 int jay_java_pointer(float x, float y, uint32_t clicks) {
     int attached;
@@ -318,6 +393,21 @@ int jay_inventory_stack_count(float x, float y) {
 }
 
 __attribute__((visibility("default")))
+int jay_gui_scale_get(void) {
+    int attached;
+    JNIEnv *env = jay_input_environment(&attached);
+    if (env == NULL || g_gui_scale == NULL) return 0;
+    jint scale = (*env)->CallStaticIntMethod(env, g_input_bridge_class, g_gui_scale);
+    if ((*env)->ExceptionCheck(env)) {
+        if (!atomic_exchange(&g_input_bridge_error_logged, 1)) (*env)->ExceptionDescribe(env);
+        (*env)->ExceptionClear(env);
+        scale = 0;
+    }
+    if (attached && g_vm != NULL) (*g_vm)->DetachCurrentThread(g_vm);
+    return scale > 0 ? scale : 0;
+}
+
+__attribute__((visibility("default")))
 int jay_java_inventory_split(float x, float y, int count) {
     int attached;
     JNIEnv *env = jay_input_environment(&attached);
@@ -327,9 +417,66 @@ int jay_java_inventory_split(float x, float y, int count) {
     return jay_finish_input_call(env, attached, delivered);
 }
 
+int jay_game_frame_mining_progress(void) {
+    // SDL presents on the already-attached Minecraft render thread.
+    JNIEnv *env = NULL;
+    if (!g_vm || !g_frame_mining_progress ||
+        (*g_vm)->GetEnv(g_vm, (void **)&env, JNI_VERSION_1_6) != JNI_OK) return -1;
+    jint value = (*env)->CallStaticIntMethod(env, g_input_bridge_class, g_frame_mining_progress);
+    return jay_finish_input_call(env, 0, JNI_TRUE) ? value : -1;
+}
+
+__attribute__((visibility("default")))
+int jay_mining_progress_get(void) {
+    int attached;
+    JNIEnv *env = jay_input_environment(&attached);
+    if (env == NULL) return -1;
+    jint value = g_mining_progress == NULL ? -1 :
+        (*env)->CallStaticIntMethod(env, g_input_bridge_class, g_mining_progress);
+    return jay_finish_input_call(env, attached, JNI_TRUE) ? value : -1;
+}
+
+__attribute__((visibility("default")))
+int jay_request_pause(void) {
+    int attached;
+    JNIEnv *env = jay_input_environment(&attached);
+    if (env == NULL) return 0;
+    jboolean delivered = g_request_pause != NULL &&
+        (*env)->CallStaticBooleanMethod(env, g_input_bridge_class, g_request_pause);
+    return jay_finish_input_call(env, attached, delivered);
+}
+
 __attribute__((visibility("default")))
 int jay_block_target_get(void) {
+    jay_refresh_block_target();
     return atomic_load(&g_block_target);
+}
+
+__attribute__((visibility("default")))
+int jay_text_input_focused_get(void) {
+    int attached;
+    JNIEnv *env = jay_input_environment(&attached);
+    if (env == NULL || g_is_text_input_focused == NULL) return -1;
+    jint state = (*env)->CallStaticIntMethod(env, g_input_bridge_class,
+        g_is_text_input_focused);
+    if ((*env)->ExceptionCheck(env)) {
+        if (!atomic_exchange(&g_input_bridge_error_logged, 1))
+            (*env)->ExceptionDescribe(env);
+        (*env)->ExceptionClear(env);
+        state = -1;
+    }
+    if (attached && g_vm != NULL) (*g_vm)->DetachCurrentThread(g_vm);
+    return state < 0 ? -1 : (state > 0 ? 1 : 0);
+}
+
+__attribute__((visibility("default")))
+int jay_text_input_at_get(float x, float y) {
+    int attached;
+    JNIEnv *env = jay_input_environment(&attached);
+    if (env == NULL || g_is_text_input_at == NULL) return 0;
+    jboolean targeted = (*env)->CallStaticBooleanMethod(env, g_input_bridge_class,
+        g_is_text_input_at, (jfloat)x, (jfloat)y);
+    return jay_finish_input_call(env, attached, targeted);
 }
 
 static void jay_refresh_block_target(void) {
@@ -439,6 +586,17 @@ void jay_input_set_action(int action, int pressed) {
 }
 
 __attribute__((visibility("default")))
+void jay_input_cancel_action(int action) {
+    if (action < 0 || action >= JAY_ACTION_COUNT) return;
+    uint32_t bit = 1u << (uint32_t)action;
+    // A cancelled Android gesture is not a short tap. Clear both the held state and any tap that
+    // has not yet been consumed so ACTION_CANCEL cannot produce an attack, jump or menu action.
+    atomic_fetch_and(&g_actions, ~bit);
+    atomic_fetch_and(&g_action_taps, ~bit);
+    atomic_fetch_add(&g_generation, 1);
+}
+
+__attribute__((visibility("default")))
 void jay_input_set_movement(float x, float y) {
     atomic_store(&g_move_x, x);
     atomic_store(&g_move_y, y);
@@ -466,7 +624,11 @@ void jay_input_set_pointer(float x, float y, int click) {
     pthread_mutex_lock(&g_event_mutex);
     atomic_store(&g_pointer_x, x);
     atomic_store(&g_pointer_y, y);
-    if (click) atomic_fetch_add(&g_pointer_clicks, 1);
+    if (click && !jay_menu_queue_push(
+            &g_menu_events, JAY_MENU_EVENT_POINTER, x, y, 1)) {
+        __android_log_write(ANDROID_LOG_ERROR, "JayMinecraft",
+            "Out of memory while queueing a touch menu event");
+    }
     atomic_fetch_add(&g_pointer_generation, 1);
     atomic_fetch_add(&g_generation, 1);
     pthread_mutex_unlock(&g_event_mutex);
@@ -474,19 +636,28 @@ void jay_input_set_pointer(float x, float y, int click) {
 
 __attribute__((visibility("default")))
 void jay_input_split_inventory(float x, float y, int count) {
-    if (count < 1) return;
-    atomic_store(&g_inventory_split_x, x);
-    atomic_store(&g_inventory_split_y, y);
-    atomic_store(&g_inventory_split_count, count);
-    atomic_fetch_add(&g_inventory_split_generation, 1);
+    if (x < 0.f) x = 0.f;
+    if (x > 1.f) x = 1.f;
+    if (y < 0.f) y = 0.f;
+    if (y > 1.f) y = 1.f;
+    pthread_mutex_lock(&g_event_mutex);
+    if (!jay_menu_queue_push(
+            &g_menu_events, JAY_MENU_EVENT_SPLIT, x, y, count)) {
+        __android_log_write(ANDROID_LOG_ERROR, "JayMinecraft",
+            "Out of memory while queueing an inventory split event");
+    }
     atomic_fetch_add(&g_generation, 1);
+    pthread_mutex_unlock(&g_event_mutex);
 }
 
 __attribute__((visibility("default")))
 void jay_input_add_codepoint(uint32_t codepoint) {
     if (codepoint == 0 || codepoint > 0x10ffffu || (codepoint >= 0xd800u && codepoint <= 0xdfffu)) return;
     pthread_mutex_lock(&g_event_mutex);
-    if (g_text_count < JAY_TEXT_CAPACITY) g_text[g_text_count++] = codepoint;
+    if (!jay_scalar_queue_push(&g_events, JAY_EVENT_CHAR, (int32_t)codepoint)) {
+        __android_log_write(ANDROID_LOG_ERROR, "JayMinecraft",
+            "Out of memory while queueing a text input event");
+    }
     atomic_fetch_add(&g_generation, 1);
     pthread_mutex_unlock(&g_event_mutex);
 }
@@ -494,7 +665,10 @@ void jay_input_add_codepoint(uint32_t codepoint) {
 __attribute__((visibility("default")))
 void jay_input_add_key(int32_t key) {
     pthread_mutex_lock(&g_event_mutex);
-    if (g_key_count < JAY_KEY_CAPACITY) g_keys[g_key_count++] = key;
+    if (!jay_scalar_queue_push(&g_events, JAY_EVENT_KEY, key)) {
+        __android_log_write(ANDROID_LOG_ERROR, "JayMinecraft",
+            "Out of memory while queueing a key input event");
+    }
     atomic_fetch_add(&g_generation, 1);
     pthread_mutex_unlock(&g_event_mutex);
 }
@@ -502,9 +676,6 @@ void jay_input_add_key(int32_t key) {
 __attribute__((visibility("default")))
 void jay_input_read(jay_input_snapshot *snapshot) {
     if (snapshot == NULL) return;
-    // GLFW polls this function on Minecraft's game thread. Refresh the reflected hit result
-    // here; the Android drawing thread only reads the atomic cache above.
-    jay_refresh_block_target();
     snapshot->move_x = atomic_load(&g_move_x);
     snapshot->move_y = atomic_load(&g_move_y);
     snapshot->look_x = atomic_exchange(&g_look_x, 0.f);
@@ -512,20 +683,21 @@ void jay_input_read(jay_input_snapshot *snapshot) {
     pthread_mutex_lock(&g_event_mutex);
     snapshot->pointer_x = atomic_load(&g_pointer_x);
     snapshot->pointer_y = atomic_load(&g_pointer_y);
-    snapshot->pointer_clicks = atomic_exchange(&g_pointer_clicks, 0);
     snapshot->actions = atomic_load(&g_actions);
     snapshot->action_taps = atomic_exchange(&g_action_taps, 0);
-    snapshot->text_count = g_text_count;
-    snapshot->key_count = g_key_count;
-    for (uint32_t i = 0; i < g_text_count; i++) snapshot->text[i] = g_text[i];
-    for (uint32_t i = 0; i < g_key_count; i++) snapshot->keys[i] = g_keys[i];
-    g_text_count = 0;
-    g_key_count = 0;
+    snapshot->event_count = jay_scalar_queue_drain(
+        &g_events,
+        JAY_EVENT_CAPACITY,
+        snapshot->event_types,
+        snapshot->event_values);
+    snapshot->menu_event_count = jay_menu_queue_drain(
+        &g_menu_events,
+        JAY_MENU_EVENT_CAPACITY,
+        snapshot->menu_event_types,
+        snapshot->menu_event_x,
+        snapshot->menu_event_y,
+        snapshot->menu_event_values);
     snapshot->pointer_generation = atomic_load(&g_pointer_generation);
-    snapshot->inventory_split_x = atomic_load(&g_inventory_split_x);
-    snapshot->inventory_split_y = atomic_load(&g_inventory_split_y);
-    snapshot->inventory_split_count = atomic_load(&g_inventory_split_count);
-    snapshot->inventory_split_generation = atomic_load(&g_inventory_split_generation);
     snapshot->generation = atomic_load(&g_generation);
     pthread_mutex_unlock(&g_event_mutex);
 }
