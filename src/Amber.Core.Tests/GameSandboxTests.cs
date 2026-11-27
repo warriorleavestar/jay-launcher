@@ -152,7 +152,7 @@ public sealed class GameSandboxTests : IDisposable
         GpuDevices = () => ["/dev/nvidia0"],
     };
 
-    [Fact]
+    [LinuxFact]
     public void Linux_HomeIsEmpty_GrantsMountedOnTop_DataHidden()
     {
         if (!OperatingSystem.IsLinux()) return;
@@ -186,7 +186,7 @@ public sealed class GameSandboxTests : IDisposable
         Assert.EndsWith("--chdir /home/p/.minecraft/versions/1.21 -- /usr/bin/java -version", text);
     }
 
-    [Fact]
+    [LinuxFact]
     public void Linux_DataFolderInsideAGrant_IsCoveredByAnEmptyTmpfs()
     {
         if (!OperatingSystem.IsLinux()) return;
@@ -207,26 +207,33 @@ public sealed class GameSandboxTests : IDisposable
 
     // ---------------------------------------------------------------- macOS (sandbox-exec)
 
-    [Fact]
+    [UnixFact]
     public void Mac_ProfileDeniesDataKeychainAndBrowsers_ThenAllowsHandedOverFiles()
     {
         if (OperatingSystem.IsWindows()) return;
+        var home = Dir("home");
+        var hidden = Dir("home", "Library", "Application Support", "Amber");
+        var agent = FileAt("jar", "home", "Library", "Application Support", "Amber",
+            "authlib-injector", "a.jar");
         var grants = new SandboxGrants
         {
-            ReadWrite = ["/Users/p/Library/Application Support/minecraft/versions/1.21"],
-            ReadOnly = ["/Users/p/Library/Application Support/Amber/authlib-injector/a.jar"],
-            Hidden = ["/Users/p/Library/Application Support/Amber"],
+            ReadWrite = [Dir("home", "Library", "Application Support", "minecraft", "versions", "1.21")],
+            ReadOnly = [agent],
+            Hidden = [hidden],
         };
-        var profile = MacSandbox.Profile(grants, "/Users/p");
+        var profile = MacSandbox.Profile(grants, home);
         Assert.StartsWith("(version 1)", profile);
         Assert.Contains("(allow default)", profile);
-        Assert.Contains("(deny file-read* file-write* (subpath \"/Users/p/Library/Application Support/Amber\"))", profile);
-        Assert.Contains("(deny file-read* file-write* (subpath \"/Users/p/Library/Keychains\"))", profile);
-        Assert.Contains("(deny file-read* file-write* (subpath \"/Users/p/Library/Application Support/Google/Chrome\"))", profile);
+        Assert.Contains($"(deny file-read* (require-all (subpath \"{hidden}\")", profile);
+        Assert.Contains($"(deny file-write* (subpath \"{hidden}\"))", profile);
+        Assert.Contains($"(deny file-read* (subpath \"{Path.Combine(home, "Library", "Keychains")}\"))", profile);
+        Assert.Contains($"(deny file-write* (subpath \"{Path.Combine(home, "Library", "Keychains")}\"))", profile);
+        Assert.Contains($"(deny file-read* (subpath \"{Path.Combine(home, "Library", "Application Support", "Google", "Chrome")}\"))", profile);
         Assert.Contains("com.apple.SecurityServer", profile);
-        // The jar inside the data folder comes after the deny (last match wins); the instance is not inside a denied folder.
-        var allow = profile.IndexOf("/Users/p/Library/Application Support/Amber/authlib-injector/a.jar", StringComparison.Ordinal);
-        Assert.True(allow > profile.IndexOf("(subpath \"/Users/p/Library/Application Support/Amber\")", StringComparison.Ordinal));
+        // sandbox-exec denies cannot be overridden by a later allow. The deny filter therefore excludes the
+        // handed-over file and its traversal parent while the write deny still covers the whole data folder.
+        Assert.Contains($"(require-not (literal \"{Path.GetDirectoryName(agent)}\"))", profile);
+        Assert.Contains($"(require-not (literal \"{agent}\"))", profile);
         Assert.DoesNotContain("minecraft/versions", profile);
         Assert.Equal(["-p", profile, "java", "-version"], MacSandbox.Arguments(profile, ["java", "-version"]));
     }
@@ -237,7 +244,7 @@ public sealed class GameSandboxTests : IDisposable
 
     // ---------------------------------------------------------------- Windows
 
-    [Fact]
+    [WindowsFact]
     public void Windows_SocketFolder_InsideTheWritableFolder_OnlyWhenShortAndAscii()
     {
         if (!OperatingSystem.IsWindows()) return;
@@ -252,7 +259,7 @@ public sealed class GameSandboxTests : IDisposable
         Assert.Null(WindowsSandbox.SocketFolder(Path.Combine(Path.GetPathRoot(game)!, "游戏")));
     }
 
-    [Theory]
+    [WindowsTheory]
     [InlineData("plain")]
     [InlineData("with space")]
     [InlineData("")]
@@ -277,7 +284,7 @@ public sealed class GameSandboxTests : IDisposable
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)] private static extern nint CommandLineToArgvW(string line, out int count);
     [DllImport("kernel32.dll")] private static extern nint LocalFree(nint memory);
 
-    [Fact]
+    [WindowsFact]
     public void Windows_Labels()
     {
         if (!OperatingSystem.IsWindows()) return;
@@ -291,7 +298,7 @@ public sealed class GameSandboxTests : IDisposable
         Assert.False(WindowsSandbox.Same("", "S:(ML;OICI;NW;;;LW)"));
     }
 
-    [Fact]
+    [WindowsFact]
     public void Windows_EnvironmentBlock_IsSortedAndDoubleNullTerminated()
     {
         if (!OperatingSystem.IsWindows()) return;
@@ -300,7 +307,7 @@ public sealed class GameSandboxTests : IDisposable
         Assert.Equal("\0\0", WindowsSandbox.EnvironmentBlock(new Dictionary<string, string?>()));
     }
 
-    [Fact]
+    [WindowsFact]
     public void Windows_DnsArguments_PerJavaVersion()
     {
         if (!OperatingSystem.IsWindows()) return;
@@ -322,7 +329,7 @@ public sealed class GameSandboxTests : IDisposable
         Assert.Null(WindowsSandbox.DnsArguments(21, java8, [], "C:\\x\\jay-dns.jar"));
     }
 
-    [Fact]
+    [WindowsFact]
     public void Windows_ResolverJarIsEmbedded_AndWrittenOncePerContent()
     {
         if (!OperatingSystem.IsWindows()) return;
@@ -354,7 +361,7 @@ public sealed class GameSandboxTests : IDisposable
             WindowsSandbox.FileSystemArguments(21, jar));
     }
 
-    [Fact]
+    [WindowsFact]
     public void Windows_StandardLevel_TakesTheContainersRightsOffAgain()
     {
         if (!OperatingSystem.IsWindows()) return;
@@ -383,7 +390,7 @@ public sealed class GameSandboxTests : IDisposable
             .OfType<System.Security.AccessControl.FileSystemAccessRule>().Where(r => r.IdentityReference == WindowsSandboxSetup.AllPackages),
     ];
 
-    [Fact]
+    [WindowsFact]
     public void Windows_SetupStep_OpensOnlyThatFolder_KeepsTheAclCanonical_AndUndoesExactly()
     {
         if (!OperatingSystem.IsWindows()) return;
@@ -431,7 +438,7 @@ public sealed class GameSandboxTests : IDisposable
         Assert.Equal(before, Sddl(parent));
     }
 
-    [Fact]
+    [WindowsFact]
     public void Windows_SetupStep_UndoLeavesOtherEntriesForTheSameGroup()
     {
         if (!OperatingSystem.IsWindows()) return;
@@ -450,7 +457,7 @@ public sealed class GameSandboxTests : IDisposable
         Assert.Equal(before, Sddl(folder));
     }
 
-    [Fact]
+    [WindowsFact]
     public void Windows_SetupStep_RefusesCommandLinesJayWouldNotWrite()
     {
         if (!OperatingSystem.IsWindows()) return;
@@ -465,7 +472,7 @@ public sealed class GameSandboxTests : IDisposable
         Assert.Empty(PackageRules(folder));
     }
 
-    [Fact]
+    [WindowsFact]
     public void Windows_SetupStep_CommandRunsJayElevatedWithTheFoldersQuoted()
     {
         if (!OperatingSystem.IsWindows()) return;
@@ -477,7 +484,7 @@ public sealed class GameSandboxTests : IDisposable
         Assert.Equal(["--jay-sandbox-undo", "--no-loopback"], WindowsSandboxSetup.Arguments(undo: true, loopback: false, []));
     }
 
-    [Fact]
+    [WindowsFact]
     public void Windows_FoldersToOpen_AreTheClosedParentsOutsideTheGrants()
     {
         if (!OperatingSystem.IsWindows()) return;
@@ -499,7 +506,7 @@ public sealed class GameSandboxTests : IDisposable
         Assert.Equal(Path.GetPathRoot(game), WindowsSandboxSetup.Parents(game).Last());
     }
 
-    [Fact]
+    [WindowsFact]
     public void Windows_StandardLevel_TakesTheContainerOffAnotherInstancesFolder_ItReadsThrough()
     {
         // Seen in a real run: a strong launch of the vanilla instance granted versions\1.21.1 to the container; the
@@ -572,7 +579,7 @@ public sealed class GameSandboxTests : IDisposable
         Assert.Contains("writable=true dir=true", output);
     }
 
-    [Fact]
+    [WindowsFact]
     public void Windows_ProcessAdoption_PrivateMembersStillExist()
     {
         // These are private members of the Windows build of System.Diagnostics.Process.
@@ -635,7 +642,7 @@ public sealed class GameSandboxTests : IDisposable
         Assert.False(WindowsSandboxPolicy.JavaCanUseStrong(0, java8, hasResolver: true));
     }
 
-    [Fact]
+    [WindowsFact]
     public void JavaMajor_FromReleaseFile()
     {
         if (!OperatingSystem.IsWindows()) return;

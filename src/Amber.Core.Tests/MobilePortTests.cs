@@ -9,11 +9,301 @@ using System.Security.Cryptography;
 using System.Formats.Tar;
 using System.IO.Compression;
 using System.Collections.Concurrent;
+using System.Text.Json;
 
 namespace Amber.Core.Tests;
 
 public sealed class MobilePortTests
 {
+    [Theory]
+    [InlineData("25.0.5-internal", 25)]
+    [InlineData("21.0.7+6-LTS", 21)]
+    [InlineData("1.8.0_462", 8)]
+    [InlineData("17", 17)]
+    public void AndroidRuntimeReleaseParsesModernAndLegacyJavaVersions(string version, int expected)
+    {
+        Assert.Equal(expected, JavaRuntimeRelease.ParseMajor(version));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("not-java")]
+    [InlineData("1")]
+    [InlineData("0.0")]
+    public void AndroidRuntimeReleaseRejectsInvalidVersions(string version)
+    {
+        Assert.Null(JavaRuntimeRelease.ParseMajor(version));
+    }
+
+    [Theory]
+    [InlineData(8, false)]
+    [InlineData(17, false)]
+    [InlineData(21, false)]
+    [InlineData(22, true)]
+    [InlineData(24, true)]
+    [InlineData(25, true)]
+    public void AndroidRuntimeChoiceUsesJava25ForEveryCompatiblePost21Instance(
+        int requiredJava, bool java25)
+    {
+        Assert.True(AndroidRuntimeChoice.IsSupported(requiredJava));
+        Assert.Equal(java25, AndroidRuntimeChoice.UsesJava25(requiredJava));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(26)]
+    [InlineData(99)]
+    public void AndroidRuntimeChoiceRejectsUnsupportedMajorsBeforeDownload(int requiredJava)
+    {
+        Assert.False(AndroidRuntimeChoice.IsSupported(requiredJava));
+    }
+
+    [Fact]
+    public void AndroidJava21RuntimeDoesNotRequireJava25GraphicsLibraries()
+    {
+        var required = AndroidNativeLibraries.RequiredForJava(21);
+
+        Assert.Contains("libmobileglues.so", required);
+        Assert.Contains("liblwjgl_opengl.so", required);
+        Assert.DoesNotContain("liblwjgl_vma.so", required);
+        Assert.DoesNotContain("libshaderc.so", required);
+        Assert.DoesNotContain("libspirv-cross.so", required);
+    }
+
+    [Fact]
+    public void AndroidJava25RuntimeRequiresExperimentalGraphicsLibraries()
+    {
+        var required = AndroidNativeLibraries.RequiredForJava(25);
+
+        Assert.Contains("liblwjgl_vma.so", required);
+        Assert.Contains("libjnidispatch.so", required);
+        Assert.Contains(AndroidNativeLibraries.Shaderc, required);
+        Assert.Contains(AndroidNativeLibraries.SpirvCross, required);
+        Assert.Equal("libshaderc.so", AndroidNativeLibraries.Shaderc);
+        Assert.Equal("libspirv-cross.so", AndroidNativeLibraries.SpirvCross);
+    }
+
+    [Fact]
+    public void AndroidSdlUsesCompleteDownloadedNativesAndOnlyFallsBackForLegacyPackages()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "jay-native-layout-" + Guid.NewGuid().ToString("N"));
+        var runtime = Path.Combine(root, "runtime");
+        var native = Path.Combine(runtime, "native");
+        var packaged = Path.Combine(root, "packaged");
+        Directory.CreateDirectory(native);
+        Directory.CreateDirectory(packaged);
+        try
+        {
+            Assert.Equal(packaged, AndroidNativeLibraries.ResolveRoot(runtime, packaged, 25, true));
+            foreach (var name in AndroidNativeLibraries.RequiredForJava(25))
+                File.WriteAllBytes(Path.Combine(native, name), [1]);
+
+            Assert.Equal(native, AndroidNativeLibraries.ResolveRoot(runtime, packaged, 25, true));
+            Assert.Equal(native, AndroidNativeLibraries.ResolveRoot(runtime, packaged, 25, false));
+
+            var packagedSdl = Path.Combine(packaged, "libSDL3.so");
+            File.WriteAllBytes(packagedSdl, [1]);
+            Assert.Equal(packagedSdl, AndroidNativeLibraries.ResolveSdlLibrary(packaged, native));
+            var runtimeSdl = Path.Combine(native, "libSDL3.so");
+            File.WriteAllBytes(runtimeSdl, [1]);
+            Assert.Equal(packagedSdl, AndroidNativeLibraries.ResolveSdlLibrary(packaged, native));
+            File.Delete(packagedSdl);
+            Assert.Equal(runtimeSdl, AndroidNativeLibraries.ResolveSdlLibrary(packaged, native));
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
+    public void AndroidEmulatorAngleUsesACompleteRuntimeOrPackagedLibrarySet()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "jay-angle-layout-" + Guid.NewGuid().ToString("N"));
+        var runtime = Path.Combine(root, "runtime");
+        var packaged = Path.Combine(root, "packaged");
+        Directory.CreateDirectory(runtime);
+        Directory.CreateDirectory(packaged);
+        try
+        {
+            Assert.Null(AndroidNativeLibraries.ResolveEmulatorAngleRoot(runtime, packaged, true));
+            File.WriteAllBytes(Path.Combine(packaged, "libEGL_angle.so"), [1]);
+            File.WriteAllBytes(Path.Combine(packaged, "libGLESv2_angle.so"), [1]);
+            Assert.Equal(packaged, AndroidNativeLibraries.ResolveEmulatorAngleRoot(runtime, packaged, true));
+            Assert.Null(AndroidNativeLibraries.ResolveEmulatorAngleRoot(runtime, packaged, false));
+
+            File.WriteAllBytes(Path.Combine(runtime, "libEGL_angle.so"), [1]);
+            File.WriteAllBytes(Path.Combine(runtime, "libGLESv2_angle.so"), [1]);
+            Assert.Equal(runtime, AndroidNativeLibraries.ResolveEmulatorAngleRoot(runtime, packaged, true));
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
+    [Theory]
+    [InlineData(17f, 120f, 132f, 17f)]
+    [InlineData(17f, 170f, 132f, 13.2f)]
+    [InlineData(17f, 500f, 132f, 10f)]
+    public void AndroidTouchSettingsLabelsFitBetweenStepperButtons(
+        float preferred,
+        float measured,
+        float available,
+        float expected)
+    {
+        Assert.Equal(expected,
+            TouchTextLayout.FitTextSize(preferred, measured, available, minimumSize: 10f),
+            precision: 3);
+    }
+
+    [Fact]
+    public void AndroidTouchSettingsTrimLabelsThatRemainTooWideAtMinimumSize()
+    {
+        var repository = FindRepositoryRoot();
+        var activity = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "GameActivity.cs"));
+        var draw = JavaMethod(activity, "private void DrawStepper",
+            "private void ApplyControlOpacity");
+
+        Assert.Contains("DrawFittedCenteredText", draw, StringComparison.Ordinal);
+        Assert.Contains("TouchTextLayout.FitTextSize", draw, StringComparison.Ordinal);
+        Assert.Contains("const string ellipsis = \"…\"", draw, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AndroidEmulatorRunnerInvokesOneRepositorySmokeScript()
+    {
+        var repository = FindRepositoryRoot();
+        var workflow = File.ReadAllText(Path.Combine(repository,
+            ".github", "workflows", "build.yml")).Replace("\r\n", "\n", StringComparison.Ordinal);
+        var smokeStart = workflow.IndexOf("  android-smoke:\n", StringComparison.Ordinal);
+        var smokeEnd = workflow.IndexOf("\n  publish-android-preview:\n", smokeStart,
+            StringComparison.Ordinal);
+
+        Assert.True(smokeStart >= 0 && smokeEnd > smokeStart);
+        var smoke = workflow[smokeStart..smokeEnd];
+        Assert.Contains("persist-credentials: false", smoke, StringComparison.Ordinal);
+        Assert.Contains(
+            "bash scripts/check-android-emulator-smoke.sh android-assets/Jay-android-experimental.apk",
+            smoke, StringComparison.Ordinal);
+        Assert.DoesNotContain("launcher_component=", smoke, StringComparison.Ordinal);
+
+        var script = File.ReadAllText(Path.Combine(repository,
+            "scripts", "check-android-emulator-smoke.sh"));
+        Assert.Contains("launcher_component=", script, StringComparison.Ordinal);
+        Assert.Contains("dismiss_immersive_confirmation", script, StringComparison.Ordinal);
+        Assert.Contains("text=\"Got it\"", script, StringComparison.Ordinal);
+        Assert.Contains("android-touch-settings-en.png", script, StringComparison.Ordinal);
+        Assert.Contains("android-touch-settings-pseudo.png", script, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(1, 800, 0, 80)]
+    [InlineData(2.5f, 1080, 0, 200)]
+    [InlineData(1, 800, 140, 88)]
+    [InlineData(2, 1600, 280, 176)]
+    [InlineData(1, 1200, float.NaN, 102)]
+    [InlineData(1, 800, 1600, 98)]
+    public void MiningRingClearsTheFingerAcrossDensities(float density, float shortEdge,
+        float touchMajor, float expectedRadius)
+    {
+        Assert.Equal(expectedRadius, TouchControlLayout.MiningRingRadius(density, shortEdge, touchMajor), 3);
+    }
+
+    [Fact]
+    public void MiningRingClosesOnBreakAndNeverOnCancelOrStaleCooldown()
+    {
+        var ring = new MiningRingProgress();
+        Assert.Equal(-1, ring.Observe(-2, 1));
+        Assert.Equal(-1, ring.Observe(1000, 5));
+        Assert.Equal(947, ring.Observe(947, 20));
+        Assert.Equal(-1, ring.Observe(-1, 30));
+        Assert.Equal(-1, ring.Observe(1000, 35));
+        Assert.Equal(947, ring.Observe(947, 40));
+        Assert.Equal(947, ring.Observe(-2, 45));
+        Assert.Equal(1000, ring.Observe(1000, 50));
+        Assert.Equal(1000, ring.Observe(-1, 66));
+        Assert.Equal(-1, ring.Observe(1000, 166));
+        Assert.Equal(500, ring.Observe(500, 200));
+        Assert.Equal(1000, ring.Observe(1000, 210));
+        Assert.Equal(200, ring.Observe(200, 225));
+        Assert.Equal(180f, MiningRingProgress.PartialSweep(500, 80, 4), 2);
+        Assert.InRange(MiningRingProgress.PartialSweep(999, 80, 4), 354f, 355f);
+    }
+
+    [Fact]
+    public void AndroidMiningIndicatorUsesTheActiveGameBridge()
+    {
+        var repository = FindRepositoryRoot();
+        var activity = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "GameActivity.cs"));
+        Assert.Contains("NativeJvmHost.MiningProgress()", activity, StringComparison.Ordinal);
+        Assert.DoesNotContain("LongPressRingMs", activity, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AndroidMobileGluesBuildAppliesTheEmulatorAnglePatch()
+    {
+        var root = FindRepositoryRoot();
+        var script = File.ReadAllText(Path.Combine(root, "scripts", "build-android-mobileglues.sh"));
+
+        Assert.Contains("emulator-angle.patch", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AndroidJava25CatalogSelectsBothModernAbisAndQuarantinesTheLegacyBundle()
+    {
+        var armDescriptor = "runtime25-arm64-v8a.json";
+        var armArchive = "jay-android-runtime25-arm64-v8a.tar.xz";
+        var arm = AndroidRuntimeAssetCatalog.SelectJava25("arm64-v8a", 16_384,
+            [armDescriptor, armArchive]);
+        Assert.Equal(new AndroidRuntimeAssets(armDescriptor, armArchive), arm);
+
+        var x64Descriptor = "runtime25-x86_64.json";
+        var x64 = AndroidRuntimeAssetCatalog.SelectJava25("x86_64", 16_384,
+            [x64Descriptor]);
+        Assert.Equal(new AndroidRuntimeAssets(x64Descriptor, null), x64);
+
+        Assert.Null(AndroidRuntimeAssetCatalog.SelectJava25("x86_64", 4096,
+            ["jre25.json", "jre25-arm64-v8a.tar.xz"]));
+        Assert.Null(AndroidRuntimeAssetCatalog.SelectJava25("arm64-v8a", 16_384,
+            ["jre25.json", "jre25-arm64-v8a.tar.xz"]));
+        Assert.Equal(new AndroidRuntimeAssets("jre25.json", "jre25-arm64-v8a.tar.xz"),
+            AndroidRuntimeAssetCatalog.SelectJava25("arm64-v8a", 4096,
+                ["jre25.json", "jre25-arm64-v8a.tar.xz"]));
+    }
+
+    [Theory]
+    [InlineData("jay-runtime-v2-arm64", null, false, true)]
+    [InlineData("jay-runtime-v2-arm64", "jay-runtime-v2-arm64", true, true)]
+    [InlineData("jay-runtime-v2-arm64", null, true, false)]
+    [InlineData("jay-runtime-v2-arm64", "jay-runtime-v3-arm64", true, false)]
+    [InlineData("", null, false, false)]
+    public void InstalledAndroidRuntimeSurvivesCataloglessDebugBuilds(
+        string manifestId, string? descriptorId, bool catalogPresent, bool expected)
+    {
+        Assert.Equal(expected,
+            AndroidRuntimeAssetCatalog.AcceptsInstalledRuntime(manifestId, descriptorId, catalogPresent));
+    }
+
+    [Fact]
+    public void AndroidRuntimeReleaseReadsTheStandardReleaseFile()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "jay-java-release-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            File.WriteAllText(Path.Combine(root, "release"),
+                "IMPLEMENTOR=\"Jay test\"\nJAVA_VERSION=\"25.0.5-internal\"\n");
+            Assert.Equal(25, JavaRuntimeRelease.ReadMajor(root));
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
     [Fact]
     public async Task FreshMobileProfileCreatesPrivateIdentityAndEmptyServerList()
     {
@@ -94,52 +384,68 @@ public sealed class MobilePortTests
     [Fact]
     public void DefaultTouchControlsStayOnScreenAndHitTheirCenters()
     {
-        Assert.Contains(TouchControlLayout.Default, control => control.Action == TouchControlAction.Move);
-        Assert.Contains(TouchControlLayout.Default, control => control.Action == TouchControlAction.Jump);
-        Assert.DoesNotContain(TouchControlLayout.Default, control => control.Action == TouchControlAction.PrimaryAction);
-        Assert.Contains(TouchControlLayout.Default, control => control.Action == TouchControlAction.Sneak);
-        Assert.DoesNotContain(TouchControlLayout.Default, control => control.Action == TouchControlAction.Sprint);
-        Assert.DoesNotContain(TouchControlLayout.Default, control => control.Action == TouchControlAction.PreviousSlot);
-        Assert.DoesNotContain(TouchControlLayout.Default, control => control.Action == TouchControlAction.NextSlot);
+        var profile = new TouchControlProfile();
+        var controls = profile.Controls;
+        Assert.Contains(controls, control => control.Action == TouchControlAction.Move);
+        Assert.Contains(controls, control => control.Action == TouchControlAction.Jump);
+        Assert.DoesNotContain(controls, control => control.Action == TouchControlAction.PrimaryAction);
+        Assert.Contains(controls, control => control.Action == TouchControlAction.Sneak);
+        Assert.DoesNotContain(controls, control => control.Action == TouchControlAction.Sprint);
+        Assert.DoesNotContain(controls, control => control.Action == TouchControlAction.PreviousSlot);
+        Assert.DoesNotContain(controls, control => control.Action == TouchControlAction.NextSlot);
 
-        foreach (var control in TouchControlLayout.Default)
+        foreach (var control in controls)
         {
-            Assert.InRange(control.CenterX - control.Radius, 0, 1);
-            Assert.InRange(control.CenterX + control.Radius, 0, 1);
-            Assert.InRange(control.CenterY - control.Radius, 0, 1);
-            Assert.InRange(control.CenterY + control.Radius, 0, 1);
+            var halfWidth = control.Action == TouchControlAction.Inventory
+                ? control.Radius * 0.82 / profile.ViewportAspectRatio
+                : control.Radius / profile.ViewportAspectRatio;
+            var halfHeight = control.Action == TouchControlAction.Inventory
+                ? control.Radius * 0.82
+                : control.Radius;
+            Assert.InRange(control.CenterX - halfWidth, 0, 1);
+            Assert.InRange(control.CenterX + halfWidth, 0, 1);
+            Assert.InRange(control.CenterY - halfHeight, 0, 1);
+            Assert.InRange(control.CenterY + halfHeight, 0, 1.001);
             if (control.GameplayVisible)
-                Assert.Equal(control.Action, TouchControlLayout.HitTest(control.CenterX, control.CenterY)!.Action);
+            {
+                if (control.Action == TouchControlAction.Move)
+                    Assert.Equal(TouchControlAction.Move,
+                        TouchControlLayout.HitTest(control.CenterX +
+                            control.Radius * 0.65 / profile.ViewportAspectRatio, control.CenterY)!.Action);
+                else
+                    Assert.Equal(control.Action, TouchControlLayout.HitTest(control.CenterX, control.CenterY)!.Action);
+            }
             if (control.MenuVisible)
                 Assert.Equal(control.Action, TouchControlLayout.HitTest(control.CenterX, control.CenterY,
                     gameplayControlsActive: false)!.Action);
         }
 
         var move = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Move);
-        var right = TouchControlLayout.JoystickVector(move.CenterX + move.Radius * 2, move.CenterY);
+        var right = TouchControlLayout.JoystickVector(move.CenterX +
+            move.Radius * 2 / profile.ViewportAspectRatio, move.CenterY);
         Assert.Equal(1, right.X, 6);
         Assert.Equal(0, right.Y, 6);
         Assert.DoesNotContain(TouchControlLayout.Default, control => control.Label is "Q" or "E" or "Run" or "Use");
-        Assert.Equal("mobile.touch.inventory",
-            TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Inventory).LabelKey);
+        Assert.Equal("背包", TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Inventory).Label);
         Assert.DoesNotContain(TouchControlLayout.Default, control => control.Action == TouchControlAction.Drop);
 
         var menu = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Menu);
         var movePad = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Move);
-        var split = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.SecondaryAction);
         var inventory = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Inventory);
         var jump = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Jump);
         var sneak = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Sneak);
         Assert.InRange(menu.CenterX, 0.47, 0.53);
         Assert.True(movePad.CenterX < 0.25);
-        Assert.InRange(movePad.CenterY, 0.75, 0.82);
-        Assert.InRange(inventory.CenterX, 0.600, 0.612);
-        Assert.InRange(inventory.CenterY, 0.95, 0.96);
-        Assert.True(jump.CenterY > 0.75 && sneak.CenterY > 0.84);
-        Assert.True(jump.Radius >= 0.04 && sneak.Radius >= 0.04);
-        Assert.False(split.GameplayVisible);
-        Assert.True(split.MenuVisible);
-        Assert.Null(TouchControlLayout.HitTest(split.CenterX, split.CenterY));
+        Assert.InRange(movePad.CenterY, 0.79, 0.81);
+        Assert.InRange(inventory.CenterX, 0.60, 0.61);
+        Assert.InRange(inventory.CenterY, 0.98, 0.982);
+        Assert.InRange(inventory.Radius, 0.023, 0.025);
+        Assert.True(jump.CenterY > 0.78);
+        Assert.Equal(movePad.CenterX, sneak.CenterX, 6);
+        Assert.Equal(movePad.CenterY, sneak.CenterY, 6);
+        Assert.True(jump.Radius >= 0.05 && sneak.Radius >= 0.035);
+        Assert.DoesNotContain(TouchControlLayout.Default,
+            control => control.Action == TouchControlAction.SecondaryAction);
     }
 
     [Fact]
@@ -152,19 +458,87 @@ public sealed class MobilePortTests
         var move = profile.Controls.Single(control => control.Action == TouchControlAction.Move);
         Assert.Equal(TouchControlAction.Sneak,
             profile.HitTest(move.CenterX, move.CenterY)!.Action);
-        var direction = profile.MovementVector(move.CenterX + move.Radius, move.CenterY + move.Radius * 0.15);
+        var direction = profile.MovementVector(move.CenterX +
+            move.Radius / profile.ViewportAspectRatio, move.CenterY + move.Radius * 0.15);
         Assert.Equal(1, direction.X, 6);
         Assert.Equal(0, direction.Y, 6);
 
         profile.Mode = TouchControlMode.JoystickAndCrosshair;
-        Assert.Contains(profile.Controls, control => control.Action == TouchControlAction.PrimaryAction);
-        Assert.Contains(profile.Controls, control => control.Action == TouchControlAction.SecondaryAction && control.GameplayVisible);
+        Assert.DoesNotContain(profile.Controls, control => control.Action == TouchControlAction.PrimaryAction);
+        Assert.DoesNotContain(profile.Controls, control =>
+            control.Action == TouchControlAction.SecondaryAction && control.GameplayVisible);
 
         profile.Mode = TouchControlMode.ExternalKeyboardMouse;
-        Assert.Single(profile.Controls);
-        Assert.Equal(TouchControlAction.Settings, profile.Controls[0].Action);
-        Assert.True(profile.Controls[0].GameplayVisible);
-        Assert.True(profile.Controls[0].MenuVisible);
+        Assert.Equal(2, profile.Controls.Count);
+        Assert.Contains(profile.Controls, control =>
+            control.Action == TouchControlAction.Settings && control.GameplayVisible && control.MenuVisible);
+        Assert.Contains(profile.Controls, control =>
+            control.Action == TouchControlAction.Close && !control.GameplayVisible && control.MenuVisible);
+    }
+
+    [Fact]
+    public void TouchControlsUseSquarePixelGeometryOnLandscapeTablets()
+    {
+        var profile = new TouchControlProfile
+        {
+            Mode = TouchControlMode.JoystickAndTap,
+            ViewportAspectRatio = 1.6
+        };
+        var move = profile.Controls.Single(control => control.Action == TouchControlAction.Move);
+        var jump = profile.Controls.Single(control => control.Action == TouchControlAction.Jump);
+
+        // One rendered radius is radius/aspect in normalised X but radius in normalised Y.
+        Assert.Equal(TouchControlAction.Move, profile.HitTest(
+            move.CenterX + move.Radius * 0.99 / profile.ViewportAspectRatio,
+            move.CenterY)!.Action);
+        Assert.Null(profile.HitTest(
+            move.CenterX + move.Radius * 1.01 / profile.ViewportAspectRatio,
+            move.CenterY));
+        Assert.Equal(TouchControlAction.Jump, profile.HitTest(
+            jump.CenterX + jump.Radius * 0.99 / profile.ViewportAspectRatio,
+            jump.CenterY)!.Action);
+        Assert.Null(profile.HitTest(
+            jump.CenterX + jump.Radius * 1.01 / profile.ViewportAspectRatio,
+            jump.CenterY));
+
+        var rightEdge = profile.MovementVector(
+            move.CenterX + move.Radius / profile.ViewportAspectRatio, move.CenterY);
+        Assert.Equal(1, rightEdge.X, 6);
+        Assert.Equal(0, rightEdge.Y, 6);
+    }
+
+    [Fact]
+    public void TouchGestureThresholdsUseSquarePixelGeometryOnLandscapeTablets()
+    {
+        var profile = new TouchControlProfile { ViewportAspectRatio = 1.6 };
+        var sink = new RecordingTouchSink();
+        var router = new TouchInputRouter(sink, profile);
+
+        Assert.True(router.Press(1, 0.50, 0.40));
+        Assert.True(router.Move(1, 0.50 + 0.014 / profile.ViewportAspectRatio, 0.40));
+        Assert.True(router.Release(1));
+        Assert.Single(sink.Pointers, pointer => pointer.Click);
+
+        Assert.True(router.Press(2, 0.50, 0.40));
+        Assert.True(router.Move(2, 0.50 + 0.016 / profile.ViewportAspectRatio, 0.40));
+        Assert.True(router.Release(2));
+        Assert.Single(sink.Pointers, pointer => pointer.Click);
+    }
+
+    [Fact]
+    public void TouchMenuClassifiesDragDirectionInPhysicalPixels()
+    {
+        var profile = new TouchControlProfile { ViewportAspectRatio = 1.6 };
+        var sink = new RecordingTouchSink();
+        var router = new TouchInputRouter(sink, profile);
+
+        Assert.True(router.Press(1, 0.35, 0.45, controlsEnabled: false));
+        Assert.True(router.Move(1, 0.40, 0.52));
+        Assert.Contains((TouchControlAction.PrimaryAction, true), sink.Actions);
+        Assert.DoesNotContain(sink.Actions,
+            action => action.Action is TouchControlAction.PreviousSlot or TouchControlAction.NextSlot);
+        Assert.True(router.Release(1));
+        Assert.Contains((TouchControlAction.PrimaryAction, false), sink.Actions);
     }
 
     [Fact]
@@ -182,181 +556,151 @@ public sealed class MobilePortTests
     }
 
     [Fact]
-    public void TouchHitAreasAndJoystickFollowTheDrawnSizeOnAWideScreen()
+    public void TouchHudKeepsInventoryAttachedToHotbarAcrossTabletAspectRatios()
     {
-        const double width = 2400, height = 1080;
-        var profile = new TouchControlProfile { AspectRatio = width / height };
-        var jump = profile.Controls.Single(control => control.Action == TouchControlAction.Jump);
-        var radiusPixels = jump.Radius * Math.Min(width, height);
-
-        // Inside the drawn size in both directions, outside it at 1.5 radii (in pixels) sideways.
-        Assert.Equal(TouchControlAction.Jump,
-            profile.HitTest(jump.CenterX + radiusPixels * 0.9 / width, jump.CenterY)!.Action);
-        Assert.Equal(TouchControlAction.Jump,
-            profile.HitTest(jump.CenterX, jump.CenterY + radiusPixels * 0.9 / height)!.Action);
-        Assert.NotEqual(TouchControlAction.Jump,
-            profile.HitTest(jump.CenterX + radiusPixels * 1.5 / width, jump.CenterY)?.Action);
-
-        // The same finger travel in pixels moves the joystick equally far in either direction.
-        var move = profile.Controls.Single(control => control.Action == TouchControlAction.Move);
-        var travel = move.Radius * Math.Min(width, height) * 0.5;
-        var sideways = profile.MovementVector(move.CenterX + travel / width, move.CenterY);
-        var forward = profile.MovementVector(move.CenterX, move.CenterY - travel / height);
-        Assert.Equal(0.5, sideways.X, 6);
-        Assert.Equal(-0.5, forward.Y, 6);
-
-        // A bad size never breaks hit testing.
-        profile.AspectRatio = double.NaN;
-        Assert.Equal(1, profile.AspectRatio);
-    }
-
-    [Fact]
-    public void EmbeddedGameRunsOncePerProcessAndBackFollowsItsState()
-    {
-        var state = new EmbeddedGameRunState();
-        Assert.Equal(EmbeddedGameBackAction.CloseScreen, state.BackAction);
-
-        var runs = 0;
-        state.Run(() =>
-        {
-            runs++;
-            Assert.True(state.IsRunning);
-            Assert.Equal(EmbeddedGameBackAction.SendEscape, state.BackAction);
-        });
-        Assert.True(state.HasStarted);
-        Assert.False(state.IsRunning);
-        Assert.Equal(EmbeddedGameBackAction.EndProcess, state.BackAction);
-
-        // A second start in the same process never reaches the JVM.
-        Assert.Throws<InvalidOperationException>(() => state.Run(() => runs++));
-        Assert.Equal(1, runs);
-
-        // A game that fails after starting still counts as started.
-        var failed = new EmbeddedGameRunState();
-        Assert.Throws<InvalidOperationException>(() => failed.Run(() => throw new InvalidOperationException("crash")));
-        Assert.Equal(EmbeddedGameBackAction.EndProcess, failed.BackAction);
-    }
-
-    [Theory]
-    [InlineData(2400, 1080, 3, 3)]
-    [InlineData(1600, 720, 3, 3)]
-    [InlineData(1280, 720, 0, 3)]
-    [InlineData(854, 480, 3, 2)]
-    [InlineData(2400, 1080, 2, 2)]
-    public void HotbarFollowsTheGameGuiScale(int width, int height, int option, int expectedScale)
-    {
-        Assert.Equal(expectedScale, MinecraftHotbar.EffectiveGuiScale(width, height, option));
-
-        var (left, top, right, bottom) = MinecraftHotbar.Bounds(width, height, option);
-        Assert.Equal(182.0 * expectedScale / width, right - left, 6);
-        Assert.Equal(0.5, (left + right) / 2, 2);
-        Assert.InRange(bottom, 1.0, 1.0 + (double)expectedScale / height);
-        Assert.Equal(22.0 * expectedScale / height, bottom - top, 6);
-
-        // The middle of each visible slot selects that slot; just outside the bar selects nothing.
-        for (var slot = 0; slot < 9; slot++)
-        {
-            var x = left + (1 + 20 * slot + 10.0) * expectedScale / width;
-            Assert.True(MinecraftHotbar.TryGetSlot(x, (top + bottom) / 2, width, height, option, out var picked));
-            Assert.Equal(slot, picked);
-        }
-        Assert.False(MinecraftHotbar.TryGetSlot(left - 1.0 / width, (top + bottom) / 2, width, height, option, out _));
-        Assert.False(MinecraftHotbar.TryGetSlot(right + 1.0 / width, (top + bottom) / 2, width, height, option, out _));
-        Assert.False(MinecraftHotbar.TryGetSlot(0.5, top - 2.0 / height, width, height, option, out _));
-    }
-
-    [Fact]
-    public void HotbarTapsMatchTheVisibleSlotsOnAWidePhone()
-    {
-        // 2400x1080 at GUI scale 3: the hotbar spans 927..1473 px. Pixel 940 is inside the first slot,
-        // which the old fixed fractions (0.405..0.595) did not accept.
-        Assert.True(MinecraftHotbar.TryGetSlot(940.0 / 2400, 1060.0 / 1080, 2400, 1080, 3, out var first));
+        var phone = TouchHudGeometry.ForAspectRatio(20d / 9d);
+        var tablet = TouchHudGeometry.ForAspectRatio(1.6);
+        Assert.True(phone.InventoryX > phone.HotbarRight);
+        Assert.True(tablet.InventoryX > tablet.HotbarRight);
+        Assert.True(tablet.HotbarRight - tablet.HotbarLeft > phone.HotbarRight - phone.HotbarLeft);
+        Assert.True(tablet.TryGetSlot(tablet.HotbarLeft + 0.001, 0.90, out var first));
         Assert.Equal(0, first);
-        Assert.True(MinecraftHotbar.TryGetSlot(1000.0 / 2400, 1060.0 / 1080, 2400, 1080, 3, out var second));
-        Assert.Equal(1, second);
-    }
+        Assert.True(tablet.TryGetSlot(tablet.HotbarRight - 0.001, 0.99, out var last));
+        Assert.Equal(8, last);
 
-    [Theory]
-    [InlineData(null, MinecraftHotbar.DefaultGuiScaleOption)]
-    [InlineData("version:4671\nguiScale:2\nmaxFps:60\n", 2)]
-    [InlineData("version:4671\r\nguiScale:0\r\n", 0)]
-    [InlineData("version:4671\n", 0)]
-    [InlineData("guiScale:big\n", MinecraftHotbar.DefaultGuiScaleOption)]
-    public void HotbarReadsTheGuiScaleFromOptions(string? text, int expected) =>
-        Assert.Equal(expected, MinecraftHotbar.ReadGuiScaleOption(text));
-
-    [Fact]
-    public void InventoryKeyFollowsTheHotbarUnlessMoved()
-    {
-        const int width = 2400, height = 1080;
-        var profile = new TouchControlProfile
-        {
-            AspectRatio = (double)width / height,
-            HotbarBounds = MinecraftHotbar.Bounds(width, height, 3)
-        };
-        var hotbar = profile.HotbarBounds!.Value;
+        var profile = new TouchControlProfile { ViewportAspectRatio = 1.6 };
         var inventory = profile.Controls.Single(control => control.Action == TouchControlAction.Inventory);
-        var faceLeftPixels = (inventory.CenterX * width) -
-                             inventory.Radius * TouchControlLayout.UtilityFaceScale * Math.Min(width, height);
-        Assert.Equal(hotbar.Right * width, faceLeftPixels, 3);
-        Assert.Equal((hotbar.Top + hotbar.Bottom) / 2, inventory.CenterY, 6);
-        Assert.False(MinecraftHotbar.TryGetSlot(inventory.CenterX, inventory.CenterY, width, height, 3, out _));
-        Assert.Equal(TouchControlAction.Inventory, profile.HitTest(inventory.CenterX, inventory.CenterY)!.Action);
+        Assert.Equal(tablet.InventoryX, inventory.CenterX, 6);
+        Assert.Equal(tablet.CenterY, inventory.CenterY, 6);
+        Assert.InRange(inventory.CenterY, 0.98, 0.982);
+        Assert.Equal(tablet.HotbarRight,
+            inventory.CenterX - inventory.Radius * 0.82 / 1.6, 6);
+        Assert.Null(profile.HitTest(tablet.HotbarRight - 0.001, tablet.CenterY));
+        Assert.Equal(TouchControlAction.Inventory,
+            profile.HitTest(inventory.CenterX, inventory.CenterY)!.Action);
 
-        profile.SetPosition(TouchControlAction.Inventory, 0.30, 0.40);
+        profile.Scale = 1.35;
         inventory = profile.Controls.Single(control => control.Action == TouchControlAction.Inventory);
-        Assert.Equal((0.30, 0.40), (inventory.CenterX, inventory.CenterY));
-    }
+        var enlarged = TouchHudGeometry.ForAspectRatio(1.6, inventory.Radius);
+        Assert.Equal(enlarged.InventoryX, inventory.CenterX, 6);
+        Assert.Equal(tablet.HotbarRight,
+            inventory.CenterX - inventory.Radius * 0.82 / 1.6, 6);
+        Assert.True(inventory.CenterY + inventory.Radius * 0.82 <= 1);
+        Assert.Null(profile.HitTest(tablet.HotbarRight - 0.001, enlarged.CenterY));
+        Assert.Equal(TouchControlAction.Inventory,
+            profile.HitTest(inventory.CenterX, inventory.CenterY)!.Action);
 
-    [Theory]
-    [InlineData(1, 1.0)]
-    [InlineData(1, 1.35)]
-    [InlineData(2, 1.35)]
-    public void InventoryKeyStaysOnScreenAtASmallGuiScale(int guiScale, double buttonScale)
-    {
-        const int width = 2400, height = 1080;
-        var profile = new TouchControlProfile
-        {
-            AspectRatio = (double)width / height,
-            Scale = buttonScale,
-            HotbarBounds = MinecraftHotbar.Bounds(width, height, guiScale)
-        };
-        var inventory = profile.Controls.Single(control => control.Action == TouchControlAction.Inventory);
-        var faceBottomPixels = inventory.CenterY * height +
-                               inventory.Radius * TouchControlLayout.UtilityFaceScale * Math.Min(width, height);
-        Assert.True(faceBottomPixels <= height + 1e-6, $"face bottom {faceBottomPixels} below {height}");
-        Assert.Equal(TouchControlAction.Inventory, profile.HitTest(inventory.CenterX, inventory.CenterY)!.Action);
+        profile.SetPosition(TouchControlAction.Inventory, 0.25, 0.25);
+        Assert.False(profile.TryGetPosition(TouchControlAction.Inventory, out _));
+        inventory = profile.Controls.Single(control => control.Action == TouchControlAction.Inventory);
+        Assert.Equal(enlarged.InventoryX, inventory.CenterX, 6);
+        Assert.Equal(enlarged.CenterY, inventory.CenterY, 6);
     }
 
     [Fact]
-    public void TouchControlTextIsTranslatedInEveryLanguage()
+    public void LiveMinecraftGuiScaleDrivesHotbarHitTestingAndInventoryAnchor()
     {
-        // The game screen follows the app language, so every string it shows must come from the
-        // language files: control names from the layout, and the settings panel text in GameActivity.
-        var src = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));
-        var keys = Enum.GetValues<TouchControlMode>()
-            .SelectMany(TouchControlLayout.For)
-            .Select(control => control.LabelKey)
-            .ToHashSet();
-        foreach (var file in Directory.EnumerateFiles(Path.Combine(src, "Amber.Android"), "*.cs")
-                     .Concat(Directory.EnumerateFiles(Path.Combine(src, "Amber.Mobile"), "*.cs")))
-            foreach (System.Text.RegularExpressions.Match match in System.Text.RegularExpressions.Regex.Matches(
-                         File.ReadAllText(file), @"\bL\.[TF]\(\s*""(mobile\.[^""]+)"""))
-                keys.Add(match.Groups[1].Value);
-        Assert.Contains("mobile.touch.edit_layout", keys);
-        var literals = Directory.EnumerateFiles(Path.Combine(src, "Amber.Android"), "*.cs")
-            .Concat(Directory.EnumerateFiles(Path.Combine(src, "Amber.Mobile"), "*.cs"))
-            .SelectMany(file => System.Text.RegularExpressions.Regex.Matches(File.ReadAllText(file),
-                    @"""[^""\n]*[\u3040-\u30ff\u4e00-\u9fff][^""\n]*""")
-                .Select(match => $"{Path.GetFileName(file)}: {match.Value}"))
-            .ToList();
-        Assert.True(literals.Count == 0, "Hard-coded UI text:\n" + string.Join("\n", literals));
+        var hud = TouchHudGeometry.ForViewport(2944, 1840, 7);
+        Assert.Equal(0.5 - 630d / 2944, hud.HotbarLeft, 6);
+        Assert.Equal(0.5 + 630d / 2944, hud.HotbarRight, 6);
+        Assert.Equal(0.5 + 707d / 2944, hud.InventoryX, 6);
+        Assert.Equal(1 - 77d / 1840, hud.CenterY, 6);
+        Assert.True(hud.TryGetSlot(0.30, 0.95, out var first));
+        Assert.Equal(0, first);
+        Assert.True(hud.TryGetSlot(0.70, 0.95, out var last));
+        Assert.Equal(8, last);
 
-        foreach (var code in new[] { "en", "zh-Hans", "zh-Hant", "ja", "lzh" })
+        var profile = new TouchControlProfile
         {
-            var table = Amber.Core.Localization.L.Load(code);
-            Assert.All(keys, key => Assert.True(table.ContainsKey(key), $"{code} is missing {key}"));
-        }
+            ViewportAspectRatio = 2944d / 1840,
+            ViewportWidthPixels = 2944,
+            ViewportHeightPixels = 1840,
+            MinecraftGuiScale = 7
+        };
+        var inventory = profile.Controls.Single(control =>
+            control.Action == TouchControlAction.Inventory);
+        Assert.Equal(hud.InventoryX, inventory.CenterX, 6);
+        Assert.Equal(hud.CenterY, inventory.CenterY, 6);
+        Assert.Equal(hud.InventoryRadius, inventory.Radius, 6);
+    }
+
+    [Fact]
+    public void AndroidReadsGuiScaleFromTheWindowWithoutRequiringAnOpenScreen()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var bootstrap = File.ReadAllText(Path.Combine(repository, "src", "Amber.Android", "Java",
+            "nz", "work", "minecraft", "jay", "AndroidGameBootstrap.java"));
+
+        Assert.Contains("windowGuiScale = optionalMethod(windowType, \"getGuiScale\")", bootstrap,
+            StringComparison.Ordinal);
+        Assert.Equal(2, bootstrap.Split(
+            "windowGuiScale = optionalMethod(windowType, \"s\")", StringSplitOptions.None).Length - 1);
+        Assert.Contains("windowGuiScale.invoke(liveWindow)", bootstrap, StringComparison.Ordinal);
+        Assert.Contains("if (liveWindow != null && windowGuiScale != null)", bootstrap,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AndroidDropsLegacyInventoryOverridesAndKeepsTheButtonOutOfLayoutEditing()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var activity = File.ReadAllText(Path.Combine(repository, "src", "Amber.Android",
+            "GameActivity.cs"));
+
+        Assert.Contains("if (layoutVersion < 3)", activity, StringComparison.Ordinal);
+        Assert.Contains("editor.PutInt(\"layout-version\", 3)", activity,
+            StringComparison.Ordinal);
+        Assert.Contains("if (action == TouchControlAction.Inventory) continue;", activity,
+            StringComparison.Ordinal);
+        Assert.Contains("if (control.Action == TouchControlAction.Inventory) return true;", activity,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AndroidSavingTouchProfileRemovesResetPositionOverrides()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var activity = File.ReadAllText(Path.Combine(repository, "src", "Amber.Android",
+            "GameActivity.cs"));
+        var saveProfile = JavaMethod(activity, "private void SaveProfile()",
+            "private bool HandleSettingsTouch");
+
+        Assert.Contains("if (_profile.TryGetPosition(modeValue, action, out var position))",
+            saveProfile, StringComparison.Ordinal);
+        Assert.Contains("editor.Remove(xKey);", saveProfile, StringComparison.Ordinal);
+        Assert.Contains("editor.Remove(yKey);", saveProfile, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AndroidRejectsUndefinedPersistedTouchModes()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var activity = File.ReadAllText(Path.Combine(repository, "src", "Amber.Android",
+            "GameActivity.cs"));
+        var loadProfile = JavaMethod(activity, "private void LoadProfile()",
+            "private void SaveProfile()");
+
+        Assert.Contains("Enum.IsDefined(mode)", loadProfile, StringComparison.Ordinal);
+        Assert.Contains("Enum.IsDefined(attackArea)", loadProfile, StringComparison.Ordinal);
+        Assert.Contains(": TouchControlMode.DPadAndTap;", loadProfile, StringComparison.Ordinal);
+        Assert.Contains(": TouchAttackArea.Anywhere;", loadProfile, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TouchProfileOffersIndependentAttackAreas()
+    {
+        var profile = new TouchControlProfile { ViewportAspectRatio = 1.6 };
+        Assert.True(profile.AllowsAttackAt(0.15, 0.25));
+        profile.AttackArea = TouchAttackArea.RightSide;
+        Assert.False(profile.AllowsAttackAt(0.20, 0.50));
+        Assert.True(profile.AllowsAttackAt(0.80, 0.50));
+        profile.AttackArea = TouchAttackArea.Crosshair;
+        Assert.True(profile.AllowsAttackAt(0.50, 0.50));
+        Assert.False(profile.AllowsAttackAt(0.75, 0.50));
     }
 
     [Fact]
@@ -377,12 +721,13 @@ public sealed class MobilePortTests
     public void TouchInputRouterKeepsSimultaneousMovementAndJumpIndependent()
     {
         var sink = new RecordingTouchSink();
-        var router = new TouchInputRouter(sink);
-        var move = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Move);
-        var jump = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Jump);
+        var profile = new TouchControlProfile();
+        var router = new TouchInputRouter(sink, profile);
+        var move = profile.Controls.Single(control => control.Action == TouchControlAction.Move);
+        var jump = profile.Controls.Single(control => control.Action == TouchControlAction.Jump);
 
-        Assert.True(router.Press(10, move.CenterX, move.CenterY));
-        Assert.True(router.Move(10, move.CenterX + move.Radius, move.CenterY));
+        Assert.True(router.Press(10, move.CenterX + move.Radius * 0.65 / profile.ViewportAspectRatio, move.CenterY));
+        Assert.True(router.Move(10, move.CenterX + move.Radius / profile.ViewportAspectRatio, move.CenterY));
         Assert.True(router.Press(11, jump.CenterX, jump.CenterY));
         Assert.Contains((TouchControlAction.Jump, true), sink.Actions);
         Assert.Equal(1, sink.LastMovement.X, 6);
@@ -395,13 +740,124 @@ public sealed class MobilePortTests
     }
 
     [Fact]
+    public void TouchInputRouterKeepsSharedActionPressedUntilTheLastFingerEnds()
+    {
+        var sink = new RecordingTouchSink();
+        var profile = new TouchControlProfile();
+        var router = new TouchInputRouter(sink, profile);
+        var jump = profile.Controls.Single(control => control.Action == TouchControlAction.Jump);
+
+        Assert.True(router.Press(20, jump.CenterX, jump.CenterY));
+        Assert.True(router.Press(21, jump.CenterX, jump.CenterY));
+        Assert.Single(sink.Actions, action => action == (TouchControlAction.Jump, true));
+
+        Assert.True(router.Release(20));
+        Assert.DoesNotContain((TouchControlAction.Jump, false), sink.Actions);
+        Assert.True(router.IsPressed(TouchControlAction.Jump));
+
+        Assert.True(router.Release(21));
+        Assert.Single(sink.Actions, action => action == (TouchControlAction.Jump, false));
+        Assert.False(router.IsPressed(TouchControlAction.Jump));
+    }
+
+    [Fact]
+    public void TouchInputRouterKeepsMiningPressedUntilTheLastLongPressEnds()
+    {
+        var sink = new RecordingTouchSink();
+        var router = new TouchInputRouter(sink);
+
+        Assert.True(router.Press(30, 0.60, 0.40));
+        Assert.True(router.BeginLongPress(30));
+        Assert.True(router.Press(31, 0.70, 0.40));
+        Assert.True(router.BeginLongPress(31));
+        Assert.Single(sink.Actions,
+            action => action == (TouchControlAction.PrimaryAction, true));
+
+        Assert.True(router.Release(30));
+        Assert.DoesNotContain((TouchControlAction.PrimaryAction, false), sink.Actions);
+        Assert.True(router.IsPressed(TouchControlAction.PrimaryAction));
+
+        Assert.True(router.Release(31));
+        Assert.Single(sink.Actions,
+            action => action == (TouchControlAction.PrimaryAction, false));
+        Assert.False(router.IsPressed(TouchControlAction.PrimaryAction));
+    }
+
+    [Fact]
+    public void InputActionLatchCombinesTouchKeyboardAndMouseSources()
+    {
+        var latch = new InputActionLatch();
+
+        Assert.Equal(new(TouchControlAction.Jump, true, false),
+            latch.Set(TouchControlAction.Jump, source: 0, pressed: true));
+        Assert.Null(latch.Set(TouchControlAction.Jump, source: 100, pressed: true));
+        Assert.Null(latch.Set(TouchControlAction.Jump, source: 200, pressed: true));
+        Assert.Null(latch.Set(TouchControlAction.Jump, source: 100, pressed: false));
+        Assert.Null(latch.Set(TouchControlAction.Jump, source: 0, pressed: false,
+            cancelled: true));
+        Assert.Equal(new(TouchControlAction.Jump, false, false),
+            latch.Set(TouchControlAction.Jump, source: 200, pressed: false));
+        Assert.False(latch.IsActive(TouchControlAction.Jump));
+    }
+
+    [Fact]
+    public void InputActionLatchClearsHardwareWithoutReleasingTouch()
+    {
+        var latch = new InputActionLatch();
+        Assert.NotNull(latch.Set(TouchControlAction.PrimaryAction, 0, pressed: true));
+        Assert.Null(latch.Set(TouchControlAction.PrimaryAction, 0x10001, pressed: true));
+        Assert.NotNull(latch.Set(TouchControlAction.Sneak, 0x10002, pressed: true));
+
+        var changes = latch.ClearSources(source => source >= 0x10000);
+
+        Assert.Single(changes);
+        Assert.Equal(new(TouchControlAction.Sneak, false, false), changes[0]);
+        Assert.True(latch.IsActive(TouchControlAction.PrimaryAction));
+        Assert.False(latch.IsActive(TouchControlAction.Sneak));
+    }
+
+    [Fact]
+    public void InputActionLatchCancelsTheLastSourceOnWindowFocusLoss()
+    {
+        var latch = new InputActionLatch();
+        Assert.NotNull(latch.Set(TouchControlAction.PrimaryAction, 0, pressed: true));
+        Assert.Null(latch.Set(TouchControlAction.PrimaryAction, 0x20001, pressed: true));
+        Assert.Null(latch.Set(TouchControlAction.PrimaryAction, 0, pressed: false,
+            cancelled: true));
+
+        var changes = latch.ClearSources(source => source >= 0x10000,
+            cancelled: true);
+
+        Assert.Equal([new(TouchControlAction.PrimaryAction, false, true)], changes);
+    }
+
+    [Fact]
+    public void TouchInputRouterRestoresFirstMovementFingerWhenSecondOneEnds()
+    {
+        var sink = new RecordingTouchSink();
+        var profile = new TouchControlProfile { Mode = TouchControlMode.JoystickAndTap };
+        var router = new TouchInputRouter(sink, profile);
+        var move = profile.Controls.Single(control => control.Action == TouchControlAction.Move);
+
+        Assert.True(router.Press(101, move.CenterX + move.Radius * 0.8 / profile.ViewportAspectRatio, move.CenterY));
+        Assert.Equal(0.8, sink.LastMovement.X, 6);
+        Assert.True(router.Press(102, move.CenterX - move.Radius * 0.8 / profile.ViewportAspectRatio, move.CenterY));
+        Assert.Equal(-0.8, sink.LastMovement.X, 6);
+
+        Assert.True(router.Release(102));
+        Assert.Equal(0.8, sink.LastMovement.X, 6);
+        Assert.True(router.Release(101));
+        Assert.Equal((0d, 0d), sink.LastMovement);
+    }
+
+    [Fact]
     public void TouchInputRouterAutoSprintsWhenTheJoystickIsPushedFullyForward()
     {
         var sink = new RecordingTouchSink();
         var router = new TouchInputRouter(sink);
         var move = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Move);
 
-        Assert.True(router.Press(50, move.CenterX, move.CenterY));
+        Assert.True(router.Press(50, move.CenterX, move.CenterY - move.Radius * 0.65));
         Assert.True(router.Move(50, move.CenterX, move.CenterY - move.Radius));
         Assert.True(router.SprintLocked);
         Assert.True(router.IsPressed(TouchControlAction.Sprint));
@@ -436,28 +892,49 @@ public sealed class MobilePortTests
         Assert.True(router.Press(15, 0.55, 0.42));
         Assert.True(router.BeginLongPress(15));
         Assert.True(router.Move(15, 0.62, 0.37));
-        Assert.Contains((TouchControlAction.PrimaryAction, false), sink.Actions);
+        Assert.Contains(TouchControlAction.PrimaryAction, sink.CanceledActions);
         Assert.False(router.IsLongPress(15));
-        Assert.Equal(0.07, sink.LastLook.X, 6);
-        Assert.Equal(-0.05, sink.LastLook.Y, 6);
+        Assert.Equal(0.07 * 1.65, sink.LastLook.X, 6);
+        Assert.Equal(-0.05 * 1.65, sink.LastLook.Y, 6);
         Assert.True(router.Release(15));
+    }
+
+    [Fact]
+    public void DraggingOneMiningFingerKeepsTheOtherMining()
+    {
+        var sink = new RecordingTouchSink();
+        var router = new TouchInputRouter(sink);
+        router.Press(1, 0.55, 0.42);
+        router.BeginLongPress(1);
+        router.Press(2, 0.65, 0.42);
+        router.BeginLongPress(2);
+
+        router.Move(2, 0.75, 0.42);
+        router.Release(2);
+        Assert.DoesNotContain(TouchControlAction.PrimaryAction, sink.CanceledActions);
+        Assert.True(router.IsLongPress(1));
+        router.Release(1);
+        Assert.Single(sink.Actions, a => a == (TouchControlAction.PrimaryAction, false));
     }
 
     [Fact]
     public void TouchInputRouterLetsSecondFingerAimWhileMovementStaysHeld()
     {
         var sink = new RecordingTouchSink();
-        var router = new TouchInputRouter(sink);
-        var move = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Move);
+        var profile = new TouchControlProfile();
+        var router = new TouchInputRouter(sink, profile);
+        var move = profile.Controls.Single(control => control.Action == TouchControlAction.Move);
 
-        Assert.True(router.Press(13, move.CenterX, move.CenterY));
-        Assert.True(router.Move(13, move.CenterX + move.Radius, move.CenterY));
+        Assert.True(router.Press(13, move.CenterX +
+            move.Radius * 0.65 / profile.ViewportAspectRatio, move.CenterY));
+        Assert.True(router.Move(13, move.CenterX +
+            move.Radius / profile.ViewportAspectRatio, move.CenterY));
         Assert.Equal(1, sink.LastMovement.X, 6);
 
         Assert.True(router.Press(14, 0.55, 0.38));
         Assert.True(router.Move(14, 0.63, 0.32));
-        Assert.Equal(0.08, sink.LastLook.X, 6);
-        Assert.Equal(-0.06, sink.LastLook.Y, 6);
+        Assert.Equal(0.08 * 1.65, sink.LastLook.X, 6);
+        Assert.Equal(-0.06 * 1.65, sink.LastLook.Y, 6);
         Assert.Equal(1, sink.LastMovement.X, 6);
 
         Assert.True(router.Release(14));
@@ -473,12 +950,11 @@ public sealed class MobilePortTests
 
         Assert.True(router.Press(20, 0.52, 0.45));
         Assert.True(router.Move(20, 0.60, 0.39));
-        Assert.Equal(0.08, sink.LastLook.X, 6);
-        Assert.Equal(-0.06, sink.LastLook.Y, 6);
+        Assert.Equal(0.08 * 1.65, sink.LastLook.X, 6);
+        Assert.Equal(-0.06 * 1.65, sink.LastLook.Y, 6);
         Assert.True(router.Release(20));
         Assert.Empty(sink.Actions);
-        Assert.Equal((0.60, 0.39, false), sink.LastPointer);
-        Assert.DoesNotContain(sink.Pointers, pointer => pointer.Click);
+        Assert.Empty(sink.Pointers);
     }
 
     [Fact]
@@ -493,6 +969,32 @@ public sealed class MobilePortTests
     }
 
     [Fact]
+    public void TouchInputRouterAppliesSensitivityAndAttackAreaWithoutDisablingLook()
+    {
+        var sink = new RecordingTouchSink();
+        var profile = new TouchControlProfile
+        {
+            AttackArea = TouchAttackArea.RightSide,
+            LookSensitivity = 2
+        };
+        var router = new TouchInputRouter(sink, profile);
+
+        Assert.True(router.Press(70, 0.20, 0.40));
+        Assert.True(router.Release(70));
+        Assert.DoesNotContain(sink.Pointers, pointer => pointer.Click);
+
+        Assert.True(router.Press(71, 0.20, 0.40));
+        Assert.True(router.Move(71, 0.25, 0.35));
+        Assert.Equal(0.10, sink.LastLook.X, 6);
+        Assert.Equal(-0.10, sink.LastLook.Y, 6);
+        Assert.True(router.Release(71));
+
+        Assert.True(router.Press(72, 0.75, 0.40));
+        Assert.True(router.Release(72));
+        Assert.Single(sink.Pointers, pointer => pointer.Click);
+    }
+
+    [Fact]
     public void TouchInputRouterBypassesControlsWhenGameplayOverlayIsDisabled()
     {
         var sink = new RecordingTouchSink();
@@ -502,14 +1004,12 @@ public sealed class MobilePortTests
         Assert.True(router.Press(21, jump.CenterX, jump.CenterY, controlsEnabled: false));
         Assert.DoesNotContain(sink.Actions, action => action.Action == TouchControlAction.Jump);
         Assert.Equal((jump.CenterX, jump.CenterY, false), sink.LastPointer);
-        Assert.Contains((TouchControlAction.PrimaryAction, true), sink.Actions);
         Assert.True(router.Release(21));
-        Assert.Contains((TouchControlAction.PrimaryAction, false), sink.Actions);
-        Assert.DoesNotContain(sink.Pointers, pointer => pointer.Click);
+        Assert.Single(sink.Pointers, pointer => pointer.Click);
 
-        var menu = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Menu);
-        Assert.True(router.Press(22, menu.CenterX, menu.CenterY, controlsEnabled: false));
-        Assert.Contains((TouchControlAction.Menu, true), sink.Actions);
+        var close = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Close);
+        Assert.True(router.Press(22, close.CenterX, close.CenterY, controlsEnabled: false));
+        Assert.Contains((TouchControlAction.Close, true), sink.Actions);
     }
 
     [Fact]
@@ -519,11 +1019,35 @@ public sealed class MobilePortTests
         var router = new TouchInputRouter(sink);
 
         Assert.True(router.Press(30, 0.35, 0.55, controlsEnabled: false));
-        Assert.Contains((TouchControlAction.PrimaryAction, true), sink.Actions);
+        Assert.DoesNotContain(sink.Actions, action => action.Action == TouchControlAction.PrimaryAction);
         Assert.True(router.Move(30, 0.70, 0.55));
+        Assert.Contains((TouchControlAction.PrimaryAction, true), sink.Actions);
         Assert.True(router.Release(30));
         Assert.Contains((TouchControlAction.PrimaryAction, false), sink.Actions);
         Assert.Equal((0.70, 0.55, false), sink.LastPointer);
+    }
+
+    [Fact]
+    public void ChangingASliderDragToScrollReleasesOnlyItsOwnHold()
+    {
+        var sink = new RecordingTouchSink();
+        var router = new TouchInputRouter(sink);
+        router.Press(1, 0.40, 0.40, controlsEnabled: false);
+        router.Move(1, 0.45, 0.40);
+        router.Press(2, 0.60, 0.40, controlsEnabled: false);
+        router.Move(2, 0.65, 0.40);
+        router.Move(2, 0.65, 0.75);
+
+        // Android reports every finger in each MOVE, including the resting scroll finger.
+        router.Move(1, 0.51, 0.40);
+        router.Move(2, 0.65, 0.75);
+        Assert.Equal((0.51, 0.40, false), sink.LastPointer);
+        Assert.DoesNotContain(TouchControlAction.PrimaryAction, sink.CanceledActions);
+        Assert.Single(sink.Actions, a => a == (TouchControlAction.PrimaryAction, true));
+        router.Release(1);
+        Assert.False(router.IsPressed(TouchControlAction.PrimaryAction));
+        Assert.Single(sink.Actions, a => a == (TouchControlAction.PrimaryAction, false));
+        router.Release(2);
     }
 
     [Fact]
@@ -536,7 +1060,7 @@ public sealed class MobilePortTests
         Assert.True(router.Move(31, 0.50, 0.55));
         Assert.True(router.Move(31, 0.50, 0.40));
         Assert.True(router.Release(31));
-        Assert.Contains((TouchControlAction.PrimaryAction, false), sink.Actions);
+        Assert.DoesNotContain(sink.Actions, action => action.Action == TouchControlAction.PrimaryAction);
         Assert.Contains((TouchControlAction.NextSlot, true), sink.Actions);
         Assert.Contains((TouchControlAction.NextSlot, false), sink.Actions);
     }
@@ -555,25 +1079,1431 @@ public sealed class MobilePortTests
     }
 
     [Fact]
-    public void TouchInputRouterUsesMenuSplitAsRightClickModifier()
+    public void HoldingAnEmptyCraftingCellPlacesOneIngredientOnlyOnRelease()
+    {
+        var sink = new RecordingTouchSink();
+        var router = new TouchInputRouter(sink, inventoryStackCount: (_, _) => 0);
+        router.Press(1, 0.48, 0.36, controlsEnabled: false);
+        Assert.True(router.BeginLongPress(1));
+        Assert.Empty(sink.SinglePlacements);
+        router.Release(1);
+        Assert.Equal([(0.48, 0.36)], sink.SinglePlacements);
+        Assert.DoesNotContain(sink.Pointers, pointer => pointer.Click);
+    }
+
+    [Fact]
+    public void TouchInputRouterDoubleTapCollectsIntoASingleCarriedItem()
+    {
+        var sink = new RecordingTouchSink();
+        var count = 1;
+        var router = new TouchInputRouter(sink, inventoryStackCount: (_, _) => count);
+
+        Assert.True(router.Press(40, 0.48, 0.36, controlsEnabled: false));
+        Assert.True(router.Release(40));
+        Assert.Single(sink.Pointers, pointer => pointer.Click);
+        count = 0; // The first click now carries the full stack and leaves the slot empty.
+        Assert.Empty(sink.Actions);
+
+        Assert.True(router.Press(41, 0.48, 0.36, controlsEnabled: false));
+        Assert.Empty(sink.Actions);
+        Assert.True(router.Release(41));
+        Assert.Empty(sink.Actions);
+        Assert.Single(sink.Pointers, pointer => pointer.Click);
+        Assert.Equal([(0.48, 0.36)], sink.CollectedItems);
+        Assert.DoesNotContain(TouchControlLayout.Default,
+            control => control.Action == TouchControlAction.SecondaryAction);
+    }
+
+    [Theory]
+    [InlineData(64)]
+    [InlineData(5)]
+    public void DoubleTapReturnsHalfOfTheStackTakenByTheFirstTap(int count)
+    {
+        var sink = new RecordingTouchSink();
+        var remaining = count;
+        var router = new TouchInputRouter(sink, inventorySlotState: (_, _) => new(3, remaining));
+        router.Press(1, .5, .4, controlsEnabled: false);
+        router.Release(1);
+        remaining = 0;
+        router.Press(2, .5, .4, controlsEnabled: false);
+        router.Release(2);
+        Assert.Equal((.5, .4, -count), Assert.Single(sink.InventorySplits));
+        Assert.Single(sink.Pointers, pointer => pointer.Click);
+        Assert.Empty(sink.CollectedItems);
+    }
+
+    [Fact]
+    public void TouchInputRouterDoesNotSplitAcrossAdjacentInventorySlots()
+    {
+        var sink = new RecordingTouchSink();
+        var firstCount = 64;
+        var router = new TouchInputRouter(sink,
+            inventorySlotState: (x, _) => x < 0.50
+                ? new InventorySlotState(17, firstCount)
+                : new InventorySlotState(18, 0));
+
+        router.Press(140, 0.49, 0.36, controlsEnabled: false);
+        router.Release(140);
+        firstCount = 0;
+        router.Press(141, 0.51, 0.36, controlsEnabled: false);
+        router.Release(141);
+
+        Assert.Empty(sink.CollectedItems);
+        Assert.Equal(2, sink.Pointers.Count(pointer => pointer.Click));
+    }
+
+    [Fact]
+    public void OverlayControlInterruptsPendingInventoryDoubleTap()
+    {
+        var sink = new RecordingTouchSink();
+        var count = 64;
+        var profile = new TouchControlProfile();
+        var router = new TouchInputRouter(sink, profile,
+            inventorySlotState: (_, _) => new InventorySlotState(17, count));
+        var keyboard = profile.Controls.Single(control =>
+            control.Action == TouchControlAction.Keyboard);
+
+        router.Press(150, 0.48, 0.36, controlsEnabled: false);
+        router.Release(150);
+        count = 0;
+        router.Press(151, keyboard.CenterX, keyboard.CenterY, controlsEnabled: false);
+        router.Release(151);
+        router.Press(152, 0.48, 0.36, controlsEnabled: false);
+        router.Release(152);
+
+        Assert.Empty(sink.CollectedItems);
+        Assert.Equal(2, sink.Pointers.Count(pointer => pointer.Click));
+    }
+
+    [Fact]
+    public void SystemCancellationInterruptsPendingInventoryDoubleTap()
+    {
+        var sink = new RecordingTouchSink();
+        var count = 64;
+        var router = new TouchInputRouter(sink,
+            inventorySlotState: (_, _) => new InventorySlotState(17, count));
+
+        router.Press(153, 0.48, 0.36, controlsEnabled: false);
+        router.Release(153);
+        count = 0;
+        router.CancelAll();
+        router.Press(154, 0.48, 0.36, controlsEnabled: false);
+        router.Release(154);
+
+        Assert.Empty(sink.CollectedItems);
+        Assert.Equal(2, sink.Pointers.Count(pointer => pointer.Click));
+    }
+
+    [Theory]
+    [InlineData(-1, -1, -1)]
+    [InlineData(0x0001_2340, 0x0122, 64)]
+    [InlineData(0x0000_0100, 0, 0)]
+    public void PackedInventorySlotStatePreservesIdentityAndCount(
+        int packed, int expectedSlot, int expectedCount)
+    {
+        var state = InventorySlotState.FromPacked(packed);
+
+        Assert.Equal(expectedSlot, state.SlotId);
+        Assert.Equal(expectedCount, state.Count);
+    }
+
+    [Fact]
+    public void CancelledSecondInventoryTapDoesNotSplitTheEarlierStack()
+    {
+        var sink = new RecordingTouchSink();
+        var count = 64;
+        var router = new TouchInputRouter(sink, inventoryStackCount: (_, _) => count);
+
+        router.Press(45, 0.48, 0.36, controlsEnabled: false);
+        router.Release(45);
+        count = 0;
+        router.Press(46, 0.48, 0.36, controlsEnabled: false);
+        router.Release(46, cancelled: true);
+        router.Press(47, 0.48, 0.36, controlsEnabled: false);
+        router.Release(47);
+
+        Assert.Empty(sink.CollectedItems);
+        Assert.Equal(2, sink.Pointers.Count(pointer => pointer.Click));
+    }
+
+    [Fact]
+    public void TouchInputRouterLongPressSelectsOneInventoryItem()
+    {
+        var sink = new RecordingTouchSink();
+        var router = new TouchInputRouter(sink, inventoryStackCount: (_, _) => 64);
+
+        Assert.True(router.Press(42, 0.48, 0.36, controlsEnabled: false));
+        Assert.True(router.BeginLongPress(42));
+        Assert.True(router.Release(42));
+
+        Assert.Equal([(0.48, 0.36, 1)], sink.InventorySplits);
+        Assert.DoesNotContain(sink.Pointers, pointer => pointer.Click);
+    }
+
+    [Fact]
+    public void TouchInputRouterLongPressSwipeSelectsExactInventoryQuantity()
+    {
+        var sink = new RecordingTouchSink();
+        var router = new TouchInputRouter(sink, inventoryStackCount: (_, _) => 64);
+
+        Assert.True(router.Press(44, 0.42, 0.40, controlsEnabled: false));
+        Assert.True(router.BeginLongPress(44));
+        Assert.True(router.Move(44, 0.42 + 0.24 * 31 / 63 / router.Profile.ViewportAspectRatio, 0.40));
+        Assert.Equal(32, Assert.Single(router.InventorySplitSelections).Count);
+        Assert.True(router.Release(44));
+        Assert.Equal([(0.42, 0.40, 32)], sink.InventorySplits);
+        Assert.DoesNotContain(sink.Pointers, pointer => pointer.Click);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void DraggingAnOccupiedSlotMovesTheStackOnlyOnRelease(bool cancelled)
+    {
+        var sink = new RecordingTouchSink();
+        var router = new TouchInputRouter(sink, inventoryStackCount: (_, y) => y < 0.5 ? 5 : 0);
+        router.Press(1, 0.4, 0.4, controlsEnabled: false);
+        router.Move(1, 0.4, 0.6);
+        router.Release(1, cancelled);
+
+        if (cancelled)
+        {
+            Assert.Empty(sink.InventorySplits);
+            Assert.DoesNotContain(sink.Pointers, point => point.Click);
+        }
+        else
+        {
+            Assert.Equal([(0.4, 0.4, 5)], sink.InventorySplits);
+            Assert.Contains((0.4, 0.6, true), sink.Pointers);
+        }
+    }
+
+    [Fact]
+    public void DraggingAnOccupiedSlotOutsideTheInventoryDoesNotDropTheStack()
+    {
+        var sink = new RecordingTouchSink();
+        var router = new TouchInputRouter(sink,
+            inventoryStackCount: (_, y) => y < 0.5 ? 5 : -1);
+
+        Assert.True(router.Press(2, 0.4, 0.4, controlsEnabled: false));
+        Assert.True(router.Move(2, 0.4, 0.7));
+        Assert.True(router.Release(2));
+
+        Assert.Empty(sink.InventorySplits);
+        Assert.DoesNotContain(sink.Pointers, point => point.Click);
+    }
+
+    [Fact]
+    public void TouchInputRouterCraftingDragHoldsOnePrimaryButton()
     {
         var sink = new RecordingTouchSink();
         var router = new TouchInputRouter(sink);
-        var split = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.SecondaryAction);
 
-        Assert.True(router.Press(40, split.CenterX, split.CenterY, controlsEnabled: false));
-        Assert.DoesNotContain(sink.Actions, action => action.Action == TouchControlAction.SecondaryAction);
+        Assert.True(router.Press(43, 0.40, 0.40, controlsEnabled: false));
+        Assert.True(router.Move(43, 0.46, 0.40));
+        Assert.True(router.Move(43, 0.52, 0.40));
+        Assert.True(router.Release(43));
 
-        Assert.True(router.Press(41, 0.48, 0.36, controlsEnabled: false));
-        Assert.Equal((0.48, 0.36, false), sink.LastPointer);
-        Assert.Contains((TouchControlAction.SecondaryAction, true), sink.Actions);
-        Assert.True(router.Move(41, 0.62, 0.54));
-        Assert.Equal((0.62, 0.54, false), sink.LastPointer);
-        Assert.DoesNotContain((TouchControlAction.SecondaryAction, false), sink.Actions);
+        Assert.Equal(1, sink.Actions.Count(action =>
+            action == (TouchControlAction.PrimaryAction, true)));
+        Assert.Equal(1, sink.Actions.Count(action =>
+            action == (TouchControlAction.PrimaryAction, false)));
+        Assert.DoesNotContain(sink.Pointers, pointer => pointer.Click);
+    }
 
-        Assert.True(router.Release(41));
-        Assert.Contains((TouchControlAction.SecondaryAction, false), sink.Actions);
-        Assert.True(router.Release(40));
+    [Fact]
+    public void TouchInputRouterCancelDoesNotTurnPendingTapIntoClick()
+    {
+        var sink = new RecordingTouchSink();
+        var router = new TouchInputRouter(sink);
+
+        Assert.True(router.Press(80, 0.52, 0.45));
+        router.CancelAll();
+
+        Assert.DoesNotContain(sink.Pointers, pointer => pointer.Click);
+        Assert.False(router.Release(80));
+    }
+
+    [Fact]
+    public void TouchInputRouterCancelDoesNotTransferSelectedInventoryItems()
+    {
+        var sink = new RecordingTouchSink();
+        var router = new TouchInputRouter(sink, inventoryStackCount: (_, _) => 64);
+
+        Assert.True(router.Press(81, 0.42, 0.40, controlsEnabled: false));
+        Assert.True(router.BeginLongPress(81));
+        Assert.True(router.Move(81, 0.42 + 0.24 * 31 / 63 / router.Profile.ViewportAspectRatio, 0.40));
+        Assert.Equal(32, Assert.Single(router.InventorySplitSelections).Count);
+
+        router.CancelAll();
+
+        Assert.Empty(sink.InventorySplits);
+        Assert.Empty(router.InventorySplitSelections);
+        Assert.False(router.Release(81));
+    }
+
+    [Fact]
+    public void CancelledReleaseDoesNotCommitDeferredMenuGestures()
+    {
+        var tapSink = new RecordingTouchSink();
+        var tapRouter = new TouchInputRouter(tapSink);
+        Assert.True(tapRouter.Press(86, 0.52, 0.45, controlsEnabled: false));
+        Assert.True(tapRouter.Release(86, cancelled: true));
+        Assert.DoesNotContain(tapSink.Pointers, pointer => pointer.Click);
+
+        var splitSink = new RecordingTouchSink();
+        var splitRouter = new TouchInputRouter(splitSink, inventoryStackCount: (_, _) => 64);
+        Assert.True(splitRouter.Press(87, 0.42, 0.40, controlsEnabled: false));
+        Assert.True(splitRouter.BeginLongPress(87));
+        Assert.True(splitRouter.Move(87,
+            0.42 + 0.24 * 31 / 63 / splitRouter.Profile.ViewportAspectRatio, 0.40));
+        Assert.Equal(32, Assert.Single(splitRouter.InventorySplitSelections).Count);
+        Assert.True(splitRouter.Release(87, cancelled: true));
+        Assert.Empty(splitSink.InventorySplits);
+    }
+
+    [Fact]
+    public void CancelledReleaseUsesCancellationEdgesForHeldActions()
+    {
+        var sink = new RecordingTouchSink();
+        var profile = new TouchControlProfile { Mode = TouchControlMode.JoystickAndTap };
+        var router = new TouchInputRouter(sink, profile);
+        var jump = profile.Controls.Single(control => control.Action == TouchControlAction.Jump);
+
+        Assert.True(router.Press(88, jump.CenterX, jump.CenterY));
+        Assert.True(router.Release(88, cancelled: true));
+        Assert.Contains(TouchControlAction.Jump, sink.CanceledActions);
+        Assert.DoesNotContain((TouchControlAction.Jump, false), sink.Actions);
+
+        Assert.True(router.Press(89, 0.52, 0.45));
+        Assert.True(router.BeginLongPress(89));
+        Assert.True(router.Release(89, cancelled: true));
+        Assert.Contains(TouchControlAction.PrimaryAction, sink.CanceledActions);
+        Assert.DoesNotContain((TouchControlAction.PrimaryAction, false), sink.Actions);
+    }
+
+    [Fact]
+    public void TouchInputRouterCancelReleasesMovementAndMining()
+    {
+        var sink = new RecordingTouchSink();
+        var profile = new TouchControlProfile();
+        var router = new TouchInputRouter(sink, profile);
+        var move = profile.Controls.Single(control => control.Action == TouchControlAction.Move);
+
+        Assert.True(router.Press(82, move.CenterX +
+            move.Radius * 0.65 / profile.ViewportAspectRatio, move.CenterY));
+        Assert.True(router.Move(82, move.CenterX +
+            move.Radius / profile.ViewportAspectRatio, move.CenterY));
+        Assert.True(router.Press(83, 0.55, 0.42));
+        Assert.True(router.BeginLongPress(83));
+        Assert.Equal(1, sink.LastMovement.X, 6);
+        Assert.True(router.IsPressed(TouchControlAction.PrimaryAction));
+
+        router.CancelAll();
+
+        Assert.Equal((0d, 0d), sink.LastMovement);
+        Assert.False(router.IsPressed(TouchControlAction.PrimaryAction));
+        Assert.Contains(TouchControlAction.PrimaryAction, sink.CanceledActions);
+        Assert.False(router.Release(82));
+        Assert.False(router.Release(83));
+    }
+
+    [Fact]
+    public void TouchInputRouterCancelUsesNonTappingActionEdge()
+    {
+        var sink = new RecordingTouchSink();
+        var profile = new TouchControlProfile { Mode = TouchControlMode.JoystickAndTap };
+        var router = new TouchInputRouter(sink, profile);
+        var jump = profile.Controls.Single(control => control.Action == TouchControlAction.Jump);
+
+        Assert.True(router.Press(85, jump.CenterX, jump.CenterY));
+        router.CancelAll();
+
+        Assert.Contains((TouchControlAction.Jump, true), sink.Actions);
+        Assert.DoesNotContain((TouchControlAction.Jump, false), sink.Actions);
+        Assert.Contains(TouchControlAction.Jump, sink.CanceledActions);
+    }
+
+    [Fact]
+    public void TouchInputRouterRepeatedPointerDownCancelsTheStaleGestureWithoutClicking()
+    {
+        var sink = new RecordingTouchSink();
+        var router = new TouchInputRouter(sink, inventoryStackCount: (_, _) => 64);
+
+        Assert.True(router.Press(84, 0.42, 0.40, controlsEnabled: false));
+        Assert.True(router.BeginLongPress(84));
+        Assert.True(router.Move(84, 0.42 + 0.24 * 31 / 63 / router.Profile.ViewportAspectRatio, 0.40));
+        Assert.Equal(32, Assert.Single(router.InventorySplitSelections).Count);
+
+        Assert.True(router.Press(84, 0.70, 0.55, controlsEnabled: false));
+
+        Assert.Empty(sink.InventorySplits);
+        Assert.DoesNotContain(sink.Pointers, pointer => pointer.Click);
+        Assert.Empty(router.InventorySplitSelections);
+        Assert.True(router.Release(84));
+        Assert.Single(sink.Pointers, pointer => pointer.Click);
+    }
+
+    [Fact]
+    public void HardwareTextInputGateSurvivesRecreatedInputConnections()
+    {
+        var gate = new HardwareTextInputGate();
+
+        Assert.True(gate.Accept(45, downTime: 1000, repeatCount: 0));
+        Assert.False(gate.Accept(45, downTime: 1000, repeatCount: 0));
+        Assert.True(gate.Accept(45, downTime: 1002, repeatCount: 0));
+        Assert.True(gate.Accept(45, downTime: 1200, repeatCount: 0));
+        Assert.True(gate.Accept(45, downTime: 1200, repeatCount: 1));
+        Assert.False(gate.Accept(45, downTime: 1200, repeatCount: 1));
+        Assert.True(gate.Accept(46, downTime: 1252, repeatCount: 0));
+    }
+
+    [Fact]
+    public void HardwareTextInputGateSuppressesImeCommitForPhysicalKeyOnly()
+    {
+        var gate = new HardwareTextInputGate();
+
+        Assert.True(gate.AcceptHardwareCodePoint(45, 'q', 500, 1_000, 0));
+        Assert.False(gate.AcceptCommittedCodePoint('q', 1_030));
+        Assert.True(gate.AcceptCommittedCodePoint('q', 1_040));
+        Assert.True(gate.AcceptCommittedCodePoint('q', 1_501));
+        Assert.True(gate.AcceptHardwareCodePoint(51, 'w', 700, 2_000, 0));
+        Assert.True(gate.AcceptCommittedCodePoint('e', 2_020));
+        Assert.True(gate.AcceptCommittedCodePoint('e', 2_021));
+        Assert.True(gate.AcceptCommittedCodePoint('e', 2_142));
+    }
+
+    [Fact]
+    public void HardwareTextInputGateAllowsRapidRepeatedCharacters()
+    {
+        var gate = new HardwareTextInputGate();
+
+        Assert.True(gate.AcceptCommittedCodePoint('o', 1_000));
+        Assert.True(gate.AcceptCommittedCodePoint('o', 1_015));
+        Assert.True(gate.Accept(43, downTime: 2_000, repeatCount: 0));
+        Assert.True(gate.Accept(43, downTime: 2_030, repeatCount: 0));
+    }
+
+    [Fact]
+    public void HardwareTextInputGateKeepsSdlSendKeyTextExactlyOnce()
+    {
+        var gate = new HardwareTextInputGate();
+
+        // The same Android key can arrive through Activity.DispatchKeyEvent and the active
+        // InputConnection. SDL still receives its printable character, but only once.
+        Assert.True(gate.AcceptHardwareCodePoint(29, 'a', 4_000, 5_000, 0));
+        Assert.False(gate.AcceptHardwareCodePoint(29, 'a', 4_000, 5_001, 0));
+        Assert.False(gate.AcceptCommittedCodePoint('a', 5_020));
+        Assert.True(gate.AcceptCommittedCodePoint('a', 5_021));
+    }
+
+    [Fact]
+    public void HardwareTextInputGateSuppressesRapidPhysicalKeyEchoesInOrder()
+    {
+        var gate = new HardwareTextInputGate();
+
+        Assert.True(gate.AcceptHardwareCodePoint(29, 'a', 8_000, 9_000, 0));
+        Assert.True(gate.AcceptHardwareCodePoint(30, 'b', 8_010, 9_010, 0));
+
+        Assert.False(gate.AcceptCommittedCodePoint('a', 9_020));
+        Assert.False(gate.AcceptCommittedCodePoint('b', 9_021));
+        Assert.True(gate.AcceptCommittedCodePoint('a', 9_022));
+        Assert.True(gate.AcceptCommittedCodePoint('b', 9_023));
+    }
+
+    [Fact]
+    public void HardwareTextInputGateAllowsMissingEarlierEchoBeforeLatestEcho()
+    {
+        var gate = new HardwareTextInputGate();
+
+        Assert.True(gate.AcceptHardwareCodePoint(29, 'a', 10_000, 11_000, 0));
+        Assert.True(gate.AcceptHardwareCodePoint(30, 'b', 10_010, 11_010, 0));
+
+        Assert.False(gate.AcceptCommittedCodePoint('b', 11_020));
+        Assert.True(gate.AcceptCommittedCodePoint('a', 11_021));
+        Assert.True(gate.AcceptCommittedCodePoint('b', 11_022));
+    }
+
+    [Fact]
+    public void HardwareTextInputGateDoesNotMatchAnArbitraryMiddleCandidate()
+    {
+        var gate = new HardwareTextInputGate();
+
+        Assert.True(gate.AcceptHardwareCodePoint(29, 'a', 12_000, 13_000, 0));
+        Assert.True(gate.AcceptHardwareCodePoint(30, 'b', 12_010, 13_010, 0));
+        Assert.True(gate.AcceptHardwareCodePoint(31, 'c', 12_020, 13_020, 0));
+
+        Assert.True(gate.AcceptCommittedCodePoint('b', 13_030));
+        Assert.True(gate.AcceptCommittedCodePoint('c', 13_031));
+    }
+
+    [Fact]
+    public void HardwareTextInputGateConsumesPendingEchoAcrossMultiCharacterCommit()
+    {
+        var gate = new HardwareTextInputGate();
+
+        Assert.True(gate.AcceptHardwareCodePoint(30, 'b', 6_000, 7_000, 0));
+        var committed = "book".EnumerateRunes()
+            .Where(rune => gate.AcceptCommittedCodePoint(rune.Value, 7_020))
+            .Select(rune => rune.ToString());
+
+        Assert.Equal("ook", string.Concat(committed));
+        Assert.True(gate.AcceptCommittedCodePoint('b', 7_030));
+    }
+
+    [Fact]
+    public void AndroidImeCommitNormalizesSubmitAndTabKeysWithoutLosingText()
+    {
+        var plan = AndroidTextCommitPlan.Create("say 👋\r\nnext\tfield\n".EnumerateRunes());
+
+        Assert.Equal(
+        [
+            new(AndroidTextCommitKind.Text, "say 👋"),
+            new(AndroidTextCommitKind.Enter),
+            new(AndroidTextCommitKind.Text, "next"),
+            new(AndroidTextCommitKind.Tab),
+            new(AndroidTextCommitKind.Text, "field"),
+            new(AndroidTextCommitKind.Enter)
+        ], plan);
+    }
+
+    [Fact]
+    public void AndroidGlfwSnapshotPreservesMixedTextAndKeyOrder()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var native = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android.Native", "jay_jvm_host.c"));
+        var scalarQueue = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android.Native", "jay_scalar_queue.c"));
+        var nativeBuild = File.ReadAllText(Path.Combine(repository,
+            "scripts", "build-android-native.sh"));
+        var glfw = File.ReadAllText(Path.Combine(repository,
+            "third_party", "android-glfw", "jay-android.patch"));
+
+        Assert.Contains("uint32_t event_types[JAY_EVENT_CAPACITY]", native, StringComparison.Ordinal);
+        Assert.Contains("int32_t event_values[JAY_EVENT_CAPACITY]", native, StringComparison.Ordinal);
+        Assert.Contains("jay_scalar_queue_push(&g_events, JAY_EVENT_CHAR", native,
+            StringComparison.Ordinal);
+        Assert.Contains("jay_scalar_queue_push(&g_events, JAY_EVENT_KEY", native,
+            StringComparison.Ordinal);
+        Assert.Contains("snapshot->event_count = jay_scalar_queue_drain(", native,
+            StringComparison.Ordinal);
+        Assert.Contains("while (drained < capacity && queue->head != NULL)", scalarQueue,
+            StringComparison.Ordinal);
+        Assert.Contains("jay_scalar_queue.c", nativeBuild, StringComparison.Ordinal);
+        Assert.DoesNotContain("g_event_count < JAY_EVENT_CAPACITY", native,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("snapshot->text_count", native, StringComparison.Ordinal);
+        Assert.DoesNotContain("snapshot->key_count", native, StringComparison.Ordinal);
+        Assert.Contains("input.eventTypes[index] == 1", glfw, StringComparison.Ordinal);
+        Assert.Contains("input.eventTypes[index] == 2", glfw, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AndroidGlfwQueuesPointerAndSplitEventsInOriginalOrder()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var native = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android.Native", "jay_jvm_host.c"));
+        var queue = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android.Native", "jay_menu_queue.c"));
+        var nativeBuild = File.ReadAllText(Path.Combine(repository,
+            "scripts", "build-android-native.sh"));
+        var glfw = File.ReadAllText(Path.Combine(repository,
+            "third_party", "android-glfw", "jay-android.patch"));
+
+        Assert.Contains("JAY_MENU_EVENT_CAPACITY 32", native, StringComparison.Ordinal);
+        Assert.Contains("JAY_MENU_EVENT_POINTER, x, y, 1", native,
+            StringComparison.Ordinal);
+        Assert.Contains("JAY_MENU_EVENT_SPLIT, x, y, count", native,
+            StringComparison.Ordinal);
+        Assert.Contains("snapshot->menu_event_count = jay_menu_queue_drain(", native,
+            StringComparison.Ordinal);
+        Assert.Contains("while (drained < capacity && queue->head != NULL)", queue,
+            StringComparison.Ordinal);
+        Assert.Contains("jay_menu_queue.c", nativeBuild, StringComparison.Ordinal);
+        Assert.DoesNotContain("g_menu_event_count < JAY_MENU_EVENT_CAPACITY", native,
+            StringComparison.Ordinal);
+        Assert.Contains("for (uint32_t index = 0; index < input.menuEventCount; index++)", glfw,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "input.eventCount == 0 && input.menuEventCount == 0",
+            glfw, StringComparison.Ordinal);
+        Assert.Contains("input.menuEventTypes[index] == JAY_MENU_EVENT_POINTER", glfw,
+            StringComparison.Ordinal);
+        Assert.Contains("input.menuEventTypes[index] == JAY_MENU_EVENT_SPLIT", glfw,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("inventorySplitGeneration", glfw, StringComparison.Ordinal);
+        Assert.DoesNotContain("pointerClicks", glfw, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AndroidHeldTouchIndicatorsAnimateAtDisplayRefreshRate()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var activity = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "GameActivity.cs"));
+
+        Assert.Contains("var animatingHoldFeedback = DrawLongPressIndicators(canvas)",
+            activity, StringComparison.Ordinal);
+        Assert.Contains("if (animatingHoldFeedback || _router.InventorySplitSelections.Count > 0)",
+            activity, StringComparison.Ordinal);
+        Assert.Contains("return drewAnimatedFeedback", activity, StringComparison.Ordinal);
+        Assert.Contains("PostInvalidateOnAnimation()", activity, StringComparison.Ordinal);
+        Assert.Contains("PostInvalidateDelayed(100)", activity, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(0, 0, 0, 0)]
+    [InlineData(2, 0, 2, 0)]
+    [InlineData(0, 3, 0, 3)]
+    [InlineData(-1, -2, 0, 0)]
+    public void AndroidTextDeletionPlanPreservesImeDirectionAndNoOps(
+        int beforeLength, int afterLength, int backspaces, int forwardDeletes)
+    {
+        var plan = AndroidTextDeletionPlan.Create(beforeLength, afterLength);
+        Assert.Equal(backspaces, plan.Backspaces);
+        Assert.Equal(forwardDeletes, plan.ForwardDeletes);
+    }
+
+    [Theory]
+    [InlineData(1, false, true)]
+    [InlineData(0, false, false)]
+    [InlineData(0, true, true)]
+    [InlineData(-1, false, false)]
+    [InlineData(-1, true, true)]
+    public void SoftKeyboardInputPolicyKeepsExplicitManualFallback(
+        int focusState, bool manuallyRequested, bool expected)
+    {
+        Assert.Equal(expected,
+            SoftKeyboardInputPolicy.AcceptsConnection(focusState, manuallyRequested));
+    }
+
+    [Theory]
+    [InlineData(true, true, false, true)]
+    [InlineData(true, false, true, true)]
+    [InlineData(true, false, false, false)]
+    [InlineData(false, true, true, false)]
+    public void SoftKeyboardOnlyOpensAfterTouchingAnEditorBeforeOrAfterTheClick(
+        bool textInputActive, bool touchedFocusedEditor, bool focusedAfterClick, bool expected)
+    {
+        Assert.Equal(expected,
+            SoftKeyboardInputPolicy.ShouldOpenAfterTouch(
+                textInputActive, touchedFocusedEditor, focusedAfterClick));
+    }
+
+    [Fact]
+    public void FinishingAndroidCompositionCommitsItExactlyOnce()
+    {
+        var composition = new AndroidCompositionBuffer();
+        composition.Set("你");
+
+        Assert.Equal("你", composition.Take());
+        Assert.Empty(composition.Take());
+
+        composition.Set("old");
+        composition.Set("new");
+        Assert.Equal("new", composition.Take());
+        composition.Set("discarded");
+        composition.Clear();
+        Assert.Empty(composition.Take());
+    }
+
+    [Fact]
+    public void OrdinarySignEditorCanOpenKeyboardWithoutAFocusedWidget()
+    {
+        var session = new SoftKeyboardInputSession();
+        session.Request(gameplayActive: false, focusState: 0);
+
+        Assert.True(session.AcceptsConnection(focusState: 0));
+
+        session.Observe(gameplayActive: true, focusState: 0);
+        Assert.False(session.AcceptsConnection(focusState: 0));
+    }
+
+    [Fact]
+    public void HangingSignEditorCanOpenKeyboardWithoutAFocusedWidget()
+    {
+        var session = new SoftKeyboardInputSession();
+        session.Request(gameplayActive: false, focusState: 0);
+
+        Assert.True(session.AcceptsConnection(focusState: 0));
+
+        session.Observe(gameplayActive: true, focusState: 0);
+        Assert.False(session.AcceptsConnection(focusState: 0));
+    }
+
+    [Fact]
+    public void ChatKeyboardFallbackSurvivesOpeningTransitionThenEndsOnGameplayReturn()
+    {
+        var session = new SoftKeyboardInputSession();
+        session.Request(gameplayActive: true, focusState: 0);
+
+        session.Observe(gameplayActive: true, focusState: 0);
+        Assert.True(session.AcceptsConnection(focusState: 0));
+
+        session.Observe(gameplayActive: false, focusState: 1);
+        Assert.True(session.AcceptsConnection(focusState: 1));
+
+        session.Observe(gameplayActive: true, focusState: 0);
+        Assert.False(session.AcceptsConnection(focusState: 0));
+    }
+
+    [Fact]
+    public void LostChatKeyDoesNotLeaveTheSoftKeyboardArmedDuringGameplay()
+    {
+        long uptime = 10_000;
+        var session = new SoftKeyboardInputSession(() => uptime);
+        session.Request(gameplayActive: true, focusState: 0);
+
+        uptime += 1_999;
+        session.Observe(gameplayActive: true, focusState: 0);
+        Assert.True(session.AcceptsConnection(focusState: 0));
+
+        uptime++;
+        session.Observe(gameplayActive: true, focusState: 0);
+        Assert.False(session.AcceptsConnection(focusState: 0));
+    }
+
+    [Fact]
+    public void SoftKeyboardPreviewTracksUnicodeCompositionCommitAndBackspace()
+    {
+        var preview = new SoftKeyboardPreviewBuffer();
+        preview.Begin();
+
+        preview.SetComposingText("你");
+        Assert.Equal("你", preview.Text);
+
+        preview.Commit("你好👋".EnumerateRunes());
+        Assert.Equal("你好👋", preview.Text);
+
+        preview.Backspace(1);
+        Assert.Equal("你好", preview.Text);
+        Assert.True(preview.IsActive);
+    }
+
+    [Fact]
+    public void SoftKeyboardPreviewOmitsSubmitCharactersAndClearsAtSessionEnd()
+    {
+        var preview = new SoftKeyboardPreviewBuffer();
+        preview.Begin();
+        preview.Commit("say hi\r\n\t".EnumerateRunes());
+
+        Assert.Equal("say hi", preview.Text);
+
+        preview.End();
+        Assert.False(preview.IsActive);
+        Assert.Empty(preview.Text);
+    }
+
+    [Fact]
+    public void KeyboardOverlayReleaseDoesNotResyncTextFocusAtItsButtonCoordinates()
+    {
+        var sink = new RecordingTouchSink();
+        var profile = new TouchControlProfile();
+        var router = new TouchInputRouter(sink, profile);
+        var keyboard = profile.Controls.Single(control =>
+            control.Action == TouchControlAction.Keyboard);
+
+        Assert.True(router.Press(90, keyboard.CenterX, keyboard.CenterY,
+            controlsEnabled: false));
+        Assert.False(router.TargetsGameSurface(90));
+        Assert.True(router.Release(90));
+
+        Assert.True(router.Press(91, 0.5, 0.5, controlsEnabled: false));
+        Assert.True(router.TargetsGameSurface(91));
+        Assert.True(router.Release(91));
+    }
+
+    [Fact]
+    public void MobileLauncherOffersReturnOnlyDuringALiveGame() => UiTestThread.Run(() =>
+    {
+        var previousBack = Amber.App.App.MobileBackRequested;
+        try
+        {
+            var view = new Amber.App.Views.MobileLauncherView();
+            var button = view.FindControl<Button>("ResumeGameButton")!;
+            var resumed = 0;
+            view.UpdateGameNavigation(null, false);
+            Assert.False(button.IsVisible);
+            view.UpdateGameNavigation(() => resumed++, false);
+            Assert.True(button.IsVisible);
+            button.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+            Assert.Equal(1, resumed);
+            view.UpdateGameNavigation(null, false);
+            Assert.False(button.IsVisible);
+        }
+        finally { Amber.App.App.MobileBackRequested = previousBack; }
+    });
+
+    [Fact]
+    public void BothAndroidGameHostsOwnATaskSeparateFromTheLauncher()
+    {
+        var directory = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "src", "Amber.Android"));
+        var manifest = System.Xml.Linq.XDocument.Load(Path.Combine(directory, "Properties", "AndroidManifest.xml"));
+        System.Xml.Linq.XNamespace android = "http://schemas.android.com/apk/res/android";
+        var sdl = manifest.Descendants("activity").Single(activity =>
+            (string?)activity.Attribute(android + "name") == "nz.work.minecraft.jay.JaySdlActivity");
+        var affinity = (string?)sdl.Attribute(android + "taskAffinity");
+        Assert.Equal("nz.work.minecraft.jay.game", affinity);
+        Assert.Contains($"TaskAffinity = \"{affinity}\"", File.ReadAllText(Path.Combine(directory, "GameActivity.cs")));
+        Assert.DoesNotContain($"TaskAffinity = \"{affinity}\"", File.ReadAllText(Path.Combine(directory, "MainActivity.cs")));
+        Assert.Equal("singleTask", (string?)sdl.Attribute(android + "launchMode"));
+    }
+
+    [Fact]
+    public void GameActivityHandlesPhysicalKeyboardChangesWithoutKillingTheWorld()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var activity = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "GameActivity.cs"));
+
+        Assert.Contains("ConfigChanges.Keyboard", activity, StringComparison.Ordinal);
+        Assert.Contains("ConfigChanges.KeyboardHidden", activity, StringComparison.Ordinal);
+        Assert.Contains("ConfigChanges.Navigation", activity, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LauncherTextFieldsRecoverTheAndroidSoftwareKeyboard()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var activity = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "MainActivity.cs"));
+        var shell = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.App", "Views", "MobileLauncherView.axaml.cs"));
+
+        Assert.Contains("MobileTextInputFocusChanged = SetLauncherKeyboardVisible", activity,
+            StringComparison.Ordinal);
+        Assert.Contains("RestartInput(target)", activity, StringComparison.Ordinal);
+        Assert.Contains("ShowSoftInput(target, ShowFlags.Forced)", activity,
+            StringComparison.Ordinal);
+        Assert.Contains("AddHandler(GotFocusEvent, OnElementGotFocus", shell,
+            StringComparison.Ordinal);
+        Assert.Contains("MobileTextInputFocusChanged?.Invoke(textInput)", shell,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AndroidGameProcessUsesTheSavedLanguageForTouchControls()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var application = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "Application.cs"));
+        var app = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.App", "App.axaml.cs"));
+        var activity = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "GameActivity.cs"));
+
+        Assert.Contains("var settings = AppSettings.Load();", application, StringComparison.Ordinal);
+        Assert.Contains("L.SetLanguage(settings.Language);", application,
+            StringComparison.Ordinal);
+        Assert.Contains("L.SetLanguage(settings.Language);", app, StringComparison.Ordinal);
+        Assert.DoesNotContain("settings.Language ?? \"zh-Hans\"", application,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("settings.Language ?? \"zh-Hans\"", app,
+            StringComparison.Ordinal);
+        var freshDefault = app.IndexOf("settings.Language = \"zh-Hans\"", StringComparison.Ordinal);
+        var applyLanguage = app.IndexOf("L.SetLanguage(settings.Language);", freshDefault,
+            StringComparison.Ordinal);
+        Assert.True(freshDefault >= 0 && applyLanguage > freshDefault,
+            "A fresh mobile install should save Chinese before applying the nullable system-language preference.");
+        Assert.Contains("L.T(\"mobile.touch.settings.title\")", activity,
+            StringComparison.Ordinal);
+        Assert.Contains("L.F(\"mobile.touch.attack_area\"", activity,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("canvas.DrawText(\"触控设置\"", activity,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("value = \"输入聊天或指令…\"", activity,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AndroidTouchPreferencesRejectNonFiniteNumericValues()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var activity = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "GameActivity.cs"));
+
+        Assert.Contains("float.IsFinite(value) ? Math.Clamp(value, minimum, maximum) : fallback",
+            activity, StringComparison.Ordinal);
+        Assert.Contains("ReadFinitePreference(\"scale\", 1f, 0.70f, 1.35f)", activity,
+            StringComparison.Ordinal);
+        Assert.Contains("ReadFinitePreference(\"look-sensitivity\", 1.65f, 0.50f, 3.00f)",
+            activity, StringComparison.Ordinal);
+        Assert.Contains("ReadFinitePreference(\"opacity\", 0.74f, 0.30f, 1f)", activity,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AndroidBackClosesLauncherNavigationBeforeBackgroundingTheActivity()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var app = File.ReadAllText(Path.Combine(repository, "src", "Amber.App", "App.axaml.cs"));
+        var shell = File.ReadAllText(Path.Combine(repository, "src", "Amber.App", "Views", "MobileLauncherView.axaml.cs"));
+        var activity = File.ReadAllText(Path.Combine(repository, "src", "Amber.Android", "MainActivity.cs"));
+
+        Assert.Contains("Func<bool>? MobileBackRequested", app, StringComparison.Ordinal);
+        Assert.Contains("App.MobileBackRequested = HandleMobileBack", shell, StringComparison.Ordinal);
+        Assert.Contains("download.CloseAfterStart?.Invoke()", shell, StringComparison.Ordinal);
+        Assert.Contains("Router.CanGoBack", shell, StringComparison.Ordinal);
+        Assert.Contains("main.Shell.Router.Back()", shell, StringComparison.Ordinal);
+        Assert.Contains("MobileBackRequested?.Invoke() == true", activity, StringComparison.Ordinal);
+        Assert.Contains("BackRequested += OnLauncherBackRequested", activity, StringComparison.Ordinal);
+        Assert.Contains("e.Handled =", activity, StringComparison.Ordinal);
+        Assert.Contains("activity.MoveTaskToBack(true)", activity, StringComparison.Ordinal);
+        Assert.DoesNotContain("RegisterOnBackInvokedCallback", activity, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MissingAndroidActionButtonIsRecoveredFromButtonState()
+    {
+        var tracker = new HardwareMouseButtonTracker();
+
+        Assert.Equal(HardwareMouseButtonTracker.Secondary,
+            tracker.Resolve(actionButton: 0, buttonState: HardwareMouseButtonTracker.Secondary,
+                pressed: true, primaryFallback: false));
+        Assert.Equal(HardwareMouseButtonTracker.Secondary,
+            tracker.Resolve(actionButton: 0, buttonState: 0,
+                pressed: false, primaryFallback: false));
+    }
+
+    [Fact]
+    public void DuplicateAndroidMousePacketsDoNotInventAnotherButtonTransition()
+    {
+        var tracker = new HardwareMouseButtonTracker();
+
+        Assert.Equal(HardwareMouseButtonTracker.Primary,
+            tracker.Resolve(actionButton: 0, buttonState: HardwareMouseButtonTracker.Primary,
+                pressed: true, primaryFallback: true));
+        Assert.Equal(0, tracker.Resolve(actionButton: 0,
+            buttonState: HardwareMouseButtonTracker.Primary,
+            pressed: true, primaryFallback: false));
+        Assert.Equal(HardwareMouseButtonTracker.Primary,
+            tracker.Resolve(actionButton: 0, buttonState: 0,
+                pressed: false, primaryFallback: true));
+        Assert.Equal(0, tracker.Resolve(actionButton: 0, buttonState: 0,
+            pressed: false, primaryFallback: false));
+    }
+
+    [Fact]
+    public void AndroidMiddleMouseKeepsDesktopPickBlockSemantics()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var activity = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "GameActivity.cs"));
+        var sdl = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "Sdl", "SdlTouchInput.cs"));
+        var native = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android.Native", "jay_jvm_host.c"));
+        var glfw = File.ReadAllText(Path.Combine(repository,
+            "third_party", "android-glfw", "jay-android.patch"));
+
+        Assert.Equal(12, (int)TouchControlAction.PickBlock);
+        Assert.Contains("HardwareMouseButtonTracker.Tertiary => TouchControlAction.PickBlock", activity,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("HardwareMouseButtonTracker.Tertiary => TouchControlAction.Inventory", activity,
+            StringComparison.Ordinal);
+        Assert.Contains("TouchControlAction.PickBlock, false", sdl, StringComparison.Ordinal);
+        Assert.Contains("TouchControlAction.PickBlock)", sdl, StringComparison.Ordinal);
+        Assert.Contains("#define JAY_ACTION_COUNT 13", native, StringComparison.Ordinal);
+        Assert.Contains("GLFW_MOUSE_BUTTON_MIDDLE", glfw, StringComparison.Ordinal);
+        Assert.Contains("action <= 2 || action == 12", glfw, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AndroidSdlTouchAndJavaMenuBridgeShareGestureProtocol()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var sdl = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "Sdl", "SdlTouchInput.cs"));
+        var bootstrap = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "Java", "nz", "work", "minecraft", "jay",
+            "SdlMenuBootstrap.java"));
+        var embedded = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "AndroidEmbeddedGame.cs"));
+
+        Assert.Contains("MenuMoveAction = 0", sdl, StringComparison.Ordinal);
+        Assert.Contains("MenuDownAction = 1", sdl, StringComparison.Ordinal);
+        Assert.Contains("MenuUpAction = 2", sdl, StringComparison.Ordinal);
+        Assert.Contains("GameplayContextualAction = 3", sdl, StringComparison.Ordinal);
+        Assert.Contains("MenuPointer(pressed ? MenuDownAction : MenuUpAction)", sdl,
+            StringComparison.Ordinal);
+        Assert.Contains("MenuPointer(GameplayContextualAction)", sdl, StringComparison.Ordinal);
+        Assert.Contains("MOVE_ACTION = 0", bootstrap, StringComparison.Ordinal);
+        Assert.Contains("DOWN_ACTION = 1", bootstrap, StringComparison.Ordinal);
+        Assert.Contains("UP_ACTION = 2", bootstrap, StringComparison.Ordinal);
+        Assert.Contains("GAMEPLAY_CONTEXTUAL_ACTION = 3", bootstrap, StringComparison.Ordinal);
+        Assert.Contains("if (held) drag.invoke", bootstrap, StringComparison.Ordinal);
+        Assert.Contains("sdl ? \"nz.work.minecraft.jay.SdlMenuBootstrap\"", embedded,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TouchOverlayReleasesHeldInputAcrossBothGlfwAndSdlWindowFocusChanges()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var activity = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "GameActivity.cs"));
+        var overrideStart = activity.IndexOf(
+            "public override void OnWindowFocusChanged(bool hasWindowFocus)",
+            activity.IndexOf("internal sealed class TouchControlOverlay", StringComparison.Ordinal),
+            StringComparison.Ordinal);
+        var overrideEnd = activity.IndexOf("public override IInputConnection?", overrideStart,
+            StringComparison.Ordinal);
+
+        Assert.True(overrideStart >= 0 && overrideEnd > overrideStart);
+        var focusHandler = activity[overrideStart..overrideEnd];
+        Assert.Contains("if (!hasWindowFocus) CancelAllInput();", focusHandler, StringComparison.Ordinal);
+        Assert.Contains("UpdateHardwareCapture(hasWindowFocus);", focusHandler, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SdlGameProcessIsReclaimedAfterItsEmbeddedJvmReturns()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var manifest = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "Properties", "AndroidManifest.xml"));
+        var entry = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "Sdl", "SdlEntry.cs"));
+
+        Assert.Contains("android:process=\":sdlgame\"", manifest, StringComparison.Ordinal);
+        Assert.Contains("finally", entry, StringComparison.Ordinal);
+        var game = File.ReadAllText(Path.Combine(repository, "src", "Amber.Android", "GameActivity.cs"));
+        Assert.Contains("GameActivity.FinishGame(activity);", entry, StringComparison.Ordinal);
+        Assert.Contains("activity.Finish();", game, StringComparison.Ordinal);
+        Assert.Contains("if (wasInFront)", game, StringComparison.Ordinal);
+        Assert.Contains("Process.KillProcess", entry, StringComparison.Ordinal);
+        Assert.Contains("Process.MyPid()", entry, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SdlGameActivitySurvivesExternalKeyboardAndMouseChanges()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var manifest = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "Properties", "AndroidManifest.xml"));
+
+        Assert.Contains(
+            "android:configChanges=\"orientation|screenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode\"",
+            manifest, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AndroidGameLaunchIsSingleInstanceAndPreparationIsDeduplicated()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var manifest = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "Properties", "AndroidManifest.xml"));
+        var gameActivity = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "GameActivity.cs"));
+        var home = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.App", "ViewModels", "HomeViewModel.cs"));
+
+        Assert.Contains("android:launchMode=\"singleTask\"", manifest, StringComparison.Ordinal);
+        Assert.Contains("LaunchMode = LaunchMode.SingleTask", gameActivity, StringComparison.Ordinal);
+        Assert.Contains("Interlocked.CompareExchange(ref _mobileLaunchInProgress, 1, 0)", home,
+            StringComparison.Ordinal);
+        Assert.Contains("Volatile.Write(ref _mobileLaunchInProgress, 0)", home, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AndroidMissingRuntimeCatalogIsNotReportedAsAnUnsupportedCpu()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var application = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "Application.cs"));
+        var store = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "AndroidRuntimeStore.cs"));
+
+        Assert.Contains("IsCurrentArchitectureSupported", store, StringComparison.Ordinal);
+        Assert.Contains("? \"mobile.runtime.catalog_missing\"", application,
+            StringComparison.Ordinal);
+        Assert.Contains(": \"mobile.runtime.unsupported\"", application,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AndroidInventoryAccessRunsOnTheMinecraftClientThread()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var glfw = File.ReadAllText(Path.Combine(repository, "src", "Amber.Android", "Java",
+            "nz", "work", "minecraft", "jay", "AndroidGameBootstrap.java"));
+        var sdl = File.ReadAllText(Path.Combine(repository, "src", "Amber.Android", "Java",
+            "nz", "work", "minecraft", "jay", "SdlMenuBootstrap.java"));
+
+        var glfwSplit = JavaMethod(glfw, "public static boolean dispatchInventorySplit", "/** True only");
+        var sdlSplit = JavaMethod(sdl, "public static boolean dispatchInventorySplit", "public static boolean isBlockTarget");
+        var glfwCount = JavaMethod(glfw, "public static int inventoryStackCount", "/** Picks an exact quantity");
+        var sdlCount = JavaMethod(sdl, "public static int inventoryStackCount", "public static boolean dispatchInventorySplit");
+        Assert.Contains("minecraftExecute.invoke", glfwSplit, StringComparison.Ordinal);
+        Assert.Contains("dispatchInventorySplitNow", glfwSplit, StringComparison.Ordinal);
+        Assert.Contains("((Executor)game).execute", sdlSplit, StringComparison.Ordinal);
+        Assert.Contains("minecraftExecute.invoke", glfwCount, StringComparison.Ordinal);
+        Assert.Contains("FutureTask<Integer>", glfwCount, StringComparison.Ordinal);
+        Assert.Contains("((Executor)game).execute", sdlCount, StringComparison.Ordinal);
+        Assert.Contains("FutureTask<Integer>", sdlCount, StringComparison.Ordinal);
+        Assert.Contains("get(250, TimeUnit.MILLISECONDS)", glfwCount, StringComparison.Ordinal);
+        Assert.Contains("get(250, TimeUnit.MILLISECONDS)", sdlCount, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void NamedAndroidInventoryBridgeInitializesTheMenuSlotIdentity()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var bootstrap = File.ReadAllText(Path.Combine(repository, "src", "Amber.Android", "Java",
+            "nz", "work", "minecraft", "jay", "AndroidGameBootstrap.java"));
+        var named = JavaMethod(bootstrap, "private static void prepareNamedInputBridge",
+            "private static void prepareNamedMouseInputFactory");
+
+        Assert.Contains("slotId = accessible(slotType.getDeclaredField(\"index\"))", named,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AndroidNativeAndManagedJvmAbiVersionsMatchTheQueuedInputLayout()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var native = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android.Native", "jay_jvm_host.c"));
+        var managed = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "NativeJvmHost.cs"));
+
+        Assert.Contains("#define JAY_JVM_ABI_VERSION 20", native, StringComparison.Ordinal);
+        Assert.Contains("ExpectedAbiVersion = 20", managed, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SoftKeyboardPreviewKeepsClampBoundsValidAtTinyVisibleHeights()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var activity = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "GameActivity.cs"));
+        var draw = activity[activity.IndexOf("private void DrawSoftKeyboardPreview",
+            StringComparison.Ordinal)..activity.IndexOf("private void DrawMovementPad",
+            StringComparison.Ordinal)];
+
+        Assert.Contains("if (visibleBottom <= margin * 2", draw, StringComparison.Ordinal);
+        Assert.Contains("minimumTextSize = Math.Min(22f, maximumTextSize)", draw,
+            StringComparison.Ordinal);
+        Assert.Contains("minimumTextSize, maximumTextSize", draw, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SdlMiningProgressDetectsTheLiveBlockTarget()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var sdl = File.ReadAllText(Path.Combine(repository, "src", "Amber.Android", "Java",
+            "nz", "work", "minecraft", "jay", "SdlMenuBootstrap.java"));
+        var blockTarget = JavaMethod(sdl, "public static boolean isBlockTarget", "// SDLActivity owns");
+
+        Assert.Contains("input.current.invoke", blockTarget, StringComparison.Ordinal);
+        Assert.Contains("input.hitResult.get", blockTarget, StringComparison.Ordinal);
+        Assert.Contains("input.targetsBlock(hit)", blockTarget, StringComparison.Ordinal);
+        Assert.Contains("hitType.invoke(hit) == blockType", sdl, StringComparison.Ordinal);
+        Assert.DoesNotContain("return false; }", blockTarget, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FreshAndroidOptionsUseTouchFriendlyAutomaticGuiScale()
+    {
+        var options = MobileGameOptions.Prepare(existing: null, migrateLegacyScale: true);
+
+        Assert.Contains("guiScale:0", options, StringComparison.Ordinal);
+        Assert.Contains("lang:zh_cn", options, StringComparison.Ordinal);
+        Assert.DoesNotContain("guiScale:3", options, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("en_us")]
+    [InlineData("ja_jp")]
+    [InlineData("zh_tw")]
+    [InlineData("lzh")]
+    [InlineData("en_ud")]
+    public void FreshAndroidOptionsFollowTheSelectedLauncherLanguage(string language)
+    {
+        var options = MobileGameOptions.Prepare(
+            existing: null,
+            migrateLegacyScale: true,
+            defaultLanguage: language);
+
+        Assert.Contains($"lang:{language}", options, StringComparison.Ordinal);
+        Assert.DoesNotContain("lang:zh_cn", options, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AndroidOptionsRejectAnInvalidDefaultLanguageWithoutChangingAnExistingChoice()
+    {
+        var fresh = MobileGameOptions.Prepare(
+            existing: null,
+            migrateLegacyScale: true,
+            defaultLanguage: "en_us\nmaxFps:999");
+        var existing = MobileGameOptions.Prepare(
+            "guiScale:0\nlang:en_us\nmaxFps:90\n",
+            migrateLegacyScale: false,
+            defaultLanguage: "ja_jp");
+
+        Assert.Contains("lang:zh_cn", fresh, StringComparison.Ordinal);
+        Assert.DoesNotContain("maxFps:999", fresh, StringComparison.Ordinal);
+        Assert.Contains("lang:en_us", existing, StringComparison.Ordinal);
+        Assert.DoesNotContain("lang:ja_jp", existing, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AndroidGuiScaleMigrationRunsOnceAndPreservesPlayerChoices()
+    {
+        const string legacy = "version:4671\r\nguiScale:3\r\nlang:en_us\r\nmaxFps:90\r\n";
+        var migrated = MobileGameOptions.Prepare(legacy, migrateLegacyScale: true);
+
+        Assert.Contains("guiScale:0\r\n", migrated, StringComparison.Ordinal);
+        Assert.Contains("lang:en_us\r\n", migrated, StringComparison.Ordinal);
+        Assert.Contains("maxFps:90\r\n", migrated, StringComparison.Ordinal);
+        Assert.DoesNotContain("lang:zh_cn", migrated, StringComparison.Ordinal);
+
+        var playerSelectedThree = MobileGameOptions.Prepare(
+            migrated.Replace("guiScale:0", "guiScale:3", StringComparison.Ordinal),
+            migrateLegacyScale: false);
+        Assert.Contains("guiScale:3", playerSelectedThree, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SdlMenuBridgeExposesFocusedEditorHitTestingToAndroid()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var sdl = File.ReadAllText(Path.Combine(repository, "src", "Amber.Android", "Java",
+            "nz", "work", "minecraft", "jay", "SdlMenuBootstrap.java"));
+
+        Assert.Contains("public static int textInputFocusState()", sdl, StringComparison.Ordinal);
+        Assert.Contains("AndroidGameBootstrap.textInputFocusState()", sdl, StringComparison.Ordinal);
+        Assert.Contains("public static boolean isTextInputAt(float x, float y)", sdl,
+            StringComparison.Ordinal);
+        Assert.Contains("AndroidGameBootstrap.isTextInputAt(x, y)", sdl, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void EverySdlInstanceUsesTheTouchMenuBootstrapInsteadOfOneHardCodedVersion()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var embedded = File.ReadAllText(Path.Combine(repository, "src", "Amber.Android",
+            "AndroidEmbeddedGame.cs"));
+        var bootstrap = JavaMethod(embedded, "var bootstrap = Path.Combine", "return new AndroidPreparedGame");
+
+        Assert.Contains("sdl ? \"nz.work.minecraft.jay.SdlMenuBootstrap\"", bootstrap,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("versionId == \"26.3\"", embedded, StringComparison.Ordinal);
+        Assert.DoesNotContain("if (sdl && !namedSdlInput)", embedded, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SdlAndroidBackUsesMinecraftEscapeWhileTheGameIsRunning()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var activity = File.ReadAllText(Path.Combine(repository, "src", "Amber.Android", "Sdl",
+            "JaySdlActivity.java"));
+        var back = JavaMethod(activity, "private void handleSystemBack", "super.onBackPressed();");
+
+        Assert.Contains("mSDLThread != null", back, StringComparison.Ordinal);
+        Assert.Contains("!mSDLMainFinished", back, StringComparison.Ordinal);
+        Assert.Contains("onNativeKeyDown(KeyEvent.KEYCODE_ESCAPE)", back, StringComparison.Ordinal);
+        Assert.Contains("onNativeKeyUp(KeyEvent.KEYCODE_ESCAPE)", back, StringComparison.Ordinal);
+        Assert.Contains("Build.VERSION.SDK_INT >= 33", activity, StringComparison.Ordinal);
+        Assert.Contains("Api33BackHandler.register(this)", activity, StringComparison.Ordinal);
+        Assert.Contains("Api33BackHandler.unregister(this, jayBackInvokedCallback)", activity,
+            StringComparison.Ordinal);
+        Assert.Contains("OnBackInvokedDispatcher.PRIORITY_DEFAULT", activity,
+            StringComparison.Ordinal);
+        Assert.Contains("public void onBackInvoked()", activity, StringComparison.Ordinal);
+        Assert.Contains("activity.handleSystemBack()", activity, StringComparison.Ordinal);
+        Assert.Contains("@Override public void onBackPressed()", activity, StringComparison.Ordinal);
+        Assert.Contains("handleSystemBack();", activity, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GlfwAndroidPredictiveBackUsesMinecraftEscapeWhileTheGameIsRunning()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var activity = File.ReadAllText(Path.Combine(repository, "src", "Amber.Android",
+            "GameActivity.cs"));
+        var manifest = File.ReadAllText(Path.Combine(repository, "src", "Amber.Android",
+            "Properties", "AndroidManifest.xml"));
+
+        Assert.Contains("BuildVersionCodes.Tiramisu", activity, StringComparison.Ordinal);
+        Assert.Contains("RegisterOnBackInvokedCallback", activity, StringComparison.Ordinal);
+        Assert.Contains("UnregisterOnBackInvokedCallback", activity, StringComparison.Ordinal);
+        Assert.Contains("IOnBackInvokedDispatcher.PriorityDefault", activity,
+            StringComparison.Ordinal);
+        Assert.Contains("public void OnBackInvoked()", activity, StringComparison.Ordinal);
+        Assert.Contains("activity.HandleActivityBack()", activity, StringComparison.Ordinal);
+        Assert.Contains("_touchOverlay.HandleSystemBack()", activity, StringComparison.Ordinal);
+        Assert.Contains("android:enableOnBackInvokedCallback=\"true\"", manifest,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SdlGameWindowResizesForTheSoftKeyboard()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var manifest = File.ReadAllText(Path.Combine(repository, "src", "Amber.Android",
+            "Properties", "AndroidManifest.xml"));
+
+        Assert.Contains("android:name=\"nz.work.minecraft.jay.JaySdlActivity\"", manifest,
+            StringComparison.Ordinal);
+        Assert.Contains("android:windowSoftInputMode=\"adjustResize\"", manifest,
+            StringComparison.Ordinal);
+        Assert.Contains("android:theme=\"@style/MyTheme.NoActionBar\"", manifest,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("Theme.Material.NoActionBar.Fullscreen", manifest,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FocusedSdlOverlayRoutesExternalKeyboardEvents()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var overlay = File.ReadAllText(Path.Combine(repository, "src", "Amber.Android",
+            "GameActivity.cs"));
+        var focusRoute = JavaMethod(overlay, "public override bool OnKeyDown", "public override void OnWindowFocusChanged");
+
+        Assert.Contains("HandleHardwareKey(e) || base.OnKeyDown", focusRoute, StringComparison.Ordinal);
+        Assert.Contains("public override bool OnKeyUp", focusRoute, StringComparison.Ordinal);
+        Assert.Contains("HandleHardwareKey(e) || base.OnKeyUp", focusRoute, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FocusedSdlOverlayLeavesAndroidSystemKeysToTheActivity()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var overlay = File.ReadAllText(Path.Combine(repository, "src", "Amber.Android",
+            "GameActivity.cs"));
+        var hardwareKeys = JavaMethod(overlay, "public bool HandleHardwareKey", "public bool HandleHardwareMotion");
+        var systemGuard = hardwareKeys.IndexOf("if (e.IsSystem) return false;", StringComparison.Ordinal);
+        var sdlRoute = hardwareKeys.IndexOf("if (_sdl is not null)", StringComparison.Ordinal);
+
+        Assert.True(systemGuard >= 0 && systemGuard < sdlRoute,
+            "Android system keys must bypass the focused SDL overlay before SDL routing.");
+    }
+
+    [Fact]
+    public void ExternalMouseWheelReachesMinecraftMenusAsWellAsGameplay()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var overlay = File.ReadAllText(Path.Combine(repository, "src", "Amber.Android",
+            "GameActivity.cs"));
+        var hardwareMotion = JavaMethod(overlay, "public bool HandleHardwareMotion",
+            "private static bool IsHardwarePointer");
+        var scrollStart = hardwareMotion.IndexOf(
+            "if (e.ActionMasked == MotionEventActions.Scroll)", StringComparison.Ordinal);
+        var scrollEnd = hardwareMotion.IndexOf(
+            "if (e.ActionMasked is MotionEventActions.ButtonPress", scrollStart,
+            StringComparison.Ordinal);
+
+        Assert.True(scrollStart >= 0 && scrollEnd > scrollStart);
+        var scrollRoute = hardwareMotion[scrollStart..scrollEnd];
+        Assert.DoesNotContain("if (!GameplayActive) return false;", scrollRoute,
+            StringComparison.Ordinal);
+        Assert.Contains("DispatchAction(action, true);", scrollRoute, StringComparison.Ordinal);
+        Assert.Contains("DispatchAction(action, false);", scrollRoute, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AndroidInventoryBridgesForwardCollectAndSinglePlacementToMinecraft()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var native = File.ReadAllText(Path.Combine(repository, "src", "Amber.Android.Native",
+            "jay_jvm_host.c"));
+        var glfw = File.ReadAllText(Path.Combine(repository, "src", "Amber.Android", "Java",
+            "nz", "work", "minecraft", "jay", "AndroidGameBootstrap.java"));
+        var sdl = File.ReadAllText(Path.Combine(repository, "src", "Amber.Android", "Java",
+            "nz", "work", "minecraft", "jay", "SdlMenuBootstrap.java"));
+
+        Assert.DoesNotContain("if (count == 0) return;", native, StringComparison.Ordinal);
+        Assert.Contains("slot, slotId.getInt(slot), 0, pickupAllClickType", glfw, StringComparison.Ordinal);
+        Assert.Contains("hovered, index, 0, pickupAll", sdl, StringComparison.Ordinal);
+        Assert.Contains("slot, slotId.getInt(slot), 1, pickupClickType", glfw, StringComparison.Ordinal);
+        Assert.Contains("hovered, index, 1, pickup", sdl, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DownloadableAndroidBuildsRequireBuiltInCurseForgeKeyButPullRequestsStayKeyless()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var workflow = File.ReadAllText(Path.Combine(repository,
+            ".github", "workflows", "build.yml")).Replace("\r\n", "\n", StringComparison.Ordinal);
+        var androidStart = workflow.IndexOf("  android:\n", StringComparison.Ordinal);
+        var androidEnd = workflow.IndexOf("\n  android-smoke:\n", androidStart, StringComparison.Ordinal);
+
+        Assert.True(androidStart >= 0 && androidEnd > androidStart);
+        var android = workflow[androidStart..androidEnd];
+        Assert.Contains("JAY_CURSEFORGE_API_KEY:", android, StringComparison.Ordinal);
+        Assert.Contains("secrets.CURSEFORGE_API_KEY", android, StringComparison.Ordinal);
+        Assert.Contains("github.event_name == 'push' && github.ref == 'refs/heads/main'", android,
+            StringComparison.Ordinal);
+        Assert.Contains("if: env.RELEASE_SIGNED_ANDROID == 'true'", android, StringComparison.Ordinal);
+        Assert.Contains("test -n \"$ANDROID_RELEASE_KEYSTORE_BASE64\"", android, StringComparison.Ordinal);
+        Assert.Contains("if [ -z \"$JAY_CURSEFORGE_API_KEY\" ]", android, StringComparison.Ordinal);
+        var ciPublishStart = android.IndexOf("      - name: Publish CI APK", StringComparison.Ordinal);
+        var signedPublishStart = android.IndexOf("      - name: Publish release-signed preview APK",
+            StringComparison.Ordinal);
+        Assert.True(ciPublishStart >= 0 && signedPublishStart > ciPublishStart);
+        Assert.DoesNotContain("secrets.CURSEFORGE_API_KEY", android[ciPublishStart..signedPublishStart],
+            StringComparison.Ordinal);
+        Assert.Contains("JAY_CURSEFORGE_API_KEY: ${{ secrets.CURSEFORGE_API_KEY }}",
+            android[signedPublishStart..], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FreshAndroidLaunchFetchesVersionMetadataBeforeChoosingItsJavaRuntime()
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var application = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "Application.cs"));
+        var embeddedGame = File.ReadAllText(Path.Combine(repository,
+            "src", "Amber.Android", "AndroidEmbeddedGame.cs"));
+
+        var metadataFetch = application.IndexOf("PrepareVersionMetadataAsync(", StringComparison.Ordinal);
+        var runtimeSupport = application.IndexOf("AndroidRuntimeChoice.IsSupported(requiredJava)", StringComparison.Ordinal);
+        var runtimeChoice = application.IndexOf("AndroidRuntimeChoice.UsesJava25(requiredJava)", StringComparison.Ordinal);
+        var runtimeInstall = application.IndexOf("AndroidRuntimeStore.InstallAsync", StringComparison.Ordinal);
+        Assert.True(metadataFetch >= 0 && runtimeSupport > metadataFetch && runtimeChoice > runtimeSupport &&
+                    runtimeInstall > runtimeChoice);
+
+        var prepareMethod = embeddedGame.IndexOf("PrepareVersionMetadataAsync(", StringComparison.Ordinal);
+        var prepareVersion = embeddedGame.IndexOf("installer.PrepareVersionAsync", prepareMethod,
+            StringComparison.Ordinal);
+        var resolveVersion = embeddedGame.IndexOf("gameDirectory.ResolveVersion(versionId)", prepareMethod,
+            StringComparison.Ordinal);
+        Assert.True(prepareMethod >= 0 && prepareVersion > prepareMethod && resolveVersion > prepareVersion);
     }
 
     [Fact]
@@ -611,6 +2541,25 @@ public sealed class MobilePortTests
         {
             Directory.Delete(root, true);
         }
+    }
+
+    [Fact]
+    public void AndroidRuntimeValidationRejectsNullJsonFieldsWithoutCrashing()
+    {
+        var nullFiles = JsonSerializer.Deserialize<RuntimeBundleManifest>(
+            """{"format":1,"id":"broken","architecture":"arm64-v8a","files":null}""")!;
+        var nullFileFields = new RuntimeBundleManifest(1, "broken", "arm64-v8a",
+            [new RuntimeBundleFile("lib/libjvm.so", 1, null!, null!, null!)]);
+        var nullArchiveHash = new RuntimeArchiveDescriptor(
+            1, "broken", "arm64-v8a", 1, null!, 1,
+            "GPL-2.0-with-classpath-exception",
+            "https://example.invalid/source",
+            "https://example.invalid/runtime.tar.xz");
+
+        Assert.NotEmpty(nullFiles.Validate());
+        Assert.False(RuntimeBundleVerifier.VerifyLayout("unused", nullFiles, "arm64-v8a"));
+        Assert.NotEmpty(nullFileFields.Validate());
+        Assert.NotEmpty(nullArchiveHash.Validate());
     }
 
     [Fact]
@@ -821,6 +2770,89 @@ public sealed class MobilePortTests
         }
     }
 
+    [Fact]
+    public async Task AndroidRuntimeArchiveInstallerSerializesConcurrentInstalls()
+    {
+        var parent = Path.Combine(Path.GetTempPath(), "jay-runtime-archive-" + Guid.NewGuid().ToString("N"));
+        var target = Path.Combine(parent, "active");
+        var archive = CreateRuntimeArchive();
+        using var entered = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        var secondOpened = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var held = 0;
+        try
+        {
+            var first = RuntimeArchiveInstaller.InstallCoreAsync(
+                target,
+                RuntimeArchive(archive),
+                (_, _) => Task.FromResult<Stream>(new MemoryStream(archive, writable: false)),
+                progress: null,
+                CancellationToken.None,
+                beforeExtractEntry: () =>
+                {
+                    if (Interlocked.Exchange(ref held, 1) != 0) return;
+                    entered.Set();
+                    release.Wait();
+                });
+
+            Assert.True(entered.Wait(TimeSpan.FromSeconds(30)), "First extraction never started.");
+            var second = RuntimeArchiveInstaller.InstallAsync(
+                target,
+                RuntimeArchive(archive),
+                (_, _) =>
+                {
+                    secondOpened.TrySetResult();
+                    return Task.FromResult<Stream>(new MemoryStream(archive, writable: false));
+                },
+                reuseInstalled: true);
+
+            await Task.Delay(100);
+            Assert.False(secondOpened.Task.IsCompleted);
+            release.Set();
+            var firstManifest = await first.WaitAsync(TimeSpan.FromSeconds(60));
+            var secondManifest = await second.WaitAsync(TimeSpan.FromSeconds(60));
+            Assert.False(secondOpened.Task.IsCompleted);
+            Assert.Equal(firstManifest.Id, secondManifest.Id);
+            Assert.Equal(firstManifest.Files.Select(file => file.Path),
+                secondManifest.Files.Select(file => file.Path));
+        }
+        finally
+        {
+            release.Set();
+            if (Directory.Exists(parent)) Directory.Delete(parent, true);
+        }
+    }
+
+    [Fact]
+    public async Task AndroidRuntimeArchiveInstallerRecoversInterruptedFilesBeforeDownloading()
+    {
+        var parent = Path.Combine(Path.GetTempPath(), "jay-runtime-archive-" + Guid.NewGuid().ToString("N"));
+        var target = Path.Combine(parent, "active");
+        var backup = target + ".backup-crash";
+        var staging = target + ".install-crash";
+        var download = target + ".download-crash";
+        Directory.CreateDirectory(backup);
+        Directory.CreateDirectory(staging);
+        await File.WriteAllTextAsync(Path.Combine(backup, "keep.txt"), "old runtime");
+        await File.WriteAllTextAsync(Path.Combine(staging, "partial.txt"), "partial runtime");
+        await File.WriteAllTextAsync(download, "partial archive");
+        try
+        {
+            var archive = CreateRuntimeArchive();
+            await Assert.ThrowsAsync<IOException>(() => RuntimeArchiveInstaller.InstallAsync(
+                target,
+                RuntimeArchive(archive),
+                (_, _) => throw new IOException("Simulated download failure.")));
+
+            Assert.Equal("old runtime", await File.ReadAllTextAsync(Path.Combine(target, "keep.txt")));
+            Assert.Equal([target], Directory.GetFileSystemEntries(parent));
+        }
+        finally
+        {
+            if (Directory.Exists(parent)) Directory.Delete(parent, true);
+        }
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -907,6 +2939,28 @@ public sealed class MobilePortTests
         return archive.ToArray();
     }
 
+    private static string JavaMethod(string source, string startMarker, string endMarker)
+    {
+        var start = source.IndexOf(startMarker, StringComparison.Ordinal);
+        Assert.True(start >= 0, $"Missing Java method marker: {startMarker}");
+        var end = source.IndexOf(endMarker, start + startMarker.Length, StringComparison.Ordinal);
+        Assert.True(end > start, $"Missing Java method end marker: {endMarker}");
+        return source[start..end];
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        foreach (var start in new[] { AppContext.BaseDirectory, Directory.GetCurrentDirectory() })
+        {
+            for (var directory = new DirectoryInfo(start); directory is not null; directory = directory.Parent)
+            {
+                if (File.Exists(Path.Combine(directory.FullName, "scripts", "build-android-mobileglues.sh")))
+                    return directory.FullName;
+            }
+        }
+        throw new DirectoryNotFoundException("Could not locate the Jay repository root.");
+    }
+
     private const string RuntimeXzFixture = """
         /Td6WFoAAATm1rRGAgAhARYAAAB0L+Wj4HH/A1VdABcXwcAN4XBkd8ji0xzZjqGzadoY40D8VACY44SciLdE0kUWxrzJNdZQh6Re
         RJw7pSaEXmof08wj5TrCFFRSiAe4d1/7GMwhiAHCmm5yuDd6kczORFYTx744AGRGQ8kuOfLCoTYRgNybThb1uEujoKUgyv3ilZXB
@@ -981,12 +3035,16 @@ public sealed class MobilePortTests
     private sealed class RecordingTouchSink : ITouchInputSink
     {
         public List<(TouchControlAction Action, bool Pressed)> Actions { get; } = [];
+        public List<TouchControlAction> CanceledActions { get; } = [];
         public (double X, double Y) LastMovement { get; private set; }
         public (double X, double Y) LastLook { get; private set; }
         public (double X, double Y, bool Click) LastPointer { get; private set; }
         public List<(double X, double Y, bool Click)> Pointers { get; } = [];
+        public List<(double X, double Y, int Count)> InventorySplits { get; } = [];
+        public List<(double X, double Y)> CollectedItems { get; } = [];
 
         public void SetAction(TouchControlAction action, bool pressed) => Actions.Add((action, pressed));
+        public void CancelAction(TouchControlAction action) => CanceledActions.Add(action);
         public void SetMovement(double x, double y) => LastMovement = (x, y);
         public void AddLook(double x, double y) => LastLook = (x, y);
         public void SetPointer(double x, double y, bool click)
@@ -994,6 +3052,12 @@ public sealed class MobilePortTests
             LastPointer = (x, y, click);
             Pointers.Add((x, y, click));
         }
+        public void SplitInventoryStack(double x, double y, int count) =>
+            InventorySplits.Add((x, y, count));
+        public List<(double X, double Y)> SinglePlacements { get; } = [];
+        public void PlaceOneItem(double x, double y) => SinglePlacements.Add((x, y));
+        public void ReturnHalfOfPickup(double x, double y, int originalCount) => InventorySplits.Add((x, y, -originalCount));
+        public void CollectMatchingItems(double x, double y) => CollectedItems.Add((x, y));
     }
 
 }

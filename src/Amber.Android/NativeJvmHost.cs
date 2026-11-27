@@ -7,29 +7,62 @@ namespace Amber.Android;
 
 internal static partial class NativeJvmHost
 {
-    private const int ExpectedAbiVersion = 11;
-
+    private const int ExpectedAbiVersion = 20;
     public static bool GameplayControlsActive => IsAvailable && GetNativeGameplayMode() != 0;
 
-    public static bool HasBlockTarget
+    [LibraryImport("jayjvm", EntryPoint = "jay_mining_ring_hold")]
+    internal static partial int SetMiningRing(long gesture, float x, float y, float radius,
+        float stroke, int width, int height);
+
+    [LibraryImport("jayjvm", EntryPoint = "jay_mining_progress_get")]
+    internal static partial int MiningProgress();
+
+    [LibraryImport("jayjvm", EntryPoint = "jay_request_pause")]
+    private static partial int RequestPause();
+
+    internal static bool TryPause()
+    {
+        if (!IsAvailable) return false;
+        try { return RequestPause() != 0; }
+        catch (EntryPointNotFoundException) { return false; }
+    }
+
+    public static int TextInputFocusState
     {
         get
         {
-            if (!IsAvailable) return false;
-            try { return GetNativeBlockTarget() != 0; }
-            catch (EntryPointNotFoundException) { return false; }
+            if (!IsAvailable) return -1;
+            try { return Math.Clamp(GetNativeTextInputFocused(), -1, 1); }
+            catch (EntryPointNotFoundException) { return -1; }
         }
     }
 
-    // The native library and its ABI cannot change while the process runs, so check them once.
-    private static readonly Lazy<bool> Available = new(() =>
+    public static int GuiScale
     {
-        try { return AbiVersion() == ExpectedAbiVersion; }
-        catch (DllNotFoundException) { return false; }
-        catch (EntryPointNotFoundException) { return false; }
-    });
+        get
+        {
+            if (!IsAvailable) return 0;
+            try { return Math.Max(0, GetNativeGuiScale()); }
+            catch (EntryPointNotFoundException) { return 0; }
+        }
+    }
 
-    public static bool IsAvailable => Available.Value;
+    public static bool TextInputAt(double x, double y)
+    {
+        if (!IsAvailable) return false;
+        try { return GetNativeTextInputAt((float)x, (float)y) != 0; }
+        catch (EntryPointNotFoundException) { return false; }
+    }
+
+    public static bool IsAvailable
+    {
+        get
+        {
+            try { return AbiVersion() == ExpectedAbiVersion; }
+            catch (DllNotFoundException) { return false; }
+            catch (EntryPointNotFoundException) { return false; }
+        }
+    }
 
     public static string? LoadRuntime(string libJvmPath)
     {
@@ -101,32 +134,112 @@ internal static partial class NativeJvmHost
 
     public static void SetAction(TouchControlAction action, bool pressed)
     {
-        if (IsAvailable) SetNativeAction((int)action, pressed ? 1 : 0);
+        if (!IsAvailable) return;
+        // Android UI callbacks run on ART's main thread. Never invoke Minecraft handlers
+        // directly from here: old clients mutate Screen state synchronously and can crash the
+        // render thread. The GLFW bridge consumes this snapshot from glfwPollEvents instead.
+        SetNativeAction((int)action, pressed ? 1 : 0);
+    }
+
+    public static void CancelAction(TouchControlAction action)
+    {
+        if (!IsAvailable) return;
+        CancelNativeAction((int)action);
     }
 
     public static void SetMovement(double x, double y)
     {
-        if (IsAvailable) SetNativeMovement((float)x, (float)y);
+        if (!IsAvailable) return;
+        SetNativeMovement((float)x, (float)y);
     }
 
     public static void AddLook(double x, double y)
     {
-        if (IsAvailable) AddNativeLook((float)x, (float)y);
+        if (!IsAvailable) return;
+        AddNativeLook((float)x, (float)y);
     }
 
     public static void SetPointer(double x, double y, bool click)
     {
-        if (IsAvailable) SetNativePointer((float)x, (float)y, click ? 1 : 0);
+        if (!IsAvailable) return;
+        SetNativePointer((float)x, (float)y, click ? 1 : 0);
+    }
+
+    public static bool DispatchJavaPointer(double x, double y, int clicks)
+    {
+        if (!IsAvailable) return false;
+        return TryJavaPointer((float)x, (float)y, (uint)Math.Max(0, clicks));
+    }
+
+    public static int InventoryStackCount(double x, double y)
+        => InventorySlotState(x, y).Count;
+
+    public static InventorySlotState InventorySlotState(double x, double y)
+    {
+        if (!IsAvailable) return new(-1, -1);
+        try { return Amber.Mobile.InventorySlotState.FromPacked(
+            GetNativeInventoryStackCount((float)x, (float)y)); }
+        catch (EntryPointNotFoundException) { return new(-1, -1); }
+    }
+
+    public static void SplitInventoryStack(double x, double y, int count)
+    {
+        if (!IsAvailable) return;
+        SetNativeInventorySplit((float)x, (float)y, count);
     }
 
     public static void AddCodePoint(int codePoint)
     {
-        if (IsAvailable) AddNativeCodePoint((uint)codePoint);
+        if (!IsAvailable) return;
+        AddNativeCodePoint((uint)codePoint);
     }
 
     public static void AddKey(int glfwKey)
     {
-        if (IsAvailable) AddNativeKey(glfwKey);
+        if (!IsAvailable) return;
+        AddNativeKey(glfwKey);
+    }
+
+    private static bool TryJavaKey(int key, int action)
+    {
+        try { return JavaKey(key, action) != 0; }
+        catch (EntryPointNotFoundException) { return false; }
+    }
+
+    private static bool TryJavaMouseButton(int button, int action)
+    {
+        try { return JavaMouseButton(button, action) != 0; }
+        catch (EntryPointNotFoundException) { return false; }
+    }
+
+    private static bool TryJavaLook(float x, float y)
+    {
+        try { return JavaLook(x, y) != 0; }
+        catch (EntryPointNotFoundException) { return false; }
+    }
+
+    private static bool TryJavaPointer(float x, float y, uint clicks)
+    {
+        try { return JavaPointer(x, y, clicks) != 0; }
+        catch (EntryPointNotFoundException) { return false; }
+    }
+
+    private static int TryJavaChar(uint codePoint)
+    {
+        try { return JavaChar(codePoint); }
+        catch (EntryPointNotFoundException) { return 0; }
+    }
+
+    private static int TryJavaScroll(double x, double y)
+    {
+        try { return JavaScroll(x, y); }
+        catch (EntryPointNotFoundException) { return 0; }
+    }
+
+    private static int TryJavaInventorySplit(float x, float y, int count)
+    {
+        try { return JavaInventorySplit(x, y, count); }
+        catch (EntryPointNotFoundException) { return 0; }
     }
 
     public static void SetSurface(Surface? surface)
@@ -140,8 +253,14 @@ internal static partial class NativeJvmHost
     [LibraryImport("jayjvm", EntryPoint = "jay_gameplay_mode_get")]
     private static partial int GetNativeGameplayMode();
 
-    [LibraryImport("jayjvm", EntryPoint = "jay_block_target_get")]
-    private static partial int GetNativeBlockTarget();
+    [LibraryImport("jayjvm", EntryPoint = "jay_text_input_focused_get")]
+    private static partial int GetNativeTextInputFocused();
+
+    [LibraryImport("jayjvm", EntryPoint = "jay_text_input_at_get")]
+    private static partial int GetNativeTextInputAt(float x, float y);
+
+    [LibraryImport("jayjvm", EntryPoint = "jay_gui_scale_get")]
+    private static partial int GetNativeGuiScale();
 
     [LibraryImport("jayjvm", EntryPoint = "jay_jvm_load", StringMarshalling = StringMarshalling.Utf8)]
     private static partial nint LoadJvm(string path);
@@ -167,6 +286,9 @@ internal static partial class NativeJvmHost
     [LibraryImport("jayjvm", EntryPoint = "jay_input_set_action")]
     private static partial void SetNativeAction(int action, int pressed);
 
+    [LibraryImport("jayjvm", EntryPoint = "jay_input_cancel_action")]
+    private static partial void CancelNativeAction(int action);
+
     [LibraryImport("jayjvm", EntryPoint = "jay_input_set_movement")]
     private static partial void SetNativeMovement(float x, float y);
 
@@ -176,11 +298,38 @@ internal static partial class NativeJvmHost
     [LibraryImport("jayjvm", EntryPoint = "jay_input_set_pointer")]
     private static partial void SetNativePointer(float x, float y, int click);
 
+    [LibraryImport("jayjvm", EntryPoint = "jay_inventory_stack_count")]
+    private static partial int GetNativeInventoryStackCount(float x, float y);
+
+    [LibraryImport("jayjvm", EntryPoint = "jay_input_split_inventory")]
+    private static partial void SetNativeInventorySplit(float x, float y, int count);
+
     [LibraryImport("jayjvm", EntryPoint = "jay_input_add_codepoint")]
     private static partial void AddNativeCodePoint(uint codePoint);
 
     [LibraryImport("jayjvm", EntryPoint = "jay_input_add_key")]
     private static partial void AddNativeKey(int glfwKey);
+
+    [LibraryImport("jayjvm", EntryPoint = "jay_java_pointer")]
+    private static partial int JavaPointer(float x, float y, uint clicks);
+
+    [LibraryImport("jayjvm", EntryPoint = "jay_java_mouse_button")]
+    private static partial int JavaMouseButton(int button, int action);
+
+    [LibraryImport("jayjvm", EntryPoint = "jay_java_key")]
+    private static partial int JavaKey(int key, int action);
+
+    [LibraryImport("jayjvm", EntryPoint = "jay_java_scroll")]
+    private static partial int JavaScroll(double x, double y);
+
+    [LibraryImport("jayjvm", EntryPoint = "jay_java_char")]
+    private static partial int JavaChar(uint codePoint);
+
+    [LibraryImport("jayjvm", EntryPoint = "jay_java_look")]
+    private static partial int JavaLook(float x, float y);
+
+    [LibraryImport("jayjvm", EntryPoint = "jay_java_inventory_split")]
+    private static partial int JavaInventorySplit(float x, float y, int count);
 
     [LibraryImport("jayjvm", EntryPoint = "jay_surface_set")]
     private static partial void SetNativeSurface(nint environment, nint surface);

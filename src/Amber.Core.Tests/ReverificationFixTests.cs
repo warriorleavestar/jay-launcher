@@ -62,6 +62,7 @@ public class ReverificationFixTests
     public async Task R3_StaleDiscoveryDoesNotReenable()
     {
         var gate = new TaskCompletionSource<bool>();
+        var asking = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var first = true;
         using var policy = new ExitPolicy([], [])
         {
@@ -69,6 +70,7 @@ public class ReverificationFixTests
             {
                 if (!first) return Task.FromResult(false);
                 first = false;
+                asking.TrySetResult();
                 return gate.Task;
             },
             ReadyInterval = TimeSpan.FromMinutes(10),
@@ -77,7 +79,8 @@ public class ReverificationFixTests
         };
         policy.SetReady(false);
         policy.Start();
-        await Task.Delay(50);
+        // The background loop can start late on a busy machine: change the network only once the query is under way.
+        await asking.Task.WaitAsync(TimeSpan.FromSeconds(10));
         policy.SimulateAddressChange();   // 查询进行中，网络变了
         gate.SetResult(true);            // 旧的查询成功返回
         await Task.Delay(100);
@@ -90,22 +93,26 @@ public class ReverificationFixTests
     {
         var calls = 0;
         var ok = true;
+        var clock = new ManualTimeProvider();
         using var policy = new ExitPolicy([], [])
         {
             Discover = _ => { Interlocked.Increment(ref calls); return Task.FromResult(ok); },
             MaxPublicIpAge = TimeSpan.FromMilliseconds(50),
+            Time = clock,
+            IsRoutable = TestAddresses.IsRoutable,
         };
         policy.SetReady(true);
-        await Task.Delay(100);
+        clock.Advance(TimeSpan.FromMilliseconds(100));
         Assert.True(await policy.EnsureFreshAsync(TimeSpan.FromSeconds(2), default));
         Assert.Equal(1, calls);
         // 刚查过：不再查。
         Assert.True(await policy.EnsureFreshAsync(TimeSpan.FromSeconds(2), default));
         Assert.Equal(1, calls);
-        await Task.Delay(100);
+        Assert.True(policy.Allows(IPAddress.Parse("198.51.100.88")));
+        clock.Advance(TimeSpan.FromMilliseconds(100));
         ok = false;
         Assert.False(await policy.EnsureFreshAsync(TimeSpan.FromSeconds(2), default));
-        Assert.False(policy.Allows(IPAddress.Parse("8.8.8.8")));
+        Assert.False(policy.Allows(IPAddress.Parse("198.51.100.88")));
     }
 
     // R7：出口没准备好时回专门的答复，加入方看到“出口还没准备好”。
@@ -205,7 +212,7 @@ public class ReverificationFixTests
     [Fact]
     public void MappedPrefixDoesNotThrow()
     {
-        Assert.False(ExitPolicy.InNetwork(IPAddress.Parse("8.8.8.8"), IPAddress.Parse("::ffff:10.0.0.0"), 104));
+        Assert.False(ExitPolicy.InNetwork(IPAddress.Parse("198.51.100.88"), IPAddress.Parse("::ffff:10.0.0.0"), 104));
         using var real = new ExitPolicy();
         real.RefreshLocal();
     }

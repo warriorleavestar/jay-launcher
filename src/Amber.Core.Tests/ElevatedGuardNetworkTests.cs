@@ -9,7 +9,7 @@ public class ElevatedGuardNetworkTests
 {
     private static string PowerShell => Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe");
 
-    [Fact]
+    [WindowsFact]
     public async Task FailedCoreStartupIsAcknowledgedToCaller()
     {
         if (!OperatingSystem.IsWindows()) return;
@@ -25,13 +25,16 @@ public class ElevatedGuardNetworkTests
         Assert.NotEmpty(guard.RecentOutput);
     }
 
-    [Fact]
+    [WindowsFact]
     public async Task KillingGuardAlsoKillsCoreWithoutFinally()
     {
         if (!OperatingSystem.IsWindows()) return;
         using var guard = ElevatedGuard.Start(PowerShell, ["-NoProfile", "-NonInteractive", "-Command", "Write-Output ('pid=' + $PID); Start-Sleep 60"], new Dictionary<string, string>(), elevate: false);
         await guard.WaitForReadyAsync().WaitAsync(TimeSpan.FromSeconds(20));
-        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        // Ready only means the guard started powershell.exe. Its first line can take well over 10 s when the whole
+        // suite runs on a busy CI runner (Windows PowerShell starts slowly), so wait as long as the ready step allows
+        // and more; the limit only guards against a hang.
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         string? line;
         while ((line = guard.RecentOutput.FirstOrDefault(x => x.StartsWith("pid=", StringComparison.Ordinal))) is null) await Task.Delay(50, deadline.Token);
         var pid = int.Parse(line[4..]);
@@ -47,7 +50,7 @@ public class ElevatedGuardNetworkTests
     /// The guard is Jay itself with a short, fixed command line: no PowerShell, no encoded script, no room key.
     /// (Defender flagged the old hidden "powershell -EncodedCommand" guard as Trojan:Win32/Commando.B!ml.)
     /// </summary>
-    [Fact]
+    [WindowsFact]
     public void GuardCommandLineIsJayWithoutScriptOrSecret()
     {
         if (!OperatingSystem.IsWindows()) return;
@@ -62,7 +65,7 @@ public class ElevatedGuardNetworkTests
     }
 
     /// <summary>Command lines Jay would never write are refused before any pipe is opened.</summary>
-    [Theory]
+    [WindowsTheory]
     [InlineData("--jay-lan-guard")]
     [InlineData("--jay-lan-guard 0123456789abcdef0123456789abcdef 12 S-1-5-21-1-2-3-1001")]
     [InlineData("--jay-lan-guard 0123456789ABCDEF0123456789ABCDEF 12 S-1-5-21-1-2-3-1001 C:\\core.exe")]

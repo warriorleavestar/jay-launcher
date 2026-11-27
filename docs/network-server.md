@@ -93,6 +93,7 @@ jay-server node remove <房间编号>       # 只删这一次，房主续期时�
 - 封禁名单存在数据目录的 `bans.json`。`--for 30m` / `24h` / `7d` 是临时封禁，到点自动解除；不加就是永久。房主被拒时能看到原因和解封时间。
 - 节点每 5 秒检查一次 `bans.json` 有没有被改过，改了就重新读。几台目录节点想共用一份封禁名单，可以用 rsync、共享盘之类把这个文件同步过去，不用在每台上各执行一次。
 - 封账号只在开了账号登录的节点上有用：Jay 发布房间时会带上登录凭证，节点核对过签名才记下账号。
+- Account bans match the exact account name. Lists saved by older versions (`"v": 1` in `bans.json`) matched the name in any case; at start-up the node ties each such ban to the one account with that name and saves the list as `"v": 2`. A ban that matches no account, or several accounts that differ only in case, keeps matching any case: `node bans` marks it `"anyCase": true` and the log names it. Ban the exact account name, then lift only the old entry with `node unban account <name> --any-case`. When an exact and an old ban share a name, a plain `node unban account <name>` changes nothing and asks for `--exact` or `--any-case`; the panel's Unban button lifts only the row it is on.
 
 ## 要求的 Jay 版本
 
@@ -113,8 +114,24 @@ jay-server node remove <房间编号>       # 只删这一次，房主续期时�
 |---|---|
 | `--config <配置.json>` | 按配置里的 `policy.modes` 挡不允许的房间方式（Jay 本身也挡，这里防改过的客户端） |
 | `--blocked-words <文件>` | 一行一个词（`#` 开头是注释）：公开房间的名字、房主名里有就不收 |
-| `--rate-limit 3,6,600` | 每人同时几个房间、每人每分钟新发布几次、整个目录每分钟几个新房间（默认就是这个）。`--no-rate-limit` 关掉 |
+| `--rate-limit 3,6,600` | 每人同时几个房间、每人每分钟新发布几次、整个目录每分钟几个新房间（默认就是这个）。`--no-rate-limit` 关掉；两个一起给会直接报错，旧的启动脚本里如果同时写了，删掉其中一个 |
 | `--admin-port 47669` / `--no-admin` | 管理接口端口，或者不开 |
+| `--relay-limit-kbps 2048` | 经这台节点转发别的 EasyTier 网络（房间）时，每个网络最多多少 KB/s。默认不限；节点自己的公共网络不受限 |
+| `--relay-networks "<名字> ..."` | 只给这些网络转发（空格分开，可用 `*` 通配）。默认全部；只想服务自己的网络时填自己的网络名 |
+
+目录还有几项固定的上限，不用配置，超出时回 `rate`：
+
+- 整个目录：每分钟 300 条约见记录、120 条新的签名记录（已有记录续期不算）、240 次信箱投递、60 个新的志愿节点地址；
+- 每把签名钥匙每小时 60 次放记录；
+- 每个来源：10 分钟 30 条约见记录、每小时 60 次放记录、10 分钟 20 次信箱投递；
+- 同一主机（按名字，也按解析出的机器：IPv4 地址或 IPv6 的 /64）最多 2 个已上榜的志愿节点地址；指向同一个地址同一个端口的几个名字算一个节点、占一个位置，发给玩家时也只给其中一个；登记的地址要有这个网络的节点应答（目录发一个不带密钥的 EasyTier 握手开头，对方用这个网络的名字回握手），只是端口开着的别的服务不算；
+- 每个来源 10 分钟最多登记 4 个新的志愿节点地址；一个地址试连失败后，这个地址、以及解析到同一个 IP 的同一个端口 2 分钟内不再试连（IPv6 只认完整地址，同一 /64 里别的地址不受影响）。
+
+“来源”指公共网络里的地址：节点用的 Jay 版 EasyTier 把每个成员的连接交给目录时，给每个成员一个自己的 127.235.x.y（按成员的 peer id 选，不是它的 10.235 地址），目录按这个分开计数。其余本机地址（127.0.0.1、主机名解析出的 127.0.1.1 等，包括在节点上跑的运维脚本）都算同一个来源，同样受这些上限，连接数放宽到最多 32 条（一般来源 8 条）；运维请用管理接口。落进这个共享来源的还有刚加入、路由还没同步到的成员（通常几秒）；他们共用这个来源的投递和约见上限，路由一到就各算各的。节点要用带这个补丁的 EasyTier（Jay 版 jay-v2.6.4-5 起），并且公共网络以安全模式运行（补丁只给安全模式的连接分地址）。没有补丁时所有人都从本机地址进来，分不出谁是谁；目录在见到第一个 127.235.x.y 之前（节点用的 Jay 版 EasyTier 本身已知会分开时除外），让本机来的连接共用一份比单个来源宽、但比整个目录小的额度：同时 64 条连接，每 10 分钟 120 封投递，最多存 2000 封信（整个目录 8000 封），约见每个窗口 120 次，新的签名记录每小时 60 条（已有记录续期不受影响）；并在日志里提醒一次。这样一个人最多用完这份共用的额度，用不完整个目录的。
+
+按来源分开计数的前提是：房间网络里的一个成员拿不到很多个 10.235.x.y 地址。每个地址都要先过网络的登录或门槛，而且 EasyTier 只认路由表里由发出连接的成员自己声明、且只有一人占用的地址；拿到很多地址的成本由网络的登录规则决定。对外公开、谁都能进的网络，请配合整个目录的上限和管理接口里的封禁来用。
+
+发布和续期被回 `rate` 时，Jay 下一轮会再试。信箱投递（加好友、发邀请）被回 `rate` 时不会自动重发，Jay 会提示发送失败，过几分钟再发就行。
 
 房主被拒时，Jay 里会显示节点给的原因（比如“房间名或房主名里有这个网络不允许的词”）。
 
@@ -177,7 +194,7 @@ docker compose -f server/docker/docker-compose.yml exec jay-network /opt/jay-ser
 
 ## 把节点绑定到硬件（防止被整盘拷走冒充）
 
-在节点上 `jay-server node bind`（生成只含加盐哈希的 hardware.request.json）→ 拷到放根钥匙的离线电脑 `jay-server network hw-cert --root <根钥匙> --request hardware.request.json --out hardware.cert` → 第二位信任人在自己的离线电脑上 `jay-server network hw-cert --cosign hardware.cert --root <自己的钥匙>`（Jay 公共网络看 JayTrust.Need，现在是 2 把要 2 把；自己的网络看 dirRootsNeed；每次签名前逐项显示内容和核对码，要手打目录公钥最后 6 个字符）→ 拷回节点 `jay-server node bind --install hardware.cert`。之后 directory.key、login.key 只以加密形式存在（有 TPM 就封存进 TPM，Linux 上还绑定安全启动状态）。硬件对不上时节点删除数据目录里的 Jay 文件；运行环境被动过（调试器、注入、文件可被别人改、TPM 不解封）时拒绝运行。不需要 root：Linux 上把服务账号加进 tss 组即可（安装脚本会自动加）。换硬件、迁移虚拟机前先 `jay-server node bind --check`。细节和限制见 [security/node-hardware-binding.md](security/node-hardware-binding.md)。
+在节点上 `jay-server node bind`（生成只含加盐哈希的 hardware.request.json）→ 拷到放根钥匙的离线电脑 `jay-server network hw-cert --root <根钥匙> --request hardware.request.json --out hardware.cert` → 第二位信任人在自己的离线电脑上 `jay-server network hw-cert --cosign hardware.cert --root <自己的钥匙>`（Jay 公共网络看 JayTrust.Need，现在是 3 把里任 2 把；自己的网络看 dirRootsNeed；每次签名前逐项显示内容和核对码，要手打目录公钥最后 6 个字符）→ 拷回节点 `jay-server node bind --install hardware.cert`。之后 directory.key、login.key 只以加密形式存在（有 TPM 就封存进 TPM，Linux 上还绑定安全启动状态）。硬件对不上时节点删除数据目录里的 Jay 文件；运行环境被动过（调试器、注入、文件可被别人改、TPM 不解封）时拒绝运行。不需要 root：Linux 上把服务账号加进 tss 组即可（安装脚本会自动加）；手动绑定时也用服务账号运行：`sudo -u jay JAY_SERVER_DIR=/var/lib/jay-network /opt/jay-server/jay-server node bind`。换硬件、迁移虚拟机前先 `jay-server node bind --check`。细节和限制见 [security/node-hardware-binding.md](security/node-hardware-binding.md)。
 
 ## 节点能看到什么
 
@@ -191,8 +208,8 @@ docker compose -f server/docker/docker-compose.yml exec jay-network /opt/jay-ser
 | 隐藏房间的房间信息（名字、房主名、房主地址、房主公钥），以及它的封好条目放在哪个索引下（房主发布时带着整份签名的房间信息） | 一直 | 不变 |
 | 快照的读者（网络里的其他人）只看到隐藏房间等长的封好条目，看不出地址、是哪个房间、是哪个邀请 | 一直 | 不变 |
 | 谁在什么时候按邀请找房间 | 看不到：每个 Jay 每 60 秒取一次整份目录（`snap`，只有变化），在本机查 | 不变 |
-| 谁在什么时候按指纹码找房间 | 一直 | 第 7、14 项后好友码只带账户哈希 |
-| 开了指纹查找的房主的指纹密钥（见 [public-network.md](public-network.md#设备指纹)） | 房主打开时 | 第 7、14 项后好友码只带账户哈希 |
+| 谁在什么时候按设备码找房间 | 一直 | 第 7、14 项后好友码只带账户哈希 |
+| 开了指纹查找的房主的指纹密钥（见 [public-network.md](public-network.md#设备码)） | 房主打开时 | 第 7、14 项后好友码只带账户哈希 |
 | 密封信件的箱号、大小、存取时刻（看不到内容和寄信人） | 一直 | 第 13 项后箱号由双方共享钥匙算出，读写次数固定 |
 | 志愿中转的公网地址和端口（也会发给网络里要中转的人） | 有人登记时 | 不变；界面写明了 |
 | 开了账号登录时：账号名、密码哈希、登录成败次数、哪个账号发布了哪个公开房间 | 开登录时 | 不变 |

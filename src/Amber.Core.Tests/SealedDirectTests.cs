@@ -13,7 +13,7 @@ public sealed class SealedDirectTests
 
     private static readonly DirectAddresses Host = new("0123456789abcdef", NatKind.Cone,
     [
-        new(PathKind.IPv6, IPEndPoint.Parse("[2408:8000::1]:40000")),
+        new(PathKind.IPv6, IPEndPoint.Parse("[2001:db8:8000::1]:40000")),
         new(PathKind.Punch, IPEndPoint.Parse("203.0.113.5:51234")),
         new(PathKind.Lan, IPEndPoint.Parse("192.168.1.5:40000")),
     ]);

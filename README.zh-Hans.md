@@ -14,7 +14,7 @@
 [![许可证: PolyForm Noncommercial](https://img.shields.io/badge/%E8%AE%B8%E5%8F%AF%E8%AF%81-PolyForm%20Noncommercial-4b6584)](LICENSE)
 
 [![下载 Windows 版](https://img.shields.io/badge/Windows-%E4%B8%8B%E8%BD%BD-d98a1f?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-win-x64.zip)
-[![下载 macOS 版](https://img.shields.io/badge/macOS-%E4%B8%8B%E8%BD%BD-4b6584?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-osx-arm64.tar.gz)
+[![下载 macOS 版](https://img.shields.io/badge/macOS-%E4%B8%8B%E8%BD%BD-4b6584?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-osx-arm64.dmg)
 [![下载 Linux 版](https://img.shields.io/badge/Linux-%E4%B8%8B%E8%BD%BD-4b6584?style=for-the-badge&logo=linux&logoColor=white)](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-linux-x64.tar.gz)
 
 [English](README.md) · **简体中文** · [下载](#下载) · [功能](#功能) · [隐私](#隐私) · [常见问题](#常见问题) · [参与贡献](CONTRIBUTING.zh-Hans.md)
@@ -47,7 +47,7 @@
 
 ### 🔒 隐私是默认的
 
-邀请码一次性、会过期，泄露了也没用。没有你批准谁也进不来，踢人会顺手换掉房间钥匙。没有遥测、没有设备识别码、没有远程开关，中间也没有 Jay 的服务器。
+邀请码一次性、会过期，泄露了也没用。没有你批准谁也进不来，踢人会顺手换掉房间钥匙。没有遥测、没有硬件或厂商的设备 ID、没有远程开关，中间也没有 Jay 的服务器。
 
 </td>
 <td width="50%" valign="top">
@@ -61,18 +61,18 @@ Fabric、Quilt、Forge、NeoForge、OptiFine 一键安装，内置 Modrinth 和 
 </table>
 
 > [!NOTE]
-> 本项目在 v0.7.0 之前叫 **Amber**，旧账号和设置可以直接沿用。一起联机的人都要用 v0.7.0 或更新的版本。
+> 本项目到 v0.5.9 为止叫 **Amber**，从 v0.7.0 起叫 Jay，旧账号和设置可以直接沿用。一起联机的人都要用 v0.7.0 或更新的版本。
 > 标了 *实验* 的功能已通过自动测试，但还没在真实环境里完整验证过，遇到问题欢迎[反馈](https://github.com/warriorleavestar/jay-launcher/issues/new/choose)。
 
 ## 下载
 
-到[最新版本](https://github.com/warriorleavestar/jay-launcher/releases/latest)下载与你的电脑对应的文件，解压就能用。不用另装任何东西：.NET 已经打包在里面，Jay 会为每个游戏版本找到或下载合适的 Java。
+到[最新版本](https://github.com/warriorleavestar/jay-launcher/releases/latest)下载与你的电脑对应的文件。不用另装运行库：.NET 已经打包在里面，Jay 会为每个游戏版本找到或下载合适的 Java。
 
 | 系统 | 文件 | 状态 |
 |---|---|---|
 | **Windows 10+** x64 | [`Jay-win-x64.zip`](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-win-x64.zip) | ✅ 稳定 |
-| **macOS** Apple 芯片 | [`Jay-osx-arm64.tar.gz`](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-osx-arm64.tar.gz) | ✅ 已真机测试 |
-| **macOS** Intel | [`Jay-osx-x64.tar.gz`](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-osx-x64.tar.gz) | 🧪 实验 |
+| **macOS** Apple 芯片 | [`Jay-osx-arm64.dmg`](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-osx-arm64.dmg) | ✅ 已真机测试 |
+| **macOS** Intel | [`Jay-osx-x64.dmg`](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-osx-x64.dmg) | 🧪 实验 |
 | **Linux** x64 | [`Jay-linux-x64.tar.gz`](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-linux-x64.tar.gz) | 🧪 实验 |
 | **Linux** ARM64 | [`Jay-linux-arm64.tar.gz`](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-linux-arm64.tar.gz) | 🧪 实验（需自备 Java） |
 | **Android** 伴侣 | [`Jay-android-experimental.apk`](https://github.com/warriorleavestar/jay-launcher/releases/download/android-preview/Jay-android-experimental.apk) | 🧪 实验，见 [docs/android.md](docs/android.md) |
@@ -89,7 +89,7 @@ Fabric、Quilt、Forge、NeoForge、OptiFine 一键安装，内置 Modrinth 和 
 <details>
 <summary><b>macOS 说明</b></summary>
 
-解压后在终端里运行 `./Jay`。macOS 版暂时没有签名：如果第一次打开被 Gatekeeper 拦下，到“系统设置 → 隐私与安全性”里允许。完整局域网和出口节点模式开启时会要一次管理员密码。
+打开 DMG，把 **Jay** 拖到 **Applications（应用程序）**，再从“应用程序”打开。配置 Apple Developer ID 证书前，Mac 版使用 ad-hoc 签名；如果第一次被 Gatekeeper 拦下，按住 Control 点击 Jay，选“打开”并确认一次。完整局域网和出口节点模式开启时会要一次管理员密码。
 </details>
 
 <details>
@@ -186,7 +186,7 @@ Jay 的窗口需要桌面会话（X11，或带 XWayland 的 Wayland）和下面�
 
 Jay 只有一个承诺：**只为你要做的事联网**；唯一的例外是每天一次的更新检查，可以关掉。
 
-- **没有遥测。** 不收集使用数据，不生成设备识别码。
+- **没有遥测。** 不收集使用数据，没有硬件或厂商的设备 ID。联机会用一把每次安装各自生成、可以重置的设备密钥（你加入的房主看得到）；设备指纹是可选的，你打开以前没有。
 - **没有远程控制。** 没有任何远程开关或云端配置能改变 Jay 的行为。
 - **更新由你决定。** Jay 每天向官方发布页查一次新版本（新装的默认开；从旧版升级的保持关闭，需要时自己打开），只有 3 位信任人里有 2 位签过才提示；从不自己下载或安装，也可以在 设置 › 关于 关掉。
 - **中间没有 Jay 的服务器。** 房间码在你的电脑上生成。联机只连联机页里列出的中转节点（内置的可以关掉，也可以加自己的）和房间里的其他玩家。
@@ -198,6 +198,8 @@ Jay 只有一个承诺：**只为你要做的事联网**；唯一的例外是每
 - 游戏：Mojang 游戏文件服务器、你选择的下载源、各加载器的下载地址（OptiFine 通过 BMCLAPI，authlib-injector 通过其官方地址或 BMCLAPI）。
 - 模组：Modrinth 和 CurseForge，只在你浏览或安装时。
 - 联机，只在你开房间或加入时：联机页里列出的中转节点、房间里的其他玩家、Jay 服务器邀请里写的那台服务器，以及 jay-easytier 的 GitHub 发布页（仅在自带的那份缺失或用不了时）。
+- 少数下载：很老的 Forge（1.5.2 及更早）缺的库从 web.archive.org 下载，Mojang 不提供 Java 的平台（ARM Linux）从 api.adoptium.net 下载 Java，打开烘焙（通用加载器）后从 jay-loader 的发布页下载加载器包。
+- GitHub 下载镜像：联机组件或加载器包从 GitHub 下不下来时，改走第三方镜像 `ghfast.top`、`gh-proxy.com`、`ghproxy.net`（系统时区是中国时先试镜像）。Jay 只接受大小和 SHA-256 与固定值一致的文件。
 - 直连房间会向你设置的 STUN 服务器（默认 `stun.miwifi.com`、`stun.chat.bilibili.com`、`stun.cloudflare.com`，可改可清空）询问你的外部地址，它们不经过游戏数据；也可能请你的路由器临时映射一个端口，结束联机时删掉。
 </details>
 
@@ -236,7 +238,7 @@ dotnet publish Amber.App -c Release -r osx-arm64 --self-contained -p:PublishSing
 
 还有一个命令行版本，例如 `dotnet run --project Amber.Cli -- list-remote`。
 
-[Android](docs/android.md) 和 [iOS](docs/ios.md) 实验版提供 Jay 服务器登记和本机网关。Android 版现在有 Jay 自己的全屏游戏画面与触屏控制基础；独立 JVM 和图形运行环境仍在开发。iOS 仍需要另外兼容的客户端。
+[Android](docs/android.md) 和 [iOS](docs/ios.md) 实验版提供 Jay 服务器登记和本机网关。Android 版可以自己下载经过校验的 Java 运行环境，用离线玩家名和触屏控制运行 Minecraft 1.21.11，见 [docs/android.md](docs/android.md)。iOS 仍需要另外兼容的客户端。
 
 第一次看代码？从 [docs/CODEMAP.md](docs/CODEMAP.md) 和 [参与贡献](CONTRIBUTING.zh-Hans.md) 开始。
 </details>

@@ -63,7 +63,7 @@ public sealed class ExitTrailTests : IDisposable
         if (home.Length > 1) Assert.DoesNotContain(home, text);
     }
 
-    [Fact]
+    [UnixFact]
     public async Task HelperProcessExitIsRecorded()
     {
         if (OperatingSystem.IsWindows()) return;

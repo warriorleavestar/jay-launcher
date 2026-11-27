@@ -128,6 +128,188 @@ public sealed class GateRecordTests : IAsyncLifetime
         Assert.Equal(L.T("core.gate.record.not_found"), e.Message);
     }
 
+    private sealed class FakeJoined(RoomDirectoryClient directories) : GateRecordPublisher.IJoined
+    {
+        public RoomDirectoryClient Directories => directories;
+        public bool HasExited => false;
+        public bool Disposed { get; private set; }
+        public void Dispose() => Disposed = true;
+    }
+
+    private static async Task Until(Func<Task<bool>> condition)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(15);
+        while (!await condition())
+        {
+            Assert.True(DateTime.UtcNow < deadline, "timed out");
+            await Task.Delay(50);
+        }
+    }
+
+    private async Task<GateInvite?> TryResolve(GateInvite invite)
+    {
+        try { return await GateRecord.ResolveAsync(Directories(), invite, default); }
+        catch (IOException) { return null; }
+    }
+
+    /// <summary>A record publish that fails in an unexpected way is logged and tried again, not left to end publishing.</summary>
+    [Fact]
+    public async Task RecordPublishingRetriesAfterAnyFailure()
+    {
+        _store.EnableRecords("jay");
+        var attempts = 0;
+        var log = new List<string>();
+        await using (GateRecordPublisher.Start(_store, _store.LoadConfig(), (_, _) =>
+        {
+            Interlocked.Increment(ref attempts);
+            throw new NotSupportedException("unexpected");
+        }, line => { lock (log) log.Add(line); }, TimeSpan.FromMilliseconds(10), TimeSpan.FromMilliseconds(10)))
+        {
+            await Until(() => Task.FromResult(Volatile.Read(ref attempts) >= 3));
+        }
+        lock (log) Assert.True(log.Count(l => l.Contains("unexpected", StringComparison.Ordinal)) >= 3);
+    }
+
+    /// <summary>A state file that can't be read for a while pauses publishing; it goes on once the file reads again.</summary>
+    [Fact]
+    public async Task RecordPublishingGoesOnAfterTheStateFileFailsToRead()
+    {
+        _store.EnableRecords("jay");
+        var statePath = Path.Combine(_root, "gate", GateStore.StateFile);
+        var good = File.ReadAllBytes(statePath);
+        File.WriteAllText(statePath, "{ not json");
+        var joins = 0;
+        var log = new List<string>();
+        var published = L.F("core.gate.record.published", GateRecordPublisher.Profile("jay").Name);
+        await using (GateRecordPublisher.Start(_store, _store.LoadConfig(), (_, _) =>
+        {
+            Interlocked.Increment(ref joins);
+            return Task.FromResult<GateRecordPublisher.IJoined>(new FakeJoined(Directories()));
+        }, line => { lock (log) log.Add(line); }, TimeSpan.FromMilliseconds(20), TimeSpan.FromHours(1)))
+        {
+            await Until(() => { lock (log) return Task.FromResult(log.Count > 0); });
+            await Task.Delay(200);
+            Assert.Equal(0, Volatile.Read(ref joins));
+            lock (log) Assert.Single(log); // said once, not every round
+            File.WriteAllBytes(statePath, good);
+            await Until(() => { lock (log) return Task.FromResult(log.Contains(published)); });
+        }
+    }
+
+    /// <summary>The wait after a failure is for that network: turning records off and on again tries at once.</summary>
+    [Fact]
+    public async Task TurningRecordsOffAndOnSkipsTheWaitAfterAFailure()
+    {
+        _store.EnableRecords("jay");
+        var fail = 1;
+        var log = new List<string>();
+        var published = L.F("core.gate.record.published", GateRecordPublisher.Profile("jay").Name);
+        await using (GateRecordPublisher.Start(_store, _store.LoadConfig(), (_, _) =>
+        {
+            if (Volatile.Read(ref fail) == 1) throw new IOException("network down");
+            return Task.FromResult<GateRecordPublisher.IJoined>(new FakeJoined(Directories()));
+        }, line => { lock (log) log.Add(line); }, TimeSpan.FromMilliseconds(20), TimeSpan.FromHours(1)))
+        {
+            await Until(() => { lock (log) return Task.FromResult(log.Any(l => l.Contains("network down", StringComparison.Ordinal))); });
+            Volatile.Write(ref fail, 0);
+            _store.DisableRecords();
+            await Task.Delay(200);
+            _store.EnableRecords("jay");
+            await Until(() => { lock (log) return Task.FromResult(log.Contains(published)); });
+        }
+    }
+
+    /// <summary>Records turned off and on again between two rounds still skip the wait after a failure.</summary>
+    [Fact]
+    public async Task TurningRecordsOffAndOnBetweenTwoRoundsSkipsTheWait()
+    {
+        _store.EnableRecords("jay");
+        var fail = 1;
+        var log = new List<string>();
+        var published = L.F("core.gate.record.published", GateRecordPublisher.Profile("jay").Name);
+        await using (GateRecordPublisher.Start(_store, _store.LoadConfig(), (_, _) =>
+        {
+            if (Volatile.Read(ref fail) == 1) throw new IOException("network down");
+            return Task.FromResult<GateRecordPublisher.IJoined>(new FakeJoined(Directories()));
+        }, line => { lock (log) log.Add(line); }, TimeSpan.FromSeconds(1), TimeSpan.FromHours(1)))
+        {
+            await Until(() => { lock (log) return Task.FromResult(log.Any(l => l.Contains("network down", StringComparison.Ordinal))); });
+            Volatile.Write(ref fail, 0);
+            // Both within one poll interval: the next round sees the same network as before.
+            _store.DisableRecords();
+            _store.EnableRecords("jay");
+            await Until(() => { lock (log) return Task.FromResult(log.Contains(published)); });
+        }
+    }
+
+    /// <summary>A join still waiting for a slow network is given up when the setting changes, and the new one is joined.</summary>
+    [Fact]
+    public async Task ASettingChangeEndsAJoinStillWaiting()
+    {
+        _store.EnableRecords("jay");
+        var calls = 0;
+        var firstCancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var log = new List<string>();
+        var published = L.F("core.gate.record.published", GateRecordPublisher.Profile("jay").Name);
+        await using (GateRecordPublisher.Start(_store, _store.LoadConfig(), async (_, ct) =>
+        {
+            if (Interlocked.Increment(ref calls) == 1)
+            {
+                try { await Task.Delay(Timeout.Infinite, ct); }
+                finally { firstCancelled.TrySetResult(); }
+            }
+            return new FakeJoined(Directories());
+        }, line => { lock (log) log.Add(line); }, TimeSpan.FromMilliseconds(50), TimeSpan.FromHours(1)))
+        {
+            await Until(() => Task.FromResult(Volatile.Read(ref calls) == 1));
+            _store.DisableRecords();
+            _store.EnableRecords("jay");
+            await firstCancelled.Task.WaitAsync(TimeSpan.FromSeconds(15));
+            await Until(() => { lock (log) return Task.FromResult(log.Contains(published)); });
+            Assert.Equal(2, Volatile.Read(ref calls));
+            // Giving up on a join is not a failure.
+            lock (log) Assert.DoesNotContain(log, l => l.StartsWith(L.F("core.gate.record.failed", "").TrimEnd(), StringComparison.Ordinal));
+        }
+    }
+
+    /// <summary>A running gate follows records on/off and republishes when its entries change, without a restart.</summary>
+    [Fact]
+    public async Task RunningPublisherFollowsTheRecordsSetting()
+    {
+        var joins = new List<FakeJoined>();
+        var log = new List<string>();
+        await using (var publisher = GateRecordPublisher.Start(_store, _store.LoadConfig(), (_, _) =>
+        {
+            var j = new FakeJoined(Directories());
+            lock (joins) joins.Add(j);
+            return Task.FromResult<GateRecordPublisher.IJoined>(j);
+        }, line => { lock (log) log.Add(line); }, TimeSpan.FromMilliseconds(50), TimeSpan.FromMilliseconds(50)))
+        {
+            await Task.Delay(300);
+            lock (joins) Assert.Empty(joins);
+
+            // Turned on while running: published without a restart.
+            _store.EnableRecords("jay");
+            var invite = GateInvite.TryParse(Invite().Encode(), out _)!;
+            await Until(async () => await TryResolve(invite) is not null);
+            Assert.Null((await TryResolve(invite))!.Rotation);
+
+            // Entries changed: put again.
+            _store.EnableRotation(GateRotation.Default, TimeSpan.FromHours(1));
+            await Until(async () => (await TryResolve(invite))?.Rotation is not null);
+
+            // Turned off: the network is left and nothing more is put.
+            _store.DisableRecords();
+            await Until(() => Task.FromResult(joins.All(j => j.Disposed)));
+            int published;
+            lock (log) published = log.Count;
+            _store.DisableRotation();
+            await Task.Delay(300);
+            lock (log) Assert.Equal(published, log.Count);
+            lock (joins) Assert.Single(joins);
+        }
+    }
+
     [Fact]
     public void RecordsTurnOffAndBackOnWithTheSameLocator()
     {
