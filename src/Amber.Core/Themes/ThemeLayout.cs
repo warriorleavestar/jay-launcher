@@ -60,13 +60,21 @@ public static partial class ThemeLayout
         // "Me": game accounts, the Jay account, my friend code, my devices, appearance. accounts.json lays out this page.
         ["me"] = Page("me", ["accounts", "add", "jay", "code", "devices", "appearance", "status"], "title"),
         ["people"] = Page("people", ["list", "detail", "status"], "title"),
-        ["instances"] = Page("instances", ["header", "picker", "details", "status"]),
+        ["instances"] = Page("instances", ["header", "lastrun", "details", "status"]),
         ["downloads"] = Page("downloads", ["search", "filters", "body", "status"], "title"),
         ["content"] = Page("content", ["header", "filters", "body", "status"]),
         ["multiplayer"] = Page("multiplayer", ["tabs", "room", "body", "status"], "title"),
         ["tools"] = Page("tools", ["body", "status"], "title"),
         ["log"] = Page("log", ["header", "jump", "filters", "list"]),
     };
+
+    /// <summary>
+    /// Whether a control a page tags with <paramref name="name"/> is a region a theme layout of <paramref name="pageId"/>
+    /// can place. Other tagged controls (for example mods.inspector inside instances.details) are not taken out of their
+    /// parent, so they move with the region that contains them instead of disappearing.
+    /// </summary>
+    public static bool IsPlaceableRegion(string pageId, string name) =>
+        Regions.TryGetValue(pageId, out var regions) && regions.All.Contains(RegionAliases.GetValueOrDefault(name, name));
 
     private static (string[] All, string[] Required) Page(string id, string[] required, params string[] optional)
     {

@@ -24,7 +24,16 @@ public abstract class RemoteEndpoint : IAsyncDisposable
     private readonly SemaphoreSlim _writeLock = new(1, 1);
     private readonly CancellationTokenSource _cts = new();
     private int _ended;
+    private int _stopping;
+    private readonly TaskCompletionSource _stopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private int _writesWaiting;
+    // Cancelled when stop begins: cuts off an ordinary frame that is still being written.
+    private readonly CancellationTokenSource _stopSends = new();
+    // An ordinary frame was cut off part-way, so the stream may end mid-frame and Stop cannot follow it.
+    private int _brokenFrame;
     private int _closed;
+    private readonly Lock _registrationsGate = new();
+    private readonly List<CancellationTokenRegistration> _registrations = [];
     private long _lastReceived = Stopwatch.GetTimestamp();
     private Task? _readLoop;
 
@@ -58,33 +67,88 @@ public abstract class RemoteEndpoint : IAsyncDisposable
 
     public bool HasEnded => Volatile.Read(ref _ended) != 0;
 
+    /// <summary>
+    /// Stop was requested or the session already ended. Irreversible: from then on nothing but the Stop frame is written
+    /// (no screen data, cursor, input, acks or heartbeats), even while Stop itself is still waiting to go out.
+    /// </summary>
+    protected bool IsStopping => Volatile.Read(ref _stopping) != 0 || HasEnded;
+
+    /// <summary>Test hook: how many sends are waiting for the write lock right now.</summary>
+    internal int WritesWaitingForLock => Volatile.Read(ref _writesWaiting);
+
+    /// <summary>Test hook: the write lock itself, so a test can hold it the way a slow write would.</summary>
+    internal SemaphoreSlim WriteLockForTest => _writeLock;
+
     /// <summary>结束了（只触发一次，可能在任何线程上）。</summary>
     public event Action<RemoteEnd>? Ended;
 
     /// <summary>这次会话结束时一起结束（比如成员钥匙作废）。</summary>
     public void EndWith(CancellationToken token)
     {
-        if (token.IsCancellationRequested) Abort(RemoteEnd.Disconnected);
-        else token.Register(() => Abort(RemoteEnd.Disconnected));
+        if (token.IsCancellationRequested)
+        {
+            Abort(RemoteEnd.Disconnected);
+            return;
+        }
+        var registration = token.Register(() => Abort(RemoteEnd.Disconnected));
+        // Keep the registration so Close can drop it; otherwise the token source keeps this session alive.
+        lock (_registrationsGate)
+        {
+            if (Volatile.Read(ref _closed) == 0)
+            {
+                _registrations.Add(registration);
+                return;
+            }
+        }
+        registration.Unregister();
     }
 
-    protected async Task<bool> SendAsync(byte[] frame, CancellationToken ct = default)
+    protected Task<bool> SendAsync(byte[] frame, CancellationToken ct = default) => WriteFrameAsync(frame, teardown: false, ct);
+
+    /// <summary>
+    /// Writes one frame under the write lock. Ordinary frames are dropped once stopping has begun, checked both before
+    /// and after waiting for the lock (a frame may have queued behind a slow write before Stop was requested), and one
+    /// still being written when stop begins is cut off. Only the Stop frame (teardown) is written then, and only if no
+    /// frame was cut off part-way. Returns false when the frame was not written, whether dropped on purpose or because
+    /// the connection failed (that ends the session as disconnected here), so callers never treat false as a protocol error.
+    /// </summary>
+    private async Task<bool> WriteFrameAsync(byte[] frame, bool teardown, CancellationToken ct)
     {
-        if (HasEnded) return false;
+        if (teardown ? HasEnded : IsStopping) return false;
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, _cts.Token);
         try
         {
-            await _writeLock.WaitAsync(linked.Token);
+            Interlocked.Increment(ref _writesWaiting);
+            try { await _writeLock.WaitAsync(linked.Token); }
+            finally { Interlocked.Decrement(ref _writesWaiting); }
+            var started = false;
+            var done = false;
             try
             {
-                await Stream.WriteAsync(frame, linked.Token);
-                await Stream.FlushAsync(linked.Token);
+                // Stop after a frame that was cut off would be read as part of that frame: close without it instead.
+                if (teardown && Volatile.Read(ref _brokenFrame) != 0) return false;
+                // Linked before the check below, so a stop that begins after the check still cancels this write.
+                using var writing = teardown ? null : CancellationTokenSource.CreateLinkedTokenSource(linked.Token, _stopSends.Token);
+                if (!teardown && IsStopping) return false;
+                var token = writing?.Token ?? linked.Token;
+                started = true;
+                await Stream.WriteAsync(frame, token);
+                await Stream.FlushAsync(token);
+                done = true;
             }
             finally
             {
+                // Recorded before the lock is released, so a Stop waiting for it sees it.
+                if (started && !done) Volatile.Write(ref _brokenFrame, 1);
                 _writeLock.Release();
             }
             return true;
+        }
+        catch (OperationCanceledException) when (!_cts.IsCancellationRequested
+            && (teardown ? ct.IsCancellationRequested : _stopSends.IsCancellationRequested && !ct.IsCancellationRequested))
+        {
+            // Stop could not go out in time (the caller closes without it), or stopping cut off this ordinary frame.
+            return false;
         }
         catch (Exception e) when (IsConnectionError(e))
         {
@@ -103,15 +167,34 @@ public abstract class RemoteEndpoint : IAsyncDisposable
     public async Task StopAsync(RemoteStopReason reason = RemoteStopReason.Normal)
     {
         if (HasEnded) return;
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(1));
-        var sent = await SendAsync(RemoteWire.Stop(reason), timeout.Token);
-        if (Interlocked.Exchange(ref _ended, 1) != 0) return;
-        OnEnding();
-        Ended?.Invoke(RemoteEnd.Local);
-        if (sent && _readLoop is { IsCompleted: false } reader) _ = LingerThenCloseAsync(reader);
-        else Close();
+        // Enter the stopping state before anything can wait: sending Stop below may queue behind a large frame batch,
+        // and nothing captured or queued from now on may follow it.
+        if (Interlocked.Exchange(ref _stopping, 1) != 0)
+        {
+            await _stopped.Task;
+            return;
+        }
+        try
+        {
+            // Stop acting on the peer's input and stop capturing right away.
+            OnStopRequested();
+            // Cut off an ordinary frame that is still being written (a large batch goes out record by record).
+            _stopSends.Cancel();
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+            var sent = await WriteFrameAsync(RemoteWire.Stop(reason), teardown: true, timeout.Token);
+            if (Interlocked.Exchange(ref _ended, 1) != 0) return;
+            OnEnding();
+            Ended?.Invoke(RemoteEnd.Local);
+            if (sent && _readLoop is { IsCompleted: false } reader) _ = LingerThenCloseAsync(reader);
+            else Close();
+        }
+        finally
+        {
+            _stopped.TrySetResult();
+        }
     }
 
+    /// <summary>Protocol teardown only: wait for the peer to close after reading Stop. Nothing else is written.</summary>
     private async Task LingerThenCloseAsync(Task reader)
     {
         try { await reader.WaitAsync(StopLinger); }
@@ -137,6 +220,14 @@ public abstract class RemoteEndpoint : IAsyncDisposable
     {
         if (Interlocked.Exchange(ref _closed, 1) != 0) return;
         try { _cts.Cancel(); } catch (ObjectDisposedException) { }
+        CancellationTokenRegistration[] registrations;
+        lock (_registrationsGate)
+        {
+            registrations = [.. _registrations];
+            _registrations.Clear();
+        }
+        // Unregister does not wait for a callback that is running (Close may be called from one).
+        foreach (var r in registrations) r.Unregister();
         if (_raw is SecureStream secure) secure.Abort();
         else _raw.Dispose();
     }
@@ -173,7 +264,7 @@ public abstract class RemoteEndpoint : IAsyncDisposable
     {
         try
         {
-            while (!HasEnded)
+            while (!IsStopping)
             {
                 await SendAsync(RemoteWire.Ping(Stopwatch.GetTimestamp()));
                 await Task.Delay(TimeSpan.FromSeconds(1), Lifetime);
@@ -216,6 +307,9 @@ public abstract class RemoteEndpoint : IAsyncDisposable
 
     /// <summary>结束前的收尾（被控方松开按住的键）。</summary>
     protected virtual void OnEnding() { }
+
+    /// <summary>Called once when StopAsync starts, before anything waits and before the Stop frame is sent.</summary>
+    protected virtual void OnStopRequested() { }
 
     /// <summary>读循环：逐帧交给 Handle，返回 false 表示协议错误。</summary>
     protected async Task ReadLoopAsync()
@@ -288,6 +382,7 @@ public sealed class RemoteSharer : RemoteEndpoint
     private long _injected;
     private long _dropped;
     private long _tilesSent;
+    private long _capturesDiscarded;
     private (int X, int Y) _lastMouse;
 
     public RemoteSharer(Stream stream, IScreenSource screen, IInputSink? input, ITileCodec codec, bool allowControl, string peerName, string peerFingerprint)
@@ -303,12 +398,15 @@ public sealed class RemoteSharer : RemoteEndpoint
     public bool ControlAllowed => _controlAllowed;
 
     /// <summary>能不能（重新）允许控制：同意时选了“只看”就没有注入，不能改成允许。</summary>
-    public bool CanGrantControl => _input is not null && !HasEnded;
+    public bool CanGrantControl => _input is not null && !IsStopping;
 
     /// <summary>注入了多少个输入包、丢弃了多少个（测试和诊断用）。</summary>
     public long InputsInjected => Interlocked.Read(ref _injected);
     public long InputsDropped => Interlocked.Read(ref _dropped);
     public long TilesSent => Interlocked.Read(ref _tilesSent);
+
+    /// <summary>Test hook: captures thrown away because stopping began while they were taken.</summary>
+    internal long CapturesDiscarded => Interlocked.Read(ref _capturesDiscarded);
 
     /// <summary>最近一次测到的往返时间。</summary>
     public TimeSpan RoundTrip => TimeSpan.FromTicks(Interlocked.Read(ref _rttTicks));
@@ -376,12 +474,21 @@ public sealed class RemoteSharer : RemoteEndpoint
     /// <summary>允许 / 收回控制（被控方自己点）。收回时松开所有按住的键。只看的会话不能改成允许（没有输入通道）。</summary>
     public async Task SetControlAsync(bool allow)
     {
-        if (allow && _input is null) return;
+        if (allow && (_input is null || IsStopping)) return;
         if (_controlAllowed == allow) return;
         _controlAllowed = allow;
         if (!allow) ReleaseAll();
         await SendAsync(allow ? RemoteWire.Encode(RemoteFrameType.GrantControl, []) : RemoteWire.Encode(RemoteFrameType.RevokeControl, []));
         ControlChanged?.Invoke(allow);
+    }
+
+    protected override void OnStopRequested()
+    {
+        // ReleaseAll takes the input lock, so no injection is still running once it returns.
+        _controlAllowed = false;
+        ReleaseAll();
+        // Wake the capture loop if it waits for acks; it sees IsStopping and quits.
+        try { _ackSignal.Release(); } catch (SemaphoreFullException) { }
     }
 
     protected override void OnEnding()
@@ -424,7 +531,7 @@ public sealed class RemoteSharer : RemoteEndpoint
         (int X, int Y)? lastCursor = null;
         var first = true;
         var clock = Stopwatch.StartNew();
-        while (!HasEnded)
+        while (!IsStopping)
         {
             var (interval, quality) = Pace();
             if (!first)
@@ -432,16 +539,25 @@ public sealed class RemoteSharer : RemoteEndpoint
                 var wait = interval - clock.Elapsed;
                 if (wait > TimeSpan.Zero) await Task.Delay(wait, Lifetime);
                 // 等对方确认，在途的批数不超过上限。
-                while (!HasEnded && Interlocked.Read(ref _sent) - Interlocked.Read(ref _acked) >= MaxInFlight)
+                while (!IsStopping && Interlocked.Read(ref _sent) - Interlocked.Read(ref _acked) >= MaxInFlight)
                     await _ackSignal.WaitAsync(TimeSpan.FromSeconds(1), Lifetime);
-                if (HasEnded) return;
+                if (IsStopping) return;
                 clock.Restart();
-                if (!await Task.Run(() => _screen.TryCapture(raw), Lifetime))
+                var captured = await Task.Run(() => _screen.TryCapture(raw), Lifetime);
+                // Stopping began while capturing: this picture is never sent.
+                if (IsStopping)
+                {
+                    Interlocked.Increment(ref _capturesDiscarded);
+                    return;
+                }
+                if (!captured)
                 {
                     await Task.Delay(500, Lifetime);
                     continue;
                 }
                 var scale = RemoteGeometry.ScaleFor(raw.Width, raw.Height);
+                // The desktop grew past the threshold: downscale into a separate buffer, never into raw itself.
+                if (scale != 1 && ReferenceEquals(frame, raw)) frame = new ScreenFrame();
                 if (scale == 1 && !ReferenceEquals(frame, raw)) frame.CopyFrom(raw);
                 else if (scale != 1) RemoteGeometry.Downscale(raw, frame, scale);
                 _geometry = (_screen.Bounds, frame.Width, frame.Height);
@@ -471,6 +587,7 @@ public sealed class RemoteSharer : RemoteEndpoint
         var size = 0;
         foreach (var (x, y, w, h) in changed)
         {
+            if (IsStopping) return;
             var data = _codec.Encode(TileCopy.Extract(frame, x, y, w, h), w, h, w * 4, quality);
             if (data.Length > RemoteWire.MaxTileData) data = new RawTileCodec().Encode(TileCopy.Extract(frame, x, y, w, h), w, h, w * 4, 0);
             batch.Add(new RemoteTile(x, y, w, h, data));
@@ -488,8 +605,9 @@ public sealed class RemoteSharer : RemoteEndpoint
     private async Task<bool> FlushBatchAsync(ScreenFrame frame, List<RemoteTile> tiles)
     {
         var seq = (uint)Interlocked.Increment(ref _sent);
+        if (!await SendAsync(RemoteWire.Tiles(new RemoteTileBatch(seq, frame.Width, frame.Height, tiles)))) return false;
         Interlocked.Add(ref _tilesSent, tiles.Count);
-        return await SendAsync(RemoteWire.Tiles(new RemoteTileBatch(seq, frame.Width, frame.Height, tiles)));
+        return true;
     }
 
     protected override Task<bool> HandleAsync(RemoteFrame frame)
@@ -525,7 +643,7 @@ public sealed class RemoteSharer : RemoteEndpoint
     {
         lock (_inputGate)
         {
-            if (!_controlAllowed || HasEnded || _input is null)
+            if (!_controlAllowed || IsStopping || _input is null)
             {
                 Interlocked.Increment(ref _dropped);
                 return;
@@ -545,7 +663,7 @@ public sealed class RemoteSharer : RemoteEndpoint
     {
         lock (_inputGate)
         {
-            if (!_controlAllowed || HasEnded || _input is null)
+            if (!_controlAllowed || IsStopping || _input is null)
             {
                 Interlocked.Increment(ref _dropped);
                 return;
@@ -661,13 +779,17 @@ public sealed class RemoteViewer : RemoteEndpoint
                 }
                 BatchesReceived++;
                 FrameChanged?.Invoke();
-                return await SendAsync(RemoteWire.FrameAck(batch.Sequence));
+                // A reply that is not sent is not a protocol error: it was dropped because this side is stopping,
+                // or the connection failed and the session already ended as disconnected.
+                await SendAsync(RemoteWire.FrameAck(batch.Sequence));
+                return true;
             case RemoteFrameType.Cursor:
                 Cursor = RemoteWire.ParseCursor(frame.Payload);
                 CursorChanged?.Invoke();
                 return true;
             case RemoteFrameType.Ping:
-                return await SendAsync(RemoteWire.Pong(frame.Payload));
+                await SendAsync(RemoteWire.Pong(frame.Payload));
+                return true;
             case RemoteFrameType.Pong:
                 return true;
             case RemoteFrameType.GrantControl:

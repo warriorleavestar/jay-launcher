@@ -304,6 +304,8 @@ internal static class ChatWire
     internal static List<RosterEntry> ParseRoster(JsonObject json)
     {
         var list = new List<RosterEntry>();
+        // The roster comes from the host: keep one entry per member, so a repeated entry can't break lookups by fingerprint.
+        var seen = new HashSet<string>(StringComparer.Ordinal);
         foreach (var node in (json["m"] as JsonArray ?? []).Take(ChatHub.MaxConnections + 1))
         {
             try
@@ -314,6 +316,8 @@ internal static class ChatWire
                 var key = Convert.FromHexString(pk);
                 if (MemberIdentity.FingerprintOf(key) != fp) continue;
                 var name = node?["name"]?.GetValue<string>();
+                // Claim the fingerprint only once the whole entry has been read, so a broken entry can't hide a good one after it.
+                if (!seen.Add(fp)) continue;
                 list.Add(new RosterEntry(fp, key, RoomChat.Clean(name, RoomChat.MaxNameLength)));
             }
             catch (Exception e) when (e is InvalidOperationException or FormatException) { }
@@ -413,6 +417,17 @@ public sealed class RateLimiter(int count, TimeSpan window, Func<DateTimeOffset>
 {
     private readonly Queue<DateTimeOffset> _times = new();
     private readonly Func<DateTimeOffset> _clock = clock ?? (() => DateTimeOffset.UtcNow);
+
+    /// <summary>Would <see cref="TryAcquire"/> succeed now? Takes nothing.</summary>
+    public bool CanAcquire()
+    {
+        var now = _clock();
+        lock (_times)
+        {
+            while (_times.Count > 0 && now - _times.Peek() >= window) _times.Dequeue();
+            return _times.Count < count;
+        }
+    }
 
     public bool TryAcquire()
     {
@@ -531,6 +546,11 @@ public sealed class ChatHub : IAsyncDisposable
         public volatile bool PingCapable;
         /// <summary>加入被宣布过（离开时要宣布）。</summary>
         public bool JoinAnnounced;
+        /// <summary>
+        /// A newer connection of the same member took over (under <c>_identityGate</c>): nothing more is sent to this one,
+        /// so each message reaches the member over exactly one side of a chat move.
+        /// </summary>
+        public volatile bool Superseded;
         /// <summary>
         /// 给这条连接发了踢人通知后等它确认：收到 "kicked-ack" 完成为 true，连接先断了完成为 false。
         /// 只属于这条连接，别的成员发 "kicked-ack" 碰不到它。
@@ -805,6 +825,10 @@ public sealed class ChatHub : IAsyncDisposable
             }
             writer = WriteLoopAsync(member);
             var stream = member.Stream;
+            // One deadline for everything before Join. Control frames are read before the join check, so a deadline per
+            // frame would let a connection that never joins stay for as long as it keeps sending them.
+            using var joinDeadline = CancellationTokenSource.CreateLinkedTokenSource(member.Cts.Token);
+            joinDeadline.CancelAfter(FirstFrameTimeout);
             while (!member.Cts.IsCancellationRequested)
             {
                 byte[]? frame;
@@ -815,9 +839,7 @@ public sealed class ChatHub : IAsyncDisposable
                 }
                 else
                 {
-                    using var deadline = CancellationTokenSource.CreateLinkedTokenSource(member.Cts.Token);
-                    deadline.CancelAfter(FirstFrameTimeout);
-                    frame = await RoomChat.ReadFrameAsync(stream, deadline.Token);
+                    frame = await RoomChat.ReadFrameAsync(stream, joinDeadline.Token);
                 }
                 if (frame is null) break;
                 if (_table is not null && ChatWire.ControlOf(frame, out var control) is { } ctl)
@@ -859,6 +881,7 @@ public sealed class ChatHub : IAsyncDisposable
                         foreach (var old in holders)
                         {
                             old.JoinAnnounced = false;
+                            old.Superseded = true;
                             old.Kick();
                         }
                         member.SenderId = message.SenderId;
@@ -922,9 +945,11 @@ public sealed class ChatHub : IAsyncDisposable
     private void Forward(MemberEntry from, string to, string blob)
     {
         byte[]? frame = null;
+        // Under the takeover lock, like Broadcast: a member's old and new connection never both get the same frame.
+        lock (_identityGate)
         foreach (var target in _members.Values)
         {
-            if (!target.Authenticated || target.Entry is not { Revoked: false } entry || entry.Fingerprint != to || ReferenceEquals(entry, from)) continue;
+            if (!target.Authenticated || target.Superseded || target.Entry is not { Revoked: false } entry || entry.Fingerprint != to || ReferenceEquals(entry, from)) continue;
             frame ??= ChatWire.PrivateFrom(from, blob);
             target.Outbox.Writer.TryWrite(frame);
         }
@@ -942,9 +967,12 @@ public sealed class ChatHub : IAsyncDisposable
     private void Broadcast(byte[] frame)
     {
         var now = Clock().UtcTicks;
+        // A takeover (a member's new connection replacing the old one) happens under _identityGate: a broadcast either
+        // comes before it and reaches the old connection, or after it and reaches the new one, never both.
+        lock (_identityGate)
         foreach (var member in _members.Values)
         {
-            if (!member.Authenticated) continue;
+            if (!member.Authenticated || member.Superseded) continue;
             if (member.Outbox.Writer.TryWrite(frame))
             {
                 Interlocked.Exchange(ref member.FullSince, 0);

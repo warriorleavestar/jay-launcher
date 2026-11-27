@@ -155,11 +155,29 @@ public class MultiplayerTests
     }
 }
 
+public class EasyTierEnvironmentTests
+{
+    [Fact]
+    public void LaunchEnvironmentDropsInheritedEasyTierVariables()
+    {
+        var info = new System.Diagnostics.ProcessStartInfo("easytier-core");
+        info.Environment["PATH"] = "/usr/bin";
+        info.Environment["ET_DISABLE_ENCRYPTION"] = "true";
+        info.Environment["ET_NETWORK_SECRET"] = "inherited";
+
+        EasyTierSession.ApplyEnvironment(info, new Dictionary<string, string> { [EasyTierArgs.SecretVariable] = "room" });
+
+        Assert.Equal("/usr/bin", info.Environment["PATH"]);
+        Assert.False(info.Environment.ContainsKey("ET_DISABLE_ENCRYPTION"));
+        Assert.Equal("room", info.Environment[EasyTierArgs.SecretVariable]);
+    }
+}
+
 public class RelayNodeTests
 {
     [Theory]
     [InlineData("tcp://public.easytier.top:11010", true)]
-    [InlineData("udp://1.2.3.4:11010", true)]
+    [InlineData("udp://192.0.2.4:11010", true)]
     [InlineData("wss://node.example.com:443", true)]
     [InlineData("tcp://public.easytier.top", false)]
     [InlineData("http://example.com:80", false)]
@@ -274,7 +292,7 @@ public class ExitNodeArgsTests
 
     [Theory]
     [InlineData("10.233.144.1", false)]
-    [InlineData("8.8.8.8", true)]
+    [InlineData("198.51.100.88", true)]
     [InlineData("not-an-ip", true)]
     public void UsingExitNeedsTunAndRoomMember(string exit, bool tun)
     {

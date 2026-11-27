@@ -18,7 +18,7 @@ namespace Amber.Core.Multiplayer.Public;
 /// <para>
 /// The first entry is the network owner's key: it identifies the network (a string with the same id and another owner
 /// key is a conflict). Further entries are co-signatures. A string counts as reviewed when the Jay trustees' quorum
-/// (<see cref="JayTrust"/>, for example 2 of 3) is among the signers. Trustees sign offline, one after another, with
+/// (<see cref="JayTrust"/>, today 2 of 2) is among the signers. Trustees sign offline, one after another, with
 /// <c>jay-server network cosign</c>; no single trustee can review a network alone. Unreviewed strings need the user's
 /// confirmation.
 /// </para>
@@ -185,7 +185,7 @@ public sealed record NetworkConfigRef(string Url, string Sha256);
 /// Older Jay versions ignore the field.
 /// </param>
 /// <param name="DirectoryRoots">
-/// Ed25519 root keys that certify directory keys ("dirRoots", optional, at most <see cref="NetworkString.MaxDirectoryRoots"/>),
+/// Ids of the hybrid root keys (<see cref="TrustSigner.Id"/>) that certify directory keys ("dirRoots", optional, at most <see cref="NetworkString.MaxDirectoryRoots"/>),
 /// see <see cref="DirectoryCertificate"/>.
 /// </param>
 /// <param name="DirectoryRootsNeed">How many of <paramref name="DirectoryRoots"/> must sign a directory certificate ("dirRootsNeed", default 1).</param>

@@ -154,10 +154,10 @@ public sealed class ReleaseSignatureTests : IDisposable
         // The full key ids printed when the keys were made (their first 8 bytes are the fingerprints written next to them
         // in JayTrust): a swapped or mistyped key fails here.
         string[] Ids(IReadOnlyList<string> keys) => [.. keys.Select(k => Convert.ToHexString(TrustSigner.IdOfPublicKey(Convert.FromBase64String(k))))];
-        Assert.Equal(["9D47BBDA24BF2956AF370F64F4DF2B6FE9A1F89DB71E79A0747D9E616D94E6ED", "75CD82DBE5DF8E4D4856BCE20C662B588CC8AE8441208A79C5FB1CE8BBD8E2D9"], Ids(JayTrust.Keys));
-        Assert.Equal(["08039FD2126DE71913B6BC5D9B4A622986A9282B935BE6AEE03590D8B667C034", "73FA5202C401F163C04DDC240089EEE763639A92B34F785A02C84561283FD5CE"], Ids(JayTrust.ReleaseKeys));
-        Assert.Equal(["9D47 BBDA 24BF 2956", "75CD 82DB E5DF 8E4D"], JayTrust.Keys.Select(k => TrustCommands.Fingerprint(TrustSigner.IdOfPublicKey(Convert.FromBase64String(k)))));
-        Assert.Equal(["0803 9FD2 126D E719", "73FA 5202 C401 F163"], JayTrust.ReleaseKeys.Select(k => TrustCommands.Fingerprint(TrustSigner.IdOfPublicKey(Convert.FromBase64String(k)))));
+        Assert.Equal(["9D47BBDA24BF2956AF370F64F4DF2B6FE9A1F89DB71E79A0747D9E616D94E6ED", "75CD82DBE5DF8E4D4856BCE20C662B588CC8AE8441208A79C5FB1CE8BBD8E2D9", "90BD4FF62EA838682081D4A3CDB041ADB69E6AFFE80DF5B0C1AAD8814D941AC0"], Ids(JayTrust.Keys));
+        Assert.Equal(["08039FD2126DE71913B6BC5D9B4A622986A9282B935BE6AEE03590D8B667C034", "73FA5202C401F163C04DDC240089EEE763639A92B34F785A02C84561283FD5CE", "510A4C81E0AE2E4EE5DB0F19B689549A8F9686FB97DC5EFA05BB08FC4A1CEB9F"], Ids(JayTrust.ReleaseKeys));
+        Assert.Equal(["9D47 BBDA 24BF 2956", "75CD 82DB E5DF 8E4D", "90BD 4FF6 2EA8 3868"], JayTrust.Keys.Select(k => TrustCommands.Fingerprint(TrustSigner.IdOfPublicKey(Convert.FromBase64String(k)))));
+        Assert.Equal(["0803 9FD2 126D E719", "73FA 5202 C401 F163", "510A 4C81 E0AE 2E4E"], JayTrust.ReleaseKeys.Select(k => TrustCommands.Fingerprint(TrustSigner.IdOfPublicKey(Convert.FromBase64String(k)))));
 
         // Changing what Quorum hands out doesn't change the built-in list.
         var quorum = JayTrust.Quorum;
@@ -489,5 +489,48 @@ public sealed class ReleaseSignatureTests : IDisposable
         Assert.Equal(Next.Hash, TrustChain.Resolve(Own, Next.Hash, File.ReadAllText(chain))!.Hash);
         // Someone not on the old list can't sign the change.
         Assert.Throws<InvalidDataException>(() => Program.ReleaseCommand(Options.Parse(Args(3)), new StringWriter(), (_, _, _) => true));
+    }
+
+    [Fact]
+    public void ServerCommandTrustChangeAlsoCosignsAManifestForTheNewList()
+    {
+        var from = Path.Combine(_dir, "old.txt");
+        var to = Path.Combine(_dir, "new.txt");
+        File.WriteAllLines(from, Own.Keys.Select(Convert.ToBase64String));
+        File.WriteAllLines(to, Next.Keys.Select(Convert.ToBase64String));
+        var chain = Path.Combine(_dir, ReleaseSignature.ChainFileName);
+        var et = Path.Combine(_dir, "et");
+        Directory.CreateDirectory(et);
+        var sums = Path.Combine(et, ReleaseSignature.SumsFileName);
+        File.WriteAllText(sums, new string('b', 64) + "  easytier-x.zip\n");
+        var sigs = Path.Combine(et, ReleaseSignature.SignatureFileName);
+        Assert.Equal(0, Program.ReleaseCommand(Options.Parse(["release", "prepare", "--component", "easytier", "--tag", "jay-v2.6.4-3", "--seq", "3",
+            "--commit", new string('c', 40), "--sums", sums, "--trust", to, "--need", "2"]), new StringWriter()));
+        string[] Args(int i) => ["release", "trust-change", "--key", KeyFile(_dir, i), "--from", from, "--to", to, "--need", "2", "--seq", "1",
+            "--chain", chain, "--cosign-sums", sums];
+        int Sigs() => ReleaseManifest.Parse(File.ReadAllText(sigs))!.Signatures.Count;
+
+        // A typo is asked again (3 times in all) and still signs nothing.
+        var asked = new List<string>();
+        Assert.Equal(3, Program.ReleaseCommand(Options.Parse(Args(0)), new StringWriter(), (_, _, expected) => { asked.Add(expected); return false; }));
+        Assert.Equal(3, asked.Count);
+        Assert.False(File.Exists(chain));
+        Assert.Equal(0, Sigs());
+
+        // Both are confirmed (the change, then the manifest) and both get signed in one run.
+        asked.Clear();
+        Assert.Equal(0, Program.ReleaseCommand(Options.Parse(Args(0)), new StringWriter(), (_, _, expected) => { asked.Add(expected); return true; }));
+        Assert.Equal([TrustCommands.CodeOf(Next.Hash), "jay-v2.6.4-3"], asked);
+        Assert.Equal(1, Sigs());
+
+        // A key that already signed the change still adds its manifest signature, and the run reports that one part was skipped.
+        File.Delete(sigs);
+        Assert.Equal(0, Program.ReleaseCommand(Options.Parse(["release", "prepare", "--component", "easytier", "--tag", "jay-v2.6.4-3", "--seq", "3",
+            "--commit", new string('c', 40), "--sums", sums, "--trust", to, "--need", "2"]), new StringWriter()));
+        Assert.Equal(4, Program.ReleaseCommand(Options.Parse(Args(0)), new StringWriter(), (_, _, _) => true));
+        Assert.Equal(1, Sigs());
+        Assert.Equal(0, Program.ReleaseCommand(Options.Parse(Args(1)), new StringWriter(), (_, _, _) => true));
+        Assert.Equal(2, Sigs());
+        Assert.Equal(Next.Hash, TrustChain.Resolve(Own, Next.Hash, File.ReadAllText(chain))!.Hash);
     }
 }

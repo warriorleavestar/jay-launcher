@@ -93,13 +93,15 @@ public sealed record PublicNetworkProfile(string Id, string Name, string Network
 
     /// <summary>
     /// The directory nodes' pinned X25519 public keys, from the signed connection string. Empty means the network doesn't
-    /// pin its directory (the built-in network, except for the GUI self-check's own local directory while it runs, and older strings): Jay then uses the legacy
-    /// unauthenticated protocol. Non-empty means Jay never sends a request to a directory that can't prove it holds one.
+    /// pin its directory (the built-in network, except for the GUI self-check's own local directory while it runs, and older strings):
+    /// Jay still uses the encrypted <see cref="DirectoryChannel"/> and then accepts a root-certified key (<see cref="DirectoryRoots"/>)
+    /// or, with neither, the first key it sees at each address (<see cref="DirectoryKeyMemory"/>). Non-empty means Jay never
+    /// sends a request to a directory that can't prove it holds one.
     /// </summary>
     public IReadOnlyList<byte[]> DirectoryKeys { get; init; } = [];
 
     /// <summary>
-    /// Ed25519 root keys whose certificates (<see cref="DirectoryCertificate"/>) make a directory key acceptable, from
+    /// Ids of the root keys (hybrid Ed25519 + ML-DSA-65, <see cref="TrustSigner.Id"/>) whose certificates (<see cref="DirectoryCertificate"/>) make a directory key acceptable, from
     /// the connection string's "dirRoots", or the Jay trustees (<see cref="JayTrust"/>) for the built-in network. Lets a
     /// network add or re-key directory nodes without re-issuing its string, while the root private keys stay offline.
     /// </summary>
@@ -114,13 +116,14 @@ public sealed record PublicNetworkProfile(string Id, string Name, string Network
 }
 
 /// <summary>公共网络 EasyTier 的启动参数。</summary>
-/// <param name="Directory">目录服务那台机器：固定地址 10.235.0.N（N = <paramref name="DirectoryIndex"/>），只放行目录端口。</param>
+/// <param name="Directory">目录服务那台机器：固定地址（<see cref="PublicNetworkProfile.DirectoryIpOf"/>(<paramref name="DirectoryIndex"/>)：1 是 10.235.0.1，2–4 是 10.235.255.254 / .253 / .252），只放行目录端口。</param>
 /// <param name="Listeners">目录服务那台机器同时当节点时监听的地址（tcp://0.0.0.0:11010 等）。</param>
 /// <param name="DirectoryIndex">第几个目录节点（1 是主目录，2–4 是备用）。</param>
 /// <param name="ExtraPeers">More peers to try besides the network's nodes (volunteer nodes remembered from last time).</param>
 /// <param name="Volunteer">Run this member as a volunteer node (listen publicly and relay for this network only).</param>
+/// <param name="Relay">A node's limits on relaying other EasyTier networks (rooms) through it. Null: EasyTier's defaults.</param>
 public sealed record PublicNetworkOptions(PublicNetworkProfile Profile, int RpcPort, int SocksPort, bool Directory = false, IReadOnlyList<string>? Listeners = null,
-    int DirectoryIndex = 1, IReadOnlyList<string>? ExtraPeers = null, VolunteerSettings? Volunteer = null)
+    int DirectoryIndex = 1, IReadOnlyList<string>? ExtraPeers = null, VolunteerSettings? Volunteer = null, RelayLimits? Relay = null)
 {
     public override string ToString() => "PublicNetworkOptions";
 }
@@ -135,9 +138,37 @@ public sealed record VolunteerSettings(string Address, int Port = VolunteerNodes
         ?? throw new ArgumentException(Amber.Core.Localization.L.T("core.mp.public.volunteer_bad_address"));
 }
 
+/// <summary>How much a public node relays for other EasyTier networks (the rooms that use it as a relay).</summary>
+/// <param name="KBpsPerNetwork">Most it relays for any one other network, in KB/s (0 = no limit).</param>
+/// <param name="Networks">EasyTier's relay whitelist: space-separated network names, <c>*</c> wildcards allowed. Null: relay every network.</param>
+public sealed record RelayLimits(int KBpsPerNetwork = 0, string? Networks = null);
+
 public static class PublicNetworkArgs
 {
-    public static Dictionary<string, string> Environment(PublicNetworkOptions o) => new() { [EasyTierArgs.SecretVariable] = o.Profile.Secret };
+    /// <summary>
+    /// Jay's EasyTier build (JAY.md, item 9): with this set to "1", a connection handed to a local service comes from
+    /// 127.235.c.d, an address of the calling peer's own picked by its peer id (not its public-network address), and from
+    /// one shared address outside 127.235.0.0/16 for a peer the route table doesn't know yet, instead of 127.0.0.1. Set for the directory node only,
+    /// so the directory can apply its per-source limits. Needs jay-v2.6.4-5 or later; on an older build every caller
+    /// arrives from 127.0.0.1 and the directory gives those callers one shared, capped allowance (RoomDirectoryServer).
+    /// </summary>
+    public const string LoopbackSourceVariable = "JAY_ET_LOOPBACK_SOURCE";
+
+    /// <summary>
+    /// Whether public-network nodes run EasyTier in secure mode. Jay's build gives callers their own address only on
+    /// secure-mode connections, so until this is on every caller shares one source (see <see cref="EasyTierRelease.MapsCallers"/>).
+    /// </summary>
+    public const bool SecureMode = false;
+
+    /// <summary>The node's EasyTier, when it is Jay's own package, tells callers of the directory apart.</summary>
+    public static bool TellsCallersApart => EasyTierRelease.MapsCallers && SecureMode;
+
+    public static Dictionary<string, string> Environment(PublicNetworkOptions o)
+    {
+        var env = new Dictionary<string, string> { [EasyTierArgs.SecretVariable] = o.Profile.Secret };
+        if (o.Directory) env[LoopbackSourceVariable] = "1";
+        return env;
+    }
 
     public static List<string> Build(PublicNetworkOptions o)
     {
@@ -172,6 +203,11 @@ public static class PublicNetworkArgs
             args.AddRange(["--relay-network-whitelist", o.Profile.NetworkName]);
             if (volunteer.LimitKBps > 0) args.AddRange(["--instance-recv-bps-limit", (volunteer.LimitKBps * 1024L).ToString(CultureInfo.InvariantCulture)]);
         }
+        if (o.Volunteer is null && o.Relay is { } relay)
+        {
+            if (!string.IsNullOrWhiteSpace(relay.Networks)) args.AddRange(["--relay-network-whitelist", relay.Networks.Trim()]);
+            if (relay.KBpsPerNetwork > 0) args.AddRange(["--foreign-relay-bps-limit", (relay.KBpsPerNetwork * 1024L).ToString(CultureInfo.InvariantCulture)]);
+        }
         var peers = o.Profile.Nodes.Concat(o.ExtraPeers ?? []).Where(p => !string.IsNullOrWhiteSpace(p)).Select(p => p.Trim())
             .Where(p => o.Volunteer is not { } self || p != self.Url).Distinct().ToList();
         foreach (var peer in peers) args.AddRange(["--peers", peer]);
@@ -194,7 +230,7 @@ public interface IPublicNetwork
     Task<string?> MyIpAsync(CancellationToken ct);
     /// <summary>现在在线的目录节点地址（按编号排）。默认只有主目录。</summary>
     Task<IReadOnlyList<string>> DirectoriesAsync(CancellationToken ct) => Task.FromResult<IReadOnlyList<string>>([PublicNetworkProfile.DirectoryIp]);
-    /// <summary>The network this is, for its pinned directory keys. Null: unknown, use the legacy directory protocol.</summary>
+    /// <summary>The network this is, for its pinned directory keys. Null: unknown network; nothing is pinned, so directory keys are trusted on first use.</summary>
     PublicNetworkProfile? Profile => null;
 }
 
@@ -265,7 +301,7 @@ public sealed class PublicNetworkSession : IPublicNetwork, IDisposable
 
     private (DateTimeOffset At, IReadOnlyList<string> Ips) _directories = (DateTimeOffset.MinValue, []);
 
-    /// <summary>现在在线的目录节点（公共网络里看得到的 10.235.0.1–4，按编号排；查一次缓存 5 秒）。</summary>
+    /// <summary>现在在线的目录节点（公共网络里看得到的 <see cref="PublicNetworkProfile.DirectoryIps"/>，按编号排；查一次缓存 5 秒）。</summary>
     public async Task<IReadOnlyList<string>> DirectoriesAsync(CancellationToken ct)
     {
         var cached = _directories;

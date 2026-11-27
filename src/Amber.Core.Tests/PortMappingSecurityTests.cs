@@ -164,7 +164,7 @@ public class PortMappingSecurityTests
                 var action = request.Headers.TryGetValues("SOAPAction", out var values) ? values.Single() : null;
                 requests.Add((request.Method, request.RequestUri!, action));
                 if (request.Method == HttpMethod.Get) return Ok(Description(control));
-                if (action!.Contains("GetExternalIPAddress")) return Ok("<NewExternalIPAddress>8.8.8.8</NewExternalIPAddress>");
+                if (action!.Contains("GetExternalIPAddress")) return Ok("<NewExternalIPAddress>198.51.100.88</NewExternalIPAddress>");
                 if (redirectCleanup && action.Contains("DeletePortMapping"))
                 {
                     var redirect = new HttpResponseMessage(HttpStatusCode.Redirect);
@@ -176,7 +176,7 @@ public class PortMappingSecurityTests
         });
         Assert.NotNull(result);
         Assert.Equal("UPnP", result.Method);
-        Assert.Equal(new IPEndPoint(IPAddress.Parse("8.8.8.8"), 25565), result.External);
+        Assert.Equal(new IPEndPoint(IPAddress.Parse("198.51.100.88"), 25565), result.External);
         if (redirectCleanup) await Assert.ThrowsAsync<HttpRequestException>(result.Remove!);
         else await result.Remove!();
         Assert.Equal(2, handlers);
@@ -204,6 +204,22 @@ public class PortMappingSecurityTests
     private static string Description(string control) =>
         $"<root xmlns='urn:schemas-upnp-org:device-1-0'><service><serviceType>urn:schemas-upnp-org:service:WANIPConnection:1</serviceType><controlURL>{SecurityElement.Escape(control)}</controlURL></service></root>";
     private static HttpResponseMessage Ok(string text) => new(HttpStatusCode.OK) { Content = new StringContent(text, Encoding.UTF8, "text/xml") };
+
+    /// <summary>A NAT-PMP reply counts only when it answers the request that was sent: version 0, the request's opcode + 128, result 0, full length.</summary>
+    [Theory]
+    [InlineData(new byte[] { 0, 128, 0, 0, 0, 0, 0, 1, 203, 0, 113, 5 }, (byte)0, 12, true)]
+    [InlineData(new byte[] { 0, 129, 0, 0, 0, 0, 0, 1, 0x9c, 0x40, 0x9c, 0x40, 0, 0, 0x1c, 0x20 }, (byte)1, 16, true)]
+    // The gateway refused (result code 2, "not authorized").
+    [InlineData(new byte[] { 0, 129, 0, 2, 0, 0, 0, 1, 0x9c, 0x40, 0, 0, 0, 0, 0, 0 }, (byte)1, 16, false)]
+    // Not an answer to this request: another version, the answer to the other opcode, a request echoed back, too short.
+    [InlineData(new byte[] { 1, 128, 0, 0, 0, 0, 0, 1, 203, 0, 113, 5 }, (byte)0, 12, null)]
+    [InlineData(new byte[] { 0, 128, 0, 0, 0, 0, 0, 1, 203, 0, 113, 5, 0, 0, 0, 0 }, (byte)1, 16, null)]
+    [InlineData(new byte[] { 0, 1, 0, 0, 0x9c, 0x40, 0x9c, 0x40, 0, 0, 0x1c, 0x20, 0, 0, 0, 0 }, (byte)1, 16, null)]
+    [InlineData(new byte[] { 0, 128, 0, 0, 0, 0, 0, 1 }, (byte)0, 12, null)]
+    [InlineData(new byte[] { 0, 128, 0 }, (byte)0, 12, null)]
+    [InlineData(new byte[0], (byte)0, 12, null)]
+    public void NatPmpRepliesMustAnswerTheRequest(byte[] reply, byte opcode, int expected, bool? accepted) =>
+        Assert.Equal(accepted, PortMapping.CheckPmpReply(reply, opcode, expected));
 
     private sealed class RecordingHandler(Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler
     {

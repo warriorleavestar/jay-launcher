@@ -301,11 +301,12 @@ public sealed class NodeHardwareBindingTests : IDisposable
         Write("directory.key", "x");
         Assert.Throws<InvalidOperationException>(() => NodeWiper.Wipe(_dir, "test", false));
         Assert.True(Has("directory.key"));
-        Assert.Throws<InvalidOperationException>(() => NodeWiper.Wipe(Path.GetPathRoot(_dir)!, "test", true));
-        Assert.Throws<InvalidOperationException>(() => NodeWiper.Wipe(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "test", true));
+        // Every refusal throws the same type (an unmarked folder too), so check the message names the right guard.
+        Assert.Contains("drive or filesystem root", Assert.Throws<InvalidOperationException>(() => NodeWiper.Wipe(Path.GetPathRoot(_dir)!, "test", true)).Message);
+        Assert.Contains("system or home folder", Assert.Throws<InvalidOperationException>(() => NodeWiper.Wipe(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "test", true)).Message);
     }
 
-    [Fact]
+    [UnixFact]
     public void WipeRemovesLinksWithoutFollowingThem()
     {
         if (OperatingSystem.IsWindows()) return; // symlinks need privileges there
@@ -354,6 +355,45 @@ public sealed class NodeHardwareBindingTests : IDisposable
     private static string Code6(string requestFile) => JsonNode.Parse(File.ReadAllText(requestFile))!["key"]!.GetValue<string>().TrimEnd('=')[^6..];
 
     private static string CertCode6(string certFile) => Convert.ToBase64String(HardwareCertificate.Parse(File.ReadAllBytes(certFile))!.DirectoryKey).TrimEnd('=')[^6..];
+
+    [Fact]
+    public void CliRefusesAReleaseKeyForIssuingAndCosigning()
+    {
+        var output = new StringWriter();
+        var root = Path.Combine(_root, "root.key");
+        var release = Path.Combine(_root, "release.key");
+        Assert.Equal(0, Program.NetworkCommand(Options.Parse(["network", "root-key", "--out", root, "--no-passphrase"]), output));
+        Assert.Equal(0, Program.NetworkCommand(Options.Parse(["network", "root-key", "--out", release, "--no-passphrase"]), output));
+        var releaseId = TrustCommands.LoadKey(release).Id;
+        Assert.Equal(0, Program.NodeBind(_dir, Options.Parse(["node", "bind"]), output, Machine(), new FakeTpm()));
+        var requestFile = Path.Combine(_dir, HardwareBinding.RequestFile);
+        var certFile = Path.Combine(_root, "hardware.cert");
+        var (oldInput, oldTerminal, oldRelease) = (Program.ConfirmInput, Program.ConfirmIsTerminal, TrustCommands.IsReleaseKey);
+        try
+        {
+            Program.ConfirmIsTerminal = () => true;
+            TrustCommands.IsReleaseKey = id => id.AsSpan().SequenceEqual(releaseId);
+
+            // Issuing with a release key: refused after the confirmation, no certificate written.
+            Program.ConfirmInput = new StringReader(Code6(requestFile) + "\n");
+            Assert.Throws<InvalidOperationException>(() =>
+                Program.NetworkCommand(Options.Parse(["network", "hw-cert", "--root", release, "--request", requestFile, "--out", certFile]), output));
+            Assert.False(File.Exists(certFile));
+
+            // Cosigning with a release key: refused, the certificate is left as it was.
+            Program.ConfirmInput = new StringReader(Code6(requestFile) + "\n");
+            Assert.Equal(0, Program.NetworkCommand(Options.Parse(["network", "hw-cert", "--root", root, "--request", requestFile, "--out", certFile]), output));
+            var issued = File.ReadAllBytes(certFile);
+            Program.ConfirmInput = new StringReader(CertCode6(certFile) + "\n");
+            Assert.Throws<InvalidOperationException>(() =>
+                Program.NetworkCommand(Options.Parse(["network", "hw-cert", "--cosign", certFile, "--root", release]), output));
+            Assert.Equal(issued, File.ReadAllBytes(certFile));
+        }
+        finally
+        {
+            (Program.ConfirmInput, Program.ConfirmIsTerminal, TrustCommands.IsReleaseKey) = (oldInput, oldTerminal, oldRelease);
+        }
+    }
 
     [Fact]
     public void CliShowsEveryFieldAndNeedsTwoTrusteesTypingTheKey()

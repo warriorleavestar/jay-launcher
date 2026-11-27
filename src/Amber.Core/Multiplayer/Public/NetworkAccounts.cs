@@ -86,10 +86,6 @@ public sealed record AccountPolicy(string Network, byte[] SignKey)
 }
 
 /// <summary>
-/// 节点上的账号表（jay-server 用）：账号名 → PBKDF2-SHA256 的盐和哈希。密码本身不存。
-/// 每个账号连续猜错 5 次锁 5 分钟，在线猜密码很慢。
-/// </summary>
-/// <summary>
 /// 账号库。内置的 <see cref="AccountStore"/> 存在节点的一个 JSON 文件里；第三方网络可以换成自己的（数据库、论坛账号、会员系统……）。
 /// 实现要自己防在线猜密码（比如连续错几次就锁一会儿），账号不存在和密码错要回答一样的 <see cref="LoginResult.Wrong"/>。
 /// </summary>
@@ -102,8 +98,18 @@ public interface IAccountStore
     void Succeeded(string name);
     /// <summary>这个账号的 TOTP 密钥（没开两步验证是 null）。</summary>
     byte[]? TotpSecret(string name);
+
+    /// <summary>
+    /// Every account name, exactly as stored, or null when the store can't list them. The node's ban list uses it once at
+    /// start-up to tie account bans saved by older versions to the account they name.
+    /// </summary>
+    IReadOnlyCollection<string>? AccountNames() => null;
 }
 
+/// <summary>
+/// 节点上的账号表（jay-server 用）：账号名 → PBKDF2-SHA256 的盐和哈希。密码本身不存。
+/// 每个账号连续猜错 5 次锁 5 分钟，在线猜密码很慢。
+/// </summary>
 public sealed class AccountStore : IAccountStore
 {
     public const int Iterations = 600_000;
@@ -157,6 +163,8 @@ public sealed class AccountStore : IAccountStore
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException or JsonException
             or FormatException or InvalidOperationException) { }
     }
+
+    public IReadOnlyCollection<string> AccountNames() => [.. List().Select(a => a.Name)];
 
     public IReadOnlyList<(string Name, bool Disabled)> List()
     {
@@ -407,7 +415,8 @@ public static class NetworkLoginClient
             && JsonNode.Parse(sealedNeed) is JsonObject needed)
         {
             var need = (needed["need"] as JsonArray ?? []).OfType<JsonObject>()
-                .Select(f => LoginFactorPrompt.From(f["name"]?.GetValue<string>(), f["prompt"]?.GetValue<string>())).OfType<LoginFactorPrompt>().Take(4).ToList();
+                .Select(f => LoginFactorPrompt.From(f["name"]?.GetValue<string>(), f["prompt"]?.GetValue<string>())).OfType<LoginFactorPrompt>()
+                .DistinctBy(p => p.Name, StringComparer.Ordinal).Take(4).ToList();
             if (need.Count == 0) throw new InvalidDataException(L.T("core.mp.account.failed"));
             var wrong = needed["wrong"]?.GetValue<bool>() == true;
             throw new SecondFactorRequiredException(need, wrong, L.T(wrong ? "core.mp.factor.wrong" : "core.mp.factor.needed"));

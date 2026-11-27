@@ -40,7 +40,7 @@ public class TransportFollowupTests
     {
         var (client, server, a, b) = await PairAsync();
         var serve = Socks5.ServeAsync(server, default, allow: _ => false, ensureReady: _ => Task.FromResult(true), stillReady: () => stillReady);
-        var e = await Assert.ThrowsAsync<IOException>(() => Socks5.ConnectAsync(client, "8.8.8.8", 443, default));
+        var e = await Assert.ThrowsAsync<IOException>(() => Socks5.ConnectAsync(client, "198.51.100.88", 443, default));
         Assert.Contains(expected, e.Message);
         await serve.WaitAsync(TimeSpan.FromSeconds(5));
         a.Dispose();
@@ -229,7 +229,7 @@ public class TransportFollowupTests
     public void InNetworkClampsPrefix()
     {
         Assert.True(ExitPolicy.InNetwork(IPAddress.Parse("10.1.2.3"), IPAddress.Parse("10.1.2.3"), 999));
-        Assert.True(ExitPolicy.InNetwork(IPAddress.Parse("10.1.2.3"), IPAddress.Parse("99.0.0.0"), -5));
+        Assert.True(ExitPolicy.InNetwork(IPAddress.Parse("10.1.2.3"), IPAddress.Parse("203.0.113.0"), -5));
     }
 
     // 对照：本机那头正常关闭时，封装通道照常发“正常结束”，对面看到的是正常关闭（不是重置）。

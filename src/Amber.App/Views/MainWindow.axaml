@@ -26,46 +26,6 @@
     <DataTemplate DataType="vm:PeopleViewModel"><views:PeoplePage /></DataTemplate>
     <DataTemplate DataType="vm:HelpCenterViewModel"><views:HelpCenterPage /></DataTemplate>
 
-    <!-- 请求条上的一条请求（§6.22）：安全类用锁定的安全横幅和安全按钮，其余用普通横幅 -->
-    <DataTemplate DataType="vm:RequestItem">
-      <Panel>
-        <safety:SafetyBanner IsVisible="{Binding IsSafety}">
-          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-            <StackPanel VerticalAlignment="Center" Spacing="2">
-              <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextWrapping="Wrap" />
-              <TextBlock Text="{Binding Body}" IsVisible="{Binding HasBody}" TextWrapping="Wrap" />
-              <TextBlock Text="{Binding RemainingText}" IsVisible="{Binding HasRemaining}" FontSize="12" />
-            </StackPanel>
-            <ItemsControl Grid.Column="1" ItemsSource="{Binding Buttons}" VerticalAlignment="Center">
-              <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel ItemSpacing="8" LineSpacing="8" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
-              <ItemsControl.ItemTemplate>
-                <DataTemplate DataType="vm:RequestButton">
-                  <safety:SafetyButton Content="{Binding Label}" Command="{Binding ChooseCommand}" />
-                </DataTemplate>
-              </ItemsControl.ItemTemplate>
-            </ItemsControl>
-          </Grid>
-        </safety:SafetyBanner>
-        <Border Classes="banner request" IsVisible="{Binding !IsSafety}">
-          <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
-            <Path Classes="icon" Data="{StaticResource Icon.Bell}" Width="20" Height="20" VerticalAlignment="Center" />
-            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
-              <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextWrapping="Wrap" />
-              <TextBlock Text="{Binding Body}" IsVisible="{Binding HasBody}" Classes="hint" TextWrapping="Wrap" />
-              <TextBlock Text="{Binding RemainingText}" IsVisible="{Binding HasRemaining}" Classes="hint" />
-            </StackPanel>
-            <ItemsControl Grid.Column="2" ItemsSource="{Binding Buttons}" VerticalAlignment="Center">
-              <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel ItemSpacing="8" LineSpacing="8" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
-              <ItemsControl.ItemTemplate>
-                <DataTemplate DataType="vm:RequestButton">
-                  <Button Classes="small" Classes.secondary="{Binding !Choice.IsDefault}" Classes.primary="{Binding Choice.IsDefault}" Content="{Binding Label}" Command="{Binding ChooseCommand}" />
-                </DataTemplate>
-              </ItemsControl.ItemTemplate>
-            </ItemsControl>
-          </Grid>
-        </Border>
-      </Panel>
-    </DataTemplate>
   </Window.DataTemplates>
 
   <Grid x:Name="ShellGrid" ColumnDefinitions="240,*">
@@ -187,16 +147,20 @@
                 ToolTip.Tip="{l:T shell.forward_tip}" AutomationProperties.Name="{l:T shell.forward}" VerticalAlignment="Center">
           <Path Classes="icon" Data="{StaticResource Icon.ChevronRight}" Width="20" Height="20" />
         </Button>
-        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" Margin="8,0,0,0" VerticalAlignment="Center">
+        <!-- Keep the page title inside the star column. A horizontal StackPanel measures its children
+             with infinite width, so a long instance name could draw underneath the network status. -->
+        <Grid Grid.Column="2" ColumnDefinitions="Auto,Auto,*,Auto" ColumnSpacing="8" Margin="8,0,0,0"
+              VerticalAlignment="Center" ClipToBounds="True">
           <!-- Breadcrumb: on library/{instance} and library/new the section name is a way back and the page's name follows it -->
           <Button x:Name="CrumbHome" Classes="ghost small" Content="{Binding Shell.Title}" Command="{Binding Shell.GoSectionHomeCommand}"
                   IsVisible="{Binding Shell.HasCrumb}" VerticalAlignment="Center" Margin="-8,0,-6,0" />
-          <Path x:Name="CrumbSeparator" Classes="icon sm" Data="{StaticResource Icon.ChevronRight}" Width="14" Height="14" Opacity="0.6"
+          <Path x:Name="CrumbSeparator" Grid.Column="1" Classes="icon sm" Data="{StaticResource Icon.ChevronRight}" Width="14" Height="14" Opacity="0.6"
                 IsVisible="{Binding Shell.HasCrumb}" VerticalAlignment="Center" />
-          <TextBlock x:Name="ShellTitle" Text="{Binding Shell.Heading}" FontSize="{DynamicResource FontSubtitle}" FontWeight="SemiBold"
-                     VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-          <TextBlock Text="{Binding Shell.ReturnLabel}" IsVisible="{Binding Shell.HasReturn}" Classes="hint" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-        </StackPanel>
+          <TextBlock x:Name="ShellTitle" Grid.Column="2" Text="{Binding Shell.Heading}" FontSize="{DynamicResource FontSubtitle}" FontWeight="SemiBold"
+                     VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MinWidth="0" />
+          <TextBlock Grid.Column="3" Text="{Binding Shell.ReturnLabel}" IsVisible="{Binding Shell.HasReturn}" Classes="hint"
+                     VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="180" />
+        </Grid>
         <Button Grid.Column="3" Classes="secondary small" Content="{l:T shell.return_done}" Command="{Binding Shell.ReturnCommand}"
                 IsVisible="{Binding Shell.HasReturn}" VerticalAlignment="Center" />
         <!-- Network status, on every page: which networks Jay is using now. The panel lists each one with what it can do. -->
@@ -400,7 +364,7 @@
                       <Path Classes="icon" Data="{StaticResource Icon.Close}" Width="18" Height="18" />
                     </Button>
                   </Grid>
-                  <ListBox x:Name="ActivityTabsPart" DockPanel.Dock="Top" Classes="subtabs" ItemsSource="{Binding Activity.TabOptions}" SelectedIndex="{Binding Activity.Tab}"
+                  <ListBox x:Name="ActivityTabsPart" DockPanel.Dock="Top" Classes="subtabs activity-tabs" ItemsSource="{Binding Activity.TabOptions}" SelectedIndex="{Binding Activity.Tab}"
                            Background="Transparent" Margin="-4,0,0,8" ScrollViewer.HorizontalScrollBarVisibility="Auto">
                     <ListBox.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" Spacing="4" /></ItemsPanelTemplate></ListBox.ItemsPanel>
                     <ListBox.ItemTemplate>
@@ -422,7 +386,7 @@
                           <ItemsControl.ItemTemplate>
                             <DataTemplate DataType="vm:TaskItem">
                               <Border Classes="card" Padding="12" Margin="0,0,0,8">
-                                <Panel>
+                                <StackPanel Spacing="8">
                                   <!-- Running: the one progress line. Finished: the name and how it ended. -->
                                   <c:ProgressLine Title="{Binding Title}" Step="{Binding Step}" Percent="{Binding Percent}" IsIndeterminate="{Binding Indeterminate}"
                                                   BytesPerSecond="{Binding Speed}" Remaining="{Binding Remaining}"
@@ -431,7 +395,31 @@
                                     <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Title}" />
                                     <TextBlock Text="{Binding Detail}" Classes="hint" Classes.error="{Binding IsFailed}" TextWrapping="Wrap" />
                                   </StackPanel>
-                                </Panel>
+                                  <Button Classes="ghost small" HorizontalAlignment="Left" Padding="4,2"
+                                          Content="{Binding DetailsLabel}" Command="{Binding ToggleDetailsCommand}"
+                                          IsVisible="{Binding HasFiles}" />
+                                  <Border Background="{DynamicResource SurfaceMuted}" CornerRadius="6" Padding="8"
+                                          IsVisible="{Binding IsExpanded}">
+                                    <StackPanel Spacing="5">
+                                      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                        <TextBlock Text="{l:T activity.task.downloading_files}" Classes="hint" FontSize="12" />
+                                        <TextBlock Grid.Column="1" Text="{Binding DownloadSpeedText}" Classes="hint"
+                                                   FontSize="12" FontWeight="SemiBold" />
+                                      </Grid>
+                                      <ItemsControl ItemsSource="{Binding ActiveFiles}">
+                                        <ItemsControl.ItemTemplate>
+                                          <DataTemplate>
+                                            <Grid ColumnDefinitions="Auto,*" ColumnSpacing="7">
+                                              <Border Width="6" Height="6" CornerRadius="3" Background="{DynamicResource Accent}" VerticalAlignment="Center" />
+                                              <TextBlock Grid.Column="1" Text="{Binding}" FontFamily="{DynamicResource FontMono}"
+                                                         FontSize="12" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding}" />
+                                            </Grid>
+                                          </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                      </ItemsControl>
+                                    </StackPanel>
+                                  </Border>
+                                </StackPanel>
                               </Border>
                             </DataTemplate>
                           </ItemsControl.ItemTemplate>

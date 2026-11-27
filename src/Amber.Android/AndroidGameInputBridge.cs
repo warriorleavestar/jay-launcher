@@ -13,6 +13,11 @@ internal static class AndroidGameInputBridge
         NativeJvmHost.SetAction(action, pressed);
     }
 
+    public static void CancelAction(TouchControlAction action)
+    {
+        NativeJvmHost.CancelAction(action);
+    }
+
     public static void SetMovement(double x, double y)
     {
         NativeJvmHost.SetMovement(x, y);
