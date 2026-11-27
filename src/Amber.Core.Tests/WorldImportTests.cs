@@ -176,7 +176,7 @@ public sealed class WorldImportTests : IDisposable
         Assert.Empty(Directory.EnumerateFileSystemEntries(Saves));
     }
 
-    [Fact]
+    [UnixFact]
     public void DanglingDirectoryLinkRemainsOccupiedOnUnix()
     {
         // Windows 创建符号链接需要额外权限；Unix CI 在不提升权限的临时目录中覆盖此状态。
