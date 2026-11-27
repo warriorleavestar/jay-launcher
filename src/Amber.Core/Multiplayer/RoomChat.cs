@@ -418,6 +418,17 @@ public sealed class RateLimiter(int count, TimeSpan window, Func<DateTimeOffset>
     private readonly Queue<DateTimeOffset> _times = new();
     private readonly Func<DateTimeOffset> _clock = clock ?? (() => DateTimeOffset.UtcNow);
 
+    /// <summary>Would <see cref="TryAcquire"/> succeed now? Takes nothing.</summary>
+    public bool CanAcquire()
+    {
+        var now = _clock();
+        lock (_times)
+        {
+            while (_times.Count > 0 && now - _times.Peek() >= window) _times.Dequeue();
+            return _times.Count < count;
+        }
+    }
+
     public bool TryAcquire()
     {
         var now = _clock();
@@ -809,6 +820,10 @@ public sealed class ChatHub : IAsyncDisposable
             }
             writer = WriteLoopAsync(member);
             var stream = member.Stream;
+            // One deadline for everything before Join. Control frames are read before the join check, so a deadline per
+            // frame would let a connection that never joins stay for as long as it keeps sending them.
+            using var joinDeadline = CancellationTokenSource.CreateLinkedTokenSource(member.Cts.Token);
+            joinDeadline.CancelAfter(FirstFrameTimeout);
             while (!member.Cts.IsCancellationRequested)
             {
                 byte[]? frame;
@@ -819,9 +834,7 @@ public sealed class ChatHub : IAsyncDisposable
                 }
                 else
                 {
-                    using var deadline = CancellationTokenSource.CreateLinkedTokenSource(member.Cts.Token);
-                    deadline.CancelAfter(FirstFrameTimeout);
-                    frame = await RoomChat.ReadFrameAsync(stream, deadline.Token);
+                    frame = await RoomChat.ReadFrameAsync(stream, joinDeadline.Token);
                 }
                 if (frame is null) break;
                 if (_table is not null && ChatWire.ControlOf(frame, out var control) is { } ctl)

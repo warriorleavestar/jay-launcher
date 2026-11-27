@@ -137,8 +137,8 @@ public sealed class GateTests : IAsyncLifetime
     [InlineData("mc.example.com", false)]
     [InlineData("localhost", false)]
     [InlineData("203.0.113.5", true)]
-    [InlineData("2408:8000::1", true)]
-    [InlineData("[2408:8000::1]", true)]
+    [InlineData("2001:db8:8000::1", true)]
+    [InlineData("[2001:db8:8000::1]", true)]
     public void IpHostsNeedASeal(string host, bool ip) => Assert.Equal(ip, GateInvite.IsIpLiteral(host));
 
     [Fact]
@@ -168,10 +168,12 @@ public sealed class GateTests : IAsyncLifetime
         await using var local = new TunnelClient(0, GateClient.Opener(membership, identity));
         using var game = new TcpClient();
         await game.ConnectAsync(IPAddress.Loopback, local.Port);
-        var hello = LoginPackets("steve");
-        await game.GetStream().WriteAsync(hello);
+        // Any casing logs in. The first join's spelling is the one the server sees from then on (an offline-mode server keys
+        // players by the exact name), so a player who has always joined as "steve" keeps that save.
+        await game.GetStream().WriteAsync(LoginPackets("steve"));
 
         using var server = await _backend.AcceptTcpClientAsync().WaitAsync(TimeSpan.FromSeconds(10));
+        var hello = LoginPackets("steve");
         var received = new byte[hello.Length];
         await server.GetStream().ReadExactlyAsync(received).AsTask().WaitAsync(TimeSpan.FromSeconds(10));
         Assert.Equal(hello, received);
@@ -181,6 +183,33 @@ public sealed class GateTests : IAsyncLifetime
         await game.GetStream().ReadExactlyAsync(reply).AsTask().WaitAsync(TimeSpan.FromSeconds(10));
         Assert.Equal("pong"u8.ToArray(), reply);
         Assert.NotNull(_store.Read().Member("Steve")!.Devices.Single().LastSeen);
+        Assert.Equal("steve", _store.Read().Member("Steve")!.Spelling);
+
+        // Another casing later still reaches the server as that one spelling.
+        using var again = new TcpClient();
+        await again.ConnectAsync(IPAddress.Loopback, local.Port);
+        await again.GetStream().WriteAsync(LoginPackets("STEVE"));
+        using var second = await _backend.AcceptTcpClientAsync().WaitAsync(TimeSpan.FromSeconds(10));
+        await second.GetStream().ReadExactlyAsync(received).AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(hello, received);
+    }
+
+    [Fact]
+    public void TheServerSpellingIsTheFirstOneAndOnlyMatchesItsName()
+    {
+        using var identity = Identity("a");
+        Invite("Steve");
+        Assert.Equal(RedeemOutcome.Ok, _store.Redeem(_store.Read().Invites.Last().Id, identity.KeyPair.PublicKey).Outcome);
+        Assert.Null(_store.Read().Member("Steve")!.Spelling);
+        Assert.Equal("sTeve", _store.ServerSpelling("Steve", "sTeve"));
+        Assert.Equal("sTeve", _store.ServerSpelling("Steve", "Steve"));
+        Assert.Equal("sTeve", _store.ServerSpelling("STEVE", "steve"));
+        Assert.Throws<ArgumentException>(() => _store.ServerSpelling("Steve", "Alex"));
+        // A name taken off and invited again starts over.
+        _store.RemoveMember("Steve");
+        Invite("Steve");
+        Assert.Equal(RedeemOutcome.Ok, _store.Redeem(_store.Read().Invites.Last().Id, identity.KeyPair.PublicKey).Outcome);
+        Assert.Equal("Steve", _store.ServerSpelling("Steve", "Steve"));
     }
 
     [Theory]
@@ -313,6 +342,134 @@ public sealed class GateTests : IAsyncLifetime
         Assert.Equal(2, _store.Read().Member("steve")!.Devices.Count);
     }
 
+    /// <summary>
+    /// After a revoke, a multi-use invite made before it adds no device to the name, not even one it turned away for the
+    /// device limit before the revoke: a replacement device needs a new invite. Devices still on the name re-enroll.
+    /// </summary>
+    [Fact]
+    public async Task ARevokeEndsWhatOlderInvitesCanAdd()
+    {
+        var invite = Invite("Steve", uses: 10);
+        using var a = Identity("a");
+        using var b = Identity("b");
+        using var c = Identity("c");
+        using var fresh = Identity("fresh");
+        var membership = await GateClient.EnrollAsync(invite, a);
+        await GateClient.EnrollAsync(invite, b);
+        // A key turned away while the slots are full, held back for after a revoke.
+        var full = await Assert.ThrowsAsync<GateRejectedException>(() => GateClient.EnrollAsync(invite, c));
+        Assert.Equal(GateStatus.DeviceLimit, full.Status);
+        await Task.Delay(20);
+        Assert.Equal(2, _store.RevokeDevices("Steve", null));
+        var usesLeft = _store.Read().Invites.Single().UsesLeft;
+
+        foreach (var device in new[] { a, c, fresh })
+        {
+            var e = await Assert.ThrowsAsync<GateRejectedException>(() => GateClient.EnrollAsync(invite, device));
+            Assert.Equal(GateStatus.NotMember, e.Status);
+            Assert.Empty(_store.AllowedNames(device.KeyPair.PublicKey));
+        }
+        Assert.Empty(_store.Read().Member("Steve")!.Devices);
+        Assert.Equal(usesLeft, _store.Read().Invites.Single().UsesLeft);
+
+        // The held-back key can't reach the server either.
+        var refused = await Assert.ThrowsAsync<GateRejectedException>(() => JoinRaw(membership, c));
+        Assert.Equal(GateStatus.NotMember, refused.Status);
+        Assert.False(_backend.Pending());
+
+        // A newer invite brings any of them in.
+        await Task.Delay(20);
+        var newer = Invite("Steve", uses: 2);
+        await GateClient.EnrollAsync(newer, c);
+        await GateClient.EnrollAsync(newer, a);
+        Assert.Equal(["Steve"], _store.AllowedNames(c.KeyPair.PublicKey));
+        Assert.Equal(["Steve"], _store.AllowedNames(a.KeyPair.PublicKey));
+    }
+
+    /// <summary>Revoking one device keeps the other one able to re-enroll with the older invite (a reinstall).</summary>
+    [Fact]
+    public async Task ADeviceStillOnTheNameReenrollsAfterAnotherIsRevoked()
+    {
+        var invite = Invite("Steve", uses: 10);
+        using var a = Identity("a");
+        using var b = Identity("b");
+        await GateClient.EnrollAsync(invite, a);
+        await GateClient.EnrollAsync(invite, b);
+        await Task.Delay(20);
+        Assert.Equal(1, _store.RevokeDevices("Steve", MemberIdentity.FingerprintOf(a.KeyPair.PublicKey)));
+        await GateClient.EnrollAsync(invite, b);
+        Assert.Equal(["Steve"], _store.AllowedNames(b.KeyPair.PublicKey));
+        var e = await Assert.ThrowsAsync<GateRejectedException>(() => GateClient.EnrollAsync(invite, a));
+        Assert.Equal(GateStatus.NotMember, e.Status);
+    }
+
+    /// <summary>Removing a name cancels its open invites, so neither the removed device nor a new key can use them.</summary>
+    [Fact]
+    public async Task RemovingAMemberCancelsTheirInvites()
+    {
+        var invite = Invite("Steve", uses: 3);
+        Invite("Alex");
+        using var a = Identity("a");
+        using var fresh = Identity("fresh");
+        await GateClient.EnrollAsync(invite, a);
+        var steveInvite = _store.OpenInvitesFor("steve").Single().Id;
+
+        var (removed, cancelled) = _store.RemoveMemberAndInvites("STEVE");
+        Assert.True(removed);
+        Assert.Equal([steveInvite], cancelled);
+        Assert.Empty(_store.OpenInvitesFor("Steve"));
+        Assert.Single(_store.OpenInvitesFor("Alex"));
+
+        await Assert.ThrowsAsync<IOException>(() => GateClient.EnrollAsync(invite, a));
+        await Assert.ThrowsAsync<IOException>(() => GateClient.EnrollAsync(invite, fresh));
+        Assert.Empty(_store.AllowedNames(a.KeyPair.PublicKey));
+        Assert.Empty(_store.AllowedNames(fresh.KeyPair.PublicKey));
+
+        // A name with only an invite and no devices yet: remove still cancels the invite.
+        Invite("Herobrine");
+        Assert.False(_store.RemoveMember("Herobrine"));
+        Assert.Empty(_store.OpenInvitesFor("Herobrine"));
+
+        await Task.Delay(20);
+        await GateClient.EnrollAsync(Invite("Steve"), a);
+        Assert.Equal(["Steve"], _store.AllowedNames(a.KeyPair.PublicKey));
+    }
+
+    /// <summary>The gate's keys are only readable by this user: 0700 / 0600, or on Windows a protected ACL on the data folder.</summary>
+    [Fact]
+    public void DataFolderAndKeysArePrivate()
+    {
+        var dir = _store.Directory;
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute, File.GetUnixFileMode(dir));
+            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(Path.Combine(dir, GateStore.KeyFile)));
+            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(Path.Combine(dir, GateStore.StateFile)));
+            return;
+        }
+        var me = System.Security.Principal.WindowsIdentity.GetCurrent().User!.Value;
+        foreach (var file in new[] { GateStore.KeyFile, GateStore.StateFile })
+        {
+            var acl = new FileInfo(Path.Combine(dir, file)).GetAccessControl();
+            var rules = acl.GetAccessRules(true, true, typeof(System.Security.Principal.SecurityIdentifier))
+                .OfType<System.Security.AccessControl.FileSystemAccessRule>().ToList();
+            foreach (var r in rules) Assert.Contains(r.IdentityReference.Value, new[] { me, "S-1-5-18", "S-1-5-32-544" });
+        }
+        Assert.True(new DirectoryInfo(dir).GetAccessControl().AreAccessRulesProtected);
+        var relayKey = Path.Combine(_root, "relay", "relay.key");
+        GateRelay.LoadOrCreateKey(relayKey).Dispose();
+        Assert.True(new FileInfo(relayKey).GetAccessControl().AreAccessRulesProtected);
+    }
+
+    [Fact]
+    public void HandshakeLimitCountsAnIpv6SlashSixtyFourAsOneAddress()
+    {
+        Assert.Equal(GateServer.RateKey(IPAddress.Parse("2001:db8:1:2::1")), GateServer.RateKey(IPAddress.Parse("2001:db8:1:2:ffff:1:2:3")));
+        Assert.NotEqual(GateServer.RateKey(IPAddress.Parse("2001:db8:1:2::1")), GateServer.RateKey(IPAddress.Parse("2001:db8:1:3::1")));
+        Assert.Equal(IPAddress.Parse("192.0.2.7").MapToIPv6(), GateServer.RateKey(IPAddress.Parse("192.0.2.7")));
+        Assert.NotEqual(GateServer.RateKey(IPAddress.Parse("192.0.2.7")), GateServer.RateKey(IPAddress.Parse("192.0.2.8")));
+    }
+
     [Fact]
     public async Task ScannerGetsNoBytes()
     {
@@ -414,6 +571,18 @@ public sealed class GateTests : IAsyncLifetime
         await Assert.ThrowsAsync<InvalidDataException>(() => McLogin.ReadAsync(new MemoryStream([0xFE, 0x01]), CancellationToken.None));
     }
 
+    /// <summary>Rewriting the name's letter case keeps every other byte, also behind a two-byte length prefix.</summary>
+    [Fact]
+    public async Task LoginNameTakesTheBoundSpelling()
+    {
+        byte[] packets = [.. Handshake(2), .. Packet([0x00, .. String("sTeVe_1"), .. new byte[200]])];
+        var login = await McLogin.ReadAsync(new MemoryStream(packets), CancellationToken.None);
+        var fixedCase = login.WithUsername("Steve_1");
+        Assert.Equal("Steve_1", fixedCase.Username);
+        Assert.Equal([.. Handshake(2), .. Packet([0x00, .. String("Steve_1"), .. new byte[200]])], fixedCase.Raw);
+        Assert.Throws<ArgumentException>(() => login.WithUsername("Alex"));
+    }
+
     private async Task<SecureStream> JoinRaw(GateMembership membership, MemberIdentity identity)
     {
         var tcp = new TcpClient();
@@ -432,7 +601,8 @@ public sealed class GateTests : IAsyncLifetime
         return [(byte)bytes.Length, .. bytes];
     }
 
-    private static byte[] Packet(byte[] body) => [(byte)body.Length, .. body];
+    private static byte[] Packet(byte[] body) =>
+        body.Length < 0x80 ? [(byte)body.Length, .. body] : [(byte)(body.Length & 0x7F | 0x80), (byte)(body.Length >> 7), .. body];
 }
 
 /// <summary>JAYS1- / JAYS2- / JAYSS1- 贴错输入框时能认出来，不和 JAY2 系列的前缀混淆。</summary>

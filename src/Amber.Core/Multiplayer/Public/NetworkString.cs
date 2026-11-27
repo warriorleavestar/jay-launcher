@@ -18,7 +18,7 @@ namespace Amber.Core.Multiplayer.Public;
 /// <para>
 /// The first entry is the network owner's key: it identifies the network (a string with the same id and another owner
 /// key is a conflict). Further entries are co-signatures. A string counts as reviewed when the Jay trustees' quorum
-/// (<see cref="JayTrust"/>, for example 2 of 3) is among the signers. Trustees sign offline, one after another, with
+/// (<see cref="JayTrust"/>, today 2 of 2) is among the signers. Trustees sign offline, one after another, with
 /// <c>jay-server network cosign</c>; no single trustee can review a network alone. Unreviewed strings need the user's
 /// confirmation.
 /// </para>

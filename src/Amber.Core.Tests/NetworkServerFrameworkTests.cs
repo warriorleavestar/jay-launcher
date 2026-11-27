@@ -157,7 +157,7 @@ public sealed class NetworkServerFrameworkTests : IAsyncDisposable
         Assert.Contains(reloaded.List(), b => b.Kind == "host" && b.Value == fingerprint && b.Reason == "刷屏");
         Assert.True(server.Bans!.Remove("host", fingerprint));
         Assert.True(Ok(server.Directory.Handle(Announce(new RoomSigner(), Listing(host)))));
-        Assert.Throws<ArgumentException>(() => server.Bans.Add("ip", "1.2.3.4", null, _now));
+        Assert.Throws<ArgumentException>(() => server.Bans.Add("ip", "198.51.100.4", null, _now));
     }
 
     [Fact]
@@ -242,6 +242,8 @@ public sealed class NetworkServerFrameworkTests : IAsyncDisposable
     [Fact]
     public async Task ExtensionsAnswerTheirOwnOpsOnly()
     {
+        Assert.Throws<ArgumentException>(() => new JayNetworkServerBuilder().UseRelayLimits(0, " "));
+        Assert.Throws<ArgumentException>(() => new JayNetworkServerBuilder().UseRelayLimits(0, ""));
         Assert.Throws<ArgumentException>(() => new JayNetworkServerBuilder().AddExtension(new LambdaExtension("motd")));
         Assert.Throws<ArgumentException>(() => new JayNetworkServerBuilder().AddExtension(new Motd()).AddExtension(new Motd()));
         var server = await StartAsync(b => b.AddExtension(new Motd()).AddExtension(new Broken()));
@@ -416,7 +418,7 @@ public sealed class NetworkServerFrameworkTests : IAsyncDisposable
     [Theory]
     [InlineData("tcp://node.example.net:11010", false)]
     [InlineData("tcp://203.0.113.5:11010", true)]
-    [InlineData("udp://[2408:8000::1]:11010", true)]
+    [InlineData("udp://[2001:db8:8000::1]:11010", true)]
     [InlineData("tcp://127.0.0.1:11010", false)]
     [InlineData("tcp://192.168.1.5:11010", false)]
     public void NetworkNodesGoByDomain(string node, bool refused)
@@ -471,6 +473,16 @@ public sealed class NetworkServerFrameworkTests : IAsyncDisposable
 
         Assert.Throws<ArgumentException>(() => Program.DirectoryBuilder(_dir, Options.Parse(["directory", "--seed-only", "--accounts"]), output, _ => { }));
         Assert.Throws<ArgumentException>(() => Program.DirectoryBuilder(_dir, Options.Parse(["directory", "--rate-limit", "3,x"]), output, _ => { }));
+        Assert.Throws<ArgumentException>(() => Program.DirectoryBuilder(_dir, Options.Parse(["directory", "--no-rate-limit", "--rate-limit", "3,6,600"]), output, _ => { }));
+        Assert.Throws<ArgumentException>(() => Program.DirectoryBuilder(_dir, Options.Parse(["directory", "--relay-limit-kbps", "-1"]), output, _ => { }));
+        Assert.Throws<ArgumentException>(() => Program.DirectoryBuilder(_dir, Options.Parse(["directory", "--relay-networks", " "]), output, _ => { }));
+        // --no-volunteers no longer swallows --rate-limit; relay limits reach the builder.
+        var limited = Program.DirectoryBuilder(_dir, Options.Parse(["directory", "--no-volunteers", "--rate-limit", "2,4,50",
+            "--relay-limit-kbps", "2048", "--relay-networks", "jay-*"]), output, _ => { });
+        Assert.False(limited.VolunteersOn);
+        Assert.NotNull(limited.RateLimit);
+        Assert.Equal(new RelayLimits(2048, "jay-*"), limited.Relay);
+        Assert.Null(Program.DirectoryBuilder(_dir, Options.Parse(["directory"]), output, _ => { }).Relay);
         // --rate-limit is read (and checked) whatever other switches are given.
         Assert.Throws<ArgumentException>(() => Program.DirectoryBuilder(_dir, Options.Parse(["directory", "--no-volunteers", "--rate-limit", "3,x"]), output, _ => { }));
         Assert.Equal((1, 2, 100), Program.DirectoryBuilder(_dir, Options.Parse(["directory", "--no-volunteers", "--no-admin", "--rate-limit", "1,2,100"]), output, _ => { }).RateLimit!.Limits);
