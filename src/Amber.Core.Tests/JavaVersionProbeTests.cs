@@ -97,7 +97,17 @@ internal sealed class EscapingJava
     }
 }
 
-[Collection("java-probe")]
+/// <summary>
+/// Tests that run the restricted Java probe or clear its cache share <see cref="JavaVersionProbe.RestrictedRuns"/> and
+/// <see cref="JavaFinder"/>'s cache, so none of them runs alongside any other test.
+/// </summary>
+[CollectionDefinition(Name, DisableParallelization = true)]
+public sealed class JavaProbeCollection
+{
+    public const string Name = "java-probe";
+}
+
+[Collection(JavaProbeCollection.Name)]
 public sealed class JavaVersionProbeTests : IDisposable
 {
     private readonly string _root = Path.Combine(Path.GetTempPath(), "amber-probe-" + Guid.NewGuid().ToString("N")[..8]);

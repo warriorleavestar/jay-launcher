@@ -10,6 +10,7 @@ namespace Amber.Core.Tests;
 /// Mojang's Java runtimes (Java 8 for Forge 1.12.2 among them): each runtime's file list is checked against the SHA-1
 /// that all.json gives for it, so a mirror cannot swap the list (and with it every file's expected hash).
 /// </summary>
+[Collection(JavaProbeCollection.Name)]
 public sealed class JavaRuntimeManifestTests : IDisposable
 {
     private readonly TestServer _official = new();

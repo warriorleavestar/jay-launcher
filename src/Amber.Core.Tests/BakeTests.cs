@@ -14,6 +14,7 @@ namespace Amber.Core.Tests;
 /// Experimental baking against the universal loader's interface v1.3. No real loader: a fake process answers each
 /// stage with JSON lines, the way amber.ul.Bake does.
 /// </summary>
+[Collection(JavaProbeCollection.Name)]
 public sealed class BakeTests : IDisposable
 {
     private readonly string _root = Path.Combine(Path.GetTempPath(), "amber-bake-" + Guid.NewGuid().ToString("N")[..8]);
@@ -1593,13 +1594,16 @@ public sealed class BakeTests : IDisposable
         Assert.Equal("version_checking {\n    B:Global=false\n    B:other=true\n}\n", File.ReadAllText(cfg));
     }
 
-    [Fact]
-    public async Task ABrokenCachedInstallerIsRemovedSoTheNextAttemptDownloadsItAgain()
+    [Theory]
+    [InlineData("neoforge", "1.21.1", "21.1.265")]
+    [InlineData("forge", "1.12.2", LegacyForge)]
+    public async Task ABrokenCachedInstallerIsRemovedSoTheNextAttemptDownloadsItAgain(string loader, string mc, string version)
     {
-        var installer = Path.Combine(Data, "platforms", "installers", "neoforge-21.1.265-installer.jar");
+        var kind = loader == "forge" ? BakePlatform.ForgeLegacy : loader;
+        var installer = Path.Combine(Data, "platforms", "installers", $"{kind}-{version}-installer.jar");
         Directory.CreateDirectory(Path.GetDirectoryName(installer)!);
         File.WriteAllText(installer, "not a zip");
-        var instance = Instance("neoforge", "1.21.1", "21.1.265", "neoforge-1.21.1");
+        var instance = Instance(loader, mc, version, $"{loader}-{mc}");
         await Assert.ThrowsAsync<InvalidDataException>(() => BakePlatform.PrepareAsync(new GameDirectory(Game), instance, Data, null, null, CancellationToken.None));
         Assert.False(File.Exists(installer));
     }

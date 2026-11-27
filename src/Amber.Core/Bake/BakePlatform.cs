@@ -97,7 +97,16 @@ public static partial class BakePlatform
         var libraries = Path.TrimEndingDirectorySeparator(Path.GetFullPath(dir.LibrariesDir));
         var tag = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(OperatingSystem.IsWindows() ? libraries.ToLowerInvariant() : libraries)))[..10];
         var root = Path.Combine(platforms, $"{kind}-{version}-{tag}");
-        if (kind == ForgeLegacy) return PrepareLegacy(dir, installer, root, libraries);
+        if (kind == ForgeLegacy)
+        {
+            try { return PrepareLegacy(dir, installer, root, libraries); }
+            catch (Exception e) when (e is InvalidDataException or JsonException or InvalidOperationException)
+            {
+                // A broken or truncated installer: drop the cached copy so the next attempt downloads it again.
+                try { File.Delete(installer); } catch (Exception d) when (d is IOException or UnauthorizedAccessException) { }
+                throw;
+            }
+        }
         var inst = Path.Combine(root, "inst");
         Directory.CreateDirectory(Path.Combine(inst, "data"));
 
