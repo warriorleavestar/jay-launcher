@@ -24,8 +24,9 @@ public class SecondReviewFixTests
     [Fact]
     public async Task DelayedConnect_RechecksAtRequestTime()
     {
-        var newIp = IPAddress.Parse("203.0.114.9");
-        using var policy = new ExitPolicy([], []) { MaxPublicIpAge = TimeSpan.FromMilliseconds(100), StaleGrace = TimeSpan.FromMilliseconds(50) };
+        var newIp = IPAddress.Parse("198.51.100.99");
+        var clock = new ManualTimeProvider();
+        using var policy = new ExitPolicy([], []) { MaxPublicIpAge = TimeSpan.FromMilliseconds(100), StaleGrace = TimeSpan.FromMilliseconds(50), Time = clock, IsRoutable = TestAddresses.IsRoutable };
         var calls = 0;
         policy.Discover = _ =>
         {
@@ -34,9 +35,10 @@ public class SecondReviewFixTests
             return Task.FromResult(true);
         };
         policy.SetReady(true);
+        Assert.True(policy.Allows(newIp));
         var (client, server, a, b) = await PairAsync();
         var serve = Socks5.ServeAsync(server, default, allow: policy.Allows, ensureReady: c => policy.EnsureFreshAsync(TimeSpan.FromSeconds(2), c));
-        await Task.Delay(300);   // 连接开着，公网 IP 变旧了
+        clock.Advance(TimeSpan.FromMilliseconds(300));   // 连接开着，公网 IP 变旧了
         var e = await Assert.ThrowsAsync<IOException>(() => Socks5.ConnectAsync(client, newIp.ToString(), 25565, default));
         Assert.StartsWith("转发的那台电脑拒绝连接", e.Message);
         Assert.Equal(1, calls);
@@ -49,12 +51,13 @@ public class SecondReviewFixTests
     [Fact]
     public async Task DelayedConnect_RefreshFailsSaysNotReady()
     {
-        using var policy = new ExitPolicy([], []) { MaxPublicIpAge = TimeSpan.FromMilliseconds(50), Discover = _ => Task.FromResult(false) };
+        var clock = new ManualTimeProvider();
+        using var policy = new ExitPolicy([], []) { MaxPublicIpAge = TimeSpan.FromMilliseconds(50), Discover = _ => Task.FromResult(false), Time = clock, IsRoutable = TestAddresses.IsRoutable };
         policy.SetReady(true);
         var (client, server, a, b) = await PairAsync();
         var serve = Socks5.ServeAsync(server, default, allow: policy.Allows, ensureReady: c => policy.EnsureFreshAsync(TimeSpan.FromSeconds(2), c));
-        await Task.Delay(150);
-        var e = await Assert.ThrowsAsync<IOException>(() => Socks5.ConnectAsync(client, "8.8.8.8", 443, default));
+        clock.Advance(TimeSpan.FromMilliseconds(150));
+        var e = await Assert.ThrowsAsync<IOException>(() => Socks5.ConnectAsync(client, "198.51.100.88", 443, default));
         Assert.Contains("没准备好", e.Message);
         await serve.WaitAsync(TimeSpan.FromSeconds(5));
         a.Dispose();
@@ -63,14 +66,17 @@ public class SecondReviewFixTests
 
     // #1：公网 IP 太久没确认时，Allows 本身也拒绝（不只看“准备好了”这个标记）。
     [Fact]
-    public async Task Allows_RefusesWhenPublicIpTooOld()
+    public void Allows_RefusesWhenPublicIpTooOld()
     {
-        using var policy = new ExitPolicy([], []) { MaxPublicIpAge = TimeSpan.FromMilliseconds(50), StaleGrace = TimeSpan.FromMilliseconds(50) };
+        var clock = new ManualTimeProvider();
+        using var policy = new ExitPolicy([], []) { MaxPublicIpAge = TimeSpan.FromMilliseconds(50), StaleGrace = TimeSpan.FromMilliseconds(50), Time = clock, IsRoutable = TestAddresses.IsRoutable };
         policy.SetReady(true);
-        Assert.True(policy.Allows(IPAddress.Parse("8.8.8.8")));
-        await Task.Delay(250);
+        Assert.True(policy.Allows(IPAddress.Parse("198.51.100.88")));
+        clock.Advance(TimeSpan.FromMilliseconds(90));   // stale, but inside the grace period
+        Assert.True(policy.Allows(IPAddress.Parse("198.51.100.88")));
+        clock.Advance(TimeSpan.FromMilliseconds(160));
         Assert.True(policy.IsReady);
-        Assert.False(policy.Allows(IPAddress.Parse("8.8.8.8")));
+        Assert.False(policy.Allows(IPAddress.Parse("198.51.100.88")));
     }
 
     // #1：握手有期限，空闲连接到时间就断开。
@@ -89,6 +95,7 @@ public class SecondReviewFixTests
     public async Task EnsureFresh_CoalescesConcurrentCallers()
     {
         var calls = 0;
+        var clock = new ManualTimeProvider();
         using var policy = new ExitPolicy([], [])
         {
             MaxPublicIpAge = TimeSpan.FromMilliseconds(50),
@@ -98,9 +105,10 @@ public class SecondReviewFixTests
                 await Task.Delay(200, c);
                 return true;
             },
+            Time = clock,
         };
         policy.SetReady(true);
-        await Task.Delay(100);
+        clock.Advance(TimeSpan.FromMilliseconds(100));
         var results = await Task.WhenAll(Enumerable.Range(0, 5).Select(_ => policy.EnsureFreshAsync(TimeSpan.FromSeconds(2), default)));
         Assert.All(results, Assert.True);
         Assert.Equal(1, calls);
@@ -112,30 +120,30 @@ public class SecondReviewFixTests
     {
         static (string, int)? NoSrv(string _) => null;
         var skipped = "";
-        Assert.Null(await JoinTarget.ResolveForRelayAsync("[2606:4700::1]:25566", default, null, NoSrv, r => skipped = r));
+        Assert.Null(await JoinTarget.ResolveForRelayAsync("[2001:db8:4700::1]:25566", TestAddresses.IsRoutable, default, null, NoSrv, r => skipped = r));
         Assert.Contains("IPv4", skipped);
         skipped = "";
-        static Task<IPAddress[]> V6Only(string _, CancellationToken __) => Task.FromResult(new[] { IPAddress.Parse("2606:4700::1") });
-        Assert.Null(await JoinTarget.ResolveForRelayAsync("v6.example.org", default, V6Only, NoSrv, r => skipped = r));
+        static Task<IPAddress[]> V6Only(string _, CancellationToken __) => Task.FromResult(new[] { IPAddress.Parse("2001:db8:4700::1") });
+        Assert.Null(await JoinTarget.ResolveForRelayAsync("v6.example.org", TestAddresses.IsRoutable, default, V6Only, NoSrv, r => skipped = r));
         Assert.Contains("IPv4", skipped);
-        static Task<IPAddress[]> Both(string _, CancellationToken __) => Task.FromResult(new[] { IPAddress.Parse("2606:4700::1"), IPAddress.Parse("1.1.1.1") });
-        Assert.NotNull(await JoinTarget.ResolveForRelayAsync("both.example.org", default, Both, NoSrv));
+        static Task<IPAddress[]> Both(string _, CancellationToken __) => Task.FromResult(new[] { IPAddress.Parse("2001:db8:4700::1"), IPAddress.Parse("203.0.113.11") });
+        Assert.NotNull(await JoinTarget.ResolveForRelayAsync("both.example.org", TestAddresses.IsRoutable, default, Both, NoSrv));
         // 本机代理软件的假 IP（IPv4）加 IPv6：按名字交给出口。
-        static Task<IPAddress[]> FakeAndV6(string _, CancellationToken __) => Task.FromResult(new[] { IPAddress.Parse("198.18.0.7"), IPAddress.Parse("2606:4700::1") });
-        Assert.NotNull(await JoinTarget.ResolveForRelayAsync("tun.example.org", default, FakeAndV6, NoSrv));
+        static Task<IPAddress[]> FakeAndV6(string _, CancellationToken __) => Task.FromResult(new[] { IPAddress.Parse("198.18.0.7"), IPAddress.Parse("2001:db8:4700::1") });
+        Assert.NotNull(await JoinTarget.ResolveForRelayAsync("tun.example.org", TestAddresses.IsRoutable, default, FakeAndV6, NoSrv));
         // SRV 指向 IPv6 地址也一样。
-        static (string, int)? SrvV6(string _) => ("2606:4700::1", 25570);
-        Assert.Null(await JoinTarget.ResolveForRelayAsync("srv.example.org", default, Both, SrvV6));
+        static (string, int)? SrvV6(string _) => ("2001:db8:4700::1", 25570);
+        Assert.Null(await JoinTarget.ResolveForRelayAsync("srv.example.org", TestAddresses.IsRoutable, default, Both, SrvV6));
     }
 
     // #2：出口拒绝 IPv6 目标时说清楚是“只转 IPv4”，不说成局域网地址。
     [Fact]
     public async Task Exit_SaysIPv6IsNotSupported()
     {
-        using var policy = new ExitPolicy([], []);
+        using var policy = new ExitPolicy([], []) { IsRoutable = TestAddresses.IsRoutable };
         var (client, server, a, b) = await PairAsync();
         var serve = Socks5.ServeAsync(server, default, allow: policy.Allows);
-        var e = await Assert.ThrowsAsync<IOException>(() => Socks5.ConnectAsync(client, "2606:4700::1", 443, default));
+        var e = await Assert.ThrowsAsync<IOException>(() => Socks5.ConnectAsync(client, "2001:db8:4700::1", 443, default));
         Assert.Contains("只转 IPv4", e.Message);
         await serve.WaitAsync(TimeSpan.FromSeconds(5));
         a.Dispose();
@@ -172,6 +180,6 @@ public class SecondReviewFixTests
     {
         Assert.Equal(AddressFamily.InterNetworkV6, ExitPolicy.Normalize(IPAddress.Parse("64:ff9b:1::a00:1")).AddressFamily);
         Assert.Equal(AddressFamily.InterNetwork, ExitPolicy.Normalize(IPAddress.Parse("64:ff9b::a00:1")).AddressFamily);
-        Assert.True(ExitPolicy.InNetwork(IPAddress.Parse("8.8.8.8"), IPAddress.Parse("8.8.8.8"), 200));
+        Assert.True(ExitPolicy.InNetwork(IPAddress.Parse("198.51.100.88"), IPAddress.Parse("198.51.100.88"), 200));
     }
 }

@@ -80,7 +80,7 @@ public class UnixRemoteTests
     }
 
     /// <summary>真实的 X 服务器（Xvfb）：截到的尺寸对、注入的鼠标位置能读回来、按键和滚轮不报错。没有 Xvfb 时跳过。</summary>
-    [Fact]
+    [LinuxFact]
     public void X11_CaptureAndInjectOnXvfb()
     {
         if (!OperatingSystem.IsLinux() || !File.Exists("/usr/bin/Xvfb")) return;
@@ -130,7 +130,7 @@ public class UnixRemoteTests
 /// <summary>Linux X11 的全局停止热键：在 Xvfb 上用 XTest 按 Ctrl+Shift+F12（NumLock 开着也行），回调被调用；同一个组合键再抢一次会失败。</summary>
 public class X11HotkeyTests
 {
-    [Fact]
+    [LinuxFact]
     public void CtrlShiftF12_FiresAndSecondGrabFails()
     {
         if (!OperatingSystem.IsLinux() || !File.Exists("/usr/bin/Xvfb")) return;
