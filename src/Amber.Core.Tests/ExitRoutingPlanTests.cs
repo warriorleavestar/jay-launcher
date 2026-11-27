@@ -77,7 +77,58 @@ public sealed class ExitRoutingPlanTests
     public void UntrackedIpv6OrHostnameUnderlayIsRejectedBeforeRouteChanges()
     {
         Assert.Throws<InvalidOperationException>(() => ExitNetworkPlan.Create(Guest with { DirectUnderlayUsesIpv6 = true }));
-        Assert.Throws<InvalidOperationException>(() => ExitNetworkPlan.Create(Guest with { Peers = ["udp://relay.example:11010"] }));
+        // A relay named by domain is refused with its own message: its address would get a direct exception for every program.
+        var e = Assert.Throws<InvalidOperationException>(() => ExitNetworkPlan.Create(Guest with { Peers = ["udp://relay.example:11010"] }));
+        Assert.Equal(Amber.Core.Localization.L.T("core.mp.exit.relay_domain"), e.Message);
         Assert.Throws<InvalidOperationException>(() => ExitNetworkPlan.Create(Guest with { Peers = ["udp://[2001:db8::1]:11010"] }));
+    }
+
+    private static Func<string, CancellationToken, Task<System.Net.IPAddress[]>> Lookup(params string[] addresses) =>
+        (_, _) => Task.FromResult(addresses.Select(System.Net.IPAddress.Parse).ToArray());
+
+    [Fact]
+    public async Task DomainRelaysArePinnedToTheAddressThePlanProtects()
+    {
+        var options = await ExitRelays.PinAsync(Guest with { Peers = ["tcp://relay.example.org:11010", "wss://ws.example.org:443/et", "udp://127.0.0.1:23000"] },
+            Lookup("2001:db8::7", "203.0.113.20", "203.0.113.21"));
+        // TCP is pinned to one IPv4 address; WebSocket keeps its name (TLS needs it) and all its IPv4 addresses are protected.
+        Assert.Equal(["tcp://203.0.113.20:11010", "wss://ws.example.org:443/et", "udp://127.0.0.1:23000"], options.Peers);
+        Assert.Equal(["203.0.113.20", "203.0.113.21"], options.RelayAddresses["ws.example.org"]);
+        var plan = Assert.IsType<ExitNetworkPlan>(ExitNetworkPlan.Create(options with { Peers = [.. options.Peers.Where(p => !p.Contains("127.0.0.1", StringComparison.Ordinal))] }));
+        Assert.Contains("203.0.113.20", plan.UnderlayAddresses);
+        Assert.Contains("203.0.113.21", plan.UnderlayAddresses);
+        Assert.DoesNotContain(plan.UnderlayAddresses, a => a.Contains(':', StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task LeavingTheExitRestoresTheConfiguredRelays()
+    {
+        var configured = new[] { "tcp://relay.example.org:11010" };
+        var pinned = await ExitRelays.PinAsync(Guest with { Peers = configured }, Lookup("203.0.113.20"));
+        var left = await ExitRelays.PinAsync(pinned with { ExitNode = null }, Lookup("203.0.113.99"));
+        Assert.Equal(configured, left.Peers);
+        Assert.Null(left.ConfiguredPeers);
+        Assert.Empty(left.RelayAddresses);
+        // Choosing again resolves again, from the configured names.
+        var again = await ExitRelays.PinAsync(left with { ExitNode = EasyTierArgs.HostIp }, Lookup("203.0.113.30"));
+        Assert.Equal(["tcp://203.0.113.30:11010"], again.Peers);
+    }
+
+    [Fact]
+    public async Task ARelayWithoutAnIpv4AddressSaysSo()
+    {
+        var e = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            ExitRelays.PinAsync(Guest with { Peers = ["tcp://relay.example.org:11010"] }, Lookup("2001:db8::7")));
+        Assert.Contains("relay.example.org", e.Message, StringComparison.Ordinal);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => ExitRelays.PinAsync(Guest with { Peers = ["tcp://relay.example.org:11010"] },
+            (_, _) => Task.FromException<System.Net.IPAddress[]>(new System.Net.Sockets.SocketException((int)System.Net.Sockets.SocketError.HostNotFound))));
+    }
+
+    [Fact]
+    public async Task WithoutAnExitNothingIsLookedUp()
+    {
+        var options = Guest with { ExitNode = null, Peers = ["tcp://relay.example.org:11010"] };
+        var same = await ExitRelays.PinAsync(options, (_, _) => throw new InvalidOperationException("looked up"));
+        Assert.Equal(options.Peers, same.Peers);
     }
 }

@@ -124,10 +124,9 @@ public sealed class DirectSession : IAsyncDisposable
     public int LocalSpeedPort { get; } = EasyTierArgs.FreeTcpPort();
     public bool UsingFallbackNode { get; private set; }
     public NatKind LocalNat => _gathered?.Nat ?? NatKind.Unknown;
-    public string LocalNatDetail => _gathered?.NatDetail ?? "";
     public IPAddress? PublicIPv4 => _gathered?.Candidates.FirstOrDefault(c => c.Kind is PathKind.Punch or PathKind.Mapped)?.EndPoint.Address;
 
-    /// <summary>加入方：测试矩阵的一步交给界面执行（聊天探测要用界面那边的连接）。为空时用内置的探测。</summary>
+    /// <summary>Raised when the session's EasyTier or bridge state changes.</summary>
     public event Action? StateChanged;
 
     /// <param name="room">房主的房间；加入方传 null（批准后才拿到）。</param>
@@ -398,8 +397,9 @@ public sealed class DirectSession : IAsyncDisposable
     /// <summary>EasyTier 启动或重启过几次（包括已提权会话的原地重启）：界面按它判断要不要重新计时。</summary>
     public int EasyTierStarts { get; private set; }
 
+
     private static bool SameConfig(EasyTierOptions a, EasyTierOptions b) =>
-        a.Tun == b.Tun && a.AllowExit == b.AllowExit && a.ExitNode == b.ExitNode && a.Peers.SequenceEqual(b.Peers)
+        a.Tun == b.Tun && a.AllowExit == b.AllowExit && a.ExitNode == b.ExitNode && (a.ConfiguredPeers ?? a.Peers).SequenceEqual(b.ConfiguredPeers ?? b.Peers)
         && (a.ExtraArgs ?? []).SequenceEqual(b.ExtraArgs ?? [])
         && (a.ExitNode is null || (a.DirectUnderlayAddresses.SequenceEqual(b.DirectUnderlayAddresses)
             && a.DirectUnderlayUsesIpv6 == b.DirectUnderlayUsesIpv6));
@@ -1040,7 +1040,7 @@ public sealed class DirectSession : IAsyncDisposable
         {
             ct.ThrowIfCancellationRequested();
             if (Bridge is not { } bridge) return;
-            bridge.AllowedPaths.UnionWith(Enum.GetValues<PathKind>());
+            bridge.SetAllowedPaths(Enum.GetValues<PathKind>());
             bridge.SprayPorts = 256;
         }
     }
@@ -1067,9 +1067,9 @@ public sealed class DirectSession : IAsyncDisposable
             ct.ThrowIfCancellationRequested();
             if (step.Route == RouteKind.Direct)
             {
-                bridge.AllowedPaths.Clear();
-                bridge.AllowedPaths.Add(step.Path!.Value);
-                if (step.Path == PathKind.PunchSpray) bridge.AllowedPaths.Add(PathKind.Punch);
+                bridge.SetAllowedPaths(step.Path == PathKind.PunchSpray
+                    ? [PathKind.PunchSpray, PathKind.Punch]
+                    : [step.Path!.Value]);
                 bridge.SprayPorts = step.Path == PathKind.PunchSpray ? 256 : 0;
                 bridge.DropPeers(preserveLocalTransport: true);
             }

@@ -1,3 +1,4 @@
+using Amber.App.Services;
 using Amber.App.ViewModels;
 using Amber.Core.Localization;
 using Avalonia;
@@ -188,7 +189,7 @@ public partial class DownloadPage : UserControl
             AllowMultiple = false,
             FileTypeFilter = [new FilePickerFileType(L.T("newinstance.pack.type")) { Patterns = ["*.mrpack", "*.zip"] }],
         });
-        if (files.Count > 0 && files[0].TryGetLocalPath() is { } path) await vm.PreviewPackAsync(path);
+        if (files.Count > 0) await vm.PreviewPackAsync(new PackSelection(files[0]));
     }
 
     private async void PickFolder_Click(object? sender, RoutedEventArgs e)

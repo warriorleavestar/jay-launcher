@@ -9,7 +9,9 @@ namespace Amber.Core.Multiplayer.Transport;
 /// instances only let room members reach the leg ports when this reservation exists, so a port that another program
 /// already uses is never opened to the room.
 /// <para>The session holds the ports for as long as EasyTier serves them. A <see cref="SplitTunnelServer"/> borrows the
-/// listeners and gives them back when it stops, so a transport restarting in the same session never lets the ports go.</para>
+/// listeners and gives them back when it stops, so a transport restarting in the same session never lets the ports go.
+/// A connection still waiting in a listener's queue when one transport stops is accepted by the next; if the room was
+/// rekeyed in between, its leg carries the old epoch and fails the leg check there.</para>
 /// </summary>
 public sealed class SplitLegReservation : IDisposable
 {

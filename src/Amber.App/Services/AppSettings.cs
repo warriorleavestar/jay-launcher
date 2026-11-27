@@ -79,7 +79,7 @@ public sealed class AppSettings
     public string? UpdateFeedUrl { get; set; }
 
     /// <summary>
-    /// Check the update feed once a day and tell the user about a signed newer version. Jay never downloads it.
+    /// Notify the user about signed releases. Downloading an installer requires a separate user action.
     /// On for a new install. A settings file from before this switch existed keeps what that Jay did: it never checked
     /// by itself (even with an update address it only checked on click), so it stays off. The saved choice then carries over.
     /// </summary>
@@ -93,6 +93,8 @@ public sealed class AppSettings
     /// <summary>The saved switch; null in a fresh install and in settings files written before it existed.</summary>
     [System.Text.Json.Serialization.JsonPropertyName("AutoUpdateCheck")]
     public bool? AutoUpdateCheckSaved { get; set; }
+
+    public bool? AndroidUpdateChecksConfigured { get; set; }
 
     /// <summary>When the automatic update check last ran (successfully or not).</summary>
     public DateTimeOffset? LastUpdateCheck { get; set; }
@@ -139,6 +141,12 @@ public sealed class AppSettings
 
     /// <summary>Volunteer node: let other players reach the public network through this computer (off by default).</summary>
     public bool VolunteerNode { get; set; }
+
+    /// <summary>
+    /// Sign volunteer registrations with the Jay account bound to the Minecraft account, so the network's operator knows
+    /// who runs the relay. Off by default, also for installs that volunteered before this setting existed.
+    /// </summary>
+    public bool VolunteerSigned { get; set; }
 
     /// <summary>This computer's public address (IP or domain) for volunteering.</summary>
     public string? VolunteerAddress { get; set; }
@@ -277,6 +285,8 @@ public sealed class AppSettings
                     var loaded = JsonSerializer.Deserialize(read(path), AppJsonContext.Default.AppSettings) ?? new AppSettings();
                     // Upgraded from a Jay without the switch: that Jay never checked by itself, so neither does this one.
                     loaded.AutoUpdateCheckSaved ??= false;
+                    if (OperatingSystem.IsAndroid() && loaded.AndroidUpdateChecksConfigured != true)
+                        loaded.AutoUpdateCheck = false;
                     return loaded;
                 }
                 return new AppSettings { IsFresh = true };
@@ -311,6 +321,7 @@ public sealed class AppSettings
         if (ReadOnly) return;
         // A new install shows the daily update check on: write that down, or the next start would read it as an upgrade.
         AutoUpdateCheckSaved ??= true;
+        if (OperatingSystem.IsAndroid()) AndroidUpdateChecksConfigured = true;
         var path = SavePathForTest ?? FilePath;
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         var temp = path + ".tmp";
@@ -324,6 +335,9 @@ public sealed class InstanceMeta
 {
     /// <summary>界面上显示的名字；null 时按游戏版本和加载器生成。</summary>
     public string? DisplayName { get; set; }
+
+    /// <summary>Modpack artwork from its trusted provider (Modrinth/CurseForge). The library keeps a local cache.</summary>
+    public string? CoverUrl { get; set; }
 
     /// <summary>null 表示正常；incomplete（安装未完成）/ broken（已损坏）。</summary>
     public string? State { get; set; }

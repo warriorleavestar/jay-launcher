@@ -139,15 +139,20 @@ public static class SplitPathPlanner
     public static SplitPathPlan Plan(int paths, IReadOnlyList<string> nodes, ReadOnlySpan<byte> stickyKey)
     {
         if (paths is < SplitStream.MinLegs or > SplitStream.MaxLegs) throw new ArgumentOutOfRangeException(nameof(paths));
-        var groups = nodes.Select(n => n.Trim()).Where(RelayNodes.IsValid).Distinct()
-            .GroupBy(RelayOperators.GroupOf)
-            .Select(g => (Key: g.Key, Nodes: (IReadOnlyList<string>)[.. g]))
-            .ToList();
+        var groups = Groups(nodes);
         if (groups.Count < paths - 1) return new SplitPathPlan([], L.T("core.mp.split.no_independent_path"));
         var key = stickyKey.ToArray();
         var ordered = groups.OrderBy(g => Convert.ToHexString(HMACSHA256.HashData(key, Encoding.UTF8.GetBytes(g.Key))), StringComparer.Ordinal).ToList();
         return new SplitPathPlan([.. ordered.Take(paths - 1).Select(g => g.Nodes)], null);
     }
+
+    /// <summary>How many independent relay groups (one per extra path) there are among these nodes.</summary>
+    public static int IndependentGroups(IReadOnlyList<string> nodes) => Groups(nodes).Count;
+
+    private static List<(string Key, IReadOnlyList<string> Nodes)> Groups(IReadOnlyList<string> nodes) =>
+        [.. nodes.Select(n => n.Trim()).Where(RelayNodes.IsValid).Distinct()
+            .GroupBy(RelayOperators.GroupOf)
+            .Select(g => (g.Key, (IReadOnlyList<string>)[.. g]))];
 
     /// <summary>
     /// Whether the paths are ready right now. <paramref name="main"/> is the host as seen on the room's own instance;
@@ -169,9 +174,13 @@ public static class SplitPathPlanner
     internal static bool OneRelayAtMost(string cost)
     {
         if (string.Equals(cost, "p2p", StringComparison.OrdinalIgnoreCase)) return true;
-        var m = System.Text.RegularExpressions.Regex.Match(cost, @"^relay\((\d{1,3})\)$", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
-        return m.Success && int.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture) <= 2;
+        var m = RelayCost.Match(cost);
+        return m.Success && int.TryParse(m.Groups[1].ValueSpan, NumberStyles.None, CultureInfo.InvariantCulture, out var hops) && hops <= 2;
     }
+
+    // ASCII digits only and no trailing newline: \d and $ would let other scripts' digits and "relay(2)\n" through.
+    private static readonly System.Text.RegularExpressions.Regex RelayCost = new(@"^relay\(([0-9]{1,3})\)\z",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 }
 
 /// <summary>

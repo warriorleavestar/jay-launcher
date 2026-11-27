@@ -21,7 +21,7 @@ public partial class MultiplayerPage : UserControl
         ThemeLayout = Amber.App.Services.ThemeLayoutHost.Attach(this, "multiplayer");
         SizeChanged += (_, e) =>
         {
-            ApplyLobbyLayout(e.NewSize.Width);
+            ApplyLobbyLayout(e.NewSize.Width, e.NewSize.Height);
             ApplyRoomLayout(e.NewSize.Width);
             // A knock never takes the whole page: past this it scrolls.
             KnockScroll.MaxHeight = Math.Max(180, e.NewSize.Height * 0.55);
@@ -115,10 +115,15 @@ public partial class MultiplayerPage : UserControl
 
     internal enum LobbyArrangement { SideBySide, Stacked, JoinFirst }
 
-    private void ApplyLobbyLayout(double width)
+    private void ApplyLobbyLayout(double width, double height)
     {
         var layout = width >= 820 ? LobbyArrangement.SideBySide : width >= 560 ? LobbyArrangement.Stacked : LobbyArrangement.JoinFirst;
         LobbyLayout = layout;
+        // Short medium windows need the same reachable actions as narrow ones even though the cards still stack.
+        var compactActions = layout != LobbyArrangement.SideBySide && height <= 640;
+        CompactLobbyBar.IsVisible = compactActions;
+        // The compact bottom bar owns the submit action, so the same button is not repeated at the end of the card.
+        LobbyJoinButton.IsVisible = !compactActions;
         var grid = LobbyGrid;
         if (layout == LobbyArrangement.SideBySide)
         {

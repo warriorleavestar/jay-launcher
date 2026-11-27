@@ -71,6 +71,7 @@ public static class Program
               --admin-port 47669 / --no-admin 本机管理接口（只听 127.0.0.1，口令在数据目录的 admin.token；/health 不用口令）
               --seed-only                     只当种子节点帮忙转发（分地区多开几台），不跑目录
               --no-volunteers                 不收志愿节点（玩家自愿帮忙转发的电脑；默认收，网络配置 policy.volunteers 为 false 时也不收）
+              --signed-volunteers             只收用 Jay 账户签名登记的志愿节点（每个节点都知道是谁在运行，可以按人封禁）
               --directory-index 2             备用目录节点（2–4，主目录是 1）：Jay 把房间发给每个在线的目录，一台挂了别的照常。
                                               备用节点要和主节点用同样的 --config、--blocked-words，开登录时复制 login.key 和 accounts.json
           jay-server node status|rooms|bans|nodes  看运行中节点的计数、公开房间、封禁名单、志愿中转
@@ -79,9 +80,9 @@ public static class Program
               绑定后 directory.key、login.key 只以加密形式存在；硬件对不上时节点删除数据目录里的 Jay 文件，运行环境被动过（调试器、注入、
               文件可被别人改、要求的安全启动关了、TPM 不解封）时拒绝运行。--check 只检查不删除。directory --wipe-dry-run 只列出会删什么。
           jay-server node panel               打印网页管理面板的链接（只能在本机打开；远程服务器用 ssh -L 转发端口）
-          jay-server node ban host|room|account|room-host|node <房主指纹|房间编号|账号|房间编号|志愿节点地址> [--for 7d] [--reason 原因]
+          jay-server node ban host|room|account|room-host|node|operator <房主指纹|房间编号|账号|房间编号|志愿节点地址|志愿节点运营者的 Jay 账户> [--for 7d] [--reason 原因]
               封禁房主（换房间也进不了列表）、房间、网络账号（也不能再登录），或者某个房间的房主（指纹 + 他登录的账号）。
-              马上把已经在目录里的房间拿掉；--for 30m/24h/7d 是临时封禁，到点自动解除。node unban host|room|account <...>
+              马上把已经在目录里的房间拿掉；--for 30m/24h/7d 是临时封禁，到点自动解除。node unban host|room|account|node|operator <...>（room-host 封的要分别解封 host 和 account）
           jay-server node remove <房间编号>     只删掉这一个房间（房主续期时会重新审核）
 
         自己的公共网络（连接串 JAYNET2-...）：
@@ -109,7 +110,7 @@ public static class Program
           jay-server network hw-cert --root <根钥匙文件> --request <hardware.request.json> --out <hardware.cert> [--need N] [--secure-boot] [--no-tpm] [--network <网络名>]
               在离线电脑上给节点的硬件签证书（默认：只允许一项硬件标识变化，有 TPM 就必须对上 TPM）。先逐项显示内容和核对码，手打目录节点公钥最后 6 位才签
           jay-server network hw-cert --cosign <hardware.cert> --root <根钥匙文件>
-              另一位信任人在自己的离线电脑上加签（Jay 公共网络要三人中两人；自己的网络看 dirRootsNeed），同样先显示再手打确认
+              另一位信任人在自己的离线电脑上加签（Jay 公共网络看 JayTrust.Need，现在是 3 把里任 2 把；自己的网络看 dirRootsNeed），同样先显示再手打确认
           jay-server node bind --install <证书> [--network <连接串或文件>]  只认签名够数的证书（不加 --network 就是 Jay 信任人）
           jay-server directory --network <连接串或文件> ...     用自己的公共网络当节点（不加就是 Jay 公共网络）
           网络 JSON 的格式见 networks/README.md。
@@ -122,7 +123,7 @@ public static class Program
           jay-server account add|passwd <账号>      加账号 / 改密码（密码在终端输入；脚本里可以用环境变量 JAY_ACCOUNT_PASSWORD）
           jay-server account remove|disable|enable <账号> / account list
           jay-server account 2fa on <账号> [--issuer <网络名>]   开两步验证：打印密钥和 otpauth 地址，用验证器 App 添加
-          jay-server account 2fa off <账号>提交到 Jay 仓库的 networks/ 审核合并后，CI 会用 Jay 注册表钥匙签名，Jay 里显示“已审核”。
+          jay-server account 2fa off <账号>
 
         发版签名（维护者在离线电脑上用，见 docs/security/release-signing.md）：
           jay-server release sums <文件...> [--out SHA256SUMS.txt]  算发布包的 SHA-256 清单
@@ -133,7 +134,7 @@ public static class Program
           jay-server release trust-change --key <发版钥匙文件> --to <新名单文件> --need <几人> --seq <序号> [--from <旧名单文件>] [--chain trust-chain.json]
               换信任人：旧名单里够数的人签了，旧版 Jay 才认新名单（名单文件每行一把完整公钥）
           jay-server release verify <安装包> [--tag <v0.9.0>]   核对安装包、清单、签名和 trust-chain.json（放在安装包旁边）
-          EasyTier 加固版（Yumao-Feather/jay-easytier）的发布也要 2/3 信任人签：prepare 和 verify 加 --component easytier，--tag 用它自己的（例如 jay-v2.6.4-1）
+          EasyTier 加固版（Yumao-Feather/jay-easytier）的发布也要 Jay 发版钥匙签够数（现在是 2 把要 2 把）：prepare 和 verify 加 --component easytier，--tag 用它自己的（例如 jay-v2.6.4-1）
 
         通用选项：--dir <数据目录>（默认是程序旁边的 jay-server-data，也可以用环境变量 JAY_SERVER_DIR）
         """;
@@ -317,7 +318,7 @@ public static class Program
 
     /// <summary>
     /// Release signing for trustees (privacy plan items 2 and 3). Every trustee signs on their own offline machine with
-    /// their own release key (separate from the key that reviews networks); a release needs 2 of the 3. Nothing here can run in CI.
+    /// their own release key (separate from the key that reviews networks); a release needs JayTrust.ReleaseNeed of them (currently 2 of 3). Nothing here can run in CI.
     /// </summary>
     internal static int ReleaseCommand(Options options, TextWriter output, Func<IReadOnlyList<string>, string, string, bool>? confirm = null)
     {
@@ -434,7 +435,7 @@ public static class Program
     /// <summary>公共网络连接串：生成钥匙、签名、检查、显示。</summary>
     internal static int NetworkCommand(Options options, TextWriter output, string? root = null)
     {
-        var sub = options.Positional.FirstOrDefault() ?? throw new ArgumentException("用法：jay-server network init|keygen|sign|cosign|config-hash|check|show|root-key|key-public|paper-check|paper-restore|dir-key|dir-cert");
+        var sub = options.Positional.FirstOrDefault() ?? throw new ArgumentException("用法：jay-server network init|keygen|sign|cosign|config-hash|check|show|root-key|key-public|paper-check|paper-restore|dir-key|dir-cert|hw-cert");
         var rest = options.Positional.Skip(1).ToList();
         switch (sub)
         {
@@ -665,7 +666,7 @@ public static class Program
                     target = existing;
                     var bytes = File.ReadAllBytes(existing);
                     shown = HardwareCertificate.Parse(bytes) ?? throw new InvalidDataException(existing + " 不是有效的硬件证书（有签名对不上，或格式不认识）");
-                    sign = () => HardwareCertificate.Cosign(bytes, TrustCommands.LoadKey(rootFile));
+                    sign = () => HardwareCertificate.Cosign(bytes, TrustCommands.ForUse(TrustCommands.LoadKey(rootFile), release: false));
                 }
                 else
                 {
@@ -677,7 +678,7 @@ public static class Program
                     int? need = options.Get("need") is { } n ? int.Parse(n, System.Globalization.CultureInfo.InvariantCulture) : null;
                     bool? tpm = options.Has("no-tpm") ? false : null;
                     shown = HardwareCertificate.Preview(request, options.Get("network"), need, tpm, options.Has("secure-boot"));
-                    sign = () => HardwareCertificate.Issue(TrustCommands.LoadKey(rootFile), request, options.Get("network"), need, tpm, options.Has("secure-boot"));
+                    sign = () => HardwareCertificate.Issue(TrustCommands.ForUse(TrustCommands.LoadKey(rootFile), release: false), request, options.Get("network"), need, tpm, options.Has("secure-boot"));
                 }
                 if (!ConfirmHardwareCertificate(shown, output)) return 3;
                 var cert = sign();
@@ -698,7 +699,7 @@ public static class Program
                 return 0;
             }
             default:
-                throw new ArgumentException("用法：jay-server network init|keygen|sign|cosign|config-hash|check|show|root-key|key-public|paper-check|paper-restore|dir-key|dir-cert");
+                throw new ArgumentException("用法：jay-server network init|keygen|sign|cosign|config-hash|check|show|root-key|key-public|paper-check|paper-restore|dir-key|dir-cert|hw-cert");
         }
     }
 
@@ -807,7 +808,6 @@ public static class Program
         // The directory only speaks the authenticated channel now; the old flag is accepted so existing scripts keep running.
         if (options.Has("secure-directory-only")) log("--secure-directory-only is the default now and can be removed");
         if (options.Has("no-rate-limit")) builder.WithoutRateLimit();
-        if (options.Has("no-volunteers")) builder.WithoutVolunteers();
         else if (options.Get("rate-limit") is { } rate)
         {
             var parts = rate.Split(',', StringSplitOptions.TrimEntries);
@@ -816,6 +816,8 @@ public static class Program
             var n = parts.Select(int.Parse).ToArray();
             builder.UseRateLimit(n[0], n[1], n[2]);
         }
+        if (options.Has("no-volunteers")) builder.WithoutVolunteers();
+        if (options.Has("signed-volunteers")) builder.RequireSignedVolunteers();
         if (options.Has("no-admin")) builder.WithoutAdmin();
         else builder.UseAdmin(options.GetInt("admin-port", JayNetworkServer.DefaultAdminPort));
         if (!options.Has("seed-only") && LoginFor(root, options, networkId, output) is { } login) builder.UseLogin(login);
@@ -961,6 +963,10 @@ public static class Program
             return 0;
         }
         output.WriteLine(reply.ToJsonString(pretty));
+        if (sub == "ban" && reply["bannedNodes"] is System.Text.Json.Nodes.JsonArray { Count: > 0 } bannedNodes)
+            output.WriteLine($"一起封掉的地址：{string.Join("、", bannedNodes)}（封错了用 node unban node <地址> 解封）");
+        if (sub == "ban" && reply["disputedNotBanned"] is System.Text.Json.Nodes.JsonArray { Count: > 0 } spared)
+            output.WriteLine($"这些地址可能是别人的，只移除、没封：{string.Join("、", spared)}（也可能是同一个人的另一个账户，看看 node nodes）");
         return reply["ok"]?.GetValue<bool>() == true ? 0 : 1;
     }
 
@@ -1347,7 +1353,7 @@ public static class Program
 /// <summary>最简单的参数解析：第一个词是命令，--name value 是选项，--flag 是开关，其余是位置参数。</summary>
 internal sealed class Options
 {
-    private static readonly HashSet<string> Flags = ["accept-eula", "no-mc", "console", "new-seed", "verbose", "accounts", "require-2fa", "seed-only", "no-admin", "no-rate-limit", "secure-directory-only", "no-volunteers", "no-passphrase", "paper", "wipe-dry-run", "check", "secure-boot", "no-tpm"];
+    private static readonly HashSet<string> Flags = ["accept-eula", "no-mc", "console", "new-seed", "verbose", "accounts", "require-2fa", "seed-only", "no-admin", "no-rate-limit", "secure-directory-only", "no-volunteers", "signed-volunteers", "no-passphrase", "paper", "wipe-dry-run", "check", "secure-boot", "no-tpm"];
     private readonly Dictionary<string, string?> _values = new(StringComparer.OrdinalIgnoreCase);
     public string? Command { get; private set; }
     public List<string> Positional { get; } = [];

@@ -146,7 +146,7 @@ public sealed record RoomRekey(string Network, string Secret, int Epoch)
     }
 }
 
-/// <summary>敲门协议的公共部分：2 字节长度前缀的帧（最大 4 KB）、握手的 prologue、名字的清理。</summary>
+/// <summary>敲门协议的公共部分：2 字节长度前缀的帧（最大 32 KB；握手证明身份之前最大 8 KB）、握手的 prologue、名字的清理。</summary>
 public static partial class KnockProtocol
 {
     public const int Port = 47660;
@@ -267,7 +267,7 @@ public static partial class KnockProtocol
     internal static partial Regex MemberIdPattern();
 }
 
-/// <summary>敲门的结果：批准时带凭据；拒绝时带原因（denied / expired / full / removed 已被踢出 / closed 房主没回就断开 / invalid 房主不认这张邀请）。</summary>
+/// <summary>敲门的结果：批准时带凭据；拒绝时带原因（denied / expired / removed 已被踢出 / device 设备验证没过 / account 公共网络账号没过 / closed 房主没回就断开 / invalid 房主不认这张邀请；full 只为兼容保留，这一版的房主不会发）。</summary>
 public sealed record KnockOutcome(RoomCredentials? Credentials, string? Reason, byte[] HostPublicKey)
 {
     public bool Approved => Credentials is not null;
@@ -314,10 +314,12 @@ public static class KnockClient
     /// side's addresses and returns them; they go back in the encrypted ack. Null, or a null result, sends none (the guest
     /// then stays on the relay). No address ever travels in a code or before approval.
     /// </param>
+    /// <param name="hostVerified">Called once the host has answered the handshake (and, with <paramref name="expectedHost"/>,
+    /// proved that key), before this side says anything about itself. Anything after it is between us and the host.</param>
     public static async Task<KnockOutcome> KnockAsync(Stream stream, JayInvite invite, X25519KeyPair me, string name, string version,
         CancellationToken ct = default, TimeSpan? handshakeTimeout = null, TimeSpan? decisionTimeout = null, Public.DeviceFingerprint? device = null,
         string? account = null, byte[]? expectedHost = null, Identity.JayProof? jay = null,
-        Func<DirectAddresses, CancellationToken, Task<DirectAddresses?>>? direct = null)
+        Func<DirectAddresses, CancellationToken, Task<DirectAddresses?>>? direct = null, Action? hostVerified = null)
     {
         var lobbyName = LobbyKeys.LobbyName(invite.LobbyKey);
         var psk = LobbyKeys.KnockPsk(invite.Token);
@@ -335,6 +337,7 @@ public static class KnockClient
             // Checked before this side says anything about itself.
             if (expectedHost is not null && (handshake.RemoteStaticPublicKey is not { } proven || !CryptographicOperations.FixedTimeEquals(proven, expectedHost)))
                 throw new WrongHostException(L.T("core.mp.knock.wronghost"));
+            hostVerified?.Invoke();
             // attest = 1：这台电脑支持设备验证（旧版房主不认识这个字段，直接忽略）。
             var about = new JsonObject { ["v"] = 1, ["name"] = KnockProtocol.SanitizeName(name), ["ver"] = version, ["attest"] = 1 };
             if (device is not null && hello["device"] is JsonObject ask && handshake.RemoteStaticPublicKey is { } host)
@@ -476,6 +479,19 @@ public sealed class InviteBook(Func<DateTimeOffset>? clock = null)
     public byte[] LobbyKeyCopy()
     {
         lock (_gate) return (byte[])(_lobbyKey ??= RandomNumberGenerator.GetBytes(JayInvite.KeyLength)).Clone();
+    }
+
+    /// <summary>
+    /// A copy of the room's current lobby key, or null when it has none (no usable invite). Every invite of the room
+    /// shares it while it lasts, so the host publishes its hidden entry for as long as it exists.
+    /// </summary>
+    public byte[]? CurrentLobbyKey()
+    {
+        lock (_gate)
+        {
+            PruneLocked();
+            return _lobbyKey is { } key ? (byte[])key.Clone() : null;
+        }
     }
 
     /// <summary>The host's game, written into new invites (invite v3) so the joiner can pick a matching instance.</summary>
@@ -678,7 +694,7 @@ public sealed record KnockLimits
 /// <summary>
 /// 房主的敲门服务：只在大厅里听 47660。流程：
 /// 收 8 字节邀请编号（明文，不认识就断开）→ XXhfspsk0 握手（psk 由邀请令牌派生、第一条消息就混入，令牌不对第一条就失败；双方交换长期身份）→ 第三条消息验证通过时用掉一次邀请 →
-/// 信任列表里的人或勾了“自动批准”的邀请直接批准，否则问房主（120 秒没点算拒绝）→ 加密发回房间凭据或拒绝原因 → 等对方确认。
+/// 信任列表里的人或勾了“自动批准”的邀请直接批准，否则问房主（等多久看 DecisionWait：2 分钟 / 10 分钟 / 一直等；没设时 120 秒，没点算拒绝）→ 加密发回房间凭据或拒绝原因 → 等对方确认。
 /// 同时最多 3 个人在敲；一分钟里失败 10 次就暂停 60 秒。
 /// </summary>
 public sealed class KnockServer : IAsyncDisposable

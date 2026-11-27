@@ -46,8 +46,6 @@ public static class ContactHandshake
         return result;
     }
 
-    public static string SasText(int[] sas) => string.Join(" ", sas.Select(i => Emoji[i]));
-
     /// <summary>
     /// 64 emoji that look different from each other and render on Windows 10, macOS and common Linux fonts
     /// (no variation selectors, no skin tones, no flags).

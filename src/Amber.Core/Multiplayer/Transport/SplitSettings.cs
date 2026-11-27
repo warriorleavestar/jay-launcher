@@ -75,7 +75,28 @@ public sealed record SplitSettings(SplitPolicy Game, SplitPolicy Chat, int Paths
     /// </summary>
     public static SplitSettings ForNewRoom(bool wraps, bool fullLan, SplitSettings requested) => wraps && !fullLan ? requested : None;
 
-    /// <summary>Parses the developer switch: "game,chat[,paths]" with off, auto or strict. Anything else means no split.</summary>
+    /// <summary>
+    /// The developer switch left the number of paths open: at least two, more when there are enough independent relays
+    /// (see <see cref="FitTo"/>). Not part of the room's credentials.
+    /// </summary>
+    internal bool PathsOpen { get; init; }
+
+    /// <summary>
+    /// The number of paths for a new room when the switch left it open: one more than the independent relay groups among
+    /// <paramref name="nodes"/>, at least <see cref="SplitStream.MinLegs"/> and at most <see cref="SplitStream.MaxLegs"/>.
+    /// Members plan their paths from the same node list.
+    /// </summary>
+    public SplitSettings FitTo(IReadOnlyList<string> nodes)
+    {
+        if (!Enabled || !PathsOpen) return this;
+        var paths = Math.Clamp(1 + SplitPathPlanner.IndependentGroups(nodes), SplitStream.MinLegs, SplitStream.MaxLegs);
+        return Create(Game, Chat, paths);
+    }
+
+    /// <summary>
+    /// Parses the developer switch: "game,chat[,paths]" with off, auto or strict. Without a number of paths, a new room uses
+    /// at least two and more when the relays allow (<see cref="FitTo"/>). Anything else means no split.
+    /// </summary>
     internal static SplitSettings FromSwitch(string? value)
     {
         var parts = (value ?? "").Split(',', StringSplitOptions.TrimEntries);
@@ -83,7 +104,7 @@ public sealed record SplitSettings(SplitPolicy Game, SplitPolicy Chat, int Paths
         SplitPolicy? Policy(string s) => s.ToLowerInvariant() switch { "off" => SplitPolicy.Off, "auto" => SplitPolicy.Auto, "strict" => SplitPolicy.Strict, _ => null };
         var paths = parts.Length == 3 && int.TryParse(parts[2], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var n) ? n : parts.Length == 2 ? SplitStream.MinLegs : 0;
         if (Policy(parts[0]) is not { } game || Policy(parts[1]) is not { } chat || paths is < SplitStream.MinLegs or > SplitStream.MaxLegs) return None;
-        return Create(game, chat, paths);
+        return parts.Length == 2 ? Create(game, chat, paths) with { PathsOpen = true } : Create(game, chat, paths);
     }
 
     /// <summary>New settings with fresh random networks for the extra paths.</summary>

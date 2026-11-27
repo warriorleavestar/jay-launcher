@@ -137,7 +137,7 @@ public sealed partial class MultiplayerViewModel
     /// 房主：创建直连房间。和经节点的房间一样是邀请房间：随机的房间凭据、成员表、大厅和敲门；
     /// 大厅密钥 L 在整个房间期间不换（直连桥的 HMAC 钥匙由它派生）。马上发第一张邀请（一次、要房主批准），生成直连邀请码。
     /// </summary>
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanHostFromLobby))]
     private async Task CreateDirectRoomAsync()
     {
         if (!IsIdle) return;
@@ -172,7 +172,9 @@ public sealed partial class MultiplayerViewModel
         {
             var addresses = await direct.PrepareAsync();
             AttachDirect(direct, room);
-            AdoptGameRelay(relay);
+            // Direct rooms never wrap (their credentials use TunnelSettings.Default, General): in whole-LAN mode guests
+            // reach the virtual address.
+            AdoptGameRelay(relay, RelayOnAdapter(FullLanMode, credentials.Tunnel.Wraps));
             relay = null;
             Mode = "host";
             RoomCodeText = "";

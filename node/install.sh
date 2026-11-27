@@ -9,7 +9,7 @@
 #   sudo bash install.sh
 # 可选环境变量 / optional environment variables:
 #   PORT=11010            监听端口（TCP 和 UDP）/ listen port (TCP and UDP)
-#   RELAY=amber           amber：只转发 Amber 联机房间（网络名 amber-*）；all：转发所有 EasyTier 网络
+#   RELAY=amber           amber：只转发 Jay 联机房间（网络名 jay-* 和 amber-*）；all：转发所有 EasyTier 网络
 #   NODE_NAME=我的节点     分享码里显示的名字 / name shown in the share code
 #   PUBLIC_HOST=1.2.3.4   公网 IP 或域名（不填就从本机网卡猜）/ public IP or domain (guessed if empty)
 #   BANDWIDTH_LIMIT=0     转发别的网络的限速，字节/秒，0 不限 / relay limit for foreign networks, bytes/s, 0 = none
@@ -91,7 +91,9 @@ install -m 0755 "$CORE" "$INSTALL_DIR/easytier-core"
 # The node joins no room: a random network name/secret only gives it an identity; it cannot decrypt rooms.
 NODE_NET="amber-node-$(head -c 6 /dev/urandom | od -An -tx1 | tr -d ' \n')"
 NODE_SECRET="$(head -c 18 /dev/urandom | od -An -tx1 | tr -d ' \n')"
-if [ "$RELAY" = "amber" ]; then WHITELIST="amber-*"; else WHITELIST="*"; fi
+# Jay names invite rooms, their lobbies and extra paths jay-…, and rooms opened with a room code amber-….
+# The list is one argument: EasyTier splits it at spaces.
+if [ "$RELAY" = "amber" ]; then WHITELIST="jay-* amber-*"; else WHITELIST="*"; fi
 
 ARGS="--network-name ${NODE_NET} --network-secret ${NODE_SECRET} --no-tun"
 ARGS="${ARGS} --listeners tcp://0.0.0.0:${PORT} udp://0.0.0.0:${PORT}"
