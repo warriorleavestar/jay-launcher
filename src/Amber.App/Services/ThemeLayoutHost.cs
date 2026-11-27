@@ -54,8 +54,9 @@ public sealed class ThemeLayoutHost
         _view = view;
         _pageId = pageId;
         _original = (Control)view.Content!;
+        // Only regions a theme can place for this page: detaching any other tagged control would lose it.
         foreach (var c in _original.GetSelfAndLogicalDescendants().OfType<Control>())
-            if (ThemeRegion.GetName(c) is { } name) _regions[name] = c;
+            if (ThemeRegion.GetName(c) is { } name && ThemeLayout.IsPlaceableRegion(pageId, name)) _regions[name] = c;
         if (_original is Panel root)
             foreach (var child in root.Children)
                 if (child.ZIndex > 0 && !_regions.Values.Any(r => ReferenceEquals(r, child) || r.GetLogicalAncestors().Contains(child)))

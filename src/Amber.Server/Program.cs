@@ -35,7 +35,7 @@ public static class Program
           jay-server cancel-invite <编号>
           jay-server revoke <用户名> [<设备码前几位>]          撤销设备（不写设备码就撤销全部）
           jay-server disable <用户名> / enable <用户名>
-          jay-server remove <用户名>
+          jay-server remove <用户名>                          移出名单，并作废给这个名字的邀请
           jay-server online-mode on|off                        正版验证（默认 off：离线账号，由网关核对用户名）
 
         隐私+（玩家经两个不同节点各走一半，源站地址不外传）：
@@ -71,6 +71,8 @@ public static class Program
               --admin-port 47669 / --no-admin 本机管理接口（只听 127.0.0.1，口令在数据目录的 admin.token；/health 不用口令）
               --seed-only                     只当种子节点帮忙转发（分地区多开几台），不跑目录
               --no-volunteers                 不收志愿节点（玩家自愿帮忙转发的电脑；默认收，网络配置 policy.volunteers 为 false 时也不收）
+              --relay-limit-kbps 2048         经这台节点转发别的网络（房间）时，每个网络最多多少 KB/s（默认不限；公共网络本身不受限）
+              --relay-networks "<名字> ..."   只给这些 EasyTier 网络转发（空格分开，可用 * 通配；默认全部）
               --signed-volunteers             只收用 Jay 账户签名登记的志愿节点（每个节点都知道是谁在运行，可以按人封禁）
               --directory-index 2             备用目录节点（2–4，主目录是 1）：Jay 把房间发给每个在线的目录，一台挂了别的照常。
                                               备用节点要和主节点用同样的 --config、--blocked-words，开登录时复制 login.key 和 accounts.json
@@ -82,7 +84,8 @@ public static class Program
           jay-server node panel               打印网页管理面板的链接（只能在本机打开；远程服务器用 ssh -L 转发端口）
           jay-server node ban host|room|account|room-host|node|operator <房主指纹|房间编号|账号|房间编号|志愿节点地址|志愿节点运营者的 Jay 账户> [--for 7d] [--reason 原因]
               封禁房主（换房间也进不了列表）、房间、网络账号（也不能再登录），或者某个房间的房主（指纹 + 他登录的账号）。
-              马上把已经在目录里的房间拿掉；--for 30m/24h/7d 是临时封禁，到点自动解除。node unban host|room|account|node|operator <...>（room-host 封的要分别解封 host 和 account）
+              马上把已经在目录里的房间拿掉；--for 30m/24h/7d 是临时封禁，到点自动解除。node unban host|room|account|node|operator <...>（room-host 封的要分别解封 host 和 account；
+              同名的账号封禁既有精确的、又有旧版不分大小写的（node bans 里标 "anyCase"）时，要加 --exact 或 --any-case 指定解哪一条）
           jay-server node remove <房间编号>     只删掉这一个房间（房主续期时会重新审核）
 
         自己的公共网络（连接串 JAYNET2-...）：
@@ -131,9 +134,11 @@ public static class Program
           jay-server release prepare --tag <v0.9.0> --seq <序号> --commit <40 位提交号> [--sums SHA256SUMS.txt] [--out SHA256SUMS.txt.sigs]
               写出还没人签的发布签名文件（序号每次发布加 1）
           jay-server release cosign --key <发版钥匙文件> [--sums SHA256SUMS.txt] [--sigs SHA256SUMS.txt.sigs]
-              信任人在离线电脑上看清要签的版本、提交号和文件清单，手打版本号后签；3 人里要 2 人
+              信任人在离线电脑上看清要签的版本、提交号和文件清单，手打版本号后签；发版钥匙要签够数（JayTrust.ReleaseNeed，现在是 2 把要 2 把）
           jay-server release trust-change --key <发版钥匙文件> --to <新名单文件> --need <几人> --seq <序号> [--from <旧名单文件>] [--chain trust-chain.json]
-              换信任人：旧名单里够数的人签了，旧版 Jay 才认新名单（名单文件每行一把完整公钥）
+              [--cosign-sums <SHA256SUMS.txt> [--cosign-sigs <SHA256SUMS.txt.sigs>]]
+              换信任人：旧名单里够数的人签了，旧版 Jay 才认新名单（名单文件每行一把完整公钥）；
+              加 --cosign-sums 时同一次还签一份写新名单的发布签名（两样都核对，口令只输一次）
           jay-server release verify <安装包> [--tag <v0.9.0>]   核对安装包、清单、签名和 trust-chain.json（放在安装包旁边）
           EasyTier 加固版（Yumao-Feather/jay-easytier）的发布也要 Jay 发版钥匙签够数（现在是 2 把要 2 把）：prepare 和 verify 加 --component easytier，--tag 用它自己的（例如 jay-v2.6.4-1）
 
@@ -370,8 +375,8 @@ public static class Program
                 var sums = File.ReadAllBytes(sumsPath);
                 var lines = TrustCommands.DescribeRelease(manifest, sums, options.Get("trust") is { } t ? ReadTrustList(t, options.Get("need")) : TrustList.Jay);
                 var tag = ReleaseManifest.Parse(manifest)!.Statement.Tag;
-                if (!confirm(lines, "版本号", tag)) return 3;
-                var signed = ReleaseSignature.Cosign(manifest, TrustCommands.ForUse(TrustCommands.LoadKey(keyPath), release: true));
+                if (!TrustCommands.ConfirmWithRetry(confirm, lines, "版本号", tag, output)) return 3;
+                var signed = ReleaseSignature.Cosign(manifest, TrustCommands.ForUse(TrustCommands.LoadKeyWithRetry(keyPath, output), release: true));
                 var outPath = options.Get("out") ?? sigsPath;
                 File.WriteAllText(outPath, signed);
                 output.WriteLine($"已签 {tag}，写入 {outPath}。签够 2 位后，把它和 SHA256SUMS.txt 一起上传到同一个 Release。");
@@ -386,10 +391,47 @@ public static class Program
                 var seq = long.Parse(options.Get("seq") ?? throw new ArgumentException("要用 --seq 指定这次换名单的序号（不小于上一版发布序号）"), System.Globalization.CultureInfo.InvariantCulture);
                 var chainPath = options.Get("chain") ?? ReleaseSignature.ChainFileName;
                 var chain = File.Exists(chainPath) ? File.ReadAllText(chainPath) : null;
-                if (!confirm(TrustCommands.DescribeTrustChange(from, to, seq), "新名单编号", TrustCommands.CodeOf(to.Hash))) return 3;
-                File.WriteAllText(options.Get("out") ?? chainPath, TrustChain.Cosign(chain, from, to.Keys, to.Need, seq, TrustCommands.ForUse(TrustCommands.LoadKey(keyPath), release: true)));
-                output.WriteLine($"已签换名单，写入 {options.Get("out") ?? chainPath}。旧名单里签够 {from.Need} 位后，把它放进之后每个 Release。");
-                return 0;
+                // --cosign-sums: in the same run, also cosign a release or EasyTier manifest that names the new list, so a
+                // trustee confirms both, types the passphrase once and signs both with the same key.
+                var alsoSums = options.Get("cosign-sums");
+                var alsoSigs = alsoSums is null ? null
+                    : options.Get("cosign-sigs") ?? Path.Combine(Path.GetDirectoryName(Path.GetFullPath(alsoSums)) ?? ".", ReleaseSignature.SignatureFileName);
+                if (!TrustCommands.ConfirmWithRetry(confirm, TrustCommands.DescribeTrustChange(from, to, seq), "新名单编号", TrustCommands.CodeOf(to.Hash), output)) return 3;
+                string? alsoManifest = null, alsoTag = null;
+                if (alsoSums is not null)
+                {
+                    alsoManifest = File.ReadAllText(alsoSigs!);
+                    alsoTag = ReleaseManifest.Parse(alsoManifest)?.Statement.Tag ?? throw new InvalidDataException($"{alsoSigs} 格式不对");
+                    if (!TrustCommands.ConfirmWithRetry(confirm, TrustCommands.DescribeRelease(alsoManifest, File.ReadAllBytes(alsoSums), to), "版本号", alsoTag, output)) return 3;
+                }
+                var signer = TrustCommands.ForUse(TrustCommands.LoadKeyWithRetry(keyPath, output), release: true);
+                var chainOut = options.Get("out") ?? chainPath;
+                var failed = false;
+                try
+                {
+                    File.WriteAllText(chainOut, TrustChain.Cosign(chain, from, to.Keys, to.Need, seq, signer));
+                    output.WriteLine($"已签换名单，写入 {chainOut}。旧名单里签够 {from.Need} 位后，把它放进之后每个 Release。");
+                }
+                catch (InvalidDataException e) when (alsoSums is not null)
+                {
+                    // Keep going so the second signature still happens (for example when this key already signed the change).
+                    output.WriteLine($"换名单没有签：{e.Message}");
+                    failed = true;
+                }
+                if (alsoSums is not null)
+                {
+                    try
+                    {
+                        File.WriteAllText(alsoSigs!, ReleaseSignature.Cosign(alsoManifest!, signer));
+                        output.WriteLine($"已签 {alsoTag}，写入 {alsoSigs}。");
+                    }
+                    catch (InvalidDataException e)
+                    {
+                        output.WriteLine($"{alsoTag} 没有签：{e.Message}");
+                        failed = true;
+                    }
+                }
+                return failed ? 4 : 0;
             }
             case "verify":
             {
@@ -408,14 +450,14 @@ public static class Program
 
     internal static string DescribeVerdict(ReleaseCheck check, string package) => check.Verdict switch
     {
-        ReleaseVerdict.Valid => $"通过：{package} 是 {check.Tag}（第 {check.Seq} 版）的正式发布包，够数的 Jay 信任人签过。",
+        ReleaseVerdict.Valid => $"通过：{package} 是 {check.Tag}（第 {check.Seq} 版）的正式发布包，Jay 发版钥匙签够了数。",
         ReleaseVerdict.Unsigned => "没有签名：安装包旁边找不到 SHA256SUMS.txt 和 SHA256SUMS.txt.sigs。",
         ReleaseVerdict.NoTrustedKey => "这个版本的程序里还没有信任人公钥，没法核对。",
         ReleaseVerdict.Malformed => "签名文件格式不对。",
         ReleaseVerdict.SumsMismatch => "签名文件和 SHA256SUMS.txt 对不上（清单被改过）。不要安装。",
         ReleaseVerdict.Rollback => $"{check.Tag} 比已经装过的版本旧。不要安装。",
         ReleaseVerdict.BrokenChain => "这个版本写的信任人名单，从程序自带的名单接不上（trust-chain.json 缺了或签得不够）。不要安装。",
-        ReleaseVerdict.NotEnoughSignatures => "签的信任人不够（要 3 人里 2 人，两种签名都要对）。不要安装。",
+        ReleaseVerdict.NotEnoughSignatures => $"发版钥匙签得不够数（{JayTrust.ReleaseKeys.Count} 把里要 {JayTrust.ReleaseNeed} 把，两种签名都要对）。不要安装。",
         ReleaseVerdict.WrongTag => $"签名属于 {check.Tag}，不是你要的版本。不要安装。",
         ReleaseVerdict.NotListed => "清单里没有这个文件名。",
         ReleaseVerdict.HashMismatch => "安装包的 SHA-256 和清单不一样（文件被改过或没下载完整）。不要安装。",
@@ -809,6 +851,8 @@ public static class Program
         }
         // The directory only speaks the authenticated channel now; the old flag is accepted so existing scripts keep running.
         if (options.Has("secure-directory-only")) log("--secure-directory-only is the default now and can be removed");
+        if (options.Has("no-rate-limit") && options.Has("rate-limit"))
+            throw new ArgumentException("--no-rate-limit 和 --rate-limit 不能同时用");
         if (options.Has("no-rate-limit")) builder.WithoutRateLimit();
         else if (options.Get("rate-limit") is { } rate)
         {
@@ -820,6 +864,17 @@ public static class Program
         }
         if (options.Has("no-volunteers")) builder.WithoutVolunteers();
         if (options.Has("signed-volunteers")) builder.RequireSignedVolunteers();
+        if (options.Get("relay-limit-kbps") is not null || options.Get("relay-networks") is not null)
+        {
+            var kbps = options.GetInt("relay-limit-kbps", 0);
+            if (kbps < 0) throw new ArgumentException("--relay-limit-kbps 不能是负数");
+            var networks = options.Get("relay-networks");
+            // EasyTier reads an empty whitelist as "relay nothing", which is easy to set by accident; ask for names instead.
+            if (networks is not null && string.IsNullOrWhiteSpace(networks))
+                throw new ArgumentException("--relay-networks 不能是空的：填要转发的网络名（空格分开，可用 *），不想限制就不要给这个选项");
+            builder.UseRelayLimits(kbps, networks);
+            log($"给别的网络转发：{(kbps > 0 ? $"每个网络最多 {kbps} KB/s" : "不限带宽")}，{networks ?? "所有网络"}");
+        }
         if (options.Has("no-admin")) builder.WithoutAdmin();
         else builder.UseAdmin(options.GetInt("admin-port", JayNetworkServer.DefaultAdminPort));
         if (!options.Has("seed-only") && LoginFactorsFor(options, networkId) is { } factors)
@@ -965,7 +1020,17 @@ public static class Program
                     ["kind"] = Need(0, "host、room、account 或 room-host"), ["value"] = Need(1, "房主指纹、房间编号或账号"), ["reason"] = options.Get("reason"),
                     ["for"] = options.Get("for") is { } span ? BanSeconds(span) : null,
                 }),
-                "unban" => await client.CallAsync("POST", "/unban", new() { ["kind"] = Need(0, "host、room 或 account"), ["value"] = Need(1, "房主指纹、房间编号或账号") }),
+                "unban" => await client.CallAsync("POST", "/unban", new()
+                {
+                    ["kind"] = Need(0, "host、room 或 account"), ["value"] = Need(1, "房主指纹、房间编号或账号"),
+                    ["match"] = (options.Has("any-case"), options.Has("exact")) switch
+                    {
+                        (true, true) => throw new ArgumentException("--any-case 和 --exact 只能选一个"),
+                        (true, false) => "anyCase",
+                        (false, true) => "exact",
+                        _ => null,
+                    },
+                }),
                 "remove" => await client.CallAsync("POST", "/remove", new() { ["id"] = Need(0, "房间编号") }),
                 _ => throw new ArgumentException("用法：jay-server node status|rooms|bans|nodes|panel|ban|unban|remove"),
             };
@@ -982,6 +1047,8 @@ public static class Program
             return 0;
         }
         output.WriteLine(reply.ToJsonString(pretty));
+        if (sub == "unban" && reply["error"]?.GetValue<string>() == "ambiguous")
+            output.WriteLine("这个名字既有精确的账号封禁，又有旧版不分大小写的封禁（node bans 里标 \"anyCase\"）：加 --exact 只解精确的那条，或加 --any-case 只解旧的那条。");
         if (sub == "ban" && reply["bannedNodes"] is System.Text.Json.Nodes.JsonArray { Count: > 0 } bannedNodes)
             output.WriteLine($"一起封掉的地址：{string.Join("、", bannedNodes)}（封错了用 node unban node <地址> 解封）");
         if (sub == "ban" && reply["disputedNotBanned"] is System.Text.Json.Nodes.JsonArray { Count: > 0 } spared)
@@ -1146,8 +1213,18 @@ public static class Program
                 return 0;
             case "revoke":
             {
-                var n = store.RevokeDevices(Arg(0, "用户名"), options.Positional.ElementAtOrDefault(1));
+                var name = Arg(0, "用户名");
+                var n = store.RevokeDevices(name, options.Positional.ElementAtOrDefault(1));
                 output.WriteLine(n == 0 ? "没找到要撤销的设备。" : $"撤销了 {n} 台设备，它们之后进不来了（网关在运行时，几秒内会断开它们在线的连接）。");
+                var open = store.OpenInvitesFor(name);
+                if (n > 0 && open.Count > 0)
+                {
+                    // Invites made before the revoke add no device any more: they only let devices still on the name enroll again.
+                    output.WriteLine($"{name} 还有没用完的邀请（只能让还在名下的设备重新登记，不能再添设备；换设备请发新邀请：jay-server invite {name}）：");
+                    foreach (var i in open)
+                        output.WriteLine($"    {i.Id}  剩 {i.UsesLeft} 次  到期 {i.Expires.ToLocalTime():yyyy-MM-dd HH:mm}");
+                    output.WriteLine("不想让它们再用，就作废：jay-server cancel-invite <编号>");
+                }
                 return 0;
             }
             case "disable":
@@ -1155,8 +1232,12 @@ public static class Program
                 output.WriteLine(store.SetDisabled(Arg(0, "用户名"), options.Command == "disable") ? "好了。" : "名单里没有这个人。");
                 return 0;
             case "remove":
-                output.WriteLine(store.RemoveMember(Arg(0, "用户名")) ? "已从名单移除。" : "名单里没有这个人。");
+            {
+                var (removed, cancelled) = store.RemoveMemberAndInvites(Arg(0, "用户名"));
+                output.WriteLine(removed ? "已从名单移除。" : "名单里没有这个人。");
+                if (cancelled.Count > 0) output.WriteLine($"同时作废了给这个名字的 {cancelled.Count} 份邀请：{string.Join(", ", cancelled)}");
                 return 0;
+            }
             case "online-mode":
             {
                 var on = Arg(0, "on 或 off") switch { "on" => true, "off" => false, _ => throw new ArgumentException("只能是 on 或 off") };
@@ -1371,7 +1452,7 @@ public static class Program
 /// <summary>最简单的参数解析：第一个词是命令，--name value 是选项，--flag 是开关，其余是位置参数。</summary>
 internal sealed class Options
 {
-    private static readonly HashSet<string> Flags = ["accept-eula", "no-mc", "console", "new-seed", "verbose", "accounts", "require-2fa", "seed-only", "no-admin", "no-rate-limit", "secure-directory-only", "no-volunteers", "signed-volunteers", "no-passphrase", "paper", "wipe-dry-run", "check", "secure-boot", "no-tpm"];
+    private static readonly HashSet<string> Flags = ["accept-eula", "no-mc", "console", "new-seed", "verbose", "accounts", "require-2fa", "seed-only", "no-admin", "no-rate-limit", "secure-directory-only", "no-volunteers", "signed-volunteers", "no-passphrase", "paper", "wipe-dry-run", "check", "secure-boot", "no-tpm", "any-case", "exact"];
     private readonly Dictionary<string, string?> _values = new(StringComparer.OrdinalIgnoreCase);
     public string? Command { get; private set; }
     public List<string> Positional { get; } = [];

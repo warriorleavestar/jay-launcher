@@ -137,7 +137,7 @@ public class MiddleEllipsisTests
     }
 
     /// <summary>只初始化渲染平台，离屏检查真实控件，不启动启动器或读写游戏目录。</summary>
-    [Fact]
+    [WindowsFact]
     public void ControlSelfCheckUsesRealTextLayoutWithoutInvalidationLoops()
     {
         if (!OperatingSystem.IsWindows()) return;

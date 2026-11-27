@@ -11,11 +11,12 @@ PORT="${PORT:-11010}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 BIN_DIR=/opt/jay-server
 DATA=/var/lib/jay-network
-UNIT=/etc/systemd/system/jay-network.service
+# UNIT_DIR: where the unit file goes; only the script tests point it elsewhere.
+UNIT="${UNIT_DIR:-/etc/systemd/system}/jay-network.service"
 # Its own user: a Minecraft server run by jay-server (user `jay`) on the same machine can't read the node's keys.
 SVC_USER=jay-network
 
-[[ $EUID -eq 0 ]] || { echo "要用 sudo 运行"; exit 1; }
+[[ "$(id -u)" -eq 0 ]] || { echo "要用 sudo 运行"; exit 1; }
 [[ -x "$HERE/jay-server" ]] || { echo "没找到 $HERE/jay-server：在解压好的 JayServer 文件夹里运行这个脚本"; exit 1; }
 command -v systemctl >/dev/null || { echo "这台机器没有 systemd；直接运行 ./jay-server directory 或者用 server/docker"; exit 1; }
 [[ "$PORT" =~ ^[0-9]+$ ]] && (( PORT >= 1 && PORT <= 65535 )) || { echo "PORT 要是 1–65535"; exit 1; }
@@ -42,8 +43,9 @@ if [[ -n "${BLOCKED_WORDS:-}" ]]; then copy "$BLOCKED_WORDS" blocked-words.txt; 
 [[ -n "${EXTRA:-}" ]] && ARGS+=(${EXTRA})
 
 # The node user may use the TPM (hardware binding, docs/security/node-hardware-binding.md) when the tss group exists.
+# The service gets the group through the unit; the user joins it too, so `sudo -u jay-network ... node bind` sees the TPM.
 TPM_GROUP=""
-if getent group tss >/dev/null; then TPM_GROUP="SupplementaryGroups=tss"; fi
+if getent group tss >/dev/null; then TPM_GROUP="SupplementaryGroups=tss"; usermod -aG tss "$SVC_USER"; fi
 
 cat > "$UNIT" <<UNIT
 # 由 install-network-node.sh 生成。改参数：改这里的 ExecStart，然后 systemctl daemon-reload && systemctl restart jay-network
@@ -91,7 +93,9 @@ elif command -v firewall-cmd >/dev/null && firewall-cmd --state >/dev/null 2>&1;
 fi
 
 systemctl daemon-reload
-systemctl enable --now jay-network
+systemctl enable jay-network
+# restart, not start: a re-run must replace a node that is already running with the new settings.
+systemctl restart jay-network
 echo
 echo "装好了。看日志：journalctl -u jay-network -f"
 echo "看状态：sudo -u $SVC_USER JAY_SERVER_DIR=$DATA $BIN_DIR/jay-server node status"

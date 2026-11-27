@@ -321,7 +321,7 @@ public class M5Tests : IDisposable
     }
 
     /// <summary>真的交给 cmd（且调用者开着延迟展开），验证目标进程收到原始参数，而不是只检查脚本文字。</summary>
-    [Fact]
+    [WindowsFact]
     public async Task LaunchScript_WindowsPreservesMetacharactersAndEmbeddedQuotes()
     {
         if (!OperatingSystem.IsWindows()) return;
@@ -356,7 +356,7 @@ public class M5Tests : IDisposable
         Assert.Equal(expected, System.Text.Json.JsonSerializer.Deserialize<string[]>(File.ReadAllText(result)));
     }
 
-    [Fact]
+    [UnixFact]
     public void LaunchScript_OnUnixQuotesPathsAndIsExecutable()
     {
         if (OperatingSystem.IsWindows()) return;

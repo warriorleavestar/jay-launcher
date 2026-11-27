@@ -116,23 +116,96 @@ public static class VolunteerNodes
 
     /// <summary>
     /// Default reachability check the directory runs before listing a volunteer: resolve the host, refuse it if any
-    /// address is not public, then open (and close) a TCP connection within 5 seconds.
+    /// address is not public, then open (and close) a TCP connection, all within <see cref="CheckTimeout"/>.
     /// </summary>
     public static async Task<bool> ProbeAsync(string url, CancellationToken ct)
     {
-        if (Normalize(url) is not { } normalized) return false;
+        using var total = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        total.CancelAfter(CheckTimeout);
+        return await ResolveAsync(url, total.Token) is { } address && await ConnectAsync(address, new Uri(Normalize(url)!).Port, total.Token);
+    }
+
+    /// <summary>
+    /// Lookup and connection together, for one check: short enough that a "probe" reply still fits the request's
+    /// deadline after a slow handshake (<see cref="RoomDirectoryProtocol.HandshakeTimeout"/> of the 10 s exchange).
+    /// </summary>
+    public static readonly TimeSpan CheckTimeout = TimeSpan.FromSeconds(4);
+
+    /// <summary>
+    /// The one address the directory will dial for <paramref name="url"/>: the host resolved once (within 5 seconds, less when <paramref name="ct"/> says so), or
+    /// null when it doesn't resolve or any of its addresses is not public.
+    /// </summary>
+    public static async Task<IPAddress?> ResolveAsync(string url, CancellationToken ct)
+    {
+        if (Normalize(url) is not { } normalized) return null;
         var uri = new Uri(normalized);
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
         deadline.CancelAfter(TimeSpan.FromSeconds(5));
         try
         {
             var addresses = IPAddress.TryParse(uri.Host.Trim('[', ']'), out var literal) ? [literal] : await Dns.GetHostAddressesAsync(uri.DnsSafeHost, deadline.Token);
-            if (addresses.Length == 0 || !addresses.All(IsPublic)) return false;
-            using var client = new TcpClient(addresses[0].AddressFamily);
-            await client.ConnectAsync(addresses[0], uri.Port, deadline.Token);
+            return addresses.Length > 0 && addresses.All(IsPublic) ? addresses[0] : null;
+        }
+        catch (Exception e) when (e is SocketException or OperationCanceledException or IOException or ArgumentException) { return null; }
+    }
+
+    /// <summary>Opens (and closes) a TCP connection to an address already resolved, within 5 seconds (less when <paramref name="ct"/> says so).</summary>
+    public static async Task<bool> ConnectAsync(IPAddress address, int port, CancellationToken ct)
+    {
+        if (!IsPublic(address)) return false;
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        deadline.CancelAfter(TimeSpan.FromSeconds(5));
+        try
+        {
+            using var client = new TcpClient(address.AddressFamily);
+            await client.ConnectAsync(address, port, deadline.Token);
             return true;
         }
         catch (Exception e) when (e is SocketException or OperationCanceledException or IOException or ArgumentException) { return false; }
+    }
+
+    /// <summary>
+    /// Is a node of network <paramref name="networkName"/> listening at <paramref name="address"/>:<paramref name="port"/>?
+    /// Opens a TCP connection, sends the opening of an EasyTier peer handshake (network name only, no secret) and waits
+    /// for the node's handshake back under that network's name, then closes; within 5 seconds (less when
+    /// <paramref name="ct"/> says so). Any other service at that port (a web or game server, say) isn't one.
+    /// </summary>
+    public static Task<bool> IsNetworkNodeAsync(IPAddress address, int port, string networkName, CancellationToken ct) =>
+        IsPublic(address) ? AnswersAsNodeAsync(address, port, networkName, ct) : Task.FromResult(false);
+
+    /// <summary><see cref="IsNetworkNodeAsync"/> for any address (tests dial this machine).</summary>
+    internal static async Task<bool> AnswersAsNodeAsync(IPAddress address, int port, string networkName, CancellationToken ct)
+    {
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        deadline.CancelAfter(TimeSpan.FromSeconds(5));
+        try
+        {
+            using var client = new TcpClient(address.AddressFamily);
+            await client.ConnectAsync(address, port, deadline.Token);
+            var stream = client.GetStream();
+            await stream.WriteAsync(NodeHandshake.Request(networkName, RandomNumberGenerator.GetInt32(1, int.MaxValue)), deadline.Token);
+            var length = new byte[4];
+            await stream.ReadExactlyAsync(length, deadline.Token);
+            var body = BinaryPrimitives.ReadUInt32LittleEndian(length);
+            if (body is < NodeHandshake.HeaderSize or > NodeHandshake.MaxReply) return false;
+            var reply = new byte[body];
+            await stream.ReadExactlyAsync(reply, deadline.Token);
+            return NodeHandshake.IsReply(reply, networkName);
+        }
+        catch (Exception e) when (e is SocketException or OperationCanceledException or IOException or ArgumentException or EndOfStreamException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>The machine an address belongs to, for per-machine caps: the IPv4 address, or the /64 of an IPv6 one.</summary>
+    public static string MachineOf(IPAddress address)
+    {
+        if (address.IsIPv4MappedToIPv6) address = address.MapToIPv4();
+        if (address.AddressFamily != AddressFamily.InterNetworkV6) return address.ToString();
+        var bytes = address.GetAddressBytes();
+        Array.Clear(bytes, 8, 8);
+        return new IPAddress(bytes) + "/64";
     }
 }
 
@@ -254,7 +327,13 @@ public sealed record VolunteerEntry(string Url, string? Operator, IReadOnlyList<
 /// and only listed once the probe succeeded (re-probed every hour). Unrenewed entries drop out after
 /// <see cref="VolunteerNodes.Ttl"/>.
 /// </summary>
-public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>>? probe = null, Func<DateTimeOffset>? clock = null)
+/// <param name="resolve">
+/// Resolves an address to the one IP the directory dials, for the per-machine cap. Defaults to
+/// <see cref="VolunteerNodes.ResolveAsync"/> when <paramref name="probe"/> is the default too; with a custom probe and no
+/// resolver, only the host name counts.
+/// </param>
+public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>>? probe = null, Func<DateTimeOffset>? clock = null,
+    Func<string, CancellationToken, Task<IPAddress?>>? resolve = null) : IAsyncDisposable
 {
     public const int MaxEntries = 256;
     public static readonly TimeSpan ReprobeEvery = TimeSpan.FromHours(1);
@@ -281,12 +360,26 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
         public DateTimeOffset Seen;
         public DateTimeOffset? VerifiedAt;
         public bool Probing;
+        /// <summary>The machine it resolved to (<see cref="VolunteerNodes.MachineOf"/>), once known.</summary>
+        public string? Machine;
+        /// <summary>The address it resolved to, once known: with the port, the listener it names.</summary>
+        public string? Ip;
+        /// <summary>Being dialled now (counts against its machine's <see cref="MaxProbingPerHost"/>).</summary>
+        public bool Dialing;
+        /// <summary>Its place in the line for a turn to be dialled (first come, first served), and which line (its machine, or its name unresolved).</summary>
+        public long? Ticket;
+        public string? Queue;
     }
 
-    private readonly Func<string, CancellationToken, Task<bool>> _probe = probe ?? VolunteerNodes.ProbeAsync;
+    private readonly Func<string, CancellationToken, Task<bool>>? _customProbe = probe;
+    private readonly Func<string, CancellationToken, Task<IPAddress?>>? _resolve = resolve ?? (probe is null ? VolunteerNodes.ResolveAsync : null);
     private readonly Func<DateTimeOffset> _now = clock ?? (() => DateTimeOffset.UtcNow);
     private readonly Dictionary<string, Entry> _entries = new(StringComparer.Ordinal);
     private readonly Lock _gate = new();
+    private long _tickets;
+    /// <summary>Cancelled when the registry is disposed: checks still waiting or dialling stop.</summary>
+    private readonly CancellationTokenSource _stopping = new();
+    private readonly HashSet<Task> _probes = [];
 
     /// <summary>Addresses the operator banned (checked on every register and list).</summary>
     public Func<string, bool>? Blocked { get; set; }
@@ -299,6 +392,12 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
 
     /// <summary>The network this directory serves (<see cref="VolunteerOperator.NetworkTag"/>); signed registrations must name it.</summary>
     public string NetworkId { get; init; } = "";
+
+    /// <summary>
+    /// The EasyTier network name of the network. When set (and no custom probe is given), an address is listed only once a
+    /// node of this network answers there (<see cref="VolunteerNodes.IsNetworkNodeAsync"/>), not just any open port.
+    /// </summary>
+    public string? NetworkName { get; init; }
 
     /// <summary>Conflicting claims kept per address.</summary>
     public const int MaxClaims = 4;
@@ -353,6 +452,41 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
     public static readonly TimeSpan CheckSameAddressEvery = TimeSpan.FromSeconds(10);
 
     private readonly Queue<DateTimeOffset> _checks = new();
+
+    /// <summary>Entries one host may have, whatever the port: counted by name, and by the machine it resolves to.</summary>
+    public const int MaxPerHost = 2;
+
+    /// <summary>
+    /// Entries of one machine (or one name, unresolved) the directory dials at once to check them. More than the new
+    /// addresses the whole directory takes can keep busy (<see cref="NewPerMinute"/> unsigned plus as many signed, each
+    /// held at most <see cref="ListingDialTimeout"/>), so registrations that hang can't keep a host's real node from being
+    /// checked. The others wait their turn in the order they came.
+    /// </summary>
+    public const int MaxProbingPerHost = 8;
+
+    /// <summary>How long the check before listing waits for the node to answer (a node answers within a round trip).</summary>
+    public static readonly TimeSpan ListingDialTimeout = TimeSpan.FromSeconds(2.5);
+
+    /// <summary>How often an entry waiting for its turn looks again, and how long it waits before its next renewal takes over.</summary>
+    internal TimeSpan WaitStep { get; init; } = TimeSpan.FromMilliseconds(250);
+    internal TimeSpan MaxWait { get; init; } = VolunteerNodes.RenewEvery;
+
+    /// <summary>
+    /// After a probe fails, the address and port it resolved to aren't dialled again for this long, under any name.
+    /// The failed entry is dropped at once, so without this a caller could register the same target again and again
+    /// under many names. Keyed by exact address and port, so a failing port, or a failing address in the same IPv6 /64,
+    /// can't keep a real node off the list.
+    /// </summary>
+    public static readonly TimeSpan FailedCooldown = TimeSpan.FromMinutes(2);
+    private readonly Dictionary<string, DateTimeOffset> _failedAt = new(StringComparer.Ordinal);
+
+    private bool CoolingDown(string key, DateTimeOffset now) => _failedAt.TryGetValue(key, out var at) && now - at < FailedCooldown;
+
+    private static string HostOf(string normalized) => new Uri(normalized).Host;
+    private static string Endpoint(string ip, int port) => $"{ip}|{port}";
+    /// <summary>The listener a failed dial cools down: the exact address and port (not the machine's /64, so one address
+    /// that fails can't hold back another one next to it).</summary>
+    private static string DialKey(IPAddress ip, string address) => "dial:" + Endpoint(ip.ToString(), new Uri(address).Port);
     private readonly Dictionary<string, DateTimeOffset> _lastCheck = new(StringComparer.Ordinal);
 
     /// <summary>
@@ -373,8 +507,28 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
             _checks.Enqueue(now);
             _lastCheck[address] = now;
         }
+        // One deadline for the lookup and the connection together, so the reply still fits the request's deadline.
+        using var total = CancellationTokenSource.CreateLinkedTokenSource(ct, _stopping.Token);
+        total.CancelAfter(VolunteerNodes.CheckTimeout);
+        ct = total.Token;
+        IPAddress? ip = null;
+        if (_resolve is not null)
+        {
+            try { ip = await _resolve(address, ct); }
+            catch (Exception e) when (e is not OutOfMemoryException) { ip = null; }
+            if (ip is null) return new JsonObject { ["ok"] = true, ["reachable"] = false };
+            // Also one check per machine at a time, so many names or ports of one machine can't be swept either.
+            // A check refused here still used its place in the directory-wide budget on purpose: the name was already
+            // looked up, and otherwise endless names for one machine would be free lookups.
+            var machine = "machine:" + VolunteerNodes.MachineOf(ip);
+            lock (_gate)
+            {
+                if (_lastCheck.ContainsKey(machine)) return Error("rate");
+                _lastCheck[machine] = now;
+            }
+        }
         bool reachable;
-        try { reachable = await _probe(address, ct); }
+        try { reachable = await Dial(address, ip, asNode: false, ct); }
         catch (Exception e) when (e is not OutOfMemoryException) { reachable = false; }
         return new JsonObject { ["ok"] = true, ["reachable"] = reachable };
     }
@@ -434,6 +588,13 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
                 // Each new entry is dialed: an address that just failed isn't dialed again sooner than a reachability check allows.
                 foreach (var (dialed, _) in _lastDialed.Where(p => now - p.Value > CheckSameAddressEvery || p.Value > now).ToList()) _lastDialed.Remove(dialed);
                 if (_lastDialed.ContainsKey(address)) return Error("rate");
+                // Each new address costs the directory an outgoing connection, so new addresses are also capped per host:
+                // registering can't be used to make the directory dial many ports of one machine. Listed entries hold a
+                // host's places; entries still to be checked take turns being dialled (see ProbeAsync), so they can't keep
+                // a host's real node off the list (a failed probe drops its entry at once).
+                var host = HostOf(address);
+                if (_entries.Count(p => HostOf(p.Key) == host && p.Value.VerifiedAt is not null) >= MaxPerHost)
+                    return new JsonObject { ["ok"] = false, ["error"] = "host", ["reason"] = $"one host may register at most {MaxPerHost} addresses" };
                 // The caller's limit holds for everyone.
                 if (source is not null && Full(_newBy, "src:" + source, NewPerSourcePerMinute, now)) return Error("rate");
                 // A listed volunteer coming back to its own address isn't new.
@@ -502,7 +663,7 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
             {
                 entry!.Seen = now;
                 listed = entry.VerifiedAt is { } at && now - at < ReprobeEvery;
-                startProbe = !listed && !entry.Probing;
+                startProbe = !listed && !entry.Probing && !_stopping.IsCancellationRequested;
                 if (startProbe) entry.Probing = true;
             }
         }
@@ -511,38 +672,183 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
             if (newlyDisputed) Disputed?.Invoke(address);
             return Error("owner");
         }
-        if (startProbe) LastProbe = ProbeAsync(address);
+        if (startProbe) LastProbe = Track(ProbeAsync(address));
         return new JsonObject { ["ok"] = true, ["listed"] = listed };
     }
+
+    /// <summary>
+    /// Dials the address: at the IP it already resolved to when there is one (it isn't looked up again, so a name can't
+    /// point somewhere else between the check and the connection), or through the custom probe.
+    /// </summary>
+    /// <remarks>
+    /// <paramref name="asNode"/>: before listing, a node of the network must answer (when <see cref="NetworkName"/> is set);
+    /// a would-be volunteer's port check only needs the port open.
+    /// </remarks>
+    private Task<bool> Dial(string address, IPAddress? ip, bool asNode, CancellationToken ct) =>
+        _customProbe is not null ? _customProbe(address, ct)
+        : ip is not null && asNode && NetworkName is { } network ? VolunteerNodes.IsNetworkNodeAsync(ip, new Uri(address).Port, network, ct)
+        : ip is not null ? VolunteerNodes.ConnectAsync(ip, new Uri(address).Port, ct)
+        : VolunteerNodes.ProbeAsync(address, ct);
 
     private async Task ProbeAsync(string address)
     {
         bool ok;
-        try { ok = await _probe(address, CancellationToken.None); }
-        catch (Exception e) when (e is not OutOfMemoryException) { ok = false; }
+        IPAddress? ip = null;
+        var crowded = false;
+        DateTimeOffset? sameListener = null;
+        var waited = System.Diagnostics.Stopwatch.StartNew();
+        string? machine = null;
+        if (_resolve is not null)
+        {
+            using var lookup = CancellationTokenSource.CreateLinkedTokenSource(_stopping.Token);
+            lookup.CancelAfter(VolunteerNodes.CheckTimeout);
+            try { ip = await _resolve(address, lookup.Token); }
+            catch (Exception e) when (e is not OutOfMemoryException) { ip = null; }
+            if (ip is not null) machine = VolunteerNodes.MachineOf(ip);
+        }
+        // Checks of one machine (or, unresolved, one name) take turns: at most MaxProbingPerHost are dialled at once, and
+        // the rest wait in the order they came, so registrations that hang can't keep the machine's real node from being
+        // checked. More places are free than the new addresses the whole directory takes can keep busy.
+        var queue = machine ?? "name:" + HostOf(address);
+        while (true)
+        {
+            var wait = false;
+            lock (_gate)
+            {
+                if (!_entries.TryGetValue(address, out var mine)) return;
+                var now = _now();
+                if (ip is not null)
+                {
+                    var port = new Uri(address).Port;
+                    var endpoint = Endpoint(ip.ToString(), port);
+                    // Many names for one machine (an IPv4 address, or an IPv6 /64) count as that machine: over the cap, the
+                    // entry goes without being dialled. Names for one listener (the same address and port) take one place
+                    // between them, so names somebody else points at a node can't crowd out the node's own registration
+                    // (Pick lists one).
+                    var others = _entries.Where(p => p.Key != address && p.Value.Machine == machine).ToList();
+                    var listed = others.Where(p => p.Value.VerifiedAt is not null && p.Value.Ip is not null)
+                        .Select(p => Endpoint(p.Value.Ip!, new Uri(p.Key).Port)).Where(e => e != endpoint).Distinct().Count();
+                    // A listed node being checked again keeps its place: only its own check decides whether it stays, so
+                    // other entries for the machine can't push it out. A name that now resolves to another listener is new
+                    // there and counted like any new one.
+                    var holdsItsPlace = mine is { VerifiedAt: not null } && mine.Ip == ip.ToString();
+                    crowded = !holdsItsPlace && listed >= MaxPerHost || CoolingDown(DialKey(ip, address), now);
+                    // A listener checked under another name since this one was needn't be dialled again: the name takes
+                    // that check's time, so the listener is still dialled once its newest check is too old.
+                    sameListener = crowded ? null : others
+                        .Where(p => p.Value.VerifiedAt is { } at && now - at < ReprobeEvery && at > (mine.VerifiedAt ?? DateTimeOffset.MinValue)
+                                    && p.Value.Ip is { } other && Endpoint(other, new Uri(p.Key).Port) == endpoint)
+                        .Max(p => p.Value.VerifiedAt);
+                    wait = !crowded && sameListener is null && !holdsItsPlace && !TakeTurn(address, mine, queue);
+                    if (!crowded && !wait) (mine.Machine, mine.Ip) = (machine, ip.ToString());
+                }
+                else if (_resolve is null) wait = mine.VerifiedAt is null && !TakeTurn(address, mine, queue);
+                if (!wait) mine.Dialing = !crowded && sameListener is null && (_resolve is null || ip is not null);
+                if (wait && waited.Elapsed >= MaxWait)
+                {
+                    // Still waiting after a renewal's time: its next renewal starts again (keeping its place in line).
+                    mine.Probing = false;
+                    return;
+                }
+            }
+            if (!wait) break;
+            try { await Task.Delay(WaitStep, _stopping.Token); }
+            catch (OperationCanceledException) { break; }
+        }
+        if (_stopping.IsCancellationRequested)
+        {
+            Stopped(address);
+            return;
+        }
+        if (crowded || (_resolve is not null && ip is null)) ok = false;
+        else if (sameListener is not null) ok = true;
+        else
+        {
+            using var dial = CancellationTokenSource.CreateLinkedTokenSource(_stopping.Token);
+            dial.CancelAfter(ListingDialTimeout);
+            try { ok = await Dial(address, ip, asNode: true, dial.Token).WaitAsync(dial.Token); }
+            catch (Exception e) when (e is not OutOfMemoryException) { ok = false; }
+            if (_stopping.IsCancellationRequested)
+            {
+                Stopped(address);
+                return;
+            }
+        }
         lock (_gate)
         {
             if (_entries.TryGetValue(address, out var entry))
             {
                 entry.Probing = false;
-                if (ok) entry.VerifiedAt = _now();
+                entry.Dialing = false;
+                entry.Ticket = null;
+                if (ok) entry.VerifiedAt = sameListener ?? _now();
                 else
                 {
                     _lastDialed[address] = _now();
                     Drop(address, entry);
                 }
             }
+            if (!ok && !crowded)
+            {
+                // Dialled and failed: cool down that port of the machine, whatever happens to the entry (the address
+                // itself waits as any failed address does).
+                if (ip is not null) _failedAt[DialKey(ip, address)] = _now();
+            }
         }
         Probed?.Invoke(address, ok);
+    }
+
+    /// <summary>The registry is shutting down: the check ends without a verdict (nothing is logged or dropped).</summary>
+    private void Stopped(string address)
+    {
+        lock (_gate)
+            if (_entries.TryGetValue(address, out var entry)) (entry.Probing, entry.Dialing) = (false, false);
+    }
+
+    private Task Track(Task probe)
+    {
+        lock (_probes) _probes.Add(probe);
+        _ = probe.ContinueWith(t => { lock (_probes) _probes.Remove(t); }, TaskScheduler.Default);
+        return probe;
+    }
+
+    /// <summary>Stops every check still waiting or dialling and waits for them to end. No new checks start after.</summary>
+    public async ValueTask DisposeAsync()
+    {
+        if (!_stopping.IsCancellationRequested) await _stopping.CancelAsync();
+        Task[] running;
+        lock (_probes) running = [.. _probes];
+        try { await Task.WhenAll(running); }
+        catch (Exception e) when (e is not OutOfMemoryException) { }
+    }
+
+    /// <summary>
+    /// Whether <paramref name="mine"/> may be dialled now: fewer than <see cref="MaxProbingPerHost"/> entries of its
+    /// machine are being dialled, counting the ones that have waited longer first. One that may not joins the line.
+    /// </summary>
+    private bool TakeTurn(string address, Entry mine, string queue)
+    {
+        var mineAt = mine.Ticket ??= ++_tickets;
+        mine.Queue = queue;
+        var dialing = _entries.Count(p => p.Key != address && p.Value.Queue == queue && p.Value.Dialing);
+        var ahead = _entries.Count(p => p.Key != address && p.Value.Queue == queue && !p.Value.Dialing && p.Value.Probing
+                                        && p.Value.Ticket < mineAt);
+        return dialing + ahead < MaxProbingPerHost;
     }
 
     /// <summary>
     /// Up to <paramref name="count"/> verified, live volunteers in random order (spreads the load), at most one per
     /// operator while there are others to give. Each comes with its operator tag ("" when unsigned).
     /// </summary>
+    /// <remarks>Names for one listener (the same port of one machine) are given once.</remarks>
     public IReadOnlyList<VolunteerNode> Pick(int count = VolunteerNodes.PerRequest)
     {
-        var shuffled = Live().OrderBy(_ => Random.Shared.Next()).Select(p => new VolunteerNode(p.Url, p.Disputed ? "" : p.Operator ?? ""));
+        // A name that is the address itself can't be pointed elsewhere later, so it goes first among a listener's names.
+        var shuffled = LiveEntries().OrderBy(p => IPAddress.TryParse(new Uri(p.Entry.Url).Host.Trim('[', ']'), out _) ? 0 : 1)
+            .ThenBy(_ => Random.Shared.Next())
+            .DistinctBy(p => p.Listener)
+            .OrderBy(_ => Random.Shared.Next())
+            .Select(p => new VolunteerNode(p.Entry.Url, p.Entry.Disputed ? "" : p.Entry.Operator ?? ""));
         return [.. VolunteerNode.SpreadOperators(shuffled).Take(count)];
     }
 
@@ -555,7 +861,10 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
     /// </summary>
     public IReadOnlyList<VolunteerEntry> Operators() => Live();
 
-    private List<VolunteerEntry> Live()
+    private List<VolunteerEntry> Live() => [.. LiveEntries().Select(p => p.Entry)];
+
+    /// <summary>Live entries with the listener each one names (machine and port; the name itself until it resolved).</summary>
+    private List<(VolunteerEntry Entry, string Listener)> LiveEntries()
     {
         var now = _now();
         lock (_gate)
@@ -564,7 +873,7 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
             return [.. _entries.Where(p => p.Value.VerifiedAt is not null && Blocked?.Invoke(p.Key) != true
                     && (p.Value.Operator is not { } op || BlockedOperator?.Invoke(op) != true))
                 .OrderBy(p => p.Key, StringComparer.Ordinal)
-                .Select(p => Public(p.Key, p.Value))];
+                .Select(p => (Public(p.Key, p.Value), p.Value.Ip is { } ip ? Endpoint(ip, new Uri(p.Key).Port) : p.Key))];
         }
     }
 
@@ -650,6 +959,7 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
         while (_tombstoneOrder.TryPeek(out var head) && !(_tombstones.TryGetValue(head.Key, out var at) && at == head.At)) _tombstoneOrder.Dequeue();
         foreach (var (key, entry) in _entries.Where(p => now - p.Value.Seen > VolunteerNodes.Ttl && !p.Value.Probing).ToList())
             Drop(key, entry);
+        foreach (var key in _failedAt.Where(p => now - p.Value >= FailedCooldown).Select(p => p.Key).ToList()) _failedAt.Remove(key);
     }
 
     private static JsonObject Error(string code) => new() { ["ok"] = false, ["error"] = code };
@@ -699,5 +1009,93 @@ public sealed class VolunteerCache(string path)
             File.WriteAllText(path, o.ToJsonString(Options));
         }
         catch (Exception e) when (e is IOException or JsonException or UnauthorizedAccessException) { }
+    }
+}
+
+/// <summary>
+/// The first packet of an EasyTier peer connection over TCP, enough to tell a node of a network from any other service:
+/// a 4-byte length, the 16-byte peer header (from, to, type, flags, forward count, reserved, payload length; little
+/// endian) and a protobuf HandshakeRequest (magic, peer id, version, network name, secret digest), as EasyTier's
+/// <c>tunnel/packet_def.rs</c> and <c>proto/peer_rpc.proto</c> describe them.
+/// </summary>
+internal static class NodeHandshake
+{
+    public const int HeaderSize = 16;
+    public const int MaxReply = 4096;
+    private const uint Magic = 0xd1e1a5e1;
+    private const byte HandshakeType = 2;
+
+    /// <summary>The handshake request, with the secret digest left zero (the node replies all the same).</summary>
+    public static byte[] Request(string networkName, int peerId)
+    {
+        var payload = new List<byte>();
+        Varint(payload, 1 << 3); Varint(payload, Magic);
+        Varint(payload, 2 << 3); Varint(payload, (uint)peerId);
+        Varint(payload, 3 << 3); Varint(payload, 1);
+        var name = Encoding.UTF8.GetBytes(networkName);
+        Varint(payload, (5 << 3) | 2); Varint(payload, (uint)name.Length); payload.AddRange(name);
+        Varint(payload, (6 << 3) | 2); Varint(payload, 32); payload.AddRange(new byte[32]);
+        var packet = new byte[4 + HeaderSize + payload.Count];
+        BinaryPrimitives.WriteUInt32LittleEndian(packet, (uint)(HeaderSize + payload.Count));
+        BinaryPrimitives.WriteUInt32LittleEndian(packet.AsSpan(4), (uint)peerId);
+        packet[12] = HandshakeType;
+        packet[14] = 1;
+        BinaryPrimitives.WriteUInt32LittleEndian(packet.AsSpan(16), (uint)payload.Count);
+        payload.CopyTo(packet, 4 + HeaderSize);
+        return packet;
+    }
+
+    /// <summary>Is <paramref name="body"/> (after the length) a handshake from a node of <paramref name="networkName"/>?</summary>
+    public static bool IsReply(ReadOnlySpan<byte> body, string networkName)
+    {
+        if (body.Length < HeaderSize || body[8] != HandshakeType) return false;
+        var length = BinaryPrimitives.ReadUInt32LittleEndian(body[12..]);
+        if (length != body.Length - HeaderSize) return false;
+        var payload = body[HeaderSize..];
+        uint? magic = null;
+        string? name = null;
+        var at = 0;
+        while (at < payload.Length)
+        {
+            if (!TryVarint(payload, ref at, out var key)) return false;
+            switch (key & 7)
+            {
+                case 0:
+                    if (!TryVarint(payload, ref at, out var value)) return false;
+                    if (key >> 3 == 1) magic = (uint)value;
+                    break;
+                case 2:
+                    if (!TryVarint(payload, ref at, out var size) || size > (ulong)(payload.Length - at)) return false;
+                    if (key >> 3 == 5) name = Encoding.UTF8.GetString(payload.Slice(at, (int)size));
+                    at += (int)size;
+                    break;
+                case 5: at += 4; break;
+                case 1: at += 8; break;
+                default: return false;
+            }
+        }
+        return at == payload.Length && magic == Magic && name == networkName;
+    }
+
+    private static void Varint(List<byte> to, uint value)
+    {
+        while (value >= 0x80)
+        {
+            to.Add((byte)(value | 0x80));
+            value >>= 7;
+        }
+        to.Add((byte)value);
+    }
+
+    private static bool TryVarint(ReadOnlySpan<byte> from, ref int at, out ulong value)
+    {
+        value = 0;
+        for (var shift = 0; shift < 64 && at < from.Length; shift += 7)
+        {
+            var b = from[at++];
+            value |= (ulong)(b & 0x7f) << shift;
+            if (b < 0x80) return true;
+        }
+        return false;
     }
 }
