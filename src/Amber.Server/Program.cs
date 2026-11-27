@@ -132,7 +132,9 @@ public static class Program
           jay-server release cosign --key <发版钥匙文件> [--sums SHA256SUMS.txt] [--sigs SHA256SUMS.txt.sigs]
               信任人在离线电脑上看清要签的版本、提交号和文件清单，手打版本号后签；3 人里要 2 人
           jay-server release trust-change --key <发版钥匙文件> --to <新名单文件> --need <几人> --seq <序号> [--from <旧名单文件>] [--chain trust-chain.json]
-              换信任人：旧名单里够数的人签了，旧版 Jay 才认新名单（名单文件每行一把完整公钥）
+              [--cosign-sums <SHA256SUMS.txt> [--cosign-sigs <SHA256SUMS.txt.sigs>]]
+              换信任人：旧名单里够数的人签了，旧版 Jay 才认新名单（名单文件每行一把完整公钥）；
+              加 --cosign-sums 时同一次还签一份写新名单的发布签名（两样都核对，口令只输一次）
           jay-server release verify <安装包> [--tag <v0.9.0>]   核对安装包、清单、签名和 trust-chain.json（放在安装包旁边）
           EasyTier 加固版（Yumao-Feather/jay-easytier）的发布也要 Jay 发版钥匙签够数（现在是 2 把要 2 把）：prepare 和 verify 加 --component easytier，--tag 用它自己的（例如 jay-v2.6.4-1）
 
@@ -369,8 +371,8 @@ public static class Program
                 var sums = File.ReadAllBytes(sumsPath);
                 var lines = TrustCommands.DescribeRelease(manifest, sums, options.Get("trust") is { } t ? ReadTrustList(t, options.Get("need")) : TrustList.Jay);
                 var tag = ReleaseManifest.Parse(manifest)!.Statement.Tag;
-                if (!confirm(lines, "版本号", tag)) return 3;
-                var signed = ReleaseSignature.Cosign(manifest, TrustCommands.ForUse(TrustCommands.LoadKey(keyPath), release: true));
+                if (!TrustCommands.ConfirmWithRetry(confirm, lines, "版本号", tag, output)) return 3;
+                var signed = ReleaseSignature.Cosign(manifest, TrustCommands.ForUse(TrustCommands.LoadKeyWithRetry(keyPath, output), release: true));
                 var outPath = options.Get("out") ?? sigsPath;
                 File.WriteAllText(outPath, signed);
                 output.WriteLine($"已签 {tag}，写入 {outPath}。签够 2 位后，把它和 SHA256SUMS.txt 一起上传到同一个 Release。");
@@ -385,10 +387,47 @@ public static class Program
                 var seq = long.Parse(options.Get("seq") ?? throw new ArgumentException("要用 --seq 指定这次换名单的序号（不小于上一版发布序号）"), System.Globalization.CultureInfo.InvariantCulture);
                 var chainPath = options.Get("chain") ?? ReleaseSignature.ChainFileName;
                 var chain = File.Exists(chainPath) ? File.ReadAllText(chainPath) : null;
-                if (!confirm(TrustCommands.DescribeTrustChange(from, to, seq), "新名单编号", TrustCommands.CodeOf(to.Hash))) return 3;
-                File.WriteAllText(options.Get("out") ?? chainPath, TrustChain.Cosign(chain, from, to.Keys, to.Need, seq, TrustCommands.ForUse(TrustCommands.LoadKey(keyPath), release: true)));
-                output.WriteLine($"已签换名单，写入 {options.Get("out") ?? chainPath}。旧名单里签够 {from.Need} 位后，把它放进之后每个 Release。");
-                return 0;
+                // --cosign-sums: in the same run, also cosign a release or EasyTier manifest that names the new list, so a
+                // trustee confirms both, types the passphrase once and signs both with the same key.
+                var alsoSums = options.Get("cosign-sums");
+                var alsoSigs = alsoSums is null ? null
+                    : options.Get("cosign-sigs") ?? Path.Combine(Path.GetDirectoryName(Path.GetFullPath(alsoSums)) ?? ".", ReleaseSignature.SignatureFileName);
+                if (!TrustCommands.ConfirmWithRetry(confirm, TrustCommands.DescribeTrustChange(from, to, seq), "新名单编号", TrustCommands.CodeOf(to.Hash), output)) return 3;
+                string? alsoManifest = null, alsoTag = null;
+                if (alsoSums is not null)
+                {
+                    alsoManifest = File.ReadAllText(alsoSigs!);
+                    alsoTag = ReleaseManifest.Parse(alsoManifest)?.Statement.Tag ?? throw new InvalidDataException($"{alsoSigs} 格式不对");
+                    if (!TrustCommands.ConfirmWithRetry(confirm, TrustCommands.DescribeRelease(alsoManifest, File.ReadAllBytes(alsoSums), to), "版本号", alsoTag, output)) return 3;
+                }
+                var signer = TrustCommands.ForUse(TrustCommands.LoadKeyWithRetry(keyPath, output), release: true);
+                var chainOut = options.Get("out") ?? chainPath;
+                var failed = false;
+                try
+                {
+                    File.WriteAllText(chainOut, TrustChain.Cosign(chain, from, to.Keys, to.Need, seq, signer));
+                    output.WriteLine($"已签换名单，写入 {chainOut}。旧名单里签够 {from.Need} 位后，把它放进之后每个 Release。");
+                }
+                catch (InvalidDataException e) when (alsoSums is not null)
+                {
+                    // Keep going so the second signature still happens (for example when this key already signed the change).
+                    output.WriteLine($"换名单没有签：{e.Message}");
+                    failed = true;
+                }
+                if (alsoSums is not null)
+                {
+                    try
+                    {
+                        File.WriteAllText(alsoSigs!, ReleaseSignature.Cosign(alsoManifest!, signer));
+                        output.WriteLine($"已签 {alsoTag}，写入 {alsoSigs}。");
+                    }
+                    catch (InvalidDataException e)
+                    {
+                        output.WriteLine($"{alsoTag} 没有签：{e.Message}");
+                        failed = true;
+                    }
+                }
+                return failed ? 4 : 0;
             }
             case "verify":
             {
