@@ -6,6 +6,7 @@ using Amber.Core.Localization;
 using Amber.Core.Themes;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.LogicalTree;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Styling;
@@ -158,7 +159,9 @@ internal sealed class ThemeSelfTest(MainWindow window, MainViewModel main, strin
                   "downloads.body" ] }
             }
             """),
-            ("layout/pages/content.json", """{ "type": "dock", "children": [ { "type": "region", "name": "content.status", "dock": "top" }, { "type": "region", "name": "content.header", "dock": "top" }, { "type": "region", "name": "content.filters", "dock": "top" }, "content.body" ] }"""));
+            ("layout/pages/content.json", """{ "type": "dock", "children": [ { "type": "region", "name": "content.status", "dock": "top" }, { "type": "region", "name": "content.header", "dock": "top" }, { "type": "region", "name": "content.filters", "dock": "top" }, "content.body" ] }"""),
+            // Places only some instance regions; Jay adds the other required ones itself.
+            ("layout/pages/instances.json", """{ "type": "dock", "children": [ { "type": "region", "name": "instances.status", "dock": "top" }, { "type": "region", "name": "instances.header", "dock": "top" }, "instances.details" ] }"""));
         settings.ImportThemePack(path);
         await Task.Delay(500);
         Check("导入带排版的主题包：导航挪到顶上", window.ShellNav == "top" && window.SidebarHost.Bounds.Width > window.Bounds.Width - 4
@@ -201,6 +204,17 @@ internal sealed class ThemeSelfTest(MainWindow window, MainViewModel main, strin
         Check("发现页也能重排：状态卡片挪到最上面",
             discover.ThemeLayout.UsingThemeLayout && discover.ThemeLayout.Regions["content.status"].TranslatePoint(default, discover) is { Y: < 20 },
             $"{discover.ThemeLayout.Regions["content.status"].TranslatePoint(default, discover)}");
+        // Controls tagged for other uses inside a region (the mod inspector in the instance tabs) move with that
+        // region; the theme layout never takes them out on their own, where nothing could put them back.
+        main.CurrentPage = main.Pages.OfType<InstanceViewModel>().Single();
+        await Task.Delay(500);
+        var instancePage = window.GetVisualDescendants().OfType<InstancePage>().FirstOrDefault();
+        Check("实例页用主题的布局，模组检查器还在页签里",
+            instancePage is not null && instancePage.ThemeLayout.UsingThemeLayout && !instancePage.ThemeLayout.Regions.ContainsKey("mods.inspector")
+            && instancePage.ModInspector.Parent is not null && instancePage.DetailsCard.IsLogicalAncestorOf(instancePage.ModInspector)
+            && instancePage.DetailsCard.Parent is not null,
+            instancePage is null ? "找不到实例页" : string.Join(",", instancePage.ThemeLayout.Regions.Keys.Order()));
+        await ShotAsync("layout-instance-760x440");
         main.CurrentPage = main.Pages.OfType<MultiplayerViewModel>().Single();
         window.Width = 1280;
         window.Height = 800;

@@ -485,6 +485,9 @@ jobs:
       group: android-preview-publish
       cancel-in-progress: false
     runs-on: ubuntu-latest
+    # The preview is signed with a key CI holds, outside the trustees' release signatures
+    # (docs/security/release-signing.md). Publishing waits for this environment's required reviewers.
+    environment: android-preview
     permissions:
       contents: write
     steps:

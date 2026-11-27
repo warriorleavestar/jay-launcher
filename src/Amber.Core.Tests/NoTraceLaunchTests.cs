@@ -188,7 +188,7 @@ public sealed class NoTraceLaunchTests : IDisposable
     }
 
     /// <summary>脚本自己的合法文件名可带 cmd 元字符；无痕配置路径必须作为完整参数保存在 JSON 中。</summary>
-    [Fact]
+    [WindowsFact]
     public void WindowsScriptEscapesSidecarPathFromExportName()
     {
         if (!OperatingSystem.IsWindows()) return;
@@ -239,7 +239,7 @@ public sealed class NoTraceLaunchTests : IDisposable
     }
 
     /// <summary>退出时删不掉（被占用）：过一会儿再试，占用解除后删掉。</summary>
-    [Fact]
+    [WindowsFact]
     public async Task ExitDeleteRetriesWhileLocked()
     {
         if (!OperatingSystem.IsWindows()) return; // Unix 可以删除仍被打开的文件，这里验证 Windows 的文件锁重试。

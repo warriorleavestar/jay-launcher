@@ -50,7 +50,7 @@ public class ReverificationFixTests
             },
             Discover = _ => Task.FromResult(true),
             // Documentation addresses stand in for public ones (real public addresses stay out of the repository).
-            Routable = a => a.AddressFamily == AddressFamily.InterNetwork,
+            IsRoutable = TestAddresses.IsRoutable,
             MaxPublicIpAge = TimeSpan.FromMinutes(5),
         };
         Assert.Equal(0, Volatile.Read(ref collected));
@@ -128,22 +128,26 @@ public class ReverificationFixTests
     {
         var calls = 0;
         var ok = true;
+        var clock = new ManualTimeProvider();
         using var policy = new ExitPolicy([], [])
         {
             Discover = _ => { Interlocked.Increment(ref calls); return Task.FromResult(ok); },
             MaxPublicIpAge = TimeSpan.FromMilliseconds(50),
+            Time = clock,
+            IsRoutable = TestAddresses.IsRoutable,
         };
         policy.SetReady(true);
-        await Task.Delay(100);
+        clock.Advance(TimeSpan.FromMilliseconds(100));
         Assert.True(await policy.EnsureFreshAsync(TimeSpan.FromSeconds(2), default));
         Assert.Equal(1, calls);
         // 刚查过：不再查。
         Assert.True(await policy.EnsureFreshAsync(TimeSpan.FromSeconds(2), default));
         Assert.Equal(1, calls);
-        await Task.Delay(100);
+        Assert.True(policy.Allows(IPAddress.Parse("198.51.100.88")));
+        clock.Advance(TimeSpan.FromMilliseconds(100));
         ok = false;
         Assert.False(await policy.EnsureFreshAsync(TimeSpan.FromSeconds(2), default));
-        Assert.False(policy.Allows(IPAddress.Parse("192.0.2.8")));
+        Assert.False(policy.Allows(IPAddress.Parse("198.51.100.88")));
     }
 
     // R7：出口没准备好时回专门的答复，加入方看到“出口还没准备好”。
@@ -243,7 +247,7 @@ public class ReverificationFixTests
     [Fact]
     public void MappedPrefixDoesNotThrow()
     {
-        Assert.False(ExitPolicy.InNetwork(IPAddress.Parse("192.0.2.8"), IPAddress.Parse("::ffff:10.0.0.0"), 104));
+        Assert.False(ExitPolicy.InNetwork(IPAddress.Parse("198.51.100.88"), IPAddress.Parse("::ffff:10.0.0.0"), 104));
         using var real = new ExitPolicy();
         real.RefreshLocal();
     }

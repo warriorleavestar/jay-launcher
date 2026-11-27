@@ -47,12 +47,16 @@ public sealed partial class ExitPolicy : IDisposable
 
     /// <summary>测试用：可以换掉查公网 IP 的方法和各种间隔。</summary>
     internal Func<CancellationToken, Task<bool>>? Discover { get; set; }
-
-    /// <summary>Tests only: replaces <see cref="IsGloballyRoutable"/>, so tests can use documentation addresses as if they were public.</summary>
-    internal Func<IPAddress, bool>? Routable { get; set; }
+    /// <summary>
+    /// Tests only: the routability check <see cref="Allows"/> uses, so tests can write documentation addresses
+    /// (RFC 5737 / RFC 3849) where a public one is needed. Jay itself always uses <see cref="IsGloballyRoutable"/>.
+    /// </summary>
+    internal Func<IPAddress, bool> IsRoutable { get; init; } = IsGloballyRoutable;
     internal TimeSpan ReadyInterval { get; set; } = TimeSpan.FromMinutes(3);
     internal TimeSpan RetryInterval { get; set; } = TimeSpan.FromSeconds(15);
     internal TimeSpan Debounce { get; set; } = TimeSpan.FromSeconds(3);
+    /// <summary>Clock for the public IP's age. Tests use a manual clock instead of waiting.</summary>
+    internal TimeProvider Time { get; set; } = TimeProvider.System;
 
     /// <summary>
     /// 查到公网 IP 后最多信任这么久：路由器重新拨号（PPPoE）会换公网 IP，而本机网卡还是私有地址、不会触发地址变化。
@@ -145,7 +149,7 @@ public sealed partial class ExitPolicy : IDisposable
                 if (ok && generation == _generation && _collecting == 0)
                 {
                     _failure = null;
-                    Interlocked.Exchange(ref _lastSuccessTicks, System.Diagnostics.Stopwatch.GetTimestamp());
+                    Interlocked.Exchange(ref _lastSuccessTicks, Time.GetTimestamp());
                     _ready = true;
                 }
                 else if (!ok && generation == _generation)
@@ -162,7 +166,7 @@ public sealed partial class ExitPolicy : IDisposable
     }
 
     private bool IsFresh(TimeSpan maxAge) =>
-        _ready && (maxAge == TimeSpan.MaxValue || System.Diagnostics.Stopwatch.GetElapsedTime(Interlocked.Read(ref _lastSuccessTicks)) <= maxAge);
+        _ready && (maxAge == TimeSpan.MaxValue || Time.GetElapsedTime(Interlocked.Read(ref _lastSuccessTicks)) <= maxAge);
 
     /// <summary>
     /// 每次转发前（收到 CONNECT 请求、去连目标之前）调用：公网 IP 查到太久（可能路由器重新拨号了）就先重查一次。
@@ -198,7 +202,7 @@ public sealed partial class ExitPolicy : IDisposable
         _localAddresses = localAddresses.Select(Normalize).ToHashSet();
         _localNetworks = localNetworks.Select(n => (Normalize(n.Item1), n.Item2)).ToList();
         _ready = true;
-        _lastSuccessTicks = System.Diagnostics.Stopwatch.GetTimestamp();
+        _lastSuccessTicks = Time.GetTimestamp();
         MaxPublicIpAge = TimeSpan.MaxValue;
     }
 
@@ -207,7 +211,7 @@ public sealed partial class ExitPolicy : IDisposable
     {
         // Ready never comes without the local networks: collect them first when they haven't been yet.
         if (ready && _localStale) RecollectLocal();
-        if (ready) _lastSuccessTicks = System.Diagnostics.Stopwatch.GetTimestamp();
+        if (ready) Interlocked.Exchange(ref _lastSuccessTicks, Time.GetTimestamp());
         _ready = ready;
     }
 
@@ -355,7 +359,7 @@ public sealed partial class ExitPolicy : IDisposable
         var ip = Normalize(address);
         // 只转 IPv4：路由器的 IPv6 外网地址不在本机任何网段里，拦不全；Minecraft 服务器和 Mojang 都有 IPv4，Java 也优先用 IPv4。
         if (ip.AddressFamily != AddressFamily.InterNetwork) return false;
-        if (!(Routable ?? IsGloballyRoutable)(ip)) return false;
+        if (!IsRoutable(ip)) return false;
         if (_localAddresses.Contains(ip)) return false;
         lock (_lock)
             if (_publicAddresses.Contains(ip)) return false;

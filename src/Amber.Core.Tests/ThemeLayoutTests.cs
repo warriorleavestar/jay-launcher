@@ -23,6 +23,19 @@ public class ThemeLayoutTests
     private static IEnumerable<string> RegionsIn(LayoutNode n) =>
         (n.Region is { } r ? [r] : Enumerable.Empty<string>()).Concat(n.Children.SelectMany(RegionsIn));
 
+    [Theory]
+    [InlineData("instances", "instances.details", true)]
+    [InlineData("instances", "instances.status", true)]
+    [InlineData("me", "me.title", true)]
+    [InlineData("me", "accounts.title", true)]          // old name of me.title
+    // Tagged for other uses (the mods tab), never placed by a theme: it must stay inside instances.details.
+    [InlineData("instances", "mods.inspector", false)]
+    [InlineData("instances", "downloads.body", false)]  // another page's region
+    [InlineData("settings", "settings.body", false)]    // the settings page keeps its own layout
+    [InlineData("nope", "nope.body", false)]
+    public void OnlyRegionsAThemeCanPlaceAreTakenOut(string page, string name, bool placeable) =>
+        Assert.Equal(placeable, ThemeLayout.IsPlaceableRegion(page, name));
+
     [Fact]
     public void MultiplayerTabsAndRoomHeaderCannotBeLeftOut()
     {
