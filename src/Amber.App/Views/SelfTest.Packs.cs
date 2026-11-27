@@ -72,6 +72,12 @@ internal sealed partial class SelfTest
                 && ResourcePackOptions.Enabled(work).SequenceEqual(["Old Classic.zip", "Faithful.zip", "Fonts.zip"])
                 && File.ReadAllLines(Path.Combine(work, "options.txt")).Contains("lang:zh_cn"),
                 string.Join(",", ResourcePackOptions.Enabled(work)));
+            string Incompatible() => File.ReadAllLines(Path.Combine(work, "options.txt"))
+                .FirstOrDefault(l => l.StartsWith("incompatibleResourcePacks:", StringComparison.Ordinal)) ?? "";
+            Check("勾上旧版本的包：记进 incompatibleResourcePacks，游戏不会再取消它", Incompatible().Contains("\"file/Old Classic.zip\"", StringComparison.Ordinal), Incompatible());
+            instance.TogglePackCommand.Execute(instance.EnabledPacks.Single(p => p.Name == "Old Classic.zip"));
+            Check("关掉旧版本的包：从 incompatibleResourcePacks 里拿掉", !Incompatible().Contains("Old Classic.zip", StringComparison.Ordinal), Incompatible());
+            instance.TogglePackCommand.Execute(instance.DisabledPacks.Single(p => p.Name == "Old Classic.zip"));
             instance.MovePackDownCommand.Execute(instance.EnabledPacks[0]);
             Check("↓：优先级降一格并存下", ResourcePackOptions.Enabled(work).SequenceEqual(["Faithful.zip", "Old Classic.zip", "Fonts.zip"]));
             instance.MovePackUpCommand.Execute(instance.EnabledPacks[0]);

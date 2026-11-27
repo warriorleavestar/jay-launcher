@@ -81,4 +81,52 @@ public sealed class AuthlibInjectorPinTests : IDisposable
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             new AuthlibInjector(new HttpClient(handler), _dir, Pin("https://official.test/a.jar")).EnsureJarAsync());
     }
+
+    /// <summary>Sends headers, then never sends the body.</summary>
+    private sealed class StalledHandler(Dictionary<string, byte[]> bodies, string stalled) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var url = request.RequestUri!.AbsoluteUri;
+            if (url == stalled)
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(new StalledStream()) });
+            return Task.FromResult(bodies.TryGetValue(url, out var body)
+                ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(body) }
+                : new HttpResponseMessage(HttpStatusCode.NotFound));
+        }
+    }
+
+    private sealed class StalledStream : Stream
+    {
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => 0; set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            await Task.Delay(Timeout.Infinite, cancellationToken);
+            return 0;
+        }
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
+            ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
+    [Fact]
+    public async Task ASourceThatStopsSendingTheBodyGivesWayToTheNext()
+    {
+        using var handler = new StalledHandler(new() { ["https://official.test/a.jar"] = Good }, "https://mirror.test/a.jar");
+        var injector = new AuthlibInjector(new HttpClient(handler), _dir, Pin("https://mirror.test/a.jar", "https://official.test/a.jar"))
+        {
+            SourceTimeout = TimeSpan.FromMilliseconds(300),
+        };
+        var download = injector.EnsureJarAsync();
+        Assert.Same(download, await Task.WhenAny(download, Task.Delay(TimeSpan.FromSeconds(30))));
+        Assert.Equal(Good, File.ReadAllBytes(await download));
+    }
 }

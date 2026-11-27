@@ -325,6 +325,9 @@ public sealed class AuthlibInjector(HttpClient http, string cacheDir)
     /// <summary>Tests: use another pin.</summary>
     internal AuthlibInjector(HttpClient http, string cacheDir, Pins.Pin pin) : this(http, cacheDir) => _pin = pin;
 
+    /// <summary>How long one source may take to send the whole jar.</summary>
+    internal TimeSpan SourceTimeout { get; init; } = TimeSpan.FromSeconds(100);
+
     public async Task<string> EnsureJarAsync(CancellationToken ct = default)
     {
         Directory.CreateDirectory(cacheDir);
@@ -340,10 +343,13 @@ public sealed class AuthlibInjector(HttpClient http, string cacheDir)
         foreach (var url in _pin.Urls)
         {
             byte[] bytes;
-            try { bytes = await DownloadAsync(url, ct); }
+            // Each source gets its own time limit for headers and body, so one that stops sending moves on to the next.
+            using var limit = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            limit.CancelAfter(SourceTimeout);
+            try { bytes = await DownloadAsync(url, limit.Token); }
             catch (HttpRequestException) { continue; }
             catch (InvalidDataException) { wrongBytes = true; continue; }
-            catch (TaskCanceledException) when (!ct.IsCancellationRequested) { continue; }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested) { continue; }
             // Every source must serve exactly the pinned bytes; a mirror that serves anything else is skipped.
             if (!Matches(SHA256.HashData(bytes))) { wrongBytes = true; continue; }
             // Written next to it and moved into place, so a cancelled write never leaves a truncated jar under the final name.
