@@ -66,22 +66,64 @@ public sealed class AccountService(HttpClient http, AccountStore store, string d
     }
 
     /// <summary>下载并缓存皮肤，返回 PNG 路径。没有皮肤或下载失败时返回 null（预览退回默认头像）。</summary>
+    private const int MaxSkinBytes = 4 * 1024 * 1024;
+    private static ReadOnlySpan<byte> PngSignature => [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+
     public async Task<string?> GetSkinFileAsync(Account account, CancellationToken ct = default)
     {
         try
         {
             if (account is { Kind: AccountKind.External, SkinUrl: null }) await External.LoadSkinAsync(account, ct);
             if (account.SkinUrl is not { } url) return null;
+            // A third-party login server names the skin address: only plain web addresses, a capped size, and a real PNG.
+            if (!WebLinks.TryGetHttpUrl(url, out var uri)) return null;
             var folder = Path.Combine(dataDir, "skins");
             Directory.CreateDirectory(folder);
             var path = Path.Combine(folder, Convert.ToHexStringLower(System.Security.Cryptography.SHA1.HashData(System.Text.Encoding.UTF8.GetBytes(url))) + ".png");
-            if (!File.Exists(path)) await File.WriteAllBytesAsync(path, await http.GetByteArrayAsync(url, ct), ct);
+            if (File.Exists(path)) return path;
+            byte[] bytes;
+            using (NetworkPolicy.Scope(NetworkCategory.Login))
+            {
+                // A slow or silent skin server must not hold the preview (or anything awaiting it) for long.
+                using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                deadline.CancelAfter(SkinTotalTimeout);
+                using var response = await http.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
+                response.EnsureSuccessStatusCode();
+                await using var stream = await response.Content.ReadAsStreamAsync(deadline.Token);
+                bytes = await ReadCappedAsync(stream, MaxSkinBytes, SkinStallTimeout, deadline.Token);
+            }
+            if (!bytes.AsSpan().StartsWith(PngSignature)) return null;
+            // Two fetches of the same skin at once: the first one saved is kept and used by both.
+            await CacheFile.SaveAsync(path, bytes, saved => saved.AsSpan().StartsWith(PngSignature), MaxSkinBytes, ct);
             return path;
         }
-        catch (Exception e) when (e is HttpRequestException or TaskCanceledException or IOException or InvalidOperationException
-                                       or FormatException or System.Text.Json.JsonException && !ct.IsCancellationRequested)
+        catch (Exception e) when (e is HttpRequestException or OperationCanceledException or IOException or UnauthorizedAccessException or InvalidOperationException
+                                       or FormatException or InvalidDataException or System.Text.Json.JsonException && !ct.IsCancellationRequested)
         {
             return null;
+        }
+    }
+
+    private static readonly TimeSpan SkinTotalTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan SkinStallTimeout = TimeSpan.FromSeconds(10);
+
+    /// <summary>
+    /// Reads <paramref name="stream"/> to the end without blocking a thread. Throws <see cref="InvalidDataException"/> past
+    /// <paramref name="max"/> bytes and <see cref="OperationCanceledException"/> when no byte arrives for
+    /// <paramref name="stall"/> or <paramref name="ct"/> is cancelled.
+    /// </summary>
+    internal static async Task<byte[]> ReadCappedAsync(Stream stream, int max, TimeSpan stall, CancellationToken ct)
+    {
+        using var buffer = new MemoryStream();
+        var chunk = new byte[16 * 1024];
+        while (true)
+        {
+            using var quiet = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            quiet.CancelAfter(stall);
+            var n = await stream.ReadAsync(chunk, quiet.Token);
+            if (n == 0) return buffer.ToArray();
+            if (buffer.Length + n > max) throw new InvalidDataException("too large");
+            buffer.Write(chunk, 0, n);
         }
     }
 }

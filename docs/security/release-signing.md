@@ -56,6 +56,9 @@ the command line.
 - **Doesn't protect:** the holders of any two configured release keys acting together, or the very first download (that copy of Jay has
   no reason to trust anything yet). It also doesn't remove Windows SmartScreen / Smart App Control or
   macOS Gatekeeper warnings; those need real code signing, which Jay doesn't have yet.
+- **Not covered: the Android preview.** The `android-preview` APK is signed with a fixed preview key that CI
+  holds (`docs/android.md`) and carries no trustee signatures, so the points above don't apply to it. Its
+  publish job waits for a maintainer's approval in the `android-preview` environment.
 - There are three release keys: Trustee 1's key and offline cold backup, plus Trustee 2's independent key. Any two
   are needed. Each key has a checked paper backup.
 - Losing more keys (and their paper backups) than a trust-chain step can spare, today any two of the three, can't be

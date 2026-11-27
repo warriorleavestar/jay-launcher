@@ -42,6 +42,21 @@ public sealed class NameFilterGate : IRoomGate
     }
 }
 
+/// <summary>Which account ban <see cref="BanList.Remove"/> lifts.</summary>
+public enum BanMatch
+{
+    /// <summary>Whichever ban there is; refuses when both kinds below are in force.</summary>
+    Auto,
+    /// <summary>Only the ban on this exact value.</summary>
+    Exact,
+    /// <summary>Only an account ban from an older version that matches the name in any case.</summary>
+    AnyCase,
+}
+
+/// <summary>An unban that would lift both an exact account ban and an older any-case one; say which with <see cref="BanMatch"/>.</summary>
+public sealed class AmbiguousUnbanException(string kind, string value)
+    : InvalidOperationException($"both an exact {kind} ban and an older any-case ban match \"{value}\"; choose one (exact or anyCase)");
+
 /// <summary>
 /// The node's ban list. A ban targets a host identity (host fingerprint, survives new rooms), a room id, or a network
 /// account (survives a new identity when the network requires login to publish). Bans can expire. The list lives in a JSON
@@ -51,16 +66,36 @@ public sealed class BanList : IRoomGate
 {
     public static readonly string[] Kinds = ["host", "room", "account", "node", "operator"];
 
+    /// <summary>
+    /// The matching rules the file is written with ("v"). 1: account bans matched the name in any case. 2: account bans
+    /// match the exact name, except entries marked "anyCase" (version 1 bans not yet tied to one account).
+    /// </summary>
+    public const int FormatVersion = 2;
+
     /// <param name="Until">When the ban ends; null = permanent.</param>
     public sealed record Ban(string Kind, string Value, string? Reason, DateTimeOffset At, DateTimeOffset? Until = null)
     {
         public bool ActiveAt(DateTimeOffset now) => Until is not { } until || until > now;
+
+        /// <summary>
+        /// An account ban from a version 1 list that still matches the name in any case, because it could not be tied to
+        /// exactly one account (see <see cref="MigrateAccountBans"/>). The admin should replace it with an exact ban.
+        /// </summary>
+        public bool AnyCase { get; init; }
     }
+
+    /// <summary>What <see cref="MigrateAccountBans"/> did.</summary>
+    /// <param name="Migrated">Version 1 account bans now tied to one exact account name.</param>
+    /// <param name="Unresolved">Bans that still match any case, with how many accounts have that name in some case (0 or 2+).</param>
+    public sealed record AccountBanMigration(int Migrated, IReadOnlyList<(Ban Ban, int Accounts)> Unresolved);
 
     private readonly string? _path;
     private readonly Func<DateTimeOffset> _now;
     private readonly Lock _gate = new();
-    private Dictionary<string, Ban> _bans = new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, Ban> _bans = new(StringComparer.Ordinal);
+    // Account bans that keep the version 1 rule (any case), by account name.
+    private Dictionary<string, Ban> _anyCase = new(StringComparer.OrdinalIgnoreCase);
+    private int _fileVersion = FormatVersion;
     private DateTime _loadedStamp;
     private DateTimeOffset _checkedAt;
 
@@ -72,21 +107,32 @@ public sealed class BanList : IRoomGate
         lock (_gate) Load();
     }
 
-    private static string Key(string kind, string value) => kind + ":" + value;
+    // Account names are case-sensitive (NetworkAccounts), so an account ban matches only that exact name (version 1 bans
+    // are kept apart in _anyCase until they are migrated). Fingerprints, room ids, node addresses and jay1 addresses
+    // compare case-insensitively.
+    private static string Key(string kind, string value) => kind + ":" + (kind == "account" ? value : value.ToLowerInvariant());
 
     private void Load()
     {
         if (_path is null || !File.Exists(_path)) return;
         var stamp = File.GetLastWriteTimeUtc(_path);
-        var bans = new Dictionary<string, Ban>(StringComparer.OrdinalIgnoreCase);
+        var bans = new Dictionary<string, Ban>(StringComparer.Ordinal);
+        var anyCase = new Dictionary<string, Ban>(StringComparer.OrdinalIgnoreCase);
         var o = JsonNode.Parse(File.ReadAllText(_path)) as JsonObject ?? throw new InvalidDataException(_path);
+        // A file without "v" predates versioning and used the version 1 rules.
+        var version = o["v"] is JsonValue v && v.TryGetValue<int>(out var n) ? n : 1;
         try
         {
             foreach (var item in o["bans"] as JsonArray ?? [])
                 if (item is JsonObject b && b["kind"]?.GetValue<string>() is { } kind && Kinds.Contains(kind) && b["value"]?.GetValue<string>() is { Length: > 0 } value)
-                    bans[Key(kind, value)] = new Ban(kind, value, b["reason"]?.GetValue<string>(),
+                {
+                    var ban = new Ban(kind, value, b["reason"]?.GetValue<string>(),
                         DateTimeOffset.FromUnixTimeSeconds(b["at"]?.GetValue<long>() ?? 0),
                         b["until"]?.GetValue<long>() is { } until ? DateTimeOffset.FromUnixTimeSeconds(until) : null);
+                    if (kind == "account" && (version < 2 || b["anyCase"] is JsonValue a && a.TryGetValue<bool>(out var any) && any))
+                        anyCase[value] = ban with { AnyCase = true };
+                    else bans[Key(kind, value)] = ban;
+                }
         }
         // A field of the wrong JSON type or a time outside the calendar is a broken file like any other.
         catch (Exception e) when (e is InvalidOperationException or FormatException or ArgumentException)
@@ -94,6 +140,8 @@ public sealed class BanList : IRoomGate
             throw new InvalidDataException(_path, e);
         }
         _bans = bans;
+        _anyCase = anyCase;
+        _fileVersion = version;
         _loadedStamp = stamp;
     }
 
@@ -118,7 +166,7 @@ public sealed class BanList : IRoomGate
         {
             Refresh();
             var now = _now();
-            return [.. _bans.Values.Where(b => b.ActiveAt(now)).OrderBy(b => b.At)];
+            return [.. _bans.Values.Concat(_anyCase.Values).Where(b => b.ActiveAt(now)).OrderBy(b => b.At)];
         }
     }
 
@@ -140,15 +188,32 @@ public sealed class BanList : IRoomGate
         return ban;
     }
 
-    public bool Remove(string kind, string value)
+    /// <summary>
+    /// Lifts one ban. <paramref name="match"/> picks which account ban: <see cref="BanMatch.Exact"/> only the ban on this
+    /// exact name, <see cref="BanMatch.AnyCase"/> only a ban from an older version that matches the name in any case.
+    /// <see cref="BanMatch.Auto"/> lifts whichever one there is, and throws <see cref="AmbiguousUnbanException"/> without
+    /// changing anything when both are in force, so lifting the old entry never lifts the exact ban too.
+    /// </summary>
+    public bool Remove(string kind, string value, BanMatch match = BanMatch.Auto)
     {
         Validate(kind, value);
+        if (match == BanMatch.AnyCase && kind != "account") throw new ArgumentException("only account bans can match a name in any case");
         if (kind == "node") value = VolunteerNodes.Normalize(value) ?? value;
         if (kind == "operator") value = Amber.Core.Identity.JayAddress.Canonical(value.Trim()) ?? value;
+        value = value.Trim();
         lock (_gate)
         {
             Refresh();
-            if (!_bans.Remove(Key(kind, value.Trim()))) return false;
+            var now = _now();
+            var key = Key(kind, value);
+            var exact = match != BanMatch.AnyCase && _bans.ContainsKey(key);
+            // A version 1 account ban is lifted by its name in any case, as it was before.
+            var old = kind == "account" && match != BanMatch.Exact && _anyCase.ContainsKey(value);
+            if (match == BanMatch.Auto && exact && old && _bans[key].ActiveAt(now) && _anyCase[value].ActiveAt(now))
+                throw new AmbiguousUnbanException(kind, value);
+            var removed = exact && _bans.Remove(key);
+            if (old) removed |= _anyCase.Remove(value);
+            if (!removed) return false;
             Save();
             return true;
         }
@@ -165,15 +230,21 @@ public sealed class BanList : IRoomGate
         var now = _now();
         // Expired bans are dropped on every save.
         foreach (var key in _bans.Where(p => !p.Value.ActiveAt(now)).Select(p => p.Key).ToList()) _bans.Remove(key);
+        foreach (var key in _anyCase.Where(p => !p.Value.ActiveAt(now)).Select(p => p.Key).ToList()) _anyCase.Remove(key);
         if (_path is null) return;
-        var array = new JsonArray([.. _bans.Values.Select(b => (JsonNode)new JsonObject
+        var array = new JsonArray([.. _bans.Values.Concat(_anyCase.Values).Select(b =>
         {
-            ["kind"] = b.Kind, ["value"] = b.Value, ["reason"] = b.Reason, ["at"] = b.At.ToUnixTimeSeconds(),
-            ["until"] = b.Until?.ToUnixTimeSeconds(),
+            var o = new JsonObject
+            {
+                ["kind"] = b.Kind, ["value"] = b.Value, ["reason"] = b.Reason, ["at"] = b.At.ToUnixTimeSeconds(),
+                ["until"] = b.Until?.ToUnixTimeSeconds(),
+            };
+            if (b.AnyCase) o["anyCase"] = true;
+            return (JsonNode)o;
         })]);
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(_path))!);
         var tmp = _path + ".tmp";
-        File.WriteAllText(tmp, new JsonObject { ["v"] = 1, ["bans"] = array }.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+        File.WriteAllText(tmp, new JsonObject { ["v"] = FormatVersion, ["bans"] = array }.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
         var previous = File.Exists(_path) ? File.GetLastWriteTimeUtc(_path) : DateTime.MinValue;
         File.Move(tmp, _path, overwrite: true);
         // Two saves within the file system's clock tick can get the same write time, and then other nodes
@@ -182,6 +253,38 @@ public sealed class BanList : IRoomGate
         var floor = previous > _loadedStamp ? previous : _loadedStamp;
         if (stamp <= floor) File.SetLastWriteTimeUtc(_path, stamp = floor.AddMilliseconds(1));
         _loadedStamp = stamp;
+        _fileVersion = FormatVersion;
+    }
+
+    /// <summary>
+    /// Ties version 1 account bans (which matched the name in any case) to the one account in <paramref name="accounts"/>
+    /// whose name matches in any case, so they match that exact name from now on. A ban whose name matches no account, or
+    /// several accounts that differ only in case, keeps matching any case and is returned for the admin to review. Saves
+    /// the list in the current format when anything changed or the file is older.
+    /// </summary>
+    /// <param name="accounts">Every account name, exactly as the account store keeps it.</param>
+    public AccountBanMigration MigrateAccountBans(IEnumerable<string> accounts)
+    {
+        var byName = accounts.Distinct(StringComparer.Ordinal).ToLookup(name => name, StringComparer.OrdinalIgnoreCase);
+        lock (_gate)
+        {
+            Refresh();
+            var now = _now();
+            var migrated = 0;
+            foreach (var (name, old) in _anyCase.ToList())
+            {
+                if (!old.ActiveAt(now) || byName[name].ToList() is not [var exact]) continue;
+                _anyCase.Remove(name);
+                var ban = old with { Value = exact, AnyCase = false };
+                var key = Key("account", exact);
+                // An exact ban on the same account may already exist: keep whichever lasts longer.
+                if (!_bans.TryGetValue(key, out var existing) || existing.Until is { } end && (ban.Until is not { } until || until > end)) _bans[key] = ban;
+                migrated++;
+            }
+            var unresolved = _anyCase.Values.Where(b => b.ActiveAt(now)).OrderBy(b => b.At).Select(b => (b, byName[b.Value].Count())).ToList();
+            if (migrated > 0 || _fileVersion < FormatVersion) Save();
+            return new AccountBanMigration(migrated, unresolved);
+        }
     }
 
     /// <summary>The ban that applies to this host/room/account, if any.</summary>
@@ -193,7 +296,7 @@ public sealed class BanList : IRoomGate
             var now = _now();
             foreach (var key in new[] { Key("host", listing.HostFingerprint), Key("room", listing.Id), account is null ? null : Key("account", account) })
                 if (key is not null && _bans.TryGetValue(key, out var ban) && ban.ActiveAt(now)) return ban;
-            return null;
+            return account is not null && _anyCase.TryGetValue(account, out var old) && old.ActiveAt(now) ? old : null;
         }
     }
 
@@ -205,7 +308,9 @@ public sealed class BanList : IRoomGate
         lock (_gate)
         {
             Refresh();
-            return _bans.TryGetValue(Key("account", account), out var ban) && ban.ActiveAt(_now());
+            var now = _now();
+            return _bans.TryGetValue(Key("account", account), out var ban) && ban.ActiveAt(now)
+                || _anyCase.TryGetValue(account, out var old) && old.ActiveAt(now);
         }
     }
 

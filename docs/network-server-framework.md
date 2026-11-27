@@ -74,7 +74,7 @@ await server.RunAsync(CancellationToken.None);
 | `GET /bans` | `{ok, bans: [{kind, value, reason, at, until}]}`（`until` 为 null 是永久） |
 | `POST /ban` `{kind: host\|room\|account\|node\|operator, value, reason?, for?}` | `{ok, removed}`（`operator` 另有 `bannedNodes: [地址, ...]` 和 `disputedNotBanned: [地址, ...]`）；`for` 是秒数，`node` 的值是志愿中转地址，`operator` 的值是志愿者的 Jay 账户（他登记的所有中转一起拿掉，这些地址也按 `node` 封同样的时间，原因写 `with operator <账户>`；有没被封的别的账户签名认领过、或有被拒的不签名登记的地址只拿掉不封，列在 `disputedNotBanned` 里；一起封掉的列在 `bannedNodes` 里，两者都写进日志：认领的也可能是同一个人的另一个账户，要运营者自己看；再封一次这个账户时，已有的这些地址封禁也改成新的结束时间；`/unban` 这个账户时一起解封）。封运营者总是挡得住这个账户的签名登记；没开 `RequireSignedVolunteers` 时不签名的登记挡不住，换一个新账户也挡不住 |
 | `POST /ban` `{kind: room-host, value: <房间编号>, reason?, for?}` | `{ok, removed, host, account}`：封这个房间房主的指纹和账号；房间不在回 404 |
-| `POST /unban` `{kind, value}` | `{ok}` 或 404 |
+| `POST /unban` `{kind, value, match?}` | `{ok}` 或 404；`match` 是 `exact`（只解这个账号的精确封禁）或 `anyCase`（只解旧版不分大小写的那条），不给时两条都在就回 409 `ambiguous`、什么都不改 |
 | `POST /remove` `{id}` | `{ok}` 或 404 |
 
 ## 协议

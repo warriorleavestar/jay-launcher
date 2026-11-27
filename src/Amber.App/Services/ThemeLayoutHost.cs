@@ -49,8 +49,9 @@ public sealed class ThemeLayoutHost
         _view = view;
         _pageId = pageId;
         _original = (Control)view.Content!;
+        // Only regions a theme can place for this page: detaching any other tagged control would lose it.
         foreach (var c in _original.GetSelfAndLogicalDescendants().OfType<Control>())
-            if (ThemeRegion.GetName(c) is { } name) _regions[name] = c;
+            if (ThemeRegion.GetName(c) is { } name && ThemeLayout.IsPlaceableRegion(pageId, name)) _regions[name] = c;
     }
 
     /// <summary>页面构造函数里 InitializeComponent 之后调用一次。</summary>
