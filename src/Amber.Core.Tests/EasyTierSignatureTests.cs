@@ -55,6 +55,20 @@ public sealed class EasyTierSignatureTests
     }
 
     [Fact]
+    public void EmbeddedBuildKeepsItsOriginalTwoOfTwoTrustList()
+    {
+        using var stream = typeof(EasyTierRelease).Assembly.GetManifestResourceStream(
+            "easytier-signed/" + ReleaseSignature.SignatureFileName)!;
+        using var reader = new StreamReader(stream, Encoding.UTF8);
+        var statement = ReleaseManifest.Parse(reader.ReadToEnd())!.Statement;
+
+        Assert.Equal(2, EasyTierRelease.EmbeddedTrust.Keys.Count);
+        Assert.Equal(2, EasyTierRelease.EmbeddedTrust.Need);
+        Assert.Equal(statement.TrustHash, EasyTierRelease.EmbeddedTrust.Hash);
+        Assert.NotEqual(TrustList.Jay.Hash, EasyTierRelease.EmbeddedTrust.Hash);
+    }
+
+    [Fact]
     public void TwoOfThreeTrusteesPass()
     {
         Assert.Equal(ReleaseVerdict.Valid, Check(Signed(Statement(EmbeddedSums()), T[0], T[2])));

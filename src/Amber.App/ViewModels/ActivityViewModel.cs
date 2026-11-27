@@ -26,6 +26,17 @@ public sealed partial class TaskItem(TaskHandle handle) : ObservableObject
     public string Step => Handle.Detail ?? (Handle.Progress is null ? L.T("activity.task.working") : "");
     public double? Speed => Handle.BytesPerSecond;
     public TimeSpan? Remaining => Handle.Remaining;
+    public IReadOnlyList<string> ActiveFiles => Handle.ActiveFiles;
+    public bool HasFiles => ActiveFiles.Count > 0;
+    public string DownloadSpeedText => Speed is { } speed && speed > 0
+        ? L.F("activity.task.speed", Fmt.Speed(speed))
+        : L.T("activity.task.measuring_speed");
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(DetailsLabel))]
+    public partial bool IsExpanded { get; set; }
+
+    public string DetailsLabel => L.T(IsExpanded ? "activity.task.hide_details" : "activity.task.show_details");
 
     public string Detail => Handle.State switch
     {
@@ -36,10 +47,17 @@ public sealed partial class TaskItem(TaskHandle handle) : ObservableObject
         _ => L.T("activity.task.cancelled"),
     };
 
-    public void Refresh() => OnPropertyChanged(string.Empty);
+    public void Refresh()
+    {
+        if (!HasFiles) IsExpanded = false;
+        OnPropertyChanged(string.Empty);
+    }
 
     [RelayCommand]
     private void Cancel() => Handle.Cancel();
+
+    [RelayCommand]
+    private void ToggleDetails() => IsExpanded = !IsExpanded;
 }
 
 /// <summary>活动中心“通知”的一行：Toast 和处理过的请求。</summary>
@@ -132,6 +150,7 @@ public sealed partial class ActivityViewModel : ObservableObject
     public ActivityViewModel(LauncherService service)
     {
         _service = service;
+        service.ShowUpdateTask += () => { Tab = 0; IsOpen = true; };
         service.Tasks.Changed += _ => Dispatcher.UIThread.Post(SyncTasks);
         service.Tasks.Completed += t => Dispatcher.UIThread.Post(() =>
         {
