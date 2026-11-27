@@ -223,7 +223,7 @@
         <StackPanel x:Name="PlayPanel" Spacing="14" IsVisible="{Binding IsPlayTab}">
           <!-- The component: only when it is missing (it also lives in settings › component). -->
           <Panel IsVisible="{Binding !IsComponentReady}">
-            <Border Classes="card" Margin="0">
+            <Border Classes="card" Margin="0" MaxWidth="760" HorizontalAlignment="Left">
               <StackPanel Spacing="8">
                 <Grid RowDefinitions="Auto,Auto" RowSpacing="8">
                   <TextBlock Text="{Binding ComponentText}" TextWrapping="Wrap" VerticalAlignment="Center" />
@@ -1536,10 +1536,29 @@
       </StackPanel>
     </ScrollViewer>
 
-    <!-- 消息被 ✕ 关掉后整张卡片一起收起，不留空卡片 -->
-    <Border svc:ThemeRegion.Name="multiplayer.status" Grid.Row="4" Classes="card" Margin="0" IsVisible="{Binding #PageStatus.IsShowing}">
-      <c:StatusBar x:Name="PageStatus" Message="{Binding StatusInfo}" />
-    </Border>
+    <!-- On the smallest windows the lobby form is taller than the viewport. Keep its two destinations at thumb reach:
+         joining can be submitted after editing the code, and opening a room remains one tap away. -->
+    <StackPanel Grid.Row="4" Spacing="6">
+      <Border x:Name="CompactLobbyBar" Classes="card" Margin="0" Padding="8" IsVisible="False">
+        <Grid x:Name="CompactLobbyState" ColumnDefinitions="*,*" ColumnSpacing="8">
+          <Grid.IsVisible>
+            <MultiBinding Converter="{x:Static BoolConverters.And}">
+              <Binding Path="IsPlayTab" />
+              <Binding Path="IsIdle" />
+            </MultiBinding>
+          </Grid.IsVisible>
+          <Button x:Name="CompactLobbyJoinButton" Classes="primary" Content="{l:T multiplayer.lobby.join_button}"
+                  Command="{Binding JoinCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+          <Button Grid.Column="1" x:Name="CompactLobbyHostButton" Content="{Binding HostButtonText}" Command="{Binding HostFromLobbyCommand}"
+                  IsVisible="{Binding ShowHostButton}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+        </Grid>
+      </Border>
+
+      <!-- 消息被 ✕ 关掉后整张卡片一起收起，不留空卡片 -->
+      <Border svc:ThemeRegion.Name="multiplayer.status" Classes="card" Margin="0" IsVisible="{Binding #PageStatus.IsShowing}">
+        <c:StatusBar x:Name="PageStatus" Message="{Binding StatusInfo}" />
+      </Border>
+    </StackPanel>
 
     <!-- "Connection problems?" (official §6.18): a 560 drawer over the page (full width in compact windows). One check, a plain
          conclusion, suggestions, and the technical details folded away. Esc closes; Ctrl+Shift+D opens. -->

@@ -14,8 +14,16 @@ namespace Amber.Core.Net;
 /// <param name="Within">设了的话，文件只能写在这个目录里面（版本文件、库、资源这类路径来自不可信的版本文件时用）。</param>
 public sealed record DownloadItem(string Url, string LocalPath, string? Sha1 = null, long? Size = null, string? Within = null);
 
-/// <summary>BytesDownloaded 是实时累计的字节数，CurrentFile 可能为空。</summary>
-public readonly record struct DownloadProgress(int CompletedFiles, int TotalFiles, long BytesDownloaded, string? CurrentFile);
+/// <summary>
+/// BytesDownloaded 是实时累计的字节数，CurrentFile 是最近完成的文件。
+/// ActiveFiles 是当前正在并行下载的文件名，不包含本地完整路径。
+/// </summary>
+public readonly record struct DownloadProgress(
+    int CompletedFiles,
+    int TotalFiles,
+    long BytesDownloaded,
+    string? CurrentFile,
+    IReadOnlyList<string>? ActiveFiles = null);
 
 public sealed class DownloadException(string message, IReadOnlyList<(DownloadItem Item, Exception Error)> failures)
     : Exception(message)
@@ -237,6 +245,7 @@ public sealed class Downloader
         long bytes = 0;
         var lastReport = Stopwatch.StartNew();
         var failures = new List<(DownloadItem, Exception)>();
+        var active = new ConcurrentDictionary<string, string>();
 
         void Report(string? file, bool force)
         {
@@ -246,7 +255,12 @@ public sealed class Downloader
                 if (!force && lastReport.ElapsedMilliseconds < 80) return;
                 lastReport.Restart();
             }
-            progress.Report(new DownloadProgress(Volatile.Read(ref completed), total, Interlocked.Read(ref bytes), file));
+            progress.Report(new DownloadProgress(
+                Volatile.Read(ref completed),
+                total,
+                Interlocked.Read(ref bytes),
+                file,
+                active.Values.OrderBy(name => name, StringComparer.OrdinalIgnoreCase).ToArray()));
         }
 
         try
@@ -279,6 +293,8 @@ public sealed class Downloader
 
             await Parallel.ForEachAsync(pending, new ParallelOptions { MaxDegreeOfParallelism = MaxConcurrency, CancellationToken = ct }, async (item, token) =>
             {
+                active[item.LocalPath] = Path.GetFileName(item.LocalPath);
+                Report(null, true);
                 try
                 {
                     await DownloadCoreAsync(item, delta =>
@@ -290,6 +306,10 @@ public sealed class Downloader
                 catch (Exception e) when (!token.IsCancellationRequested)
                 {
                     lock (failures) failures.Add((item, e));
+                }
+                finally
+                {
+                    active.TryRemove(item.LocalPath, out _);
                 }
                 Interlocked.Increment(ref completed);
                 Report(Path.GetFileName(item.LocalPath), false);

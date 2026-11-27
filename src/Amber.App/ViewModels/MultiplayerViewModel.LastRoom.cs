@@ -56,7 +56,7 @@ public sealed partial class MultiplayerViewModel
         OnPropertyChanged(nameof(LastRoomText));
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanHostFromLobby))]
     private async Task RepeatLastRoomAsync()
     {
         if (LastRoomSettings is not { } last || !IsIdle) return;

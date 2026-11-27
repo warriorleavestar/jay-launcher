@@ -1,0 +1,13 @@
+diff --git a/MobileGlues-cpp/config/settings.cpp b/MobileGlues-cpp/config/settings.cpp
+index 43d5dd0..d8d046a 100644
+--- a/MobileGlues-cpp/config/settings.cpp
++++ b/MobileGlues-cpp/config/settings.cpp
+@@ -156,6 +156,8 @@ void init_settings() {
+     LOG_D("Is Adreno 830? = %s", is830 ? "true" : "false")
+     LOG_D("Is ANGLE supported? = %s", isANGLESupported ? "true" : "false")
+ 
++    const char* preferred = getenv("JAY_EMULATOR_ANGLE");
++    if (preferred && strcmp(preferred, "1") == 0) angleConfig = AngleConfig::ForceEnable;
+     switch (angleConfig) {
+     case AngleConfig::ForceDisable:
+         finalAngleMode = AngleMode::Disabled;

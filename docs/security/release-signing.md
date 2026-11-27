@@ -1,7 +1,7 @@
 # Release signatures
 
-A Jay release counts only when **enough Jay trustee release keys** (`JayTrust.ReleaseNeed`; the goal is 2 of 3 trustees, today both of the two keys below) have signed it, each with both **Ed25519 and
-ML-DSA-65** (privacy plan, items 2 and 3). Every trustee holds **two separate keys**: a trust key for
+A Jay release counts only when **enough Jay trustee release keys** (`JayTrust.ReleaseNeed`; today 2 of 3) have signed it, each with both **Ed25519 and
+ML-DSA-65**. Every trustee holds **two separate keys**: a trust key for
 networks, directory certificates and hardware certificates (`JayTrust.Keys`), and a **release key** used only
 for releases and trustee list changes (`JayTrust.ReleaseKeys`, both in
 `src/Amber.Core/Multiplayer/Public/TrustQuorum.cs`). `jay-server` refuses a release key for network signing and
@@ -17,7 +17,7 @@ Each release carries, next to its packages:
 
 ## What the app checks
 
-The update check (`UpdateCheck.cs`, Settings › About › Check for updates, and the daily automatic check) downloads those three files from the newer
+The update check (`UpdateCheck.cs`, Settings › About › Check for updates, and the automatic check while Jay is open) downloads those three files from the newer
 release's assets and offers the update only when:
 
 - `SHA256SUMS.txt.sigs` is for exactly this `SHA256SUMS.txt` and this tag;
@@ -33,8 +33,20 @@ release's assets and offers the update only when:
   data folder), so an old signed release can't be passed off as new.
 
 Anything else: the app says the version was found but did not pass verification, and shows no button.
-Jay does not download or install the update itself: the notice opens the release page, whose address is
-built from the verified tag. A package downloaded from there can be checked with About › Verify a Jay download.
+Windows, macOS and Android offer **Download and update** when the signed list and the release
+both contain the installer for the current platform. Jay streams the installer into its private
+update cache, checks SHA-256, and opens the native installer for confirmation. It keeps game
+instances, worlds and accounts in place. The Windows updater targets the running portable
+installation. On macOS, install Jay.app from the DMG before using its update-only PKG.
+Android requires the same application ID and signing identity and a higher version code.
+Earlier launchers need one ordinary in-place upgrade to gain this feature.
+
+To deliver an update, increment the launcher version and mobile build number, then tag the
+matching commit. CI stages the Windows setup EXE, both macOS PKGs and the channel-signed
+Android APK beside the portable packages in the release draft. Sign the resulting checksum list
+as below and publish the signed draft as **latest**. An enabled launcher checks shortly after
+opening and every 15 minutes thereafter. Settings › About can also check immediately.
+A rolling preview alone does not authorize a launcher update.
 
 About › **Verify a Jay download** runs the same check on a file the user already downloaded (with
 `SHA256SUMS.txt`, `.sigs` and `trust-chain.json` next to it). `jay-server release verify` does the same on
@@ -45,13 +57,12 @@ the command line.
 - **Protects:** updates and re-downloads for people who already run a genuine Jay. A stolen GitHub
   account, a compromised CI run, a swapped mirror file or **a single trustee** cannot produce a valid
   release; ML-DSA-65 keeps that true against a future quantum computer that breaks Ed25519.
-- **Doesn't protect:** two trustees acting together, or the very first download (that copy of Jay has
+- **Doesn't protect:** the holders of any two configured release keys acting together, or the very first download (that copy of Jay has
   no reason to trust anything yet). It also doesn't remove Windows SmartScreen / Smart App Control or
   macOS Gatekeeper warnings; those need real code signing, which Jay doesn't have yet.
-- **For now there are two release keys, and both belong to one trustee** (their own key and an offline cold
-  backup), with both needed. Until a third trustee joins, this guards against one stolen key, not against that one
-  person. Each key has a checked paper backup.
-- Losing more keys (and their paper backups) than a trust-chain step can spare, today either of the two, can't be
+- There are three release keys: Trustee 1's key and offline cold backup, plus Trustee 2's independent key. Any two
+  are needed. Each key has a checked paper backup.
+- Losing more keys (and their paper backups) than a trust-chain step can spare, today any two of the three, can't be
   repaired by a trust-chain step; old installs then have to reinstall from a fresh download.
 - A self-signed Authenticode certificate is not a substitute. Windows doesn't trust it, and asking
   users to install it as a trusted root would weaken their whole system.
@@ -85,7 +96,7 @@ The CI release job publishes the packages and `SHA256SUMS.txt` as a **draft** re
 gh release download v0.9.0 --pattern 'SHA256SUMS.txt' --dir rel
 jay-server release prepare --tag v0.9.0 --seq 12 --commit <full commit id> --sums rel/SHA256SUMS.txt
 
-# Each release key holder (today: Trustee 1's key and the cold backup), on an offline machine:
+# Any two release key holders, on an offline machine:
 jay-server release cosign --key jay-release.key --sums rel/SHA256SUMS.txt
 ```
 
@@ -101,13 +112,13 @@ package end to end, and publish:
 gh release upload v0.9.0 rel/SHA256SUMS.txt.sigs
 gh release download v0.9.0 --pattern 'Jay-win-x64.zip' --dir rel
 jay-server release verify rel/Jay-win-x64.zip --tag v0.9.0
-gh release edit v0.9.0 --draft=false
+gh release edit v0.9.0 --draft=false --latest
 ```
 
 ## EasyTier builds
 
 Jay's hardened EasyTier ([Yumao-Feather/jay-easytier](https://github.com/Yumao-Feather/jay-easytier))
-is signed the same way: the trustees' **release keys** (as many as `JayTrust.ReleaseNeed`; today both of the two), both algorithms (never the network trust keys). Its signature names the component, so the
+is signed the same way: the trustees' **release keys** (as many as `JayTrust.ReleaseNeed`; today 2 of 3), both algorithms (never the network trust keys). Its signature names the component, so the
 signed bytes start with `jay-component-v1` and `easytier` instead of `jay-release-v2`, and the JSON has
 `"component": "easytier"`. A Jay release signature can never pass as an EasyTier one, or the other way round.
 The tag is the fork's own (`jay-v2.6.4-3`) and the seq counts EasyTier builds (1, 2, …), separately from Jay.
@@ -128,7 +139,7 @@ When the fork's release job has published the zips, `SHA256SUMS.txt` and `SIZES.
 gh release download jay-v2.6.4-3 --repo Yumao-Feather/jay-easytier --pattern 'SHA256SUMS.txt' --dir et
 jay-server release prepare --component easytier --tag jay-v2.6.4-3 --seq 3 --commit 9407746b1ce1dc4d977441c47dfdcb303363a62a --sums et/SHA256SUMS.txt
 
-# Each release key holder (today: Trustee 1's key and the cold backup), on an offline machine (the review says it is an EasyTier build):
+# Any two release key holders, on an offline machine (the review says it is an EasyTier build):
 jay-server release cosign --key jay-release.key --sums et/SHA256SUMS.txt
 
 gh release upload jay-v2.6.4-3 --repo Yumao-Feather/jay-easytier et/SHA256SUMS.txt.sigs
