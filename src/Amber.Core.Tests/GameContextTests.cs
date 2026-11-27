@@ -78,7 +78,7 @@ public sealed class GameContextTests : IDisposable
     }
 
     /// <summary>区分大小写的系统上，只差大小写的是另一个游戏目录。</summary>
-    [Fact]
+    [LinuxFact]
     public void DirectoryThatDiffersOnlyByCaseIsAnotherDirectoryOnLinux()
     {
         if (!OperatingSystem.IsLinux()) return;

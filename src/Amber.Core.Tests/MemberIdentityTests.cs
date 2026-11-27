@@ -94,7 +94,7 @@ public sealed class MemberIdentityTests : IDisposable
     }
 
     /// <summary>非 Windows：已存在的包裹密钥文件权限过宽时被收紧到 0600；已存在的那把会被沿用（不被覆盖）。</summary>
-    [Fact]
+    [UnixFact]
     public void ExistingWrapKeyIsReusedAndTightened()
     {
         if (OperatingSystem.IsWindows()) return;
@@ -128,7 +128,7 @@ public sealed class MemberIdentityTests : IDisposable
     }
 
     /// <summary>非 Windows：包裹密钥文件长度不对（比如断电留下的空文件）时，换新身份并重建包裹密钥，不会每次启动都失败。</summary>
-    [Theory]
+    [UnixTheory]
     [InlineData(true)]
     [InlineData(false)]
     public void BrokenWrapKeyRecovers(bool identityExists)
@@ -293,7 +293,7 @@ public sealed class MemberIdentityTests : IDisposable
         Assert.True(File.Exists(Path.Combine(_dir, MemberIdentity.FileName + ".broken")));
     }
 
-    [Fact]
+    [WindowsFact]
     public void LockedKeyProtectionKeepsTheIdentityFile()
     {
         // Windows only: DPAPI refusing for this logon (an SSH logon without a password) must not replace a good identity.
@@ -317,7 +317,7 @@ public sealed class MemberIdentityTests : IDisposable
         }
     }
 
-    [Fact]
+    [WindowsFact]
     public void UndecryptableFileWithWorkingKeyProtectionIsReplaced()
     {
         if (!OperatingSystem.IsWindows()) return;

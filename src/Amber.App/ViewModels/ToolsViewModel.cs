@@ -174,7 +174,8 @@ public sealed partial class ToolsViewModel : PageViewModel
         if (string.IsNullOrWhiteSpace(name)) name = "download.bin";
         var target = Path.Combine(DownloadFolder.Trim(), name);
         SetStatus(StatusMessage.Info("tools.download.downloading", name));
-        var item = new DownloadItem(uri.ToString(), target, string.IsNullOrWhiteSpace(DownloadSha1) ? null : DownloadSha1.Trim());
+        // The address the person typed is fetched as given, plain http included.
+        var item = new DownloadItem(uri.ToString(), target, string.IsNullOrWhiteSpace(DownloadSha1) ? null : DownloadSha1.Trim()) { UserTyped = true };
         await service.Downloader.DownloadOneAsync(item, new Progress<long>(bytes =>
         {
             SetStatus(StatusMessage.Info("tools.download.progress", name, bytes / 1024.0 / 1024));

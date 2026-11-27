@@ -425,6 +425,9 @@ public sealed partial class MultiplayerViewModel
     {
         if (IsJoined)
         {
+            // The old network's chat connections (also either side of a move) are not heard any more. (The host's own
+            // chat goes to its hub on this machine and stays.)
+            _chatRoute.Retire();
             var chat = _chat;
             _chat = null;
             StopPrivate();
@@ -438,7 +441,7 @@ public sealed partial class MultiplayerViewModel
     /// <summary>加入方：被房主踢出：停止联机（关掉 EasyTier 和聊天），告诉用户。</summary>
     private void OnKicked(ChatClient client)
     {
-        if (_chat != client || !IsJoined || _room is not { FromInvite: true }) return;
+        if (!IsChatFrom(client) || !IsJoined || _room is not { FromInvite: true }) return;
         StopSession();
         SetStatus(StatusMessage.Warning("multiplayer.kick.you_were_kicked"));
     }
@@ -446,7 +449,7 @@ public sealed partial class MultiplayerViewModel
     /// <summary>加入方：房主换了网络（有人被踢）。经自己的成员通道收到、版本比当前大才换。</summary>
     private void OnRekey(ChatClient client, RoomRekey next)
     {
-        if (_chat != client || !IsJoined || _room is not { FromInvite: true } room || next.Epoch <= room.Epoch) return;
+        if (!IsChatFrom(client) || !IsJoined || _room is not { FromInvite: true } room || next.Epoch <= room.Epoch) return;
         SetStatus(StatusMessage.Info("multiplayer.rekey.reconnecting"));
         SwitchNetwork(room.Rekeyed(next));
     }

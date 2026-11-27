@@ -150,7 +150,7 @@ public sealed class TrashServiceTests : IDisposable
         Assert.Equal(8, TrashService.TotalSize(b.TrashRoot));
     }
 
-    [Fact]
+    [WindowsFact]
     public void LockedFileStaysWhereItWas()
     {
         if (!OperatingSystem.IsWindows()) return;

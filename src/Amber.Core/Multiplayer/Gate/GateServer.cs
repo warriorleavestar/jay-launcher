@@ -66,6 +66,19 @@ public sealed class GateServer : IAsyncDisposable
     }
 
     /// <summary>
+    /// The key the per-address handshake limit counts by: an IPv4 address as it is, an IPv6 address by its /64 prefix,
+    /// since one host usually has a whole /64 and could otherwise use a new address for every connection.
+    /// </summary>
+    internal static IPAddress RateKey(IPAddress address)
+    {
+        address = address.MapToIPv6();
+        if (address.IsIPv4MappedToIPv6) return address;
+        var bytes = address.GetAddressBytes();
+        Array.Clear(bytes, 8, 8);
+        return new IPAddress(bytes);
+    }
+
+    /// <summary>
     /// 入口端口轮换：普通模式下开了轮换就关掉固定端口，只听当前前后三个时间窗的端口。
     /// 隐私+/++ 下玩家连的是节点，网关的固定端口留给节点转发（用防火墙只放行节点），轮换交给节点去做。
     /// 从隐私+/++ 降回普通模式时，节点还在转发到固定端口：配着节点就让固定端口一直开着，但过渡期后只收节点转来的连接（见 <see cref="FixedPortClosedTo"/>）。
@@ -97,7 +110,7 @@ public sealed class GateServer : IAsyncDisposable
     {
         using (client)
         {
-            var remote = (client.Client.RemoteEndPoint as IPEndPoint)?.Address.MapToIPv6() ?? IPAddress.IPv6None;
+            var address = (client.Client.RemoteEndPoint as IPEndPoint)?.Address.MapToIPv6() ?? IPAddress.IPv6None;
             Pump.Tune(client);
             GateState state;
             try { state = _store.Read(); }
@@ -110,7 +123,7 @@ public sealed class GateServer : IAsyncDisposable
                 return;
             }
             var plus = state.Privacy.IsSplit();
-            var fromRelay = state.Relays.Count > 0 && RelaySources(state).Contains(remote);
+            var fromRelay = state.Relays.Count > 0 && RelaySources(state).Contains(address);
             if (FixedPortClosedTo(client, state, fromRelay))
             {
                 Interlocked.Increment(ref Rejected);
@@ -118,8 +131,8 @@ public sealed class GateServer : IAsyncDisposable
                 return;
             }
             // 节点转来的连接共用节点的 IP，不按 IP 限握手数（总数仍受 MaxConnections 限制）。
-            if (fromRelay) remote = IPAddress.None;
-            else if (_handshaking.AddOrUpdate(remote, 1, (_, n) => n + 1) > _config.MaxHandshakesPerIp)
+            var remote = fromRelay ? IPAddress.None : RateKey(address);
+            if (!fromRelay && _handshaking.AddOrUpdate(remote, 1, (_, n) => n + 1) > _config.MaxHandshakesPerIp)
             {
                 Release(remote);
                 Pump.Abort(client);
@@ -175,7 +188,9 @@ public sealed class GateServer : IAsyncDisposable
                     var names = _store.AllowedNames(device);
                     if (names.Count == 0)
                     {
-                        await GateProtocol.SendJoinResultAsync(secure, GateStatus.NotMember, timeout.Token, network);
+                        // A device that is not (or no longer) on the list gets the status alone: the address book is for members.
+                        // A disabled member is told so, as on enrollment.
+                        await GateProtocol.SendJoinResultAsync(secure, _store.IsDisabledDevice(device) ? GateStatus.Disabled : GateStatus.NotMember, timeout.Token);
                         await secure.CloseAsync(timeout.Token);
                         _log(L.F("core.gate.log.not_member", fingerprint));
                         return;
@@ -189,7 +204,7 @@ public sealed class GateServer : IAsyncDisposable
                         _log(L.F("core.gate.log.split_required", fingerprint));
                         return;
                     }
-                    if (BreakerOpen)
+                    if (Refusing(state))
                     {
                         await GateProtocol.SendJoinResultAsync(secure, GateStatus.CircuitOpen, timeout.Token, network);
                         await secure.CloseAsync(timeout.Token);
@@ -234,12 +249,16 @@ public sealed class GateServer : IAsyncDisposable
                             _log(L.F("core.gate.log.wrong_name", fingerprint, login.Username!, string.Join(", ", names)));
                             return;
                         }
+                        // Any casing may log in, but the server always gets one spelling per name: an offline-mode server
+                        // treats each casing as a different player, which would sidestep its bans and whitelist. That
+                        // spelling is the one of the first join, so a player keeps the save they already have.
+                        login = login.WithUsername(_store.ServerSpelling(name, login.Username!));
                     }
                 }
                 Release(remote);
                 remote = IPAddress.None;
                 // 配对和读登录包期间刚好熔断了：不再接进服务端。
-                if (BreakerOpen) throw new IOException(GateRejectedException.Describe(GateStatus.CircuitOpen));
+                if (Refusing(state)) throw new IOException(GateRejectedException.Describe(GateStatus.CircuitOpen));
                 using var backend = new TcpClient();
                 await backend.ConnectAsync(_config.BackendHost, _config.BackendPort, ct);
                 Pump.Tune(backend);
@@ -302,12 +321,22 @@ public sealed class GateServer : IAsyncDisposable
     private readonly ConcurrentDictionary<string, DateTime> _heartbeats = new();
     private readonly ConcurrentDictionary<string, SecureStream> _relayChannels = new();
     private volatile bool _breakerOpen;
+    // Whether the last check counted enough healthy relays for privacy++. False until a check has run, so a server
+    // that has just started, or just switched to privacy++, lets nobody in before it has counted its relays.
+    private volatile bool _relaysCounted;
     private int _epoch;
     private DateTime _healthySince = DateTime.MinValue;
     private HashSet<string> _healthyLast = [];
 
     /// <summary>隐私++ 熔断中：断开了全部游戏连接，暂停接受新连接。</summary>
     public bool BreakerOpen => _breakerOpen;
+    /// <summary>Relays whose heartbeat the last check counted as healthy.</summary>
+    public int HealthyRelays => _healthyLast.Count;
+    /// <summary>The last check counted enough healthy relays for privacy++ (false before the first check).</summary>
+    public bool RelaysCounted => _relaysCounted;
+
+    /// <summary>New game connections are refused: the breaker is open, or privacy++ has not yet counted enough healthy relays.</summary>
+    private bool Refusing(GateState state) => _breakerOpen || state.Privacy == PrivacyLevel.PlusPlus && !_relaysCounted;
     public int ActiveSessions => _sessions.Count;
     /// <summary>熔断状态变了（true = 熔断，false = 恢复）。第二个参数是原因（哪些节点不可用）。运行程序拿去执行 save-all。</summary>
     public event Action<bool, string>? BreakerChanged;
@@ -503,6 +532,7 @@ public sealed class GateServer : IAsyncDisposable
         _healthyLast = healthy;
 
         var enough = healthy.Count >= GateStore.RequiredHealthyRelays(state);
+        _relaysCounted = enough;
         if (state.Privacy != PrivacyLevel.PlusPlus || enough)
         {
             if (_healthySince == DateTime.MinValue) _healthySince = now;

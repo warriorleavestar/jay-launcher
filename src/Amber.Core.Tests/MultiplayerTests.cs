@@ -177,7 +177,7 @@ public class RelayNodeTests
 {
     [Theory]
     [InlineData("tcp://public.easytier.top:11010", true)]
-    [InlineData("udp://1.2.3.4:11010", true)]
+    [InlineData("udp://192.0.2.4:11010", true)]
     [InlineData("wss://node.example.com:443", true)]
     [InlineData("tcp://public.easytier.top", false)]
     [InlineData("http://example.com:80", false)]
@@ -292,7 +292,7 @@ public class ExitNodeArgsTests
 
     [Theory]
     [InlineData("10.233.144.1", false)]
-    [InlineData("8.8.8.8", true)]
+    [InlineData("198.51.100.88", true)]
     [InlineData("not-an-ip", true)]
     public void UsingExitNeedsTunAndRoomMember(string exit, bool tun)
     {
