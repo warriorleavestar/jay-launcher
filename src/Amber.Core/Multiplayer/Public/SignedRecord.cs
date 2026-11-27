@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Security.Cryptography;
 using System.Text.Json.Nodes;
+using Amber.Core.Multiplayer.Transport;
 
 namespace Amber.Core.Multiplayer.Public;
 
@@ -51,7 +52,7 @@ public sealed record SignedRecord(byte[] LookupKey, byte[] Signer, long Seq, Dat
         var key = HKDF.DeriveKey(HashAlgorithmName.SHA256, id.ToArray(), 32, [], SealInfo);
         try
         {
-            using var aead = new ChaCha20Poly1305(key);
+            using var aead = new ChaChaPoly(key);
             var output = new byte[NonceLength + plaintext.Length + TagLength];
             RandomNumberGenerator.Fill(output.AsSpan(0, NonceLength));
             aead.Encrypt(output.AsSpan(0, NonceLength), plaintext, output.AsSpan(NonceLength, plaintext.Length), output.AsSpan(NonceLength + plaintext.Length), lookup);
@@ -71,7 +72,7 @@ public sealed record SignedRecord(byte[] LookupKey, byte[] Signer, long Seq, Dat
         var key = HKDF.DeriveKey(HashAlgorithmName.SHA256, id.ToArray(), 32, [], SealInfo);
         try
         {
-            using var aead = new ChaCha20Poly1305(key);
+            using var aead = new ChaChaPoly(key);
             var length = blob.Length - NonceLength - TagLength;
             var plaintext = new byte[length];
             aead.Decrypt(blob[..NonceLength], blob.Slice(NonceLength, length), blob[(NonceLength + length)..], plaintext, lookup);

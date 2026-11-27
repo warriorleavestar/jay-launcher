@@ -13,6 +13,7 @@ cmake="$sdk/cmake/3.22.1/bin/cmake"
 ninja="$sdk/cmake/3.22.1/bin/ninja"
 source_commit="7b6aead9fb88b3623e3b3725ebb42670cbe4c579"
 patch_file="$(cd "$(dirname "$0")/../third_party/android-glfw" && pwd)/jay-android.patch"
+egl_patch_file="$(cd "$(dirname "$0")/../third_party/android-glfw" && pwd)/android-egl-es.patch"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
@@ -22,6 +23,8 @@ git clone --filter=blob:none --no-checkout https://github.com/glfw/glfw.git "$wo
 git -C "$work/glfw" checkout --detach "$source_commit"
 git -C "$work/glfw" apply --recount --check "$patch_file"
 git -C "$work/glfw" apply --recount "$patch_file"
+git -C "$work/glfw" apply --recount --check "$egl_patch_file"
+git -C "$work/glfw" apply --recount "$egl_patch_file"
 
 for abi in arm64-v8a x86_64; do
   build="$work/build-$abi"

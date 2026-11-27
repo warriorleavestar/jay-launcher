@@ -39,14 +39,21 @@ public class SpeedTestSecurityTests
     [Fact]
     public async Task TotalDeadlineStopsAContinuouslyTricklingBody()
     {
-        var limits = new SpeedTestServer.Limits(1, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2),
+        // Handshake and idle limits are far longer than the close window, so only the 300 ms total deadline can close
+        // the connection in time. The window itself leaves room for a busy CI runner (a full parallel test run on
+        // Windows has taken over 1.5 s to deliver the close).
+        var limits = new SpeedTestServer.Limits(1, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30),
             TimeSpan.FromSeconds(1), TimeSpan.FromMilliseconds(300));
         await using var server = new SpeedTestServer(0, limits);
         using var client = await ConnectAsync(server.BoundPort);
-        await client.GetStream().WriteAsync(BitConverter.GetBytes(64L * 1024 * 1024));
+        // Capture the stream while the socket is known to be connected. On a slow CI runner the server's short
+        // total deadline can close the socket between the initial write and TrickleAsync's first GetStream call;
+        // that is the success condition under test, not a failure of the trickle writer.
+        var stream = client.GetStream();
+        await stream.WriteAsync(BitConverter.GetBytes(64L * 1024 * 1024));
         using var stop = new CancellationTokenSource();
-        var trickle = TrickleAsync(client, stop.Token);
-        try { await AssertClosedAsync(client, TimeSpan.FromSeconds(1.5)); }
+        var trickle = TrickleAsync(stream, stop.Token);
+        try { await AssertClosedAsync(client, TimeSpan.FromSeconds(10)); }
         finally { stop.Cancel(); await trickle; }
         await WaitForAsync(() => server.ActiveSessions == 0);
     }
@@ -112,13 +119,13 @@ public class SpeedTestSecurityTests
         while (!condition()) await Task.Delay(10, timeout.Token);
     }
 
-    private static async Task TrickleAsync(TcpClient client, CancellationToken ct)
+    private static async Task TrickleAsync(NetworkStream stream, CancellationToken ct)
     {
         try
         {
             while (true)
             {
-                await client.GetStream().WriteAsync(new byte[] { 1 }, ct);
+                await stream.WriteAsync(new byte[] { 1 }, ct);
                 await Task.Delay(25, ct);
             }
         }
