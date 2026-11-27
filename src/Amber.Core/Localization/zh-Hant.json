@@ -1581,7 +1581,7 @@
   "core.gate.record.needs_network": "這份邀請要到公共網路「{0}」裡查位址。請先在 Jay 的公共網路裡新增這個網路，或者讓管理員發一份加密邀請。",
   "core.gate.record.looking_up": "正在 {0} 上查伺服器位址……",
   "core.gate.record.mobile": "這份邀請要到公共網路裡查位址，手機版暫時連不了公共網路。請讓管理員發一份加密邀請。",
-  "core.gate.status.devicelimit": "這個使用者名稱綁定的裝置已滿，請讓管理員先撤銷一台舊裝置",
+  "core.gate.status.devicelimit": "這個使用者名稱綁定的裝置已滿，請讓管理員先撤銷一台舊裝置，再給你發一個新邀請",
   "core.gate.status.notmember": "這台裝置不在伺服器名單裡（可能被撤銷了），請讓管理員重新發邀請",
   "core.gate.status.disabled": "這個使用者名稱已被管理員停用",
   "core.gate.status.unknown": "伺服器拒絕了連線",
