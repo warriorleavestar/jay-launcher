@@ -65,7 +65,7 @@ public sealed class EasyTierProcessGuardTests : IDisposable
         Assert.Equal(["-c", EasyTierProcessGuard.WatchScript, "jay-easytier", Environment.ProcessId.ToString(), "/opt/et/easytier-core", "--network-name", "a b; rm -rf ~"], info.ArgumentList);
     }
 
-    [Fact]
+    [UnixFact]
     public async Task CoreEndsSoonAfterJayIsKilled()
     {
         if (OperatingSystem.IsWindows()) return;
@@ -94,7 +94,7 @@ public sealed class EasyTierProcessGuardTests : IDisposable
         Assert.True(await Until(() => watch.HasExited));
     }
 
-    [Fact]
+    [UnixFact]
     public async Task StoppingTheWatcherStopsTheCore()
     {
         if (OperatingSystem.IsWindows()) return;
@@ -105,7 +105,7 @@ public sealed class EasyTierProcessGuardTests : IDisposable
         Assert.True(await Until(() => !Alive(core)));
     }
 
-    [Fact]
+    [UnixFact]
     public async Task TrackerCleansUpAWrappedCoreWhenTheWatcherWasLeftBehind()
     {
         // 看门进程自己被留下（比如记录它的 Jay 已经没了但看门进程还没轮到检查）：下次开始联机前的清理按 sh 认出它，连 core 一起结束。
@@ -163,7 +163,7 @@ public sealed class EasyTierProcessGuardTests : IDisposable
         Assert.False(File.Exists(record), "the stale record is removed");
     }
 
-    [Fact]
+    [UnixFact]
     public async Task StopEndsWatcherAndCoreThroughSigtermWithoutFallback()
     {
         // #229: Kill(entireProcessTree) SIGSTOPs the watcher first, and on macOS a stopped member of Jay's orphaned process
@@ -184,7 +184,7 @@ public sealed class EasyTierProcessGuardTests : IDisposable
         Assert.True(await Until(() => !Alive(core)), "core ended with the watcher");
     }
 
-    [Fact]
+    [UnixFact]
     public async Task CoreIgnoresHangUpSentToTheGroup()
     {
         if (OperatingSystem.IsWindows()) return;
@@ -198,7 +198,7 @@ public sealed class EasyTierProcessGuardTests : IDisposable
         Assert.True(Alive(core), "core survives SIGHUP");
     }
 
-    [Fact]
+    [UnixFact]
     public async Task StopIsPromptWhileTheWatcherIsPolling()
     {
         // The trap must run at once, not after the watcher's one-second poll.
@@ -213,7 +213,7 @@ public sealed class EasyTierProcessGuardTests : IDisposable
         Assert.True(DateTime.UtcNow - started < TimeSpan.FromSeconds(2), $"took {(DateTime.UtcNow - started).TotalMilliseconds:F0} ms");
     }
 
-    [Fact]
+    [UnixFact]
     public async Task StopFallbackKillsWithoutStopping()
     {
         // A core that ignores TERM: after the timeout both processes go, through plain SIGKILLs.
@@ -230,7 +230,7 @@ public sealed class EasyTierProcessGuardTests : IDisposable
         Assert.True(await Until(() => watch.HasExited && !Alive(core), 5));
     }
 
-    [Fact]
+    [UnixFact]
     public async Task StopRightAfterStartLeavesNoCore()
     {
         // A SIGTERM can reach sh before its TERM trap is set (Dispose right after Launch). The core must not outlive it.
@@ -254,7 +254,7 @@ public sealed class EasyTierProcessGuardTests : IDisposable
         }
     }
 
-    [Fact]
+    [UnixFact]
     public async Task TermBeforeTheTrapIsSetStillEndsTheCore()
     {
         // Deterministic version of the race above: the real script with a pause between starting the core and setting

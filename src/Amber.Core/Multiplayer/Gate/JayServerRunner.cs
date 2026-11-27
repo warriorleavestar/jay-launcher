@@ -46,6 +46,7 @@ public sealed class JayServerRunner : IAsyncDisposable
     {
         if (!IsInitialized(root)) throw new InvalidOperationException(L.T("core.gate.run.not_initialized"));
         var store = new GateStore(GateDirectory(root));
+        GateStore.ProtectOnWindows(store.Directory);
         var config = store.LoadConfig();
         var host = new McServerHost(root);
         if (withMc)
@@ -73,7 +74,7 @@ public sealed class JayServerRunner : IAsyncDisposable
                 log(L.F("core.gate.run.mc_started", mc.Process.Id));
             }
             var runner = new JayServerRunner(store, config, key, gate, mc);
-            // A server with no domain and records on: keep its signed address record on the public network's directories.
+            // While records are on (also when turned on later), keep the signed address record on the public network's directories.
             runner._records = GateRecordPublisher.Start(store, config, Path.Combine(root, "records"), log);
             // 熔断时先存盘（不停服），万一之后有人去停服务端也不会坏档。
             gate.BreakerChanged += (open, _) =>

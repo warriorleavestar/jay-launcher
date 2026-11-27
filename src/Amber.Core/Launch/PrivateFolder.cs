@@ -117,6 +117,40 @@ internal static class PrivateFolder
 
     private static bool Trusted(string sid, string me) => sid == me || sid == LocalSystem || sid == Administrators;
 
+    /// <summary>
+    /// Windows: limits <paramref name="path"/> to this user, SYSTEM and Administrators (inheritance from the parent off),
+    /// creating it when missing. Files in it, now and later, get the same rules; this is the Windows side of a 0700 folder.
+    /// False when the ACL could not be set (for example a file system without ACLs).
+    /// </summary>
+    [SupportedOSPlatform("windows")]
+    internal static bool Lock(string path)
+    {
+        try
+        {
+            var me = WindowsIdentity.GetCurrent().User!;
+            var info = new DirectoryInfo(Path.GetFullPath(path));
+            if (!info.Exists) info.Create(Locked(me));
+            else info.SetAccessControl(Locked(me));
+            return true;
+        }
+        catch (SystemException e) when (e is UnauthorizedAccessException or IOException or PlatformNotSupportedException or InvalidOperationException
+            or PrivilegeNotHeldException) { return false; }
+    }
+
+    /// <summary>
+    /// Windows: the same rules for one file (this user, SYSTEM and Administrators; nothing inherited), the Windows side of
+    /// a 0600 file in a folder Jay doesn't own.
+    /// </summary>
+    [SupportedOSPlatform("windows")]
+    internal static FileSecurity LockedFile()
+    {
+        var security = new FileSecurity();
+        security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+        foreach (var sid in new[] { WindowsIdentity.GetCurrent().User!, new SecurityIdentifier(LocalSystem), new SecurityIdentifier(Administrators) })
+            security.AddAccessRule(new FileSystemAccessRule(sid, FileSystemRights.FullControl, AccessControlType.Allow));
+        return security;
+    }
+
     [SupportedOSPlatform("windows")]
     private static DirectorySecurity Locked(SecurityIdentifier me)
     {

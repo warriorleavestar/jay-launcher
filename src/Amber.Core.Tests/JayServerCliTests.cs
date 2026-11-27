@@ -107,6 +107,44 @@ public sealed class JayServerCliTests
         }
     }
 
+    /// <summary>revoke lists the name's open invites with how to cancel them; remove cancels them and says which.</summary>
+    [Fact]
+    public void RevokeListsOpenInvitesAndRemoveCancelsThem()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "jay-cli-test-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var store = GateStore.Initialize(Path.Combine(root, "gate"), "203.0.113.10", 47670, 47670);
+            var output = new StringWriter();
+            int Run(params string[] args) => Program.Admin(root, Options.Parse(args), output);
+            Run("invite", "Steve", "--uses", "3");
+            Run("invite", "Alex");
+            var id = store.OpenInvitesFor("Steve").Single().Id;
+            var alex = store.OpenInvitesFor("Alex").Single().Id;
+            Assert.Equal(RedeemOutcome.Ok, store.Redeem(id, System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)).Outcome);
+
+            output.GetStringBuilder().Clear();
+            Assert.Equal(0, Run("revoke", "Steve"));
+            var text = output.ToString();
+            Assert.Contains(id, text);
+            Assert.Contains("cancel-invite", text);
+            // Older invites no longer add a device after a revoke: the hint points to a new invite, not to retrying.
+            Assert.Contains("jay-server invite Steve", text);
+            Assert.DoesNotContain("重试", text);
+            Assert.DoesNotContain(alex, text);
+
+            output.GetStringBuilder().Clear();
+            Assert.Equal(0, Run("remove", "Steve"));
+            Assert.Contains(id, output.ToString());
+            Assert.Empty(store.OpenInvitesFor("Steve"));
+            Assert.Single(store.OpenInvitesFor("Alex"));
+        }
+        finally
+        {
+            try { Directory.Delete(root, true); } catch (IOException) { }
+        }
+    }
+
     [Fact]
     public void PlusPlusCommands()
     {
@@ -231,6 +269,14 @@ public sealed class JayServerCliTests
     }
 
     /// <summary>The invite the CLI printed: an IP-only test server prints a sealed code and its passphrase.</summary>
+
+    [Fact]
+    public void ReleaseVerifyStatesTheRealReleaseQuorum()
+    {
+        var text = Program.DescribeVerdict(new Amber.Core.Launch.ReleaseCheck(Amber.Core.Launch.ReleaseVerdict.NotEnoughSignatures, "v0.8.0", 1), "Jay.zip");
+        Assert.Contains($"{Amber.Core.Multiplayer.Public.JayTrust.ReleaseKeys.Count} 把里要 {Amber.Core.Multiplayer.Public.JayTrust.ReleaseNeed} 把", text);
+        Assert.DoesNotContain("3 人", text);
+    }
     private static GateInvite ReadInvite(string output)
     {
         var passphrase = System.Text.RegularExpressions.Regex.Match(output, @"\d{4} \d{4} \d{4} \d{4}").Value;
