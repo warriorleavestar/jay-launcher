@@ -15,7 +15,9 @@ namespace Amber.App.Views;
 /// AMBER_SELFTEST_SCOPE=logs (UI batch 7c): Instance › Logs in a throwaway game directory inside the report folder with
 /// two saved runs. Run list newest first (column when wide, picker otherwise), the diagnosis line for a crash, stack
 /// traces folded and repeats merged, filters and search, F8 jumps to errors, the locked privacy preview before
-/// exporting, and the report itself has no user name. Screenshots at three widths in two languages. Nothing goes online.
+/// exporting, and the report itself has no user name. A simulated running game then checks that the real list keeps its
+/// rows, the opened stack, the selection and the scroll position while new lines come in and old ones roll out.
+/// Screenshots at three widths in two languages. Nothing goes online.
 /// </summary>
 internal sealed partial class SelfTest
 {
@@ -109,6 +111,8 @@ internal sealed partial class SelfTest
             Check("报告里没有电脑用户名，有模组列表和日志", report.Length > 0 && !report.Contains(home, StringComparison.OrdinalIgnoreCase)
                 && report.Contains("Mixin apply failed") && report.Contains("1.20.1"), report.Length.ToString());
 
+            await LiveLogRowsAsync(instance, page, id, work);
+
             window.Width = 900;
             window.Height = 760;
             await Task.Delay(600);
@@ -131,6 +135,106 @@ internal sealed partial class SelfTest
             service.SaveAndReload();
             window.Width = 1440;
             window.Height = 900;
+        }
+    }
+    /// <summary>
+    /// The live run of a game that is "playing": new lines come in once a second. The rows that didn't change stay the
+    /// same items in the real list (same container, nothing redrawn), the opened stack stays open, the selected row stays
+    /// selected and the list doesn't scroll; a row whose stack grows is replaced and keeps both its open stack and the
+    /// selection; and when the log is full and its oldest lines roll out, the rows are still kept.
+    /// </summary>
+    private async Task LiveLogRowsAsync(InstanceViewModel instance, InstancePage page, string id, string work)
+    {
+        var originalLive = instance.LiveLogFor;
+        var log = new LogViewModel();
+        var run = log.BeginRun(id, DateTimeOffset.Now);
+        using var store = RunLogStore.Begin(work, run.StartedAt, noTrace: false);
+        run.Store = store;
+        void Add(GameLogLevel level, string message) => log.Add(run, new GameLogLine(DateTimeOffset.Now, level, "main", message));
+        try
+        {
+            Add(GameLogLevel.Info, "Loading 3 mods");
+            Add(GameLogLevel.Info, "Preparing spawn area");
+            for (var i = 0; i < 40; i++) Add(GameLogLevel.Info, $"Chunk {i} loaded");
+            Add(GameLogLevel.Error, "Ticking entity failed");
+            for (var i = 0; i < 3; i++) Add(GameLogLevel.Error, $"\tat example.Entity.tick{i}(Entity.java:{i})");
+            for (var i = 40; i < 60; i++) Add(GameLogLevel.Info, $"Chunk {i} loaded");
+            log.Flush();
+            instance.LiveLogFor = x => x == id ? run : null;
+            instance.OnRunsChanged(id);
+            await WaitAsync(() => instance.LogRuns.Any(r => r.IsLive), 10);
+            instance.SelectedLogRun = instance.LogRuns.First(r => r.IsLive);
+            await WaitAsync(() => instance.IsLiveRun && instance.LogRows.Any(r => r.HasStack), 10);
+            Check("实时日志：正在玩的这局在运行记录里，打开它", instance.IsLiveRun);
+
+            instance.LogFollow = false;
+            var error = instance.LogRows.First(r => r.HasStack);
+            instance.ToggleStackCommand.Execute(error);
+            instance.SelectedLogRow = error;
+            await Task.Delay(300);
+            // Scrolled away from the top, so a list that redid itself would show it.
+            Dispatcher.UIThread.Invoke(() => page.LogList.ScrollIntoView(instance.LogRows[^1]));
+            await Task.Delay(300);
+            Dispatcher.UIThread.Invoke(() => page.LogList.ScrollIntoView(error));
+            await Task.Delay(300);
+            ScrollViewer? Scroller() => page.LogList.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault();
+            var (container, offset) = Dispatcher.UIThread.Invoke(() => (page.LogList.ContainerFromItem(error), Scroller()?.Offset.Y ?? -1));
+            Check("实时日志：堆栈点开、选中，列表里有这一行", error.Expanded && container is not null && offset > 0, $"offset {offset:0}");
+
+            // New lines come in: the timer picks them up within a second or two.
+            var count = instance.LogRows.Count;
+            for (var i = 0; i < 5; i++) Add(GameLogLevel.Info, $"Player moved {i}");
+            log.Flush();
+            await WaitAsync(() => instance.LogRows.Count == count + 5, 5);
+            await Task.Delay(300);
+            var (sameContainer, selectedItem, offsetAfter) = Dispatcher.UIThread.Invoke(() =>
+                (page.LogList.ContainerFromItem(error), page.LogList.SelectedItem, Scroller()?.Offset.Y ?? -1));
+            Check("实时日志：新行进来后，原来的行还是同一个、同一个控件，堆栈仍展开，仍选中，不滚动",
+                instance.LogRows.Count == count + 5 && instance.LogRows.Contains(error) && error.Expanded
+                && ReferenceEquals(sameContainer, container) && ReferenceEquals(selectedItem, error) && Math.Abs(offsetAfter - offset) < 1,
+                $"rows {instance.LogRows.Count}/{count + 5}, offset {offset:0}→{offsetAfter:0}");
+
+            // The last error's stack grows: its row is replaced and keeps the open stack and the selection.
+            Add(GameLogLevel.Error, "Saving chunk failed");
+            Add(GameLogLevel.Error, "\tat example.Saver.save(Saver.java:1)");
+            log.Flush();
+            await WaitAsync(() => instance.LogRows.LastOrDefault()?.HasStack == true, 5);
+            var growing = instance.LogRows[^1];
+            instance.ToggleStackCommand.Execute(growing);
+            instance.SelectedLogRow = growing;
+            await Task.Delay(300);
+            Add(GameLogLevel.Error, "\tat example.Saver.flush(Saver.java:2)");
+            log.Flush();
+            await WaitAsync(() => instance.LogRows[^1].Event.Stack.Count == 2, 5);
+            await Task.Delay(300);
+            var grown = instance.LogRows[^1];
+            var selectedNow = Dispatcher.UIThread.Invoke(() => page.LogList.SelectedItem);
+            Check("实时日志：堆栈变长的那行换成新行，仍展开、仍选中，旧行不留在列表里",
+                !ReferenceEquals(grown, growing) && grown.Expanded && ReferenceEquals(selectedNow, grown) && ReferenceEquals(instance.SelectedLogRow, grown)
+                && !instance.LogRows.Contains(growing) && grown.StackLabel.Contains('2'), grown.StackLabel);
+
+            // The log is full: the oldest lines roll out, every index shifts, the rows that are still there are kept.
+            instance.SelectedLogRow = error;
+            await Task.Delay(300);
+            var before = instance.LogRows.Count;
+            // Just enough to fill the log and push out its first two lines (the ones before the first chunk).
+            var fill = LogViewModel.MaxLines - run.All.Count + 2;
+            for (var i = 0; i < fill; i++) Add(GameLogLevel.Info, $"Tick {i}");
+            log.Flush();
+            await WaitAsync(() => run.Dropped > 0 && instance.LogRows.Count > before, 10);
+            await Task.Delay(500);
+            var selectedAfterRoll = Dispatcher.UIThread.Invoke(() => page.LogList.SelectedItem);
+            Check("实时日志：日志满了、最早的行滚出去后，留下的行和展开、选中都不变",
+                run.Dropped == 2 && instance.LogRows.Contains(error) && error.Expanded && ReferenceEquals(selectedAfterRoll, error)
+                && instance.LogRows.Contains(grown) && !instance.LogRows.Any(r => r.Message is "Loading 3 mods" or "Preparing spawn area") && instance.LogRows.Any(r => r.Message == "Chunk 0 loaded"),
+                $"dropped {run.Dropped}, rows {instance.LogRows.Count}");
+            await ShotAsync("logs-live-1440");
+        }
+        finally
+        {
+            instance.LiveLogFor = originalLive;
+            instance.OnRunsChanged(id);
+            await Task.Delay(300);
         }
     }
 }

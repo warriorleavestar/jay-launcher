@@ -563,6 +563,12 @@
     <Setter Property="FontWeight" Value="Bold" />
     <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
   </Style>
+  <!-- The Activity drawer's selected tab sits immediately below "In progress". Keep this indicator
+       a solid bright blue instead of the older dark segmented wing brush. -->
+  <Style Selector="ListBox.subtabs.activity-tabs ListBoxItem:selected">
+    <Setter Property="BorderBrush" Value="#2997FF" />
+    <Setter Property="BorderThickness" Value="0,0,0,4" />
+  </Style>
   <Style Selector="ListBox.subtabs ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter, ListBox.subtabs ListBoxItem:selected:pointerover /template/ ContentPresenter#PART_ContentPresenter, ListBox.subtabs ListBoxItem:selected:focus /template/ ContentPresenter#PART_ContentPresenter">
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
