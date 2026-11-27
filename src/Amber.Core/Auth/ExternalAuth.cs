@@ -311,7 +311,7 @@ public sealed class ExternalAuth(HttpClient http)
 }
 
 /// <summary>下载 authlib-injector，并生成启动外置账号需要的 JVM 参数。</summary>
-public sealed class AuthlibInjector(HttpClient http, string cacheDir)
+public sealed partial class AuthlibInjector(HttpClient http, string cacheDir)
 {
     private const string LatestUrl = "https://authlib-injector.yushi.moe/artifact/latest.json";
     private const string MirrorLatestUrl = "https://bmclapi2.bangbang93.com/mirrors/authlib-injector/artifact/latest.json";
@@ -338,17 +338,32 @@ public sealed class AuthlibInjector(HttpClient http, string cacheDir)
             return existing ?? throw new InvalidOperationException(L.T("core.auth.injector.downloadfailed"));
         }
 
-        var version = latest["version"]!.GetValue<string>();
+        // The feed names the file and the download: a version that is not a plain version string could leave the cache
+        // folder, and the agent must come over HTTPS.
+        var version = (latest["version"] as JsonValue)?.TryGetValue<string>(out var v) == true ? v : null;
+        var download = (latest["download_url"] as JsonValue)?.TryGetValue<string>(out var d) == true ? d : null;
+        if (version is null || !SafeVersion().IsMatch(version) || !Uri.TryCreate(download, UriKind.Absolute, out var downloadUri) || downloadUri.Scheme != Uri.UriSchemeHttps)
+            throw new InvalidDataException(L.T("core.auth.injector.downloadfailed"));
         var target = Path.Combine(cacheDir, $"authlib-injector-{version}.jar");
         if (File.Exists(target)) return target;
 
-        var bytes = await http.GetByteArrayAsync(latest["download_url"]!.GetValue<string>(), ct);
+        var bytes = await http.GetByteArrayAsync(downloadUri, ct);
         var expected = latest["checksums"]?["sha256"]?.GetValue<string>();
         if (expected is not null && !Convert.ToHexStringLower(SHA256.HashData(bytes)).Equals(expected, StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException(L.T("core.auth.injector.checksumfailed"));
-        await File.WriteAllBytesAsync(target, bytes, ct);
+        // Write next to it and move into place, so a cancelled write never leaves a truncated jar under the final name.
+        // Two downloads of the same version at once: the first one saved is kept and used by both, once it checks out.
+        await Amber.Core.Net.CacheFile.SaveAsync(target, bytes, saved => expected is not null
+            ? Convert.ToHexStringLower(SHA256.HashData(saved)).Equals(expected, StringComparison.OrdinalIgnoreCase)
+            : saved.AsSpan().SequenceEqual(bytes), MaxJarBytes, ct);
         return target;
     }
+
+    /// <summary>Anything bigger under the jar's name is not the agent another download just saved.</summary>
+    private const long MaxJarBytes = 64L * 1024 * 1024;
+
+    [System.Text.RegularExpressions.GeneratedRegex("^[0-9A-Za-z][0-9A-Za-z._+-]{0,63}$")]
+    private static partial System.Text.RegularExpressions.Regex SafeVersion();
 
     public static IReadOnlyList<string> JvmArgs(string jarPath, string apiRoot, string metadataJson) =>
     [
