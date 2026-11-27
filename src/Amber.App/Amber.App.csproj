@@ -1,7 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <OutputType>WinExe</OutputType>
+    <OutputType Condition="'$(AmberAppAsLibrary)' != 'true'">WinExe</OutputType>
+    <OutputType Condition="'$(AmberAppAsLibrary)' == 'true'">Library</OutputType>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -38,10 +39,10 @@
   </ItemGroup>
 
   <!-- Linux 发行版不一定有中文字体：只给 Linux 版打包思源黑体（Noto Sans SC，SIL OFL 1.1，见 Assets/Fonts/OFL.txt）做回退。 -->
-  <ItemGroup Condition="$(RuntimeIdentifier.StartsWith('linux')) Or ('$(RuntimeIdentifier)' == '' And $([MSBuild]::IsOSPlatform('Linux')))">
+  <ItemGroup Condition="'$(AmberAppAsLibrary)' == 'true' Or $(RuntimeIdentifier.StartsWith('linux')) Or ('$(RuntimeIdentifier)' == '' And $([MSBuild]::IsOSPlatform('Linux')))">
     <AvaloniaResource Include="Assets\Fonts\NotoSansSC-Regular.otf" />
   </ItemGroup>
-  <PropertyGroup Condition="$(RuntimeIdentifier.StartsWith('linux')) Or ('$(RuntimeIdentifier)' == '' And $([MSBuild]::IsOSPlatform('Linux')))">
+  <PropertyGroup Condition="'$(AmberAppAsLibrary)' == 'true' Or $(RuntimeIdentifier.StartsWith('linux')) Or ('$(RuntimeIdentifier)' == '' And $([MSBuild]::IsOSPlatform('Linux')))">
     <DefineConstants>$(DefineConstants);JAY_BUNDLED_CJK_FONT</DefineConstants>
   </PropertyGroup>
 

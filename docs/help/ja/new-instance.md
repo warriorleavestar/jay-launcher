@@ -17,4 +17,4 @@ related: library, discover, modpacks, import-launcher
 - Esc でパネルを閉じます。
 
 ## うまくいかないとき
-- インストールに失敗する：多くはネットワークの問題です。[設定 › ダウンロード経路](jay:settings#Source) で別の経路を選んでもう一度試してください。
+- インストールに失敗する：多くはネットワークの問題です。[設定 › ダウンロード元](jay:settings#Source) で別のダウンロード元を選んでもう一度試してください。

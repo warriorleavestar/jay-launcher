@@ -17,4 +17,4 @@ related: library, discover, modpacks, import-launcher
 - Esc 關閉面板。
 
 ## 出問題了
-- 安裝失敗：多數是網路問題，到 [設定 › 下載線路](jay:settings#Source) 換一條線路再試。
+- 安裝失敗：多數是網路問題，到 [設定 › 下載來源](jay:settings#Source) 換一個下載來源再試。

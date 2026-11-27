@@ -19,12 +19,8 @@ public sealed class ThemeStore(string root)
         if (info.Length > ThemePackReader.MaxPackBytes) throw new ThemePackException("pack_too_large", $"{info.Length}");
         Dictionary<string, byte[]> files;
         ThemePack pack;
-        using (var stream = info.OpenRead())
-        {
-            files = ThemePackReader.ReadEntries(stream);
-            stream.Position = 0;
-            pack = ThemePackReader.Read(stream);
-        }
+        using (var stream = info.OpenRead()) files = ThemePackReader.ReadEntries(stream);
+        pack = ThemePackReader.ParseFiles(files);
         // Jay's own themes can't be replaced by an import that claims their id.
         if (BuiltInThemes.IsBuiltIn(pack.Id)) throw new ThemePackException("builtin_id", pack.Id);
         Directory.CreateDirectory(Root);

@@ -155,6 +155,24 @@ public class MultiplayerTests
     }
 }
 
+public class EasyTierEnvironmentTests
+{
+    [Fact]
+    public void LaunchEnvironmentDropsInheritedEasyTierVariables()
+    {
+        var info = new System.Diagnostics.ProcessStartInfo("easytier-core");
+        info.Environment["PATH"] = "/usr/bin";
+        info.Environment["ET_DISABLE_ENCRYPTION"] = "true";
+        info.Environment["ET_NETWORK_SECRET"] = "inherited";
+
+        EasyTierSession.ApplyEnvironment(info, new Dictionary<string, string> { [EasyTierArgs.SecretVariable] = "room" });
+
+        Assert.Equal("/usr/bin", info.Environment["PATH"]);
+        Assert.False(info.Environment.ContainsKey("ET_DISABLE_ENCRYPTION"));
+        Assert.Equal("room", info.Environment[EasyTierArgs.SecretVariable]);
+    }
+}
+
 public class RelayNodeTests
 {
     [Theory]
