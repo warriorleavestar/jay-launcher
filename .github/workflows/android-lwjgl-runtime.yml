@@ -5,6 +5,7 @@ on:
     paths:
       - '.github/workflows/android-lwjgl-runtime.yml'
       - 'scripts/build-android-lwjgl.sh'
+      - 'scripts/build-android-lwjgl-vma.sh'
       - 'third_party/android-lwjgl/**'
   workflow_dispatch:
 
@@ -37,6 +38,10 @@ jobs:
       - name: Build LWJGL JNI libraries
         run: |
           bash scripts/build-android-lwjgl.sh \
+            "$ANDROID_HOME/ndk/28.2.13676358" \
+            "${{ matrix.architecture }}" \
+            "lwjgl-${{ matrix.architecture }}"
+          bash scripts/build-android-lwjgl-vma.sh \
             "$ANDROID_HOME/ndk/28.2.13676358" \
             "${{ matrix.architecture }}" \
             "lwjgl-${{ matrix.architecture }}"

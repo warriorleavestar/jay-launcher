@@ -1,3 +1,4 @@
+using Amber.App.Services;
 using Amber.App.ViewModels;
 using Amber.Core.Localization;
 using Avalonia;
@@ -175,6 +176,6 @@ public partial class ContentPage : UserControl
             Title = L.T("content.modpack.picker"),
             FileTypeFilter = [new FilePickerFileType(L.T("content.type.modpack")) { Patterns = ["*.mrpack", "*.zip"] }],
         });
-        if (files.Count > 0 && files[0].TryGetLocalPath() is { } path) await vm.ImportLocalPackAsync(path);
+        if (files.Count > 0) await vm.ImportLocalPackAsync(new PackSelection(files[0]));
     }
 }

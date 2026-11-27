@@ -69,9 +69,6 @@ public static class TrashService
     /// <summary>默认保留天数（设置里可改）。</summary>
     public const int DefaultKeepDays = 7;
 
-    /// <summary>回收目录总量超过这个数时提示用户。</summary>
-    public const long WarnTotalBytes = 2L * 1024 * 1024 * 1024;
-
     /// <summary>
     /// 选回收目录：和游戏目录同卷就用游戏目录下的；否则沿着被删路径往上，跳过 mods、saves 这类被扫描的目录，用第一个不是它们的上级（通常是实例根目录）。
     /// </summary>

@@ -3,6 +3,7 @@ using System.IO.Compression;
 using System.Text;
 using System.Text.Json;
 using Amber.Core.Java;
+using Amber.Core.Game;
 using Amber.Core.Net;
 
 namespace Amber.Core.Tests;
@@ -10,6 +11,36 @@ namespace Amber.Core.Tests;
 /// <summary>Mojang 不提供 Java 时的退路：ARM Mac/Windows 退回 x64 版，ARM Linux 下 Temurin（含安全解压）。</summary>
 public class JavaFallbackTests
 {
+    [Fact]
+    public async Task Manager_ReusesJavaFromSharedJayCache()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "jay-shared-java-" + Guid.NewGuid().ToString("N"));
+        var game = Path.Combine(root, "game");
+        var shared = Path.Combine(root, "jay-data");
+        try
+        {
+            var home = Path.Combine(shared, "runtime", "java-runtime-gamma", "test-platform", "java-runtime-gamma");
+            Directory.CreateDirectory(Path.Combine(home, "bin"));
+            await System.IO.File.WriteAllTextAsync(Path.Combine(home, "bin", OperatingSystem.IsWindows() ? "java.exe" : "java"), "");
+            await System.IO.File.WriteAllTextAsync(Path.Combine(home, "release"), "JAVA_VERSION=\"42.0.5\"\nOS_ARCH=\"aarch64\"\n");
+            Directory.CreateDirectory(game);
+            using var http = new HttpClient(new NoNetworkHandler());
+            var manager = new JavaManager(new Downloader(http, SourceChain.OfficialFirst), new GameDirectory(game), shared);
+            var java = await manager.ForMajorAsync(42);
+            Assert.StartsWith(shared, java, StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+
+    private sealed class NoNetworkHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("A cached Java lookup must not use the network: " + request.RequestUri);
+    }
+
     [Fact]
     public void ArmMacAndWindows_FallBackToX64()
     {
