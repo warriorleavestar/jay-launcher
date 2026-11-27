@@ -24,9 +24,12 @@ $work = Join-Path $env:TEMP ("amber-mp-test-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Force $work | Out-Null
 $started = New-Object System.Collections.ArrayList
 $results = New-Object System.Collections.ArrayList
+# Room and invite codes seen so far: hidden wherever they appear in the log.
+$secrets = New-Object System.Collections.ArrayList
+. (Join-Path $PSScriptRoot "redact.ps1")
 
 function Write-Log([string]$text) {
-    $line = "[" + (Get-Date -Format "HH:mm:ss") + "] " + $text
+    $line = "[" + (Get-Date -Format "HH:mm:ss") + "] " + (Hide-Credentials $text $secrets)
     Write-Host $line
     Add-Content -Path $log -Value $line -Encoding UTF8
 }
@@ -109,9 +112,8 @@ function Test-Through([string]$address, [int]$seconds) {
 
 function Save-Output($proc) {
     Write-Log "----- $($proc.Name) 输出 -----"
-    foreach ($f in @($proc.Out, $proc.Err)) {
-        if (Test-Path $f) { Get-Content $f -Encoding UTF8 | ForEach-Object { Add-Content -Path $log -Value ("  " + $_) -Encoding UTF8 } }
-    }
+    # Room and invite codes let anyone join: they are hidden whole, never shortened.
+    foreach ($f in @($proc.Out, $proc.Err)) { Add-RedactedFile $f $log $secrets }
 }
 
 function Save-PeerTable($proc) {
@@ -122,7 +124,7 @@ function Save-PeerTable($proc) {
         foreach ($extra in @(@("peer"), @("-o", "json", "peer"), @("route"))) {
             try {
                 $text = & $cliExe -p "127.0.0.1:$rpc" @extra 2>&1 | Out-String
-                Add-Content -Path $log -Value $text -Encoding UTF8
+                Add-Content -Path $log -Value (Hide-Credentials $text $secrets) -Encoding UTF8
             } catch { Write-Log "easytier-cli 失败：$_" }
         }
     }
@@ -141,7 +143,8 @@ function Run-Case([string]$label, [string[]]$hostPeers, [string[]]$guestPeers, [
     $h = Start-Cli "$label-房主" $hostArgs
     $room = Wait-Line $h "ROOM " 30
     if (-not $room) { Add-Result "$label 房主启动" $false "没有输出房间码"; Save-Output $h; Stop-Pair @($h); return }
-    Add-Result "$label 房主启动" $true "房间码 $($room.Substring(0, 13))…（密钥不写进日志）"
+    [void]$secrets.Add($room)
+    Add-Result "$label 房主启动" $true "已拿到房间码（不写进日志）"
     $guestArgs = @("lan-join", $room, "--seconds", "600") + $guestPeers
     $g = Start-Cli "$label-加入方" $guestArgs
     $local = Wait-Line $g "LOCAL " 30
@@ -161,7 +164,8 @@ function Run-DirectCase([string]$label, [string[]]$extra, [int]$timeout) {
     $h = Start-Cli "$label-房主" (@("lan-direct-host", "$gamePort", "--seconds", "600") + $extra)
     $invite = Wait-Line $h "INVITE " 60
     if (-not $invite) { Add-Result "$label 生成邀请码" $false "没有输出邀请码"; Save-Output $h; Stop-Pair @($h); return }
-    Add-Result "$label 生成邀请码" $true ($invite.Substring(0, 12) + "…")
+    [void]$secrets.Add($invite)
+    Add-Result "$label 生成邀请码" $true "已拿到邀请码（不写进日志）"
     $g = Start-Cli "$label-加入方" (@("lan-direct-join", $invite, "--seconds", "600") + $extra)
     $local = Wait-Line $g "LOCAL " 120
     if (-not $local) { Add-Result "$label 打洞并启动" $false "没有输出本机地址"; Save-Output $h; Save-Output $g; Stop-Pair @($h, $g); return }
@@ -209,7 +213,8 @@ finally {
     Get-Process easytier-core -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith($etDir, [StringComparison]::OrdinalIgnoreCase) } | Stop-Process -Force -ErrorAction SilentlyContinue
     # 后台作业卡在 AcceptTcpClient 上，Stop-Job 会等很久；直接强制移除。
     Remove-Job $serverJob -Force -ErrorAction SilentlyContinue
-    Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
+    # The raw output there still holds the full codes: keep trying until it is gone.
+    if (-not (Remove-RawOutput $work)) { Write-Log "警告：临时输出文件夹没删掉，里面有房间码，请手动删除：$work" }
     Write-Log "===== 汇总 ====="
     foreach ($r in $results) { Write-Log $r }
     Write-Log "日志已保存：$log"
