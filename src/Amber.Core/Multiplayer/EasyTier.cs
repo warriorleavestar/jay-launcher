@@ -230,12 +230,13 @@ public sealed class EasyTierInstaller
     public string ExpectedFileName => Asset.Name;
     /// <summary>
     /// The WinDivert driver (full-LAN broadcast relay on Windows) must be there too; if it's missing, extract again. So must
-    /// the package itself: the elevated guard checks and extracts it again on its own (<see cref="ElevatedCoreStore"/>).
+    /// the package itself on desktops: the elevated guard checks and extracts it again on its own (<see cref="ElevatedCoreStore"/>).
+    /// Android runs the executables shipped inside the APK and keeps no package.
     /// </summary>
     public bool IsInstalled => (!OperatingSystem.IsAndroid() || EasyTierRelease.SignatureAllowsInstall)
         && File.Exists(CorePath) && File.Exists(CliPath)
         && (!OperatingSystem.IsWindows() || Asset.DriverName is not { } driver || File.Exists(Path.Combine(InstallDir, driver)))
-        && File.Exists(PackagePath);
+        && (OperatingSystem.IsAndroid() || File.Exists(PackagePath));
 
     /// <summary>A copy of the checked package, kept for the elevated guard when it didn't come from the bundled one.</summary>
     public string KeptPackagePath => Path.Combine(_dataDir, "easytier", EasyTierRelease.InstallTag, Asset.Name);
