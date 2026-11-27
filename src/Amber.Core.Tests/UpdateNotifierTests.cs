@@ -9,7 +9,7 @@ using Amber.Core.Multiplayer.Public;
 
 namespace Amber.Core.Tests;
 
-/// <summary>The once-a-day update notice: only a signed newer Jay is shown, never downloaded; off, not due and skipped stay quiet.</summary>
+/// <summary>The automatic update notice: only a signed newer Jay is shown, never downloaded; off, not due and skipped stay quiet.</summary>
 public sealed class UpdateNotifierTests : IDisposable
 {
     private static readonly TrustSigner[] T = [.. Enumerable.Range(0, 3).Select(_ => TrustSigner.FromSeed(Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))))];
@@ -32,14 +32,14 @@ public sealed class UpdateNotifierTests : IDisposable
     }
 
     /// <summary>A release feed for v99.0.0 with a package, its SHA-256 list and the list signed by <paramref name="signers"/>.</summary>
-    private static FakeHttp Release(TrustSigner[] signers, string page = Page, string tag = "v99.0.0", long seq = 5)
+    private static FakeHttp Release(TrustSigner[] signers, string page = Page, string tag = "v99.0.0", long seq = 5, string package = "Jay-win-x64.zip")
     {
         var http = new FakeHttp();
-        var sums = $"{Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes("package")))}  Jay-win-x64.zip\n";
+        var sums = $"{Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes("package")))}  {package}\n";
         var statement = new ReleaseStatement(tag, seq, new string('c', 40), Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(sums))), Own.Hash, ReleaseStatement.NoLog);
         var sigs = signers.Aggregate(ReleaseSignature.Create(statement), (json, s) => ReleaseSignature.Cosign(json, s));
         var assets = new JsonArray();
-        foreach (var (name, body) in new[] { ("Jay-win-x64.zip", "package"), (ReleaseSignature.SumsFileName, sums), (ReleaseSignature.SignatureFileName, sigs) })
+        foreach (var (name, body) in new[] { (package, "package"), (ReleaseSignature.SumsFileName, sums), (ReleaseSignature.SignatureFileName, sigs) })
         {
             var url = $"https://releases.example.test/download/{tag}/{name}";
             http.On(url, body);
@@ -86,6 +86,23 @@ public sealed class UpdateNotifierTests : IDisposable
         Assert.Equal([Page], _opened);
     }
 
+    [Fact]
+    public async Task SignedNativeInstallerIsOfferedWithoutDownloadingUntilChosen()
+    {
+        var package = OperatingSystem.IsMacOS() ? (System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture == System.Runtime.InteropServices.Architecture.Arm64 ? "Jay-osx-arm64.pkg" : "Jay-osx-x64.pkg") : "Jay-win-x64-setup.exe";
+        if (!OperatingSystem.IsWindows() && !OperatingSystem.IsMacOS()) return;
+        var http = Release([T[0], T[1]], package: package);
+        var (service, notifier) = Make(http);
+        using var _ = service;
+        Assert.True(await notifier.CheckIfDueAsync());
+        var notice = Notice(service)!;
+        Assert.True(notice.Spec.IsSafety);
+        Assert.Contains(notice.Spec.Choices, choice => choice.Id == "install");
+        Assert.Contains(notice.Spec.Choices, choice => choice.Id == "later" && choice.IsDefault);
+        service.Requests.Resolve(notice, "later", RequestSource.Bar);
+        Assert.DoesNotContain(http.Requests, request => request.Url.EndsWith("/" + package, StringComparison.Ordinal));
+    }
+
     [Theory]
     [InlineData("https://phishing.example.test/jay-v99")]
     [InlineData("http://releases.example.test/v99.0.0")]
@@ -122,7 +139,7 @@ public sealed class UpdateNotifierTests : IDisposable
         Assert.Empty(off.Requests);
 
         var recent = new FakeHttp();
-        var (service2, notifier2) = Make(recent, s => s.LastUpdateCheck = _now.AddHours(-2));
+        var (service2, notifier2) = Make(recent, s => s.LastUpdateCheck = _now.AddMinutes(-5));
         using (service2) Assert.False(await notifier2.CheckIfDueAsync());
         Assert.Empty(recent.Requests);
     }

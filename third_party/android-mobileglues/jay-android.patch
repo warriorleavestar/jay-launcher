@@ -36,3 +36,411 @@ index 7f957f3..44f84b5 100644
      }
      eglDisplay = EGL_NO_DISPLAY;
  }
+diff --git a/MobileGlues-cpp/CMakeLists.txt b/MobileGlues-cpp/CMakeLists.txt
+index 9ccb1ae..23d2cb2 100644
+--- a/MobileGlues-cpp/CMakeLists.txt
++++ b/MobileGlues-cpp/CMakeLists.txt
+@@ -113,6 +113,7 @@ set(MOBILEGLUES_SOURCES
+     gl/ExtWrappers/DSAWrapper.cpp
+     gl/ExtWrappers/MultiBindWrapper.cpp
+     gl/glsl/glsl_for_es.cpp
++    gl/glsl/fragment_output_indices.cpp
+     gl/glsl/uniform_defaults.cpp
+     gl/glsl/cache.cpp
+     gl/FSR1/FSR1.cpp
+diff --git a/MobileGlues-cpp/gl/glsl/glsl_for_es.cpp b/MobileGlues-cpp/gl/glsl/glsl_for_es.cpp
+index d48cb38..40c9692 100644
+--- a/MobileGlues-cpp/gl/glsl/glsl_for_es.cpp
++++ b/MobileGlues-cpp/gl/glsl/glsl_for_es.cpp
+@@ -21,6 +21,7 @@
+ #include <sstream>
+ #include "cache.h"
+ #include "uniform_defaults.h"
++#include "fragment_output_indices.h"
+ #include "../../version.h"
+ 
+ #define DEBUG 0
+@@ -258,7 +259,14 @@ std::string GLSLtoGLSLES(const char* glsl_code, GLenum glsl_type, uint essl_ver
+     if (cachedESSL) {
+         LOG_D("GLSL Hit Cache:\n%s\n-->\n%s", glsl_code, cachedESSL)
+         return_code = 0;
+-        return process_uniform_declarations(cachedESSL, uniform_defaults);
++        std::string converted = process_uniform_declarations(cachedESSL, uniform_defaults);
++        if (glsl_type == GL_FRAGMENT_SHADER) {
++            // Caches survive native-library upgrades. Re-run the inexpensive
++            // legality pass so entries written by an older MobileGlues build
++            // cannot keep dynamic fragment-output indices alive forever.
++            converted = legalize_fragment_output_array_indices(converted);
++        }
++        return converted;
+     }
+ 
+     return_code = -1;
+@@ -771,6 +779,9 @@ std::string GLSLtoGLSLES_2(const char* glsl_code, GLenum glsl_type, uint essl_v
+         essl = removeLayoutBinding(essl);
+     }
+     essl = processOutColorLocations(essl);
++    if (glsl_type == GL_FRAGMENT_SHADER) {
++        essl = legalize_fragment_output_array_indices(essl);
++    }
+     essl = forceSupporterOutput(essl);
+ 
+     LOG_D("Originally GLSL to GLSL ES Complete: \n%s", essl.c_str())
+diff --git a/MobileGlues-cpp/gl/glsl/fragment_output_indices.h b/MobileGlues-cpp/gl/glsl/fragment_output_indices.h
+new file mode 100644
+index 0000000..a34e61f
+--- /dev/null
++++ b/MobileGlues-cpp/gl/glsl/fragment_output_indices.h
+@@ -0,0 +1,8 @@
++#pragma once
++
++#include <string>
++
++// OpenGL ES requires fragment-output array indices to be constant integral
++// expressions. Desktop GLSL permits a runtime index. Expand writes into a switch
++// and reads into constant-index conditional expressions.
++std::string legalize_fragment_output_array_indices(const std::string& essl);
+diff --git a/MobileGlues-cpp/gl/glsl/fragment_output_indices.cpp b/MobileGlues-cpp/gl/glsl/fragment_output_indices.cpp
+new file mode 100644
+index 0000000..bb4739d
+--- /dev/null
++++ b/MobileGlues-cpp/gl/glsl/fragment_output_indices.cpp
+@@ -0,0 +1,247 @@
++#include "fragment_output_indices.h"
++
++#include <algorithm>
++#include <cctype>
++#include <regex>
++#include <string>
++#include <vector>
++
++namespace {
++struct output_array_t {
++    std::string name;
++    unsigned count;
++    size_t declaration_begin;
++    size_t declaration_end;
++};
++
++struct replacement_t {
++    size_t begin;
++    size_t end;
++    std::string text;
++};
++
++std::string trim_copy(const std::string& value) {
++    auto begin = std::find_if_not(value.begin(), value.end(), [](unsigned char c) { return std::isspace(c); });
++    auto end = std::find_if_not(value.rbegin(), value.rend(), [](unsigned char c) { return std::isspace(c); }).base();
++    return begin < end ? std::string(begin, end) : std::string();
++}
++
++bool is_constant_index(const std::string& value) {
++    static const std::regex integer_literal(R"(^\s*(?:0[xX][0-9a-fA-F]+|[0-9]+)[uU]?\s*$)");
++    return std::regex_match(value, integer_literal);
++}
++
++size_t matching_bracket(const std::string& source, size_t open) {
++    unsigned depth = 0;
++    for (size_t i = open; i < source.size(); ++i) {
++        if (source[i] == '[') ++depth;
++        if (source[i] == ']' && --depth == 0) return i;
++    }
++    return std::string::npos;
++}
++
++std::string legalize_output_reads(const std::string& expression,
++                                  const std::vector<output_array_t>& outputs) {
++    std::vector<replacement_t> replacements;
++    for (const auto& output : outputs) {
++        const std::string needle = output.name + "[";
++        size_t search = 0;
++        while ((search = expression.find(needle, search)) != std::string::npos) {
++            const size_t occurrence = search;
++            search += needle.size();
++            if (occurrence > 0 &&
++                (std::isalnum(static_cast<unsigned char>(expression[occurrence - 1])) ||
++                 expression[occurrence - 1] == '_')) continue;
++            const size_t open = occurrence + output.name.size();
++            const size_t close = matching_bracket(expression, open);
++            if (close == std::string::npos) continue;
++            const std::string index = trim_copy(expression.substr(open + 1, close - open - 1));
++            if (index.empty() || is_constant_index(index)) continue;
++            size_t cursor = close + 1;
++            for (;;) {
++                while (cursor < expression.size() &&
++                       std::isspace(static_cast<unsigned char>(expression[cursor]))) ++cursor;
++                if (cursor < expression.size() && expression[cursor] == '.') {
++                    ++cursor;
++                    while (cursor < expression.size() &&
++                           (std::isalnum(static_cast<unsigned char>(expression[cursor])) ||
++                            expression[cursor] == '_')) ++cursor;
++                    continue;
++                }
++                if (cursor < expression.size() && expression[cursor] == '[') {
++                    const size_t suffix_end = matching_bracket(expression, cursor);
++                    if (suffix_end == std::string::npos) break;
++                    cursor = suffix_end + 1;
++                    continue;
++                }
++                break;
++            }
++            while (cursor < expression.size() &&
++                   std::isspace(static_cast<unsigned char>(expression[cursor]))) ++cursor;
++            static const char* mutations[] = {
++                "<<=", ">>=", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "=", "++", "--"
++            };
++            bool mutating = false;
++            for (const char* candidate : mutations) {
++                const size_t length = std::char_traits<char>::length(candidate);
++                if (expression.compare(cursor, length, candidate) == 0 &&
++                    !(length == 1 && cursor + 1 < expression.size() &&
++                      expression[cursor + 1] == '=')) {
++                    mutating = true;
++                    break;
++                }
++            }
++            size_t prefix = occurrence;
++            while (prefix > 0 &&
++                   std::isspace(static_cast<unsigned char>(expression[prefix - 1]))) --prefix;
++            if (prefix >= 2 &&
++                (expression.compare(prefix - 2, 2, "++") == 0 ||
++                 expression.compare(prefix - 2, 2, "--") == 0)) mutating = true;
++            if (mutating) continue;
++
++            // ESSL also requires constant indices when a fragment output is read. A
++            // conditional expression preserves the value and type while every actual
++            // output-array access uses a literal index.
++            std::string selected = "(";
++            for (unsigned i = 0; i + 1 < output.count; ++i) {
++                selected += "(" + index + ") == " + std::to_string(i) + " ? " +
++                            output.name + "[" + std::to_string(i) + "] : ";
++            }
++            selected += output.name + "[" + std::to_string(output.count - 1) + "]";
++            selected += ")";
++            replacements.push_back({occurrence, close + 1, std::move(selected)});
++        }
++    }
++    std::sort(replacements.begin(), replacements.end(),
++              [](const replacement_t& a, const replacement_t& b) { return a.begin > b.begin; });
++    std::string result = expression;
++    for (const auto& replacement : replacements)
++        result.replace(replacement.begin, replacement.end - replacement.begin, replacement.text);
++    return result;
++}
++
++size_t statement_end(const std::string& source, size_t begin) {
++    unsigned parens = 0;
++    unsigned brackets = 0;
++    unsigned braces = 0;
++    for (size_t i = begin; i < source.size(); ++i) {
++        switch (source[i]) {
++        case '(': ++parens; break;
++        case ')': if (parens) --parens; break;
++        case '[': ++brackets; break;
++        case ']': if (brackets) --brackets; break;
++        case '{': ++braces; break;
++        case '}': if (braces) --braces; break;
++        case ';': if (!parens && !brackets && !braces) return i; break;
++        default: break;
++        }
++    }
++    return std::string::npos;
++}
++} // namespace
++
++std::string legalize_fragment_output_array_indices(const std::string& essl) {
++    // SPIRV-Cross emits declarations in this form. Restrict the pass to output
++    // arrays with a literal, small size so it cannot rewrite an unrelated local
++    // array or create an unexpectedly large shader.
++    static const std::regex declaration(
++        R"((?:layout\s*\([^;{}]*\)\s*)?out\s+(?:(?:lowp|mediump|highp)\s+)?[A-Za-z_]\w*\s+([A-Za-z_]\w*)\s*\[\s*([0-9]+)\s*\]\s*;)"
++    );
++
++    std::vector<output_array_t> outputs;
++    for (std::sregex_iterator it(essl.begin(), essl.end(), declaration), end; it != end; ++it) {
++        const unsigned count = static_cast<unsigned>(std::stoul((*it)[2].str()));
++        if (count == 0 || count > 16) continue;
++        outputs.push_back({(*it)[1].str(), count, static_cast<size_t>(it->position()),
++                           static_cast<size_t>(it->position() + it->length())});
++    }
++    if (outputs.empty()) return essl;
++
++    std::vector<replacement_t> replacements;
++    for (const auto& output : outputs) {
++        const std::string needle = output.name + "[";
++        size_t search = 0;
++        while ((search = essl.find(needle, search)) != std::string::npos) {
++            const size_t occurrence = search;
++            search += needle.size();
++            if (occurrence >= output.declaration_begin && occurrence < output.declaration_end) continue;
++            if (occurrence > 0 &&
++                (std::isalnum(static_cast<unsigned char>(essl[occurrence - 1])) ||
++                 essl[occurrence - 1] == '_')) continue;
++
++            const size_t open = occurrence + output.name.size();
++            const size_t close = matching_bracket(essl, open);
++            if (close == std::string::npos) continue;
++            const std::string index = trim_copy(essl.substr(open + 1, close - open - 1));
++            if (index.empty() || is_constant_index(index)) continue;
++
++            size_t cursor = close + 1;
++            while (cursor < essl.size() && std::isspace(static_cast<unsigned char>(essl[cursor]))) ++cursor;
++            // The selected attachment can be followed by a vector component
++            // index (for example output[attachment][component]) or a member
++            // selector. Only the attachment index itself is restricted by
++            // ESSL, so preserve the remaining access chain on every constant
++            // case generated below.
++            std::string suffix;
++            for (;;) {
++                while (cursor < essl.size() && std::isspace(static_cast<unsigned char>(essl[cursor]))) ++cursor;
++                if (cursor < essl.size() && essl[cursor] == '.') {
++                    const size_t suffix_begin = cursor++;
++                    while (cursor < essl.size() &&
++                           (std::isalnum(static_cast<unsigned char>(essl[cursor])) || essl[cursor] == '_')) ++cursor;
++                    suffix += essl.substr(suffix_begin, cursor - suffix_begin);
++                    continue;
++                }
++                if (cursor < essl.size() && essl[cursor] == '[') {
++                    const size_t suffix_end = matching_bracket(essl, cursor);
++                    if (suffix_end == std::string::npos) break;
++                    suffix += essl.substr(cursor, suffix_end - cursor + 1);
++                    cursor = suffix_end + 1;
++                    continue;
++                }
++                break;
++            }
++            while (cursor < essl.size() && std::isspace(static_cast<unsigned char>(essl[cursor]))) ++cursor;
++
++            static const char* operators[] = {"<<=", ">>=", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "="};
++            std::string op;
++            for (const char* candidate : operators) {
++                const size_t length = std::char_traits<char>::length(candidate);
++                if (essl.compare(cursor, length, candidate) == 0 &&
++                    !(length == 1 && cursor + 1 < essl.size() && essl[cursor + 1] == '=')) {
++                    op = candidate;
++                    cursor += length;
++                    break;
++                }
++            }
++            if (op.empty()) continue;
++
++            const size_t end = statement_end(essl, cursor);
++            if (end == std::string::npos) continue;
++            const std::string rhs = legalize_output_reads(
++                trim_copy(essl.substr(cursor, end - cursor)), outputs);
++            if (rhs.empty()) continue;
++
++            std::string expanded = "switch (" + index + ") {\n";
++            for (unsigned i = 0; i < output.count; ++i) {
++                expanded += "case " + std::to_string(i) + ": " + output.name + "[" + std::to_string(i) + "]" +
++                            suffix + " " + op + " " + rhs + "; break;\n";
++            }
++            expanded += "default: break;\n}";
++            replacements.push_back({occurrence, end + 1, std::move(expanded)});
++            search = end + 1;
++        }
++    }
++
++    if (replacements.empty()) return legalize_output_reads(essl, outputs);
++    std::sort(replacements.begin(), replacements.end(),
++              [](const replacement_t& a, const replacement_t& b) { return a.begin > b.begin; });
++    std::string result = essl;
++    size_t previous_begin = essl.size();
++    for (const auto& replacement : replacements) {
++        if (replacement.end > previous_begin) continue;
++        result.replace(replacement.begin, replacement.end - replacement.begin, replacement.text);
++        previous_begin = replacement.begin;
++    }
++    return legalize_output_reads(result, outputs);
++}
+diff --git a/MobileGlues-cpp/tests/fragment_output_indices_test.cpp b/MobileGlues-cpp/tests/fragment_output_indices_test.cpp
+new file mode 100644
+index 0000000..fc1a733
+--- /dev/null
++++ b/MobileGlues-cpp/tests/fragment_output_indices_test.cpp
+@@ -0,0 +1,85 @@
++#include "../gl/glsl/fragment_output_indices.h"
++
++#include <cstdio>
++#include <cstdlib>
++#include <string>
++
++static void expect_equal(const char* label, const std::string& actual, const std::string& expected) {
++    if (actual == expected) return;
++    std::fprintf(stderr, "%s failed\n--- actual ---\n%s\n--- expected ---\n%s\n", label, actual.c_str(), expected.c_str());
++    std::exit(1);
++}
++
++int main() {
++    const std::string source = R"(#version 320 es
++layout(location = 0) out highp vec4 attachments[2];
++void main()
++{
++    attachments[draw_index] = shade();
++    attachments[1].xy += vec2(1.0);
++}
++)";
++    const std::string expected = R"(#version 320 es
++layout(location = 0) out highp vec4 attachments[2];
++void main()
++{
++    switch (draw_index) {
++case 0: attachments[0] = shade(); break;
++case 1: attachments[1] = shade(); break;
++default: break;
++}
++    attachments[1].xy += vec2(1.0);
++}
++)";
++    expect_equal("dynamic output index", legalize_fragment_output_array_indices(source), expected);
++
++    const std::string component_source = R"(#version 310 es
++layout(location = 0) out highp vec4 attachments[2];
++void main()
++{
++    attachments[attachmentIndex][componentIndex] = coefficients[componentIndex];
++}
++)";
++    const std::string component_expected = R"(#version 310 es
++layout(location = 0) out highp vec4 attachments[2];
++void main()
++{
++    switch (attachmentIndex) {
++case 0: attachments[0][componentIndex] = coefficients[componentIndex]; break;
++case 1: attachments[1][componentIndex] = coefficients[componentIndex]; break;
++default: break;
++}
++}
++)";
++    expect_equal("dynamic output with component index",
++                 legalize_fragment_output_array_indices(component_source), component_expected);
++
++    const std::string local = "void f() { vec4 values[2]; values[i] = vec4(0.0); }";
++    expect_equal("local array untouched", legalize_fragment_output_array_indices(local), local);
++
++    const std::string suffix_collision = R"(layout(location = 0) out vec4 color[2];
++void main() { vec4 local_color[2]; local_color[index] = vec4(1.0); })";
++    expect_equal("output name suffix does not match a local identifier",
++                 legalize_fragment_output_array_indices(suffix_collision), suffix_collision);
++
++    const std::string readback = R"(layout(location = 0) out vec4 color[2];
++void main() { color[i] = color[i] * 0.5; })";
++    const std::string readback_expected = R"(layout(location = 0) out vec4 color[2];
++void main() { switch (i) {
++case 0: color[0] = ((i) == 0 ? color[0] : color[1]) * 0.5; break;
++case 1: color[1] = ((i) == 0 ? color[0] : color[1]) * 0.5; break;
++default: break;
++} })";
++    expect_equal("dynamic output readback",
++                 legalize_fragment_output_array_indices(readback), readback_expected);
++
++    const std::string free_reads = R"(layout(location = 0) out vec4 color[2];
++void consume(vec4 value);
++void main() { vec4 saved = color[i]; consume(color[j]); })";
++    const std::string free_reads_expected = R"(layout(location = 0) out vec4 color[2];
++void consume(vec4 value);
++void main() { vec4 saved = ((i) == 0 ? color[0] : color[1]); consume(((j) == 0 ? color[0] : color[1])); })";
++    expect_equal("dynamic output reads outside assignments",
++                 legalize_fragment_output_array_indices(free_reads), free_reads_expected);
++    std::puts("fragment output index tests passed");
++}

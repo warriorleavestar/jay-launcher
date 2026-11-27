@@ -6,17 +6,14 @@ using Avalonia.Threading;
 namespace Amber.App.Services;
 
 /// <summary>
-/// The automatic update check (Settings › About › "Check for a new Jay once a day"). A minute after start and then once
-/// an hour it looks whether a day has passed since the last check; if so it asks the update feed (the official releases
-/// unless the user set another address). A newer version is put on the request bar only when 2 of the 3 Jay trustees
-/// signed it; unsigned or failed checks stay silent (Settings › About › Check for updates says why). The notice only
-/// opens the release page: Jay never downloads or installs an update by itself.
+/// Polls the configured release feed while Jay is open. Only a verified release can
+/// publish an install action; downloads start when the user chooses that action.
 /// </summary>
 internal sealed class UpdateNotifier : IDisposable
 {
     internal const string RequestKind = "update";
-    private static readonly TimeSpan FirstDelay = TimeSpan.FromMinutes(1);
-    private static readonly TimeSpan Tick = TimeSpan.FromHours(1);
+    private static readonly TimeSpan FirstDelay = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan Tick = TimeSpan.FromMinutes(1);
 
     private readonly LauncherService _service;
     private readonly Func<DateTimeOffset> _now;
@@ -26,7 +23,7 @@ internal sealed class UpdateNotifier : IDisposable
     private readonly Func<string, Exception?> _open;
     private bool _running;
     /// <summary>The notices on the request bar, by dedupe key: their version and the page to open (null: none).</summary>
-    private readonly Dictionary<string, (string Version, string? Page)> _offers = [];
+    private readonly Dictionary<string, (VerifiedUpdate Update, string? Page)> _offers = [];
 
     /// <param name="http">Tests pass a fake feed; Jay uses the service's API client.</param>
     /// <param name="trust">Tests pass their own trustees; Jay uses the built-in list.</param>
@@ -56,7 +53,7 @@ internal sealed class UpdateNotifier : IDisposable
 
     internal static void RaiseSwitched(bool on) => Switched?.Invoke(on);
 
-    /// <summary>Turning the daily check off also takes down a notice that is still waiting.</summary>
+    /// <summary>Turning the automatic check off also takes down a notice that is still waiting.</summary>
     private void OnSwitched(bool on)
     {
         if (on) return;
@@ -67,12 +64,13 @@ internal sealed class UpdateNotifier : IDisposable
         }
     }
 
-    /// <summary>Starts the timer. Not on phones and tablets (the stores and the preview channel update those).</summary>
+    /// <summary>Starts the timer on supported platforms.</summary>
     public static UpdateNotifier? Start(LauncherService service)
     {
         if (!AutoUpdateCheck.IsSupported) return null;
         // Self-checks and page snapshots must not reach the network or put a notice on the request bar.
         if (Environment.GetEnvironmentVariable("AMBER_SELFTEST") is { Length: > 0 } || Environment.GetEnvironmentVariable("AMBER_SNAPSHOT_DIR") is { Length: > 0 }) return null;
+        LauncherUpdate.CleanInstalledDownloads();
         var notifier = new UpdateNotifier(service);
         DispatcherTimer.RunOnce(() =>
         {
@@ -91,7 +89,7 @@ internal sealed class UpdateNotifier : IDisposable
         catch (Exception e) { System.Diagnostics.Trace.WriteLine($"update check: {e.GetType().Name}: {e.Message}"); }
     }
 
-    /// <summary>Runs the check when it is on and a day has passed. Returns whether a notice was posted.</summary>
+    /// <summary>Runs the check when it is on and the polling interval has passed. Returns whether a notice was posted.</summary>
     internal async Task<bool> CheckIfDueAsync(CancellationToken ct = default)
     {
         var settings = _service.Settings;
@@ -112,7 +110,7 @@ internal sealed class UpdateNotifier : IDisposable
             }
             finally
             {
-                // Count failed checks too, so an offline computer or a bad address isn't retried every hour.
+                // Count failed checks too, so an offline computer or a bad address isn't retried on every timer tick.
                 settings.LastUpdateCheck = _now();
                 Save();
             }
@@ -120,7 +118,8 @@ internal sealed class UpdateNotifier : IDisposable
             if (!AutoUpdateCheck.ShouldNotify(update.Info.Version, settings.SkippedUpdateVersion)) return false;
             // The switch may have been turned off while the feed was answering.
             if (!settings.AutoUpdateCheck) return false;
-            Offer(update.Info.Version, AutoUpdateCheck.ReleasePage(feed, update));
+            if (_offers.Values.Any(o => o.Update.Info.Version == update.Info.Version && o.Update.Check.Seq == update.Check.Seq)) return false;
+            Offer(update, AutoUpdateCheck.ReleasePage(feed, update));
             return true;
         }
         finally
@@ -130,7 +129,7 @@ internal sealed class UpdateNotifier : IDisposable
     }
 
     /// <param name="page">A page Jay can vouch for (<see cref="AutoUpdateCheck.ReleasePage"/>); without one there is no open button.</param>
-    private void Offer(string version, string? page)
+    private void Offer(VerifiedUpdate update, string? page)
     {
         // A newer version replaces an older notice that is still waiting.
         foreach (var older in _offers.Keys.ToList())
@@ -138,13 +137,17 @@ internal sealed class UpdateNotifier : IDisposable
             _offers.Remove(older);
             _service.Requests.Withdraw(older);
         }
+        var version = update.Info.Version;
         var key = "jay-update-" + version;
-        _offers[key] = (version, page);
-        List<RequestChoice> choices = page is null ? [] : [new("open", L.T("tools.update.open_page"), IsDefault: true)];
-        choices.Add(new("later", L.T("update.notice.later"), IsDefault: page is null));
+        _offers[key] = (update, page);
+        bool install = LauncherUpdate.PackageFor(update) is not null;
+        List<RequestChoice> choices = [];
+        if (!install && page is not null) choices.Add(new("open", L.T("tools.update.open_page"), IsDefault: true));
+        choices.Add(new("later", L.T("update.notice.later"), IsDefault: install || page is null));
+        if (install) choices.Add(new("install", L.T("tools.update.install")));
         choices.Add(new("skip", L.T("update.notice.skip")));
         _service.Requests.Post(new RequestSpec(RequestKind, L.F("update.notice.title", version),
-            L.F(page is null ? "update.notice.body_no_page" : "update.notice.body", UpdateChecker.CurrentVersion), choices, DedupeKey: key));
+            L.F(install ? "tools.update.ready" : page is null ? "update.notice.body_no_page" : "update.notice.body", UpdateChecker.CurrentVersion), choices, IsSafety: install, DedupeKey: key));
     }
 
     private void OnResolved(RequestHandle request)
@@ -153,12 +156,15 @@ internal sealed class UpdateNotifier : IDisposable
         if (request.ResolvedBy == RequestSource.Program) return;
         switch (request.Choice)
         {
+            case "install" when LauncherUpdate.PackageFor(offer.Update) is not null:
+                LauncherUpdate.Start(_service, offer.Update);
+                break;
             case "open" when offer.Page is { } url && UpdateChecker.TryGetSafeUpdateUrl(url, out var uri):
                 if (_open(uri!.AbsoluteUri) is { } error)
                     Toasts.Show(L.F("update.notice.open_failed", error.Message), Avalonia.Controls.Notifications.NotificationType.Error);
                 break;
             case "skip":
-                _service.Settings.SkippedUpdateVersion = offer.Version;
+                _service.Settings.SkippedUpdateVersion = offer.Update.Info.Version;
                 Save();
                 break;
         }
