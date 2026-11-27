@@ -137,6 +137,24 @@ public static class GameSandbox
         return home ?? bin;
     }
 
+    /// <summary>
+    /// <paramref name="args"/> without one occurrence of each of <paramref name="remove"/> (compared exactly), in order.
+    /// </summary>
+    public static IEnumerable<string> Without(IEnumerable<string> args, IEnumerable<string> remove)
+    {
+        var left = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var r in remove) left[r] = left.GetValueOrDefault(r) + 1;
+        foreach (var arg in args)
+        {
+            if (left.TryGetValue(arg, out var n) && n > 0)
+            {
+                left[arg] = n - 1;
+                continue;
+            }
+            yield return arg;
+        }
+    }
+
     /// <summary>Existing files named in arguments (-javaagent:…, -Dx=/path, a bare path). Folders are not granted this way.</summary>
     public static IEnumerable<string> FilesIn(IEnumerable<string> args)
     {
