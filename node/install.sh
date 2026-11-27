@@ -100,7 +100,8 @@ if [ "$RELAY" = "amber" ]; then WHITELIST="jay-* amber-*"; else WHITELIST="*"; f
 # The secret reaches easytier-core as ET_NETWORK_SECRET from a root-only file (EnvironmentFile= below). Not on the
 # command line, where every local user could read it in the process list, and not as Environment= in the unit,
 # which systemd shows to every local user (systemctl show).
-SECRET_FILE="${INSTALL_DIR}/node.env"
+# NODE_SECRET_FILE only moves it for the script's own tests (like UNIT_DIR above).
+SECRET_FILE="${NODE_SECRET_FILE:-${INSTALL_DIR}/node.env}"
 (umask 077; printf 'ET_NETWORK_SECRET=%s\n' "$NODE_SECRET" > "$SECRET_FILE")
 chmod 0600 "$SECRET_FILE"
 
