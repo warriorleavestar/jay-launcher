@@ -30,7 +30,10 @@ internal static class InstanceSettingsTrust
 {
     private static readonly AsyncLocal<string?> StoreOverride = new();
     private static readonly AsyncLocal<int?> MaxOverride = new();
-    private static readonly Lock Gate = new();
+    // One gate per record file: changes to the same record in this process take turns (the file lock covers other
+    // processes); records elsewhere (tests point theirs at their own folders) don't wait for each other.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, Lock> Gates =
+        new(OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
 
     /// <summary>How long a save, or a load that adopts a new folder, waits for another Jay process holding the record.</summary>
     internal static readonly TimeSpan QuickWait = TimeSpan.FromSeconds(1);
@@ -172,7 +175,8 @@ internal static class InstanceSettingsTrust
     private static void Change(Func<Store, bool> change, TimeSpan wait, bool keepGoingIfUnwritable = false, Action<Store>? then = null)
     {
         var deadline = Stopwatch.GetTimestamp() + (long)(wait.TotalSeconds * Stopwatch.Frequency);
-        if (!Gate.TryEnter(wait)) throw Busy(null);
+        var gate = Gates.GetOrAdd(Path.GetFullPath(StorePath), _ => new Lock());
+        if (!gate.TryEnter(wait)) throw Busy(null);
         try
         {
             using var held = TakeLock(deadline);
@@ -192,7 +196,7 @@ internal static class InstanceSettingsTrust
         }
         finally
         {
-            Gate.Exit();
+            gate.Exit();
         }
     }
 
