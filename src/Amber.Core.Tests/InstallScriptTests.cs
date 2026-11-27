@@ -26,6 +26,7 @@ public sealed class InstallScriptTests : IDisposable
     private string State => Path.Combine(_root, "state");
     private string UnitDir => Path.Combine(_root, "systemd");
     private string Log => Path.Combine(_root, "calls.log");
+    private string SecretFile => Path.Combine(_root, "state", "node.env");
 
     public InstallScriptTests()
     {
@@ -71,6 +72,12 @@ public sealed class InstallScriptTests : IDisposable
         Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(unit));
         Assert.Contains("tcp://0.0.0.0:11010", Running("amber-node"), StringComparison.Ordinal);
         Assert.Contains("节点已运行 / node is running", run.Output, StringComparison.Ordinal);
+        // The network secret is in a root-only file the unit reads, not in the unit or on the command line.
+        var secret = File.ReadAllText(SecretFile).Trim();
+        Assert.Matches("^ET_NETWORK_SECRET=[0-9a-f]{36}$", secret);
+        Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(SecretFile));
+        Assert.Contains("EnvironmentFile=" + SecretFile, File.ReadAllText(unit), StringComparison.Ordinal);
+        Assert.DoesNotContain(secret["ET_NETWORK_SECRET=".Length..], File.ReadAllText(unit), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -179,7 +186,8 @@ public sealed class InstallScriptTests : IDisposable
     private string Running(string service) => File.ReadAllText(Path.Combine(State, "running-" + service));
 
     private Task<Run> RunNode(int port) =>
-        RunScript(Path.Combine(Repo, "node", "install.sh"), new() { ["PORT"] = port.ToString(), ["PUBLIC_HOST"] = "relay.example.org" });
+        RunScript(Path.Combine(Repo, "node", "install.sh"),
+            new() { ["PORT"] = port.ToString(), ["PUBLIC_HOST"] = "relay.example.org", ["NODE_SECRET_FILE"] = SecretFile });
 
     private Task<Run> RunNetwork(int port)
     {
