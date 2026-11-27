@@ -28,18 +28,27 @@ public sealed class VanillaInstaller(Downloader downloader, GameDirectory dir)
     /// <summary>安装一个原版版本（已存在则只补全缺失文件）。</summary>
     public async Task InstallAsync(string versionId, IProgress<InstallProgress>? progress = null, CancellationToken ct = default)
     {
-        var jsonPath = dir.VersionJsonPath(versionId);
-        if (!File.Exists(jsonPath))
-        {
-            progress?.Report(new(InstallStage.Manifest, default));
-            var manifest = await GetManifestAsync(ct);
-            var entry = manifest.Versions.FirstOrDefault(v => v.Id == versionId)
-                        ?? throw new ArgumentException(L.F("core.install.vanilla.missingversion", versionId));
-
-            progress?.Report(new(InstallStage.VersionJson, default));
-            await downloader.DownloadOneAsync(new DownloadItem(entry.Url, jsonPath, entry.Sha1), ct);
-        }
+        await PrepareVersionAsync(versionId, progress, ct);
         await CompleteAsync(versionId, progress, ct);
+    }
+
+    /// <summary>
+    /// Downloads only the official version metadata. Mobile launchers use this to check the
+    /// selected game's required Java major before downloading hundreds of megabytes that the
+    /// installed runtime could not execute.
+    /// </summary>
+    public async Task PrepareVersionAsync(string versionId, IProgress<InstallProgress>? progress = null,
+        CancellationToken ct = default)
+    {
+        var jsonPath = dir.VersionJsonPath(versionId);
+        if (File.Exists(jsonPath)) return;
+        progress?.Report(new(InstallStage.Manifest, default));
+        var manifest = await GetManifestAsync(ct);
+        var entry = manifest.Versions.FirstOrDefault(v => v.Id == versionId)
+                    ?? throw new ArgumentException(L.F("core.install.vanilla.missingversion", versionId));
+
+        progress?.Report(new(InstallStage.VersionJson, default));
+        await downloader.DownloadOneAsync(new DownloadItem(entry.Url, jsonPath, entry.Sha1), ct);
     }
 
     /// <summary>补全一个已有版本（含加载器版本）运行所需的所有文件。</summary>

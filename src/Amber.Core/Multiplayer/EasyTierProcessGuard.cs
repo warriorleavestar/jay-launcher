@@ -33,7 +33,7 @@ internal static class EasyTierProcessGuard
         if (OperatingSystem.IsWindows()) return;
         var core = info.FileName;
         var args = info.ArgumentList.ToList();
-        info.FileName = "/bin/sh";
+        info.FileName = ShellPath;
         info.ArgumentList.Clear();
         info.ArgumentList.Add("-c");
         info.ArgumentList.Add(WatchScript);
@@ -44,23 +44,25 @@ internal static class EasyTierProcessGuard
     }
 
     /// <summary>看门脚本用的 sh 的真实路径（Linux 上 /bin/sh 多半指向 dash 或 bash，进程信息里看到的是真实路径）。</summary>
+    private static string ShellPath => OperatingSystem.IsAndroid() ? "/system/bin/sh" : "/bin/sh";
+
     internal static string WatcherExecutable { get; } = ResolveShell();
 
     private static string ResolveShell()
     {
-        if (OperatingSystem.IsWindows()) return "/bin/sh";
+        if (OperatingSystem.IsWindows()) return ShellPath;
         // 要和系统报告的进程路径完全一致：/bin 本身也可能是指向 /usr/bin 的链接，所以用 realpath 解析整条路径。
         try
         {
             // macOS /bin/sh starts the shell selected by /private/var/select/sh.
             // Process.MainModule reports that selected executable after startup.
-            var shell = OperatingSystem.IsMacOS() ? "/private/var/select/sh" : "/bin/sh";
+            var shell = OperatingSystem.IsMacOS() ? "/private/var/select/sh" : ShellPath;
             var resolved = realpath(shell, IntPtr.Zero);
-            if (resolved == IntPtr.Zero) return "/bin/sh";
-            try { return System.Runtime.InteropServices.Marshal.PtrToStringUTF8(resolved) ?? "/bin/sh"; }
+            if (resolved == IntPtr.Zero) return ShellPath;
+            try { return System.Runtime.InteropServices.Marshal.PtrToStringUTF8(resolved) ?? ShellPath; }
             finally { free(resolved); }
         }
-        catch (Exception e) when (e is DllNotFoundException or EntryPointNotFoundException) { return "/bin/sh"; }
+        catch (Exception e) when (e is DllNotFoundException or EntryPointNotFoundException) { return ShellPath; }
     }
 
     [System.Runtime.InteropServices.DllImport("libc")]
@@ -140,7 +142,7 @@ internal static class EasyTierProcessGuard
     /// Direct children of <paramref name="pid"/>. Linux reads /proc (no external tools needed); macOS asks pgrep.
     /// Empty when none are found.
     /// </summary>
-    internal static List<int> ChildPids(int pid) => OperatingSystem.IsLinux() ? ProcChildPids(pid) : PgrepChildPids(pid);
+    internal static List<int> ChildPids(int pid) => OperatingSystem.IsLinux() || OperatingSystem.IsAndroid() ? ProcChildPids(pid) : PgrepChildPids(pid);
 
     private static List<int> ProcChildPids(int pid)
     {
@@ -200,7 +202,7 @@ internal static class EasyTierProcessGuard
 
     private static bool StartedThroughWatcher(Process process)
     {
-        try { return process.StartInfo.FileName == "/bin/sh"; }
+        try { return process.StartInfo.FileName == ShellPath; }
         catch (InvalidOperationException) { return false; }
     }
 
@@ -215,5 +217,5 @@ internal static class EasyTierProcessGuard
 
     /// <summary>给 <see cref="EasyTierProcessTracker"/> 记录的可执行文件：套了看门脚本时是 sh，否则是 easytier-core 本身。</summary>
     internal static string TrackedExecutable(ProcessStartInfo info) =>
-        info.FileName == "/bin/sh" ? WatcherExecutable : info.FileName;
+        info.FileName == ShellPath ? WatcherExecutable : info.FileName;
 }
