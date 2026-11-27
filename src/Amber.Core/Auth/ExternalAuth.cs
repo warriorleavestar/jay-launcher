@@ -355,9 +355,8 @@ public sealed class AuthlibInjector(HttpClient http, string cacheDir)
             // Every source must serve exactly the pinned bytes; a mirror that serves anything else is skipped.
             if (!Matches(SHA256.HashData(bytes))) { wrongBytes = true; continue; }
             // Written next to it and moved into place, so a cancelled write never leaves a truncated jar under the final name.
-            var temp = target + ".tmp";
-            await File.WriteAllBytesAsync(temp, bytes, ct);
-            File.Move(temp, target, overwrite: true);
+            // Two downloads at once: the first one saved is kept and used by both, once it matches the pin.
+            await Amber.Core.Net.CacheFile.SaveAsync(target, bytes, saved => Matches(SHA256.HashData(saved)), MaxJarBytes, ct);
             return target;
         }
         throw wrongBytes
@@ -385,6 +384,9 @@ public sealed class AuthlibInjector(HttpClient http, string cacheDir)
         }
         return buffer.ToArray();
     }
+
+    /// <summary>Anything bigger under the jar's name is not the agent another download just saved.</summary>
+    private const long MaxJarBytes = 64L * 1024 * 1024;
 
     public static IReadOnlyList<string> JvmArgs(string jarPath, string apiRoot, string metadataJson) =>
     [

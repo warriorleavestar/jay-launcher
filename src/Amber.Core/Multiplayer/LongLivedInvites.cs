@@ -82,8 +82,13 @@ public sealed class LongLivedInvites
         Prune();
         if (_lobbyKey is not { } key) return 0;
         var added = 0;
+        // The app seeds a running room again after each new long-lived invite: the ones the book already holds stay as they are.
+        var have = book.Pending;
         foreach (var invite in Active)
+        {
+            if (have.Any(p => p.Standing && p.Invite.Token.AsSpan().SequenceEqual(invite.Token))) continue;
             if (book.AddLongLived(key, invite.Token, invite.Expires, tunnel) is not null) added++;
+        }
         return added;
     }
 
@@ -121,7 +126,8 @@ public sealed class LongLivedInvites
             }
             _lobbyKey = key;
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or FormatException or InvalidOperationException)
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or FormatException or InvalidOperationException
+            or ArgumentOutOfRangeException)
         {
             _items.Clear();
             _lobbyKey = null;
@@ -152,8 +158,8 @@ public sealed class LongLivedInvites
             };
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(_path))!);
             var temp = _path + ".tmp";
-            File.WriteAllText(temp, root.ToJsonString());
-            if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(temp, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            // Created private from the start: the file holds the lobby key and every token.
+            MemberIdentity.WritePrivate(temp, System.Text.Encoding.UTF8.GetBytes(root.ToJsonString()));
             File.Move(temp, _path, overwrite: true);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
