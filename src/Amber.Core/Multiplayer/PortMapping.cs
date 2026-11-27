@@ -53,7 +53,7 @@ public static partial class PortMapping
             return GatewayInfo.None;
         }
         var upnp = FindUpnpAsync(gateway, log, ct);
-        var pmp = FindNatPmpAsync(gateway, log, ct);
+        var pmp = FindNatPmpAsync(new IPEndPoint(gateway, 5351), log, ct);
         try
         {
             await Task.WhenAll(upnp, pmp);
@@ -85,7 +85,7 @@ public static partial class PortMapping
         {
             try
             {
-                if (await MapNatPmpAsync(localPort, pmpGateway, external, log, ct) is { } pmp) return pmp;
+                if (await MapNatPmpAsync(localPort, new IPEndPoint(pmpGateway, 5351), external, log, ct) is { } pmp) return pmp;
             }
             catch (Exception e) when (e is SocketException or OperationCanceledException)
             {
@@ -341,12 +341,12 @@ public static partial class PortMapping
     // ---- NAT-PMP（RFC 6886）----
 
     /// <summary>The external address NAT-PMP reports (RFC 6886, 3.2); asks for no mapping.</summary>
-    private static async Task<IPAddress?> FindNatPmpAsync(IPAddress gateway, Action<string> log, CancellationToken ct)
+    private static async Task<IPAddress?> FindNatPmpAsync(IPEndPoint target, Action<string> log, CancellationToken ct)
     {
         try
         {
             using var udp = new UdpClient(AddressFamily.InterNetwork);
-            var address = await PmpRequestAsync(udp, new IPEndPoint(gateway, 5351), [0, 0], 12, ct);
+            var address = await PmpRequestAsync(udp, target, [0, 0], 12, ct);
             if (address is null)
             {
                 log(L.T("core.mp.natpmp.noresponse"));
@@ -363,10 +363,15 @@ public static partial class PortMapping
         }
     }
 
-    private static async Task<PortMappingResult?> MapNatPmpAsync(int localPort, IPAddress gateway, IPAddress externalIp, Action<string> log, CancellationToken ct)
+    /// <summary>Asks <paramref name="target"/> for its external address, then for a mapping when that address is public (tests).</summary>
+    internal static async Task<PortMappingResult?> MapNatPmpAsync(int localPort, IPEndPoint target, Action<string> log, CancellationToken ct) =>
+        await FindNatPmpAsync(target, log, ct) is { } externalIp && IsPublic(externalIp)
+            ? await MapNatPmpAsync(localPort, target, externalIp, log, ct)
+            : null;
+
+    private static async Task<PortMappingResult?> MapNatPmpAsync(int localPort, IPEndPoint target, IPAddress externalIp, Action<string> log, CancellationToken ct)
     {
         using var udp = new UdpClient(AddressFamily.InterNetwork);
-        var target = new IPEndPoint(gateway, 5351);
         var mapRequest = new byte[12];
         mapRequest[1] = 1;
         BinaryPrimitives.WriteUInt16BigEndian(mapRequest.AsSpan(4), (ushort)localPort);
@@ -374,6 +379,8 @@ public static partial class PortMapping
         BinaryPrimitives.WriteUInt32BigEndian(mapRequest.AsSpan(8), PortMappingResult.LeaseSeconds);
         var mapped = await PmpRequestAsync(udp, target, mapRequest, 16, ct);
         if (mapped is null || BinaryPrimitives.ReadUInt16BigEndian(mapped.AsSpan(2)) != 0) return null;
+        // The reply names the internal port it maps: it has to be the one that was asked for.
+        if (BinaryPrimitives.ReadUInt16BigEndian(mapped.AsSpan(8)) != localPort) return null;
         var externalPort = BinaryPrimitives.ReadUInt16BigEndian(mapped.AsSpan(10));
         var lease = PmpLease(mapped);
         log(L.F("core.mp.natpmp.mapped", externalPort, localPort));
@@ -417,12 +424,28 @@ public static partial class PortMapping
             timeout.CancelAfter(TimeSpan.FromMilliseconds(500 * (attempt + 1)));
             try
             {
-                var r = await udp.ReceiveAsync(timeout.Token);
-                if (r.Buffer.Length >= expected) return r.Buffer;
+                while (true)
+                {
+                    // Only the gateway's answer to this request counts (RFC 6886, 3.1); anything else on the port is passed over.
+                    var r = await udp.ReceiveAsync(timeout.Token);
+                    if (!r.RemoteEndPoint.Equals(target)) continue;
+                    if (CheckPmpReply(r.Buffer, request[1], expected) is { } accepted) return accepted ? r.Buffer : null;
+                }
             }
             catch (OperationCanceledException) when (!ct.IsCancellationRequested) { }
         }
         return null;
+    }
+
+    /// <summary>
+    /// Is this datagram the answer to a NAT-PMP request with the given opcode? True: a full success reply. False: the
+    /// gateway answered this request with an error. Null: not an answer to it (wrong version or opcode, or cut short).
+    /// </summary>
+    internal static bool? CheckPmpReply(ReadOnlySpan<byte> reply, byte requestOpcode, int expected)
+    {
+        if (reply.Length < 4 || reply[0] != 0 || reply[1] != 128 + requestOpcode) return null;
+        if (BinaryPrimitives.ReadUInt16BigEndian(reply[2..]) != 0) return false;
+        return reply.Length >= expected ? true : null;
     }
 
     internal static IPAddress? DefaultGateway() =>

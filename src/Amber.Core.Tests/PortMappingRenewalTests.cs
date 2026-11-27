@@ -93,7 +93,7 @@ public sealed class PortMappingRenewalTests
             var action = request.Headers.GetValues("SOAPAction").Single();
             var body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
             lock (actions) actions.Add((action, body));
-            if (action.Contains("GetExternalIPAddress")) return Ok("<NewExternalIPAddress>8.8.8.8</NewExternalIPAddress>");
+            if (action.Contains("GetExternalIPAddress")) return Ok("<NewExternalIPAddress>203.0.113.9</NewExternalIPAddress>");
             return fail ? new HttpResponseMessage(HttpStatusCode.InternalServerError) { Content = new StringContent("<errorDescription>busy</errorDescription>") } : Ok("<ok/>");
         }));
         Assert.NotNull(result);
@@ -133,7 +133,7 @@ public sealed class PortMappingRenewalTests
             StartForTest = (o, _) => Task.FromResult<IEasyTierSession>(new FakeEasyTier(o)),
             SpeedTestPortForTest = 0,
             MappingRetryInterval = TimeSpan.FromMilliseconds(100),
-            GatherForTest = _ => Task.FromResult(new DirectGatherer.Gathered(
+            GatherForTest = (_, _) => Task.FromResult(new DirectGatherer.Gathered(
                 [new(PathKind.Lan, IPEndPoint.Parse("192.168.1.20:40000")), mapped], NatKind.Open, "",
                 new PortMappingResult("UPnP", mapped.EndPoint, null, _ => { Interlocked.Increment(ref renewals); return Task.FromResult(false); },
                     TimeSpan.FromMilliseconds(400)), NatKind.Symmetric)),

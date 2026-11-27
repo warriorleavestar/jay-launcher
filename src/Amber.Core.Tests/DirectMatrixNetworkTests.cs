@@ -138,7 +138,7 @@ public sealed class DirectMatrixNetworkTests
             new(PathKind.Punch, IPEndPoint.Parse("203.0.113.5:40000")),
             new(PathKind.Mapped, IPEndPoint.Parse("[::ffff:198.51.100.7]:40001")),
             new(PathKind.Lan, IPEndPoint.Parse("192.168.1.5:40000")),
-            new(PathKind.IPv6, IPEndPoint.Parse("[2408:8000::1]:40000")),
+            new(PathKind.IPv6, IPEndPoint.Parse("[2001:db8:8000::1]:40000")),
         ]);
         Assert.Equal([IPAddress.Parse("198.51.100.7"), IPAddress.Parse("203.0.113.5")], hostPublic.OrderBy(a => a.ToString()));
     }
