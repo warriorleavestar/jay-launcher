@@ -116,7 +116,7 @@ public sealed class RoomAnnouncer : IAsyncDisposable
                 void Behind(long directoryNow)
                 {
                     behind = true;
-                    _signer.AdvanceTo(directoryNow);
+                    _signer.AdvanceTo(directoryNow, DateTimeOffset.UtcNow);
                 }
                 // A listed room carries its invite in its listing, so invites still find it without the hidden entry:
                 // nothing for the host to fix.

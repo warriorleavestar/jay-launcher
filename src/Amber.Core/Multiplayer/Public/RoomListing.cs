@@ -198,6 +198,8 @@ public sealed class RoomSigner
 {
     private readonly Org.BouncyCastle.Crypto.Parameters.Ed25519PrivateKeyParameters _key;
     private long _lastSeq;
+    /// <summary>How far the directories' clock is ahead of this computer's (milliseconds), learned in <see cref="AdvanceTo"/>.</summary>
+    private long _aheadMs;
 
     public RoomSigner()
     {
@@ -212,7 +214,7 @@ public sealed class RoomSigner
     /// <summary>填上编号、签名公钥和更大的序号，然后签名。</summary>
     public RoomListing Sign(RoomListing listing, DateTimeOffset now)
     {
-        var seq = Math.Max(now.ToUnixTimeMilliseconds(), Interlocked.Read(ref _lastSeq) + 1);
+        var seq = Math.Max(now.ToUnixTimeMilliseconds() + Interlocked.Read(ref _aheadMs), Interlocked.Read(ref _lastSeq) + 1);
         Interlocked.Exchange(ref _lastSeq, seq);
         // 先按收件方的规则整理好文字字段，免得对方整理后和签名的内容对不上。
         var unsigned = listing with
@@ -228,18 +230,25 @@ public sealed class RoomSigner
     /// <summary>
     /// A directory said this computer's clock is behind (its time is <paramref name="seq"/>, Unix milliseconds): the next
     /// version is signed after it, so a directory that doesn't hold the room yet takes it. Never moves back.
+    /// With <paramref name="localNow"/> (this computer's time when the directory answered) the gap is kept too, so later
+    /// versions keep pace with the directory's clock instead of creeping on by a millisecond from the slow one; otherwise
+    /// renewals would fall outside the directory's allowed clock skew again a few minutes later.
     /// </summary>
-    public void AdvanceTo(long seq)
+    public void AdvanceTo(long seq, DateTimeOffset? localNow = null)
     {
         long seen;
         do seen = Interlocked.Read(ref _lastSeq);
         while (seq > seen && Interlocked.CompareExchange(ref _lastSeq, seq, seen) != seen);
+        if (localNow is not { } local) return;
+        var ahead = seq - local.ToUnixTimeMilliseconds();
+        do seen = Interlocked.Read(ref _aheadMs);
+        while (ahead > seen && Interlocked.CompareExchange(ref _aheadMs, ahead, seen) != seen);
     }
 
     /// <summary>撤下房间的签名（带序号，旧的撤下请求不能重放到以后的房间版本上）。</summary>
     public (long Seq, byte[] Signature) SignWithdraw(DateTimeOffset now)
     {
-        var seq = Math.Max(now.ToUnixTimeMilliseconds(), Interlocked.Read(ref _lastSeq) + 1);
+        var seq = Math.Max(now.ToUnixTimeMilliseconds() + Interlocked.Read(ref _aheadMs), Interlocked.Read(ref _lastSeq) + 1);
         Interlocked.Exchange(ref _lastSeq, seq);
         return (seq, SignBytes(WithdrawBytes(RoomId, seq)));
     }

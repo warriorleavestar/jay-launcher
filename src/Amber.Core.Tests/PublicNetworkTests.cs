@@ -219,6 +219,25 @@ public sealed class PublicNetworkTests : IAsyncDisposable
     }
 
     [Fact]
+    public void AfterTheDirectoryNamedItsTimeLaterVersionsKeepPaceWithIt()
+    {
+        // The host's clock is 3 hours behind the directory. Once told, versions signed 15 and 60 minutes later (by the
+        // host's slow clock) are still within the directory's allowed skew, so the room's hidden lookup entries stay.
+        var signer = new RoomSigner();
+        var hostTime = _now - TimeSpan.FromHours(3);
+        signer.AdvanceTo(_now.ToUnixTimeMilliseconds(), hostTime);
+        foreach (var later in new[] { TimeSpan.FromMinutes(15), TimeSpan.FromMinutes(60) })
+        {
+            var seq = signer.Sign(Listing(), hostTime + later).Seq;
+            Assert.InRange(seq - (_now + later).ToUnixTimeMilliseconds(), 0, (long)HiddenEntry.MaxClockSkew.TotalMilliseconds);
+        }
+        // Without the host's time only the version moves on, as before.
+        var bare = new RoomSigner();
+        bare.AdvanceTo(_now.ToUnixTimeMilliseconds());
+        Assert.Equal(_now.ToUnixTimeMilliseconds() + 1, bare.Sign(Listing(), hostTime + TimeSpan.FromMinutes(15)).Seq);
+    }
+
+    [Fact]
     public async Task OneDirectoryNamingAFarOffTimeDoesNotSetTheVersion()
     {
         // Two directories that don't hold the room both say the host's clock is behind; one names a time a month away.
