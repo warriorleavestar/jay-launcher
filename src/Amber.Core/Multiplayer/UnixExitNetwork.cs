@@ -297,10 +297,10 @@ internal sealed class UnixExitNetwork
         try
         {
             if (new FileInfo(ResolvConf).LinkTarget is null) return null;
-            if (new FileInfo(ResolvConf).ResolveLinkTarget(returnFinalTarget: true) is not FileInfo { Exists: true } target) return null;
-            if (target.LinkTarget is not null) return null;
-            var runtime = Path.GetFullPath(RuntimeDir).TrimEnd('/') + "/";
-            var full = Path.GetFullPath(target.FullName);
+            // Resolve every link on the way, folders too (/var/run is often a link to /run), and from then on use only
+            // the resolved path, so a link changed later can't send the writes elsewhere.
+            if (RealPath(ResolvConf) is not { } full || !File.Exists(full) || new FileInfo(full).LinkTarget is not null) return null;
+            var runtime = (RealPath(RuntimeDir) ?? Path.GetFullPath(RuntimeDir)).TrimEnd('/') + "/";
             if (!full.StartsWith(runtime, StringComparison.Ordinal)) return null;
             for (var d = Path.GetDirectoryName(full); d is not null && d.Length >= runtime.Length - 1; d = Path.GetDirectoryName(d))
             {
@@ -312,6 +312,21 @@ internal sealed class UnixExitNetwork
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return null; }
     }
+
+    /// <summary>The path with every link resolved (realpath(3)); null when it doesn't exist or can't be resolved.</summary>
+    private static string? RealPath(string path)
+    {
+        var resolved = realpath(path, IntPtr.Zero);
+        if (resolved == IntPtr.Zero) return null;
+        try { return System.Runtime.InteropServices.Marshal.PtrToStringUTF8(resolved); }
+        finally { free(resolved); }
+    }
+
+    [System.Runtime.InteropServices.DllImport("libc", SetLastError = true)]
+    private static extern IntPtr realpath([System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.LPUTF8Str)] string path, IntPtr resolved);
+
+    [System.Runtime.InteropServices.DllImport("libc")]
+    private static extern void free(IntPtr pointer);
 
     private static void WriteLinkTarget(string target)
     {

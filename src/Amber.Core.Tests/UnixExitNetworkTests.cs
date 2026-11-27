@@ -248,6 +248,31 @@ public sealed class UnixExitNetworkTests
     }
 
     [Fact]
+    public void ResolvConfLinkThroughALinkedParentFolderStaysALink()
+    {
+        // Many systems link resolv.conf to /var/run/NetworkManager/resolv.conf, where /var/run is itself a link to /run.
+        if (OperatingSystem.IsWindows()) return;
+        WithResolvConf(dir =>
+        {
+            var path = UnixExitNetwork.ResolvConf;
+            var managed = Path.Combine(UnixExitNetwork.RuntimeDir, "NetworkManager", "resolv.conf");
+            Directory.CreateDirectory(Path.GetDirectoryName(managed)!);
+            File.WriteAllText(managed, "nameserver 192.168.1.1\n");
+            var varRun = Path.Combine(dir, "var-run");
+            Directory.CreateSymbolicLink(varRun, UnixExitNetwork.RuntimeDir);
+            var viaLink = Path.Combine(varRun, "NetworkManager", "resolv.conf");
+            File.CreateSymbolicLink(path, viaLink);
+            UnixExitNetwork.ReplaceResolvConf();
+            Assert.Equal(viaLink, new FileInfo(path).LinkTarget);
+            Assert.Contains("nameserver " + ExitDnsServers.Primary, File.ReadAllText(managed));
+            Assert.Equal("nameserver 192.168.1.1\n", File.ReadAllText(UnixExitNetwork.LinkTargetBackup));
+            UnixExitNetwork.RestoreResolvConf();
+            Assert.Equal(viaLink, new FileInfo(path).LinkTarget);
+            Assert.Equal("nameserver 192.168.1.1\n", File.ReadAllText(managed));
+        });
+    }
+
+    [Fact]
     public void ResolvConfLinkHealsAfterAKilledGuardAndAReboot()
     {
         if (OperatingSystem.IsWindows()) return;
