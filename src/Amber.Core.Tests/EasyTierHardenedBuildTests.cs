@@ -15,6 +15,7 @@ public sealed class EasyTierHardenedBuildTests : IDisposable
         { "windows", Architecture.X64 }, { "windows", Architecture.Arm64 },
         { "macos", Architecture.X64 }, { "macos", Architecture.Arm64 },
         { "linux", Architecture.X64 }, { "linux", Architecture.Arm64 },
+        { "android", Architecture.X64 }, { "android", Architecture.Arm64 },
     };
 
     public void Dispose()
