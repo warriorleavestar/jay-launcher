@@ -44,9 +44,6 @@ public sealed class TileDiffer
 
     public TileDiffer(int tileSize = RemoteWire.TileSize) => TileSize = tileSize;
 
-    /// <summary>下一张全部重发（比如控制方要求刷新）。</summary>
-    public void Reset() => _hasLast = false;
-
     /// <summary>找出变了的块，并把这张画面记成“上一次”。</summary>
     public List<(int X, int Y, int Width, int Height)> Diff(ScreenFrame frame)
     {
