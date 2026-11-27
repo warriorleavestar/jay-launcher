@@ -76,6 +76,52 @@ public sealed class ChatRejoinTests : IDisposable
         await second.DisposeAsync();
         Assert.True(await WaitAsync(() => seen.Any(m => m.Kind == ChatKind.Leave && m.SenderId == alice.Id)));
     }
+
+    [Fact]
+    public async Task AMessageSentDuringATakeoverReachesOnlyOneOfTheTwoConnections()
+    {
+        var credentials = RoomCredentials.Create(_host.PublicKey.ToArray(), 25565, TunnelSettings.Default);
+        var table = new MemberTable();
+        var hostRoom = credentials.ToHostRoom(table, "Host");
+        var alice = table.Issue(_alice.PublicKey, "Alice");
+        var bob = table.Issue(_bob.PublicKey, "Bob");
+        RoomCode RoomOf(MemberEntry e) => RoomCredentials.FromJson((credentials with { Member = e.Key }).ToJson()).ToRoom();
+
+        await using var hub = new ChatHub(hostRoom, 0);
+        await using var bobClient = new ChatClient(RoomOf(bob), "Bob");
+        await bobClient.ConnectAsync("127.0.0.1", hub.Port);
+        var onFirst = new ConcurrentQueue<string>();
+        var onSecond = new ConcurrentQueue<string>();
+        await using var first = new ChatClient(RoomOf(alice), "Alice");
+        first.Received += m => { if (m.Kind == ChatKind.Message) onFirst.Enqueue(m.Text); };
+        await first.ConnectAsync("127.0.0.1", hub.Port);
+        Assert.True(await WaitAsync(() => hub.MemberCount == 2));
+
+        // Bob keeps talking while Alice's second connection takes over from the first (as when chat moves).
+        using var stop = new CancellationTokenSource();
+        var sent = 0;
+        var talking = Task.Run(async () =>
+        {
+            // The hub lets a member say 5 things in 5 seconds: 4 messages spread over the takeover.
+            while (!stop.IsCancellationRequested && sent < 4)
+            {
+                await bobClient.SendAsync("m" + sent);
+                sent++;
+                await Task.Delay(15);
+            }
+        });
+        await Task.Delay(5);
+        await using var second = new ChatClient(RoomOf(alice), "Alice");
+        second.Received += m => { if (m.Kind == ChatKind.Message) onSecond.Enqueue(m.Text); };
+        await second.ConnectAsync("127.0.0.1", hub.Port);
+        await Task.Delay(100);
+        stop.Cancel();
+        await talking;
+        // Once the takeover is done, the new connection hears what is said next.
+        await bobClient.SendAsync("after");
+        Assert.True(await WaitAsync(() => onSecond.Contains("after")), "not on the new connection");
+        Assert.Empty(onFirst.Intersect(onSecond));
+    }
 }
 
 /// <summary>
