@@ -223,11 +223,13 @@ public sealed class PublicNetworkTests : IAsyncDisposable
     {
         // The host's clock is 3 hours behind the directory. Once told, versions signed 15 and 60 minutes later (by the
         // host's slow clock) are still within the directory's allowed skew, so the room's hidden lookup entries stay.
-        var signer = new RoomSigner();
+        long mono = 0;
+        var signer = new RoomSigner(() => mono);
         var hostTime = _now - TimeSpan.FromHours(3);
         signer.AdvanceTo(_now.ToUnixTimeMilliseconds(), hostTime);
         foreach (var later in new[] { TimeSpan.FromMinutes(15), TimeSpan.FromMinutes(60) })
         {
+            mono = (long)later.TotalMilliseconds;
             var seq = signer.Sign(Listing(), hostTime + later).Seq;
             Assert.InRange(seq - (_now + later).ToUnixTimeMilliseconds(), 0, (long)HiddenEntry.MaxClockSkew.TotalMilliseconds);
         }
@@ -235,6 +237,21 @@ public sealed class PublicNetworkTests : IAsyncDisposable
         var bare = new RoomSigner();
         bare.AdvanceTo(_now.ToUnixTimeMilliseconds());
         Assert.Equal(_now.ToUnixTimeMilliseconds() + 1, bare.Sign(Listing(), hostTime + TimeSpan.FromMinutes(15)).Seq);
+    }
+
+    [Fact]
+    public void FixingTheSystemClockAfterwardsDoesNotAddTheGapAgain()
+    {
+        // The host's clock was 3 hours behind and then got corrected: later versions follow the real time, not 3 hours
+        // past it (which a directory would refuse as too far ahead).
+        long mono = 0;
+        var signer = new RoomSigner(() => mono);
+        signer.AdvanceTo(_now.ToUnixTimeMilliseconds(), _now - TimeSpan.FromHours(3));
+        mono = (long)TimeSpan.FromMinutes(10).TotalMilliseconds;
+        var fixedNow = _now + TimeSpan.FromMinutes(10);
+        var seq = signer.Sign(Listing(), fixedNow).Seq;
+        Assert.InRange(seq - fixedNow.ToUnixTimeMilliseconds(), 0, 1000);
+        Assert.InRange(signer.SignWithdraw(fixedNow + TimeSpan.FromMinutes(5)).Seq - (fixedNow + TimeSpan.FromMinutes(5)).ToUnixTimeMilliseconds(), 0, 1000);
     }
 
     [Fact]
