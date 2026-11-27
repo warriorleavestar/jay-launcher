@@ -116,6 +116,9 @@ public static partial class JavaFinder
     {
         if (!File.Exists(javaPath)) return 0;
         var full = Path.GetFullPath(javaPath);
+        // /usr/bin/java and the like are links into the real runtime: read the release file next to the target.
+        try { if (new FileInfo(full).ResolveLinkTarget(returnFinalTarget: true) is { Exists: true } target) full = target.FullName; }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
         var bin = Path.GetDirectoryName(full) ?? full;
         var home = Path.GetFileName(bin) == "bin" ? Path.GetDirectoryName(bin) ?? bin : bin;
         try

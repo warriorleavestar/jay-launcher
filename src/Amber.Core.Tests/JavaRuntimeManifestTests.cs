@@ -110,6 +110,12 @@ public sealed class JavaRuntimeManifestTests : IDisposable
             }
             Assert.False(File.Exists(Path.Combine(home, "release")));
             var major = JavaFinder.MajorOf(java);
+            if (!EscapingJava.ProbeAvailable)
+            {
+                // No restricted probe here (macOS, or Linux without bubblewrap): it is never run, so the version stays unknown.
+                Assert.Equal(0, major);
+                return;
+            }
             Assert.True(major == 17, $"got {major}; probe: {JavaVersionProbe.LastProblem}");
             // The sandbox's own check (which Java 9+ flags to pass) takes the same way when the release file is missing.
             Assert.Equal(17, Amber.Core.Launch.WindowsSandbox.JavaMajor(java));
@@ -117,6 +123,30 @@ public sealed class JavaRuntimeManifestTests : IDisposable
         finally
         {
             try { Directory.Delete(home, true); } catch (IOException) { }
+        }
+    }
+
+    [Fact]
+    public void ALinkToAJavaReadsTheReleaseFileOfItsTarget()
+    {
+        // /usr/bin/java → /usr/lib/jvm/java-8/bin/java: the version comes from the target runtime's release file.
+        var root = Path.Combine(Path.GetTempPath(), "amber-javalink-" + Guid.NewGuid().ToString("N")[..8]);
+        var bin = Directory.CreateDirectory(Path.Combine(root, "jvm", "java-8", "bin")).FullName;
+        try
+        {
+            var java = Path.Combine(bin, OperatingSystem.IsWindows() ? "java.exe" : "java");
+            File.WriteAllText(java, "not a real java");
+            File.WriteAllText(Path.Combine(root, "jvm", "java-8", "release"), "JAVA_VERSION=\"1.8.0_401\"\nOS_ARCH=\"amd64\"\n");
+            var linkDir = Directory.CreateDirectory(Path.Combine(root, "usr", "bin")).FullName;
+            var link = Path.Combine(linkDir, Path.GetFileName(java));
+            try { File.CreateSymbolicLink(link, java); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return; } // no right to make links here
+            JavaFinder.ForgetMajors();
+            Assert.Equal(8, JavaFinder.MajorOf(link));
+        }
+        finally
+        {
+            try { Directory.Delete(root, true); } catch (IOException) { }
         }
     }
 }
