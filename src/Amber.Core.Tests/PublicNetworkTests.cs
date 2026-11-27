@@ -144,6 +144,24 @@ public sealed class PublicNetworkTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task EachRoomExpiresOnTimeWhenOthersAreRenewed()
+    {
+        var client = new RoomDirectoryClient(_net);
+        var early = new RoomSigner();
+        var late = new RoomSigner();
+        await client.AnnounceAsync(early.Sign(Listing() with { Name = "early" }, _now), true, [], default);
+        _now += TimeSpan.FromSeconds(60);
+        await client.AnnounceAsync(late.Sign(Listing() with { Name = "late" }, _now), true, [], default);
+        _now += RoomDirectoryProtocol.Ttl - TimeSpan.FromSeconds(60);
+        Assert.Equal("late", Assert.Single(await client.ListAsync(default)).Name);
+        await client.AnnounceAsync(late.Sign(Listing() with { Name = "late" }, _now), true, [], default);
+        _now += RoomDirectoryProtocol.Ttl - TimeSpan.FromSeconds(1);
+        Assert.Equal(1, _directory.Count);
+        _now += TimeSpan.FromSeconds(1);
+        Assert.Equal(0, _directory.Count);
+    }
+
+    [Fact]
     public async Task ReplayAndForgedWithdrawAreRejected()
     {
         var client = new RoomDirectoryClient(_net);
@@ -163,6 +181,103 @@ public sealed class PublicNetworkTests : IAsyncDisposable
         await client.WithdrawAsync(signer, default);
         await Assert.ThrowsAsync<DirectoryRejectedException>(() => client.AnnounceAsync(second, true, [], default));
         Assert.Empty(await client.ListAsync(default));
+    }
+
+    [Fact]
+    public async Task AnOldListingCannotBringBackAnExpiredRoom()
+    {
+        var client = new RoomDirectoryClient(_net);
+        var signed = new RoomSigner().Sign(Listing(), _now);
+        await client.AnnounceAsync(signed, true, [], default);
+        // The room closes; its signed listing stays in everyone's snapshot.
+        _now += RoomDirectoryServer.MaxNewListingAge + TimeSpan.FromMinutes(1);
+        Assert.Empty(await client.ListAsync(default));
+        var replay = await Assert.ThrowsAsync<DirectoryRejectedException>(() => client.AnnounceAsync(signed, true, [], default));
+        Assert.Equal("stale", replay.Code);
+        Assert.Empty(await client.ListAsync(default));
+    }
+
+    [Fact]
+    public async Task AHostWhoseClockIsBehindStillGetsListed()
+    {
+        var client = new RoomDirectoryClient(_net);
+        var signer = new RoomSigner();
+        var hostTime = _now - TimeSpan.FromHours(3);
+        long? told = null;
+        await Assert.ThrowsAsync<DirectoryRejectedException>(() => client.AnnounceAsync(signer.Sign(Listing(), hostTime), true, [], default, behind: t => told = t));
+        Assert.Equal(_now.ToUnixTimeMilliseconds(), told);
+        signer.AdvanceTo(told!.Value);
+        await client.AnnounceAsync(signer.Sign(Listing(), hostTime), true, [], default);
+        Assert.Single(await client.ListAsync(default));
+        // Renewals of a room the directory holds keep working with the host's slow clock, well past the age limit.
+        for (var i = 1; i <= 20; i++)
+        {
+            _now += TimeSpan.FromMinutes(1);
+            await client.AnnounceAsync(signer.Sign(Listing() with { Players = 4 }, hostTime + TimeSpan.FromMinutes(i)), true, [], default);
+        }
+        Assert.Equal(4, Assert.Single(await client.ListAsync(default)).Players);
+    }
+
+    [Fact]
+    public void AfterTheDirectoryNamedItsTimeLaterVersionsKeepPaceWithIt()
+    {
+        // The host's clock is 3 hours behind the directory. Once told, versions signed 15 and 60 minutes later (by the
+        // host's slow clock) are still within the directory's allowed skew, so the room's hidden lookup entries stay.
+        long mono = 0;
+        var signer = new RoomSigner(() => mono);
+        var hostTime = _now - TimeSpan.FromHours(3);
+        signer.AdvanceTo(_now.ToUnixTimeMilliseconds(), hostTime);
+        foreach (var later in new[] { TimeSpan.FromMinutes(15), TimeSpan.FromMinutes(60) })
+        {
+            mono = (long)later.TotalMilliseconds;
+            var seq = signer.Sign(Listing(), hostTime + later).Seq;
+            Assert.InRange(seq - (_now + later).ToUnixTimeMilliseconds(), 0, (long)HiddenEntry.MaxClockSkew.TotalMilliseconds);
+        }
+        // Without the host's time only the version moves on, as before.
+        var bare = new RoomSigner();
+        bare.AdvanceTo(_now.ToUnixTimeMilliseconds());
+        Assert.Equal(_now.ToUnixTimeMilliseconds() + 1, bare.Sign(Listing(), hostTime + TimeSpan.FromMinutes(15)).Seq);
+    }
+
+    [Fact]
+    public void FixingTheSystemClockAfterwardsDoesNotAddTheGapAgain()
+    {
+        // The host's clock was 3 hours behind and then got corrected: later versions follow the real time, not 3 hours
+        // past it (which a directory would refuse as too far ahead).
+        long mono = 0;
+        var signer = new RoomSigner(() => mono);
+        signer.AdvanceTo(_now.ToUnixTimeMilliseconds(), _now - TimeSpan.FromHours(3));
+        mono = (long)TimeSpan.FromMinutes(10).TotalMilliseconds;
+        var fixedNow = _now + TimeSpan.FromMinutes(10);
+        var seq = signer.Sign(Listing(), fixedNow).Seq;
+        Assert.InRange(seq - fixedNow.ToUnixTimeMilliseconds(), 0, 1000);
+        Assert.InRange(signer.SignWithdraw(fixedNow + TimeSpan.FromMinutes(5)).Seq - (fixedNow + TimeSpan.FromMinutes(5)).ToUnixTimeMilliseconds(), 0, 1000);
+    }
+
+    [Fact]
+    public async Task OneDirectoryNamingAFarOffTimeDoesNotSetTheVersion()
+    {
+        // Two directories that don't hold the room both say the host's clock is behind; one names a time a month away.
+        var far = _now + TimeSpan.FromDays(30);
+        await using var other = new RoomDirectoryServer(IPAddress.Loopback, 0, clock: () => far);
+        _net.Map[("10.235.0.2", PublicNetworkProfile.DirectoryPort)] = other.Port;
+        var client = new RoomDirectoryClient(_net, [PublicNetworkProfile.DirectoryIp, "10.235.0.2"]);
+        long? told = null;
+        await Assert.ThrowsAsync<DirectoryRejectedException>(() =>
+            client.AnnounceAsync(new RoomSigner().Sign(Listing(), _now - TimeSpan.FromHours(3)), true, [], default, behind: t => told = t));
+        // The host signs after the earlier time, which the other directories agree with.
+        Assert.Equal(_now.ToUnixTimeMilliseconds(), told);
+    }
+
+    [Fact]
+    public async Task TheAnnouncerSignsAgainWhenTheDirectorySaysItsClockIsBehind()
+    {
+        // This directory's clock is hours ahead of the wall clock the announcer signs with.
+        _now = DateTimeOffset.UtcNow + TimeSpan.FromHours(3);
+        await using var announcer = new RoomAnnouncer(_net, () => Listing(), () => [], every: TimeSpan.FromHours(1));
+        await announcer.AnnounceOnceAsync(default);
+        Assert.True(announcer.Published, announcer.LastError);
+        Assert.Single(await new RoomDirectoryClient(_net).ListAsync(default));
     }
 
     [Fact]
