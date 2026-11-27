@@ -70,10 +70,27 @@ public sealed class PortMappingRenewalTests
         Assert.Equal(4, renewals);
     }
 
+    /// <summary>A router that grants only a few seconds is asked again before those seconds run out.</summary>
+    [Fact]
+    public async Task AShortGrantIsRenewedBeforeItRunsOut()
+    {
+        var waits = new List<TimeSpan>();
+        using var stop = new CancellationTokenSource();
+        var mapping = new PortMappingResult("NAT-PMP", IPEndPoint.Parse("198.51.100.7:40000"), null, _ =>
+        {
+            if (waits.Count >= 3) stop.Cancel();
+            return Task.FromResult(true);
+        }, TimeSpan.FromSeconds(5));
+        await DirectSession.KeepMappingAsync(mapping, TimeSpan.FromMinutes(1), (wait, ct) => { waits.Add(wait); return NoWait(wait, ct); }, _ => { }, () => { }, stop.Token);
+        Assert.NotEmpty(waits);
+        Assert.All(waits, w => Assert.True(w < TimeSpan.FromSeconds(5), $"{w}"));
+    }
+
     [Theory]
     [InlineData(3600u, 3600)]
     [InlineData(0u, 7200)]
-    [InlineData(5u, 20)]
+    [InlineData(5u, 5)]
+    [InlineData(1u, 1)]
     [InlineData(999999u, 7200)]
     public void NatPmpLeaseComesFromTheReply(uint granted, int seconds)
     {

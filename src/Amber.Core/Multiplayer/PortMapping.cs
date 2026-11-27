@@ -408,11 +408,14 @@ public static partial class PortMapping
         }, lease);
     }
 
-    /// <summary>The lifetime a NAT-PMP mapping reply grants (bytes 12–15), kept between 20 s and the lease that was asked for.</summary>
+    /// <summary>
+    /// The lifetime a NAT-PMP mapping reply grants (bytes 12–15), at most the lease that was asked for. A short grant is
+    /// kept as it is, so the renewal comes before the router lets the mapping go.
+    /// </summary>
     internal static TimeSpan PmpLease(ReadOnlySpan<byte> reply)
     {
         var seconds = reply.Length >= 16 ? BinaryPrimitives.ReadUInt32BigEndian(reply[12..]) : 0;
-        return TimeSpan.FromSeconds(seconds == 0 ? PortMappingResult.LeaseSeconds : Math.Clamp(seconds, 20, PortMappingResult.LeaseSeconds));
+        return TimeSpan.FromSeconds(seconds == 0 ? PortMappingResult.LeaseSeconds : Math.Min(seconds, PortMappingResult.LeaseSeconds));
     }
 
     private static async Task<byte[]?> PmpRequestAsync(UdpClient udp, IPEndPoint target, byte[] request, int expected, CancellationToken ct)
