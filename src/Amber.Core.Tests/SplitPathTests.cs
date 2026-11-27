@@ -413,8 +413,15 @@ public sealed class SplitPathTests
     public async Task ACheckThatNeverReturnsMeansNotReady()
     {
         var hang = 0;
+        // A query that never answers ends only when its round is cut off, and then throws, like a real one. (Returning an
+        // empty list there would read as "relay unreachable", and the test would depend on catching the short stale window.)
+        static async Task<List<PeerInfo>> Hang(CancellationToken ct)
+        {
+            await Task.Delay(Timeout.Infinite, ct);
+            return [];
+        }
         Task<List<PeerInfo>> Extra(SplitPathOptions o, CancellationToken ct) => Volatile.Read(ref hang) == 1
-            ? Task.Delay(Timeout.Infinite, ct).ContinueWith(_ => new List<PeerInfo>(), TaskScheduler.Default)
+            ? Hang(ct)
             : Task.FromResult<List<PeerInfo>>([new("jay-path-host", SplitPathArgs.HostIp(o.Index), "relay(2)", 90, "tcp")]);
         // Each round is cut off after its time limit.
         using (var group = SplitPathGroup.ForTest(TwoExtraPaths(), _ => Task.FromResult<List<PeerInfo>>([DirectHost]), Extra,

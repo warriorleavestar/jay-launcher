@@ -1,0 +1,146 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:l="using:Amber.App.Localization"
+             xmlns:vm="using:Amber.App.ViewModels"
+             xmlns:views="using:Amber.App.Views"
+             x:Class="Amber.App.Views.MobileLauncherView"
+             x:DataType="vm:MainViewModel">
+  <UserControl.DataTemplates>
+    <DataTemplate DataType="vm:LibraryViewModel"><views:LibraryPage /></DataTemplate>
+    <DataTemplate DataType="vm:AccountsViewModel"><views:AccountsPage /></DataTemplate>
+    <DataTemplate DataType="vm:InstanceViewModel"><views:InstancePage /></DataTemplate>
+    <DataTemplate DataType="vm:DownloadViewModel"><views:DownloadPage /></DataTemplate>
+    <DataTemplate DataType="vm:ContentViewModel"><views:ContentPage /></DataTemplate>
+    <DataTemplate DataType="vm:MultiplayerViewModel"><views:MultiplayerPage /></DataTemplate>
+    <DataTemplate DataType="vm:SettingsViewModel"><views:SettingsPage /></DataTemplate>
+    <DataTemplate DataType="vm:AboutViewModel"><views:AboutPage /></DataTemplate>
+    <DataTemplate DataType="vm:PeopleViewModel"><views:PeoplePage /></DataTemplate>
+    <DataTemplate DataType="vm:HelpCenterViewModel"><views:HelpCenterPage /></DataTemplate>
+  </UserControl.DataTemplates>
+
+  <UserControl.Styles>
+    <Style Selector=".compact TextBlock.mobile-sidebar-label">
+      <Setter Property="IsVisible" Value="False" />
+    </Style>
+    <Style Selector="TextBlock.mobile-compact-only">
+      <Setter Property="IsVisible" Value="False" />
+    </Style>
+    <Style Selector=".compact TextBlock.mobile-compact-only">
+      <Setter Property="IsVisible" Value="True" />
+    </Style>
+    <Style Selector=".compact Path.mobile-nav-icon">
+      <Setter Property="IsVisible" Value="False" />
+    </Style>
+    <Style Selector=".compact Button.mobile-sidebar-button">
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="Padding" Value="6,8" />
+    </Style>
+    <Style Selector=".compact Grid.mobile-nav-row">
+      <Setter Property="Width" Value="48" />
+      <Setter Property="ColumnSpacing" Value="0" />
+    </Style>
+    <Style Selector=".compact ListBox.nav ListBoxItem">
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+    </Style>
+  </UserControl.Styles>
+
+  <Grid x:Name="ShellGrid" ColumnDefinitions="220,*" Background="{DynamicResource PageBg}">
+    <Border Classes="sidebar" BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="0,0,1,0">
+      <Grid RowDefinitions="Auto,*,Auto" Margin="10">
+        <Button Classes="ghost mobile-sidebar-button" Command="{Binding Shell.GoSectionCommand}" CommandParameter="library"
+                HorizontalContentAlignment="Left" Padding="10,8">
+          <StackPanel Orientation="Horizontal" Spacing="10">
+            <Image Source="avares://Jay/Assets/jay.png" Width="30" Height="30" />
+            <TextBlock Classes="mobile-sidebar-label" Text="Jay" FontSize="21" FontWeight="Bold" VerticalAlignment="Center" Foreground="{DynamicResource SidebarText}" />
+          </StackPanel>
+        </Button>
+
+        <ListBox Grid.Row="1" Classes="nav" ItemsSource="{Binding Shell.Sections}" SelectedItem="{Binding Shell.SelectedSection}"
+                 Background="Transparent" Margin="0,10">
+          <ListBox.Styles>
+            <Style Selector="ListBoxItem">
+              <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            </Style>
+          </ListBox.Styles>
+          <ListBox.ItemTemplate>
+            <DataTemplate DataType="vm:NavSection">
+              <Grid Classes="mobile-nav-row" ColumnDefinitions="Auto,*" ColumnSpacing="12" MinHeight="48">
+                <Path Classes="mobile-nav-icon" Data="{Binding Icon}" Stroke="{DynamicResource SidebarText}" Width="21" Height="21" VerticalAlignment="Center" />
+                <TextBlock Classes="mobile-sidebar-label" Grid.Column="1" Text="{Binding Title}" Foreground="{DynamicResource SidebarText}"
+                           FontSize="15" VerticalAlignment="Center" />
+                <TextBlock Classes="mobile-compact-only" Grid.ColumnSpan="2" Text="{Binding ShortTitle}"
+                           Foreground="{DynamicResource SidebarText}" FontSize="12"
+                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+              </Grid>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+
+        <StackPanel Grid.Row="2" Spacing="4">
+          <Button Classes="ghost mobile-sidebar-button" Command="{Binding Shell.OpenSettingsCommand}" HorizontalContentAlignment="Left" MinHeight="48">
+            <StackPanel Orientation="Horizontal" Spacing="12">
+              <Path Classes="mobile-nav-icon" Data="{StaticResource Icon.Settings}" Stroke="{DynamicResource SidebarText}" Width="21" Height="21" />
+              <TextBlock Classes="mobile-sidebar-label" Text="{l:T shell.settings}" Foreground="{DynamicResource SidebarText}" VerticalAlignment="Center" />
+              <TextBlock Classes="mobile-compact-only" Text="{l:T shell.settings_short}" Foreground="{DynamicResource SidebarText}" VerticalAlignment="Center" />
+            </StackPanel>
+          </Button>
+          <Button Classes="ghost mobile-sidebar-button" Command="{Binding Shell.OpenMeCommand}" HorizontalContentAlignment="Left" MinHeight="48">
+            <StackPanel Orientation="Horizontal" Spacing="12">
+              <Border Width="24" Height="24" CornerRadius="12" Background="{DynamicResource AccentTint}">
+                <TextBlock Text="{Binding Shell.AccountInitial}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+              </Border>
+              <TextBlock Classes="mobile-sidebar-label" Text="{Binding Shell.AccountName}" Foreground="{DynamicResource SidebarText}" VerticalAlignment="Center" />
+            </StackPanel>
+          </Button>
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <Grid Grid.Column="1" RowDefinitions="Auto,Auto,*">
+      <Border BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="0,0,0,1" Padding="14,10">
+        <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="10">
+          <Button Classes="ghost icon-only" Command="{Binding Shell.BackCommand}" IsEnabled="{Binding Shell.CanGoBack}">
+            <Path Data="{StaticResource Icon.ArrowLeft}" Width="18" Height="18" />
+          </Button>
+          <Button x:Name="ResumeGameButton" Grid.Column="2" Classes="secondary" IsVisible="False"
+                  Content="{l:T mobile.game.resume}" Click="OnResumeGame" />
+          <Button Grid.Column="3" Classes="ghost icon-only" Command="{Binding Activity.ToggleCommand}" IsVisible="{Binding Activity.HasTasks}" AutomationProperties.Name="{l:T activity.title}">
+            <Path Classes="icon" Data="{StaticResource Icon.Bell}" Width="20" Height="20" />
+          </Button>
+          <TextBlock Grid.Column="1" Text="{Binding Shell.Heading}" FontSize="20" FontWeight="SemiBold" VerticalAlignment="Center" />
+        </Grid>
+      </Border>
+      <ContentControl Grid.Row="1" Content="{Binding Activity.FirstRequest}" IsVisible="{Binding Activity.HasRequests}" Margin="12,4" />
+      <ContentControl Grid.Row="2" Content="{Binding CurrentPage}" Margin="18,12,18,18" />
+    </Grid>
+    <Border Grid.ColumnSpan="2" Background="{DynamicResource Overlay}" Padding="16"
+            IsVisible="{Binding Activity.IsOpen}">
+      <Grid RowDefinitions="Auto,*" RowSpacing="8">
+        <Grid ColumnDefinitions="*,Auto">
+          <TextBlock Classes="h2" Text="{l:T activity.title}" VerticalAlignment="Center" />
+          <Button Grid.Column="1" Content="{l:T common.close}" Command="{Binding Activity.CloseCommand}" />
+        </Grid>
+        <ScrollViewer Grid.Row="1">
+          <ItemsControl ItemsSource="{Binding Activity.Tasks}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate DataType="vm:TaskItem">
+                <StackPanel Classes="card" Margin="0,4" Spacing="4">
+                  <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
+                  <TextBlock Text="{Binding Detail}" TextWrapping="Wrap" />
+                  <ProgressBar Minimum="0" Maximum="100" Value="{Binding Percent}" IsIndeterminate="{Binding Indeterminate}" IsVisible="{Binding IsRunning}" />
+                  <Button Classes="secondary" HorizontalAlignment="Left" Content="{l:T common.cancel}" Command="{Binding CancelCommand}" IsVisible="{Binding CanCancel}" />
+                  <TextBlock Text="{Binding DownloadSpeedText}" IsVisible="{Binding IsRunning}" />
+                  <ItemsControl ItemsSource="{Binding ActiveFiles}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate><TextBlock Text="{Binding}" TextWrapping="Wrap" /></DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </StackPanel>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </ScrollViewer>
+      </Grid>
+    </Border>
+  </Grid>
+</UserControl>

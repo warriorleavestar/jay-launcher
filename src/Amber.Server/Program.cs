@@ -110,7 +110,7 @@ public static class Program
           jay-server network hw-cert --root <根钥匙文件> --request <hardware.request.json> --out <hardware.cert> [--need N] [--secure-boot] [--no-tpm] [--network <网络名>]
               在离线电脑上给节点的硬件签证书（默认：只允许一项硬件标识变化，有 TPM 就必须对上 TPM）。先逐项显示内容和核对码，手打目录节点公钥最后 6 位才签
           jay-server network hw-cert --cosign <hardware.cert> --root <根钥匙文件>
-              另一位信任人在自己的离线电脑上加签（Jay 公共网络看 JayTrust.Need，现在是 2 把要 2 把；自己的网络看 dirRootsNeed），同样先显示再手打确认
+              另一位信任人在自己的离线电脑上加签（Jay 公共网络看 JayTrust.Need，现在是 3 把里任 2 把；自己的网络看 dirRootsNeed），同样先显示再手打确认
           jay-server node bind --install <证书> [--network <连接串或文件>]  只认签名够数的证书（不加 --network 就是 Jay 信任人）
           jay-server directory --network <连接串或文件> ...     用自己的公共网络当节点（不加就是 Jay 公共网络）
           网络 JSON 的格式见 networks/README.md。
@@ -123,7 +123,7 @@ public static class Program
           jay-server account add|passwd <账号>      加账号 / 改密码（密码在终端输入；脚本里可以用环境变量 JAY_ACCOUNT_PASSWORD）
           jay-server account remove|disable|enable <账号> / account list
           jay-server account 2fa on <账号> [--issuer <网络名>]   开两步验证：打印密钥和 otpauth 地址，用验证器 App 添加
-          jay-server account 2fa off <账号>提交到 Jay 仓库的 networks/ 审核合并后，CI 会用 Jay 注册表钥匙签名，Jay 里显示“已审核”。
+          jay-server account 2fa off <账号>
 
         发版签名（维护者在离线电脑上用，见 docs/security/release-signing.md）：
           jay-server release sums <文件...> [--out SHA256SUMS.txt]  算发布包的 SHA-256 清单
@@ -318,7 +318,7 @@ public static class Program
 
     /// <summary>
     /// Release signing for trustees (privacy plan items 2 and 3). Every trustee signs on their own offline machine with
-    /// their own release key (separate from the key that reviews networks); a release needs JayTrust.ReleaseNeed of them (currently 2 of 2). Nothing here can run in CI.
+    /// their own release key (separate from the key that reviews networks); a release needs JayTrust.ReleaseNeed of them (currently 2 of 3). Nothing here can run in CI.
     /// </summary>
     internal static int ReleaseCommand(Options options, TextWriter output, Func<IReadOnlyList<string>, string, string, bool>? confirm = null)
     {
@@ -435,7 +435,7 @@ public static class Program
     /// <summary>公共网络连接串：生成钥匙、签名、检查、显示。</summary>
     internal static int NetworkCommand(Options options, TextWriter output, string? root = null)
     {
-        var sub = options.Positional.FirstOrDefault() ?? throw new ArgumentException("用法：jay-server network init|keygen|sign|cosign|config-hash|check|show|root-key|key-public|paper-check|paper-restore|dir-key|dir-cert");
+        var sub = options.Positional.FirstOrDefault() ?? throw new ArgumentException("用法：jay-server network init|keygen|sign|cosign|config-hash|check|show|root-key|key-public|paper-check|paper-restore|dir-key|dir-cert|hw-cert");
         var rest = options.Positional.Skip(1).ToList();
         switch (sub)
         {
@@ -666,7 +666,7 @@ public static class Program
                     target = existing;
                     var bytes = File.ReadAllBytes(existing);
                     shown = HardwareCertificate.Parse(bytes) ?? throw new InvalidDataException(existing + " 不是有效的硬件证书（有签名对不上，或格式不认识）");
-                    sign = () => HardwareCertificate.Cosign(bytes, TrustCommands.LoadKey(rootFile));
+                    sign = () => HardwareCertificate.Cosign(bytes, TrustCommands.ForUse(TrustCommands.LoadKey(rootFile), release: false));
                 }
                 else
                 {
@@ -678,7 +678,7 @@ public static class Program
                     int? need = options.Get("need") is { } n ? int.Parse(n, System.Globalization.CultureInfo.InvariantCulture) : null;
                     bool? tpm = options.Has("no-tpm") ? false : null;
                     shown = HardwareCertificate.Preview(request, options.Get("network"), need, tpm, options.Has("secure-boot"));
-                    sign = () => HardwareCertificate.Issue(TrustCommands.LoadKey(rootFile), request, options.Get("network"), need, tpm, options.Has("secure-boot"));
+                    sign = () => HardwareCertificate.Issue(TrustCommands.ForUse(TrustCommands.LoadKey(rootFile), release: false), request, options.Get("network"), need, tpm, options.Has("secure-boot"));
                 }
                 if (!ConfirmHardwareCertificate(shown, output)) return 3;
                 var cert = sign();
@@ -699,7 +699,7 @@ public static class Program
                 return 0;
             }
             default:
-                throw new ArgumentException("用法：jay-server network init|keygen|sign|cosign|config-hash|check|show|root-key|key-public|paper-check|paper-restore|dir-key|dir-cert");
+                throw new ArgumentException("用法：jay-server network init|keygen|sign|cosign|config-hash|check|show|root-key|key-public|paper-check|paper-restore|dir-key|dir-cert|hw-cert");
         }
     }
 
