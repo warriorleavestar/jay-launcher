@@ -30,6 +30,12 @@ public static class EasyTierRelease
     public const string Commit = "b26dc3d4756d";
     /// <summary>The hardened build's full commit, as the trustees' signature names it.</summary>
     public const string FullCommit = "b26dc3d4756de903d8a06c6574c9f68c6ec3a377";
+    /// <summary>
+    /// Whether this build can give each caller of a local service its own address (<see cref="Public.PublicNetworkArgs.LoopbackSourceVariable"/>,
+    /// jay-v2.6.4-5 and later). Set it with the bump. It only does so for callers on secure-mode connections, so callers
+    /// are told apart only when the public network also runs in secure mode (<see cref="Public.PublicNetworkArgs.SecureMode"/>).
+    /// </summary>
+    public const bool MapsCallers = false;
     /// <summary>Signature seq of this build: one more for every hardened release.</summary>
     public const long Seq = 4;
     /// <summary>Component name in the trustees' signature (<see cref="ReleaseStatement.Components"/>).</summary>

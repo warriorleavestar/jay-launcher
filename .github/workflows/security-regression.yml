@@ -2,10 +2,10 @@ name: security-regression
 
 on:
   pull_request:
-    paths: ['src/**', '.github/workflows/security-regression.yml']
+    paths: ['src/**', 'node/install.sh', 'server/install-network-node.sh', '.github/workflows/security-regression.yml']
   push:
     branches: [main]
-    paths: ['src/**', '.github/workflows/security-regression.yml']
+    paths: ['src/**', 'node/install.sh', 'server/install-network-node.sh', '.github/workflows/security-regression.yml']
 
 # 同一个 PR 推了新提交时，取消旧提交还在排队或在跑的检查；main 和标签上的不取消
 concurrency:
@@ -22,7 +22,7 @@ jobs:
       matrix:
         os: [windows-latest, ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 45
     defaults:
       run:
         working-directory: src
@@ -43,11 +43,19 @@ jobs:
             echo "AMBER_ADDED_TEST_LOOPBACK=true" >> "$GITHUB_ENV"
           fi
 
-      # SystemMotionTests: the time limit on the macOS/Linux settings helpers only runs off Windows, which the build job does not cover.
+      # Windows runs the whole suite in build.yml (validate); here it repeats only the security classes.
       - name: Security boundary regression tests
+        if: runner.os == 'Windows'
         run: >-
           dotnet test Amber.Core.Tests -c Release
-          --filter "FullyQualifiedName~ProcessBoundarySecurityTests|FullyQualifiedName~InputParsingSecurityTests|FullyQualifiedName~WorldImportTests|FullyQualifiedName~ServerStatusTests|FullyQualifiedName~SpeedTestServerTests|FullyQualifiedName~SpeedTestSecurityTests|FullyQualifiedName~NbtBudgetTests|FullyQualifiedName~TestMatrixTests|FullyQualifiedName~SystemMotionTests"
+          --filter "FullyQualifiedName~ProcessBoundarySecurityTests|FullyQualifiedName~InputParsingSecurityTests|FullyQualifiedName~WorldImportTests|FullyQualifiedName~ServerStatusTests|FullyQualifiedName~SpeedTestServerTests|FullyQualifiedName~SpeedTestSecurityTests|FullyQualifiedName~NbtBudgetTests|FullyQualifiedName~TestMatrixTests|FullyQualifiedName~SystemMotionTests|FullyQualifiedName~InstallScriptTests"
+          --logger "trx;LogFileName=security.trx" --results-directory ../out/security-tests
+
+      # Linux and macOS run the whole suite: tests with Unix-only bodies run nowhere else in CI.
+      - name: Full test suite
+        if: runner.os != 'Windows'
+        run: >-
+          dotnet test Amber.Core.Tests -c Release
           --logger "trx;LogFileName=security.trx" --results-directory ../out/security-tests
 
       - name: Upload security test results
