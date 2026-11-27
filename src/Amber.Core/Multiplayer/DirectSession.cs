@@ -112,7 +112,11 @@ public sealed class DirectSession : IAsyncDisposable
 
     /// <summary>加入方：证明自己是批准过的成员最多等这么久。</summary>
     internal static TimeSpan AdmitTimeout { get; set; } = TimeSpan.FromSeconds(20);
-    private TaskCompletionSource<(byte[] Nonce, byte[]? HostProof)>? _challenge;
+    private TaskCompletionSource<(byte[] Nonce, byte[]? HostProof, bool Legacy)>? _challenge;
+    // The guest nonce of the admission running now: the host echoes it, so a late answer to an earlier round is ignored.
+    private string? _challengeRound;
+    // A peer answered the way Jay did before the host proof (no version, no proof): the host may run an older Jay.
+    private volatile bool _hostLooksOutdated;
     private DirectPeer? _admitPeer;
     private TaskCompletionSource<bool>? _admitReply;
     // Guest: one admission at a time; a request that comes in meanwhile runs once more afterwards.
@@ -623,11 +627,11 @@ public sealed class DirectSession : IAsyncDisposable
                 catch (UnverifiedHostException) when (attempt < 3 && _remote is { } host && Bridge is { } bridge && !_disposed)
                 {
                     if (await bridge.PunchAsync(host.Candidates, host.Nat, AdmitRepunchTimeout, ct) is null)
-                        throw new DirectFailedException(L.T("core.mp.direct.host_unproven"));
+                        throw new DirectFailedException(UnprovenMessage());
                 }
                 catch (UnverifiedHostException)
                 {
-                    throw new DirectFailedException(L.T("core.mp.direct.host_unproven"));
+                    throw new DirectFailedException(UnprovenMessage());
                 }
             }
         }
@@ -640,6 +644,17 @@ public sealed class DirectSession : IAsyncDisposable
     private sealed class UnverifiedHostException : Exception;
 
     /// <summary>
+    /// The admission handshake this Jay speaks: 2 = the host proves itself first (<see cref="DirectKeys.HostProof"/>) and
+    /// echoes the guest's nonce. A host that answers without it runs an older Jay, which this guest cannot verify.
+    /// </summary>
+    internal const int AdmitVersion = 2;
+
+    /// <summary>Tests: the host answers "admit-start" the way Jay did before <see cref="AdmitVersion"/> 2.</summary>
+    internal bool LegacyChallengeForTest { get; set; }
+
+    private string UnprovenMessage() => L.T(_hostLooksOutdated ? "core.mp.direct.host_outdated" : "core.mp.direct.host_unproven");
+
+    /// <summary>
     /// 加入方：向房主证明自己是批准过的成员（要一个挑战，再用成员钥匙对它做 HMAC）。UDP 会丢包，每秒重发，最多 <see cref="AdmitTimeout"/>。
     /// The guest asks with a fresh nonce, and the host has to answer with <see cref="DirectKeys.HostProof"/> over it before
     /// the guest proves anything: everyone who saw the invite can pass the bridge HMAC, only the host holds this member's
@@ -649,18 +664,19 @@ public sealed class DirectSession : IAsyncDisposable
     internal async Task AdmitAsync(MemberKey member, CancellationToken ct)
     {
         if (Bridge?.Peers.FirstOrDefault() is not { } peer || LocalAddresses is not { } local) throw new DirectFailedException(L.T("core.mp.direct.admit_timeout"));
-        var challenge = new TaskCompletionSource<(byte[] Nonce, byte[]? HostProof)>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var challenge = new TaskCompletionSource<(byte[] Nonce, byte[]? HostProof, bool Legacy)>(TaskCreationOptions.RunContinuationsAsynchronously);
         var reply = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         _admitPeer = peer;
         _challenge = challenge;
         _admitReply = reply;
         var guestNonce = RandomNumberGenerator.GetBytes(16);
+        _challengeRound = Convert.ToBase64String(guestNonce);
         using var limit = CancellationTokenSource.CreateLinkedTokenSource(ct);
         limit.CancelAfter(AdmitTimeout);
         try
         {
-            (byte[] Nonce, byte[]? HostProof) answer;
-            var start = new JsonObject { ["op"] = "admit-start", ["id"] = member.IdHex, ["gn"] = Convert.ToBase64String(guestNonce) };
+            (byte[] Nonce, byte[]? HostProof, bool Legacy) answer;
+            var start = new JsonObject { ["op"] = "admit-start", ["id"] = member.IdHex, ["gn"] = _challengeRound, ["v"] = AdmitVersion };
             var asked = Stopwatch.StartNew();
             while (true)
             {
@@ -674,6 +690,15 @@ public sealed class DirectSession : IAsyncDisposable
                     Bridge.RejectHost(peer, block: false);
                     throw new UnverifiedHostException();
                 }
+            }
+            if (answer.Legacy)
+            {
+                // Nothing to verify, so it is dropped like any peer that can't prove it is the host (an impostor can send
+                // this too); the final message says the host may need a newer Jay.
+                _hostLooksOutdated = true;
+                Log(L.T("core.mp.direct.host_outdated"));
+                Bridge.RejectHost(peer);
+                throw new UnverifiedHostException();
             }
             var expectedHost = DirectKeys.HostProof(member, local.Session, answer.Nonce, guestNonce);
             if (answer.HostProof is not { } hostProof || !CryptographicOperations.FixedTimeEquals(expectedHost, hostProof))
@@ -701,6 +726,7 @@ public sealed class DirectSession : IAsyncDisposable
         finally
         {
             _challenge = null;
+            _challengeRound = null;
             _admitReply = null;
             _admitPeer = null;
         }
@@ -895,7 +921,12 @@ public sealed class DirectSession : IAsyncDisposable
             case "admit-start" when IsHost && Bridge is { } challengeBridge:
                 var nonce = challengeBridge.ChallengeFor(peer);
                 var reply = new JsonObject { ["op"] = "challenge", ["n"] = Convert.ToBase64String(nonce) };
-                if (HostProofFor(message, nonce) is { } hostProof) reply["hp"] = Convert.ToBase64String(hostProof);
+                if (!LegacyChallengeForTest)
+                {
+                    reply["v"] = AdmitVersion;
+                    if (Str(message, "gn") is { Length: <= 64 } round) reply["gn"] = round;
+                    if (HostProofFor(message, nonce) is { } hostProof) reply["hp"] = Convert.ToBase64String(hostProof);
+                }
                 _ = challengeBridge.SendControlAsync(peer, reply);
                 break;
             case "admit" when IsHost:
@@ -905,12 +936,13 @@ public sealed class DirectSession : IAsyncDisposable
                 if (admitted) StateChanged?.Invoke();
                 break;
             case "challenge" when !IsHost:
-                if (Str(message, "n") is { } n && _challenge is { } waiting && ReferenceEquals(peer, _admitPeer))
+                if (Str(message, "n") is { } n && _challenge is { } waiting && ReferenceEquals(peer, _admitPeer)
+                    && ChallengeRound(message, _challengeRound) is { } legacy)
                 {
                     try
                     {
                         var hp = Str(message, "hp") is { } hpText ? Convert.FromBase64String(hpText) : null;
-                        if (Convert.FromBase64String(n) is { Length: 16 } challengeNonce) waiting.TrySetResult((challengeNonce, hp));
+                        if (Convert.FromBase64String(n) is { Length: 16 } challengeNonce) waiting.TrySetResult((challengeNonce, hp, legacy));
                     }
                     catch (FormatException) { }
                 }
@@ -970,6 +1002,18 @@ public sealed class DirectSession : IAsyncDisposable
 
 
     // 对方发来的 JSON 字段类型不对时当作没有，不抛异常。
+    /// <summary>
+    /// Guest: whether a "challenge" answers the admission running now (<paramref name="round"/> is its guest nonce).
+    /// Null to ignore it: a late answer to an earlier round, or a current-format answer that doesn't echo the round.
+    /// False for a current answer, true for one in the format of a Jay before <see cref="AdmitVersion"/> 2.
+    /// </summary>
+    internal static bool? ChallengeRound(JsonObject message, string? round)
+    {
+        if (round is null) return null;
+        if (Str(message, "gn") is { } echoed) return echoed == round ? false : null;
+        return message["v"] is null && message["hp"] is null ? true : null;
+    }
+
     private static string? Str(JsonObject m, string key) => (m[key] as JsonValue)?.TryGetValue<string>(out var v) == true ? v : null;
     private static bool? Bool(JsonObject m, string key) => (m[key] as JsonValue)?.TryGetValue<bool>(out var v) == true ? v : null;
     private static int? Int(JsonObject m, string key) => (m[key] as JsonValue)?.TryGetValue<int>(out var v) == true ? v : null;

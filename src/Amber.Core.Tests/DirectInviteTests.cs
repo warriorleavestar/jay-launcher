@@ -3,6 +3,7 @@ using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
+using Amber.Core.Localization;
 using Amber.Core.Multiplayer;
 using Amber.Core.Multiplayer.Transport;
 
@@ -597,6 +598,40 @@ public sealed class DirectInviteTests
         Assert.Equal(host.Host.Bridge.SocketEndPoint.Port, hostSide.Remote.Port);
         Assert.All(impostor.Host.Bridge.Peers, p => Assert.False(p.Admitted));
         Assert.Equal("room", await ArrivesAtAsync(guest, host.Lobby, room, "real"));
+    }
+
+    /// <summary>
+    /// The host runs a Jay from before the host proof: it answers "admit-start" with a bare challenge. The guest can't
+    /// verify it, so it doesn't join over the bridge, and the message says the host needs a newer Jay.
+    /// </summary>
+    [Fact]
+    public async Task AHostFromBeforeTheHostProofIsNamedAsOutdated()
+    {
+        await using var host = new DirectRoom();
+        await host.PrepareAsync();
+        host.Host.LegacyChallengeForTest = true;
+        await using var guest = Guest();
+        var failed = await Assert.ThrowsAsync<DirectFailedException>(() => JoinAsync(host, guest, host.Admit(RandomNumberGenerator.GetBytes(32), "Steve")));
+        Assert.Equal(L.T("core.mp.direct.host_outdated"), failed.Message);
+        Assert.All(host.Host.Bridge!.Peers, p => Assert.False(p.Admitted));
+    }
+
+    /// <summary>A challenge counts only for the admission round it echoes; a late one from an earlier round is ignored.</summary>
+    [Fact]
+    public void AChallengeAnswersOnlyTheRoundItEchoes()
+    {
+        JsonObject Reply(string? round, bool current = true)
+        {
+            var m = new JsonObject { ["op"] = "challenge", ["n"] = "AAAAAAAAAAAAAAAAAAAAAA==" };
+            if (current) m["v"] = DirectSession.AdmitVersion;
+            if (round is not null) m["gn"] = round;
+            return m;
+        }
+        Assert.Equal(false, DirectSession.ChallengeRound(Reply("second"), "second"));
+        Assert.Null(DirectSession.ChallengeRound(Reply("first"), "second"));
+        Assert.Null(DirectSession.ChallengeRound(Reply(null), "second"));
+        Assert.Null(DirectSession.ChallengeRound(Reply("second"), null));
+        Assert.Equal(true, DirectSession.ChallengeRound(Reply(null, current: false), "second"));
     }
 
     /// <summary>

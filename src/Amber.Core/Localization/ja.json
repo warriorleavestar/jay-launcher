@@ -1514,6 +1514,7 @@
   "core.mp.direct.admit_rejected": "{0} のメンバー証明が正しくないため、そのブリッジは引き続きノックしかできません",
   "core.mp.direct.too_many_unadmitted": "{0} から直接接続がありましたが、メンバー証明を待っている接続が多すぎるため、今は受け付けません",
   "core.mp.direct.host_unverified": "{0} がホストのアドレスで応答しましたが、ホスト本人であることを証明できませんでした。無視します",
+  "core.mp.direct.host_outdated": "ホストの Jay が古いため、直接接続を確認できません。両方とも最新の Jay に更新してください。",
   "core.mp.direct.host_unproven": "直接接続の相手が本当にホストかどうか確認できませんでした",
   "core.mp.direct.readmit_failed": "新しい直接接続でメンバーの再確認ができませんでした：",
   "multiplayer.direct.old_code": "これは古い直接接続コード（JAY2D- / JAY2R-）です。公開 IP アドレスが含まれていたため、もう使えません。相手に Jay を更新して通常の招待（JAY2- で始まる）を送ってもらってください。",

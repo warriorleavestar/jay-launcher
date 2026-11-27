@@ -228,6 +228,22 @@ public class DirectBridgeTests
         Assert.Equal(PathKind.Mapped, (await hostWait)!.Path);
     }
 
+    /// <summary>
+    /// A port-preserving NAT gives the STUN and the mapped candidate one endpoint. It counts as the mapped path, but
+    /// while only plain punching is allowed (that test step) it is the punched path, so the probe is not refused.
+    /// </summary>
+    [Fact]
+    public void ASharedEndpointIsThePathThatIsAllowed()
+    {
+        var at = IPEndPoint.Parse("198.51.100.7:40000");
+        List<Candidate> remote = [new(PathKind.Punch, at), new(PathKind.Mapped, at)];
+        Assert.Equal(PathKind.Mapped, DirectBridge.SharedEndpointPath(remote, at, Enum.GetValues<PathKind>().ToHashSet()));
+        Assert.Equal(PathKind.Mapped, DirectBridge.SharedEndpointPath(remote, at, new HashSet<PathKind> { PathKind.Mapped }));
+        Assert.Equal(PathKind.Punch, DirectBridge.SharedEndpointPath(remote, at, new HashSet<PathKind> { PathKind.Punch }));
+        Assert.Equal(PathKind.Punch, DirectBridge.SharedEndpointPath(remote, at, new HashSet<PathKind> { PathKind.PunchSpray }));
+        Assert.Equal(PathKind.Punch, DirectBridge.SharedEndpointPath(remote, IPEndPoint.Parse("198.51.100.8:40000"), new HashSet<PathKind> { PathKind.Mapped }));
+    }
+
     /// <summary>A probe that claims to be aimed at a mapped port is not believed by a side that holds none.</summary>
     [Fact]
     public async Task MappedClaimNeedsAMappingOnTheReceivingSide()

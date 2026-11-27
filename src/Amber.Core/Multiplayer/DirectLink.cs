@@ -646,8 +646,20 @@ public sealed class DirectBridge : IAsyncDisposable
         if (from.AddressFamily == AddressFamily.InterNetworkV6) return PathKind.IPv6;
         if (throughMapping) return PathKind.Mapped;
         if (!PortMapping.IsPublic(from.Address)) return PathKind.Lan;
-        // A port-preserving NAT can give the STUN and the mapped candidate the same endpoint: that is the mapped path.
-        return _lastRemote?.Where(c => c.EndPoint.Equals(from)).OrderBy(c => c.Kind == PathKind.Mapped ? 0 : 1).FirstOrDefault()?.Kind ?? PathKind.Punch;
+        return SharedEndpointPath(_lastRemote, from, _allowedPaths);
+    }
+
+    /// <summary>
+    /// The path a probe from a public <paramref name="from"/> came over. A port-preserving NAT can give the STUN and the
+    /// mapped candidate the same endpoint: that counts as the mapped path, unless only plain punching is allowed right now
+    /// (a test step for it), when the same endpoint is the punched path.
+    /// </summary>
+    internal static PathKind SharedEndpointPath(IReadOnlyList<Candidate>? remote, IPEndPoint from, IReadOnlySet<PathKind> allowed)
+    {
+        bool Allowed(PathKind kind) => allowed.Contains(kind) || kind == PathKind.Punch && allowed.Contains(PathKind.PunchSpray);
+        return remote?.Where(c => c.EndPoint.Equals(from))
+            .OrderBy(c => Allowed(c.Kind) ? 0 : 1).ThenBy(c => c.Kind == PathKind.Mapped ? 0 : 1)
+            .FirstOrDefault()?.Kind ?? PathKind.Punch;
     }
 
     private IReadOnlyList<Candidate>? _lastRemote;
