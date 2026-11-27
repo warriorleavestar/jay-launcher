@@ -27,9 +27,12 @@ public sealed record GateRelayCode(byte[] ServerKeyHash, byte[] Secret)
         if (string.IsNullOrWhiteSpace(text)) return null;
         var start = text.IndexOf(Prefix, StringComparison.OrdinalIgnoreCase);
         if (start < 0) return null;
+        // The code has a fixed length: stop there so words after it are not read as part of it.
+        const int codeChars = ((1 + GateInvite.KeyHashLength + SecretLength + ChecksumLength) * 8 + 4) / 5;
         var chars = new StringBuilder();
         foreach (var c in text.AsSpan(start + Prefix.Length))
         {
+            if (chars.Length == codeChars) break;
             if (char.IsWhiteSpace(c) || c == '-') continue;
             if (!char.IsAsciiLetterOrDigit(c)) break;
             chars.Append(c);
