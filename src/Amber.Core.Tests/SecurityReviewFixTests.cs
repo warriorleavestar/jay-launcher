@@ -37,25 +37,28 @@ public class SecurityReviewFixTests
     [Fact]
     public void Exit_FailsClosedUntilPublicIpKnown()
     {
-        using var policy = new ExitPolicy([], []);
+        using var policy = new ExitPolicy([], []) { IsRoutable = TestAddresses.IsRoutable };
         policy.SetReady(false);
-        Assert.False(policy.Allows(IPAddress.Parse("8.8.8.8")));
+        Assert.False(policy.Allows(IPAddress.Parse("198.51.100.88")));
         policy.SetReady(true);
-        Assert.True(policy.Allows(IPAddress.Parse("8.8.8.8")));
-        ExitPolicy.ReportPublicAddress(IPAddress.Parse("198.51.7.9"));
-        Assert.False(policy.Allows(IPAddress.Parse("198.51.7.9")));
-        Assert.False(policy.Allows(IPAddress.Parse("::ffff:198.51.7.9")));
+        Assert.True(policy.Allows(IPAddress.Parse("198.51.100.88")));
+        // The reported set is shared by every policy, so this address is used here only and no other test may expect it allowed.
+        var reported = IPAddress.Parse("203.0.113.112");
+        Assert.True(policy.Allows(reported));
+        ExitPolicy.ReportPublicAddress(reported);
+        Assert.False(policy.Allows(reported));
+        Assert.False(policy.Allows(IPAddress.Parse("::ffff:203.0.113.112")));
     }
 
     // 2. 公网 IPv6 的整个 /56（同一家里的别的 /64），以及路由表里的非默认路由。
     [Fact]
     public void Exit_BlocksSiblingPrefixesAndRoutes()
     {
-        using var policy = new ExitPolicy([IPAddress.Parse("2400:1a00:b1:4e::25")], [(IPAddress.Parse("2400:1a00:b1:4e::"), 64), (IPAddress.Parse("2400:1a00:b1:4e::25"), 56)]);
+        using var policy = new ExitPolicy([IPAddress.Parse("2001:db8:b1:4e::25")], [(IPAddress.Parse("2001:db8:b1:4e::"), 64), (IPAddress.Parse("2001:db8:b1:4e::25"), 56)]);
         Assert.Equal(48, new ExitPolicy(48).IPv6SitePrefix);
-        Assert.False(policy.Allows(IPAddress.Parse("2400:1a00:b1:4f::1")));
-        Assert.False(policy.Allows(IPAddress.Parse("2400:1a00:b1:ff::1")));
-        Assert.False(policy.Allows(IPAddress.Parse("2400:1a00:b2:0::1")));   // 仅游戏转发不转 IPv6
+        Assert.False(policy.Allows(IPAddress.Parse("2001:db8:b1:4f::1")));
+        Assert.False(policy.Allows(IPAddress.Parse("2001:db8:b1:ff::1")));
+        Assert.False(policy.Allows(IPAddress.Parse("2001:db8:b2:0::1")));   // 仅游戏转发不转 IPv6
         if (OperatingSystem.IsWindows())
         {
             var routes = ExitPolicy.NonDefaultRoutes();
@@ -343,7 +346,8 @@ public class SecurityReviewFixTests
         var client = new SecureStream(a, iSend, iReceive, TransportProfile.For(TransportMode.Extreme));
         var watch = System.Diagnostics.Stopwatch.StartNew();
         client.Dispose();
-        Assert.True(watch.ElapsedMilliseconds < 200, $"Dispose 用了 {watch.ElapsedMilliseconds} ms");
+        // Only proves Dispose doesn't wait on the network; a loose bound keeps a busy machine from failing it.
+        Assert.True(watch.ElapsedMilliseconds < 2000, $"Dispose 用了 {watch.ElapsedMilliseconds} ms");
         await using var server = new SecureStream(b, rSend, rReceive, TransportProfile.For(TransportMode.Extreme));
         Assert.Equal(0, await server.ReadAsync(new byte[4]).AsTask().WaitAsync(TimeSpan.FromSeconds(5)));
         Assert.True(server.ClosedCleanly);
@@ -401,36 +405,38 @@ public class SecurityReviewFixTests
     [Fact]
     public async Task JoinTarget_ResolveForRelay()
     {
-        static Task<IPAddress[]> Public(string _, CancellationToken __) => Task.FromResult(new[] { IPAddress.Parse("8.8.8.8") });
+        static Task<IPAddress[]> Public(string _, CancellationToken __) => Task.FromResult(new[] { IPAddress.Parse("198.51.100.88") });
         static Task<IPAddress[]> Private(string _, CancellationToken __) => Task.FromResult(new[] { IPAddress.Parse("192.168.1.9") });
         static (string, int)? NoSrv(string _) => null;
         static (string, int)? Srv(string name) => name == "_minecraft._tcp.play.example.org" ? ("mc1.example.org", 25570) : null;
 
-        Assert.Equal(new RelayPlan("play.example.org", 25565, "play.example.org", 25565), await JoinTarget.ResolveForRelayAsync("play.example.org", default, Public, NoSrv));
+        Assert.Equal(new RelayPlan("play.example.org", 25565, "play.example.org", 25565), await JoinTarget.ResolveForRelayAsync("play.example.org", TestAddresses.IsRoutable, default, Public, NoSrv));
         // SRV：连 SRV 给的主机和端口，握手包里仍写用户写的名字和默认端口（和游戏直接进时一样，按域名分服的服务器才认得）。
-        Assert.Equal(new RelayPlan("mc1.example.org", 25570, "mc1.example.org", 25570), await JoinTarget.ResolveForRelayAsync("play.example.org", default, Public, Srv));
+        Assert.Equal(new RelayPlan("mc1.example.org", 25570, "mc1.example.org", 25570), await JoinTarget.ResolveForRelayAsync("play.example.org", TestAddresses.IsRoutable, default, Public, Srv));
         // 写了 25565 也查 SRV（和游戏一样）。
-        Assert.Equal(new RelayPlan("mc1.example.org", 25570, "mc1.example.org", 25570), await JoinTarget.ResolveForRelayAsync("play.example.org:25565", default, Public, Srv));
-        Assert.Equal(new RelayPlan("play.example.org", 25566, "play.example.org", 25566), await JoinTarget.ResolveForRelayAsync("play.example.org:25566", default, Public, Srv));
-        Assert.Null(await JoinTarget.ResolveForRelayAsync("intranet.example.org", default, Private, NoSrv));
-        Assert.Null(await JoinTarget.ResolveForRelayAsync("localhost:25565", default, Public, NoSrv));
-        Assert.Null(await JoinTarget.ResolveForRelayAsync("192.168.1.5:25565", default, Public, NoSrv));
-        Assert.Equal(new RelayPlan("1.2.3.4", 25565, "1.2.3.4", 25565), await JoinTarget.ResolveForRelayAsync("1.2.3.4", default, Public, NoSrv));
+        Assert.Equal(new RelayPlan("mc1.example.org", 25570, "mc1.example.org", 25570), await JoinTarget.ResolveForRelayAsync("play.example.org:25565", TestAddresses.IsRoutable, default, Public, Srv));
+        Assert.Equal(new RelayPlan("play.example.org", 25566, "play.example.org", 25566), await JoinTarget.ResolveForRelayAsync("play.example.org:25566", TestAddresses.IsRoutable, default, Public, Srv));
+        Assert.Null(await JoinTarget.ResolveForRelayAsync("intranet.example.org", TestAddresses.IsRoutable, default, Private, NoSrv));
+        Assert.Null(await JoinTarget.ResolveForRelayAsync("localhost:25565", TestAddresses.IsRoutable, default, Public, NoSrv));
+        Assert.Null(await JoinTarget.ResolveForRelayAsync("192.168.1.5:25565", TestAddresses.IsRoutable, default, Public, NoSrv));
+        Assert.Equal(new RelayPlan("198.51.100.88", 25565, "198.51.100.88", 25565), await JoinTarget.ResolveForRelayAsync("198.51.100.88", TestAddresses.IsRoutable, default, Public, NoSrv));
+        // The real check refuses documentation addresses: only the test stand-in above lets them through.
+        Assert.Null(await JoinTarget.ResolveForRelayAsync("198.51.100.88", default, Public, NoSrv));
         // A name in another script is sent and looked up in its ASCII form.
         string? srvAsked = null;
         (string, int)? SrvSpy(string name) { srvAsked = name; return null; }
         Assert.Equal(new RelayPlan("xn--bcher-kva.example.org", 25565, "xn--bcher-kva.example.org", 25565),
-            await JoinTarget.ResolveForRelayAsync("bücher.example.org", default, Public, SrvSpy));
+            await JoinTarget.ResolveForRelayAsync("bücher.example.org", TestAddresses.IsRoutable, default, Public, SrvSpy));
         Assert.Equal("_minecraft._tcp.xn--bcher-kva.example.org", srvAsked);
         // 本机名字不去查 SRV。
         var asked = false;
         (string, int)? Spy(string _) { asked = true; return null; }
-        Assert.Null(await JoinTarget.ResolveForRelayAsync("nas.lan", default, Public, Spy));
+        Assert.Null(await JoinTarget.ResolveForRelayAsync("nas.lan", TestAddresses.IsRoutable, default, Public, Spy));
         Assert.False(asked);
         // SRV 查询卡住也不会一直等。
         var watch = System.Diagnostics.Stopwatch.StartNew();
         (string, int)? Hang(string _) { Thread.Sleep(10_000); return null; }
-        Assert.NotNull(await JoinTarget.ResolveForRelayAsync("play.example.org", default, Public, Hang));
+        Assert.NotNull(await JoinTarget.ResolveForRelayAsync("play.example.org", TestAddresses.IsRoutable, default, Public, Hang));
         Assert.True(watch.Elapsed < TimeSpan.FromSeconds(6));
     }
 

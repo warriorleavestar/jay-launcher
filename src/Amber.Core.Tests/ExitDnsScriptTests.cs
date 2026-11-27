@@ -14,8 +14,8 @@ public sealed class ExitDnsScriptTests
             [pscustomobject]@{ InterfaceGuid = $script:Guid; InterfaceIndex = 42; ifIndex = 42; Name = 'Amber LAN' },
             [pscustomobject]@{ InterfaceGuid = '97595f35-0796-47c9-89cb-3916afce2061'; InterfaceIndex = 7; ifIndex = 7; Name = 'Wi-Fi' }
         )
-        $script:Servers = @('9.9.9.9', '149.112.112.112')
-        $script:NameServer = '9.9.9.9,149.112.112.112'
+        $script:Servers = @('192.0.2.99', '192.0.2.112')
+        $script:NameServer = '192.0.2.99,192.0.2.112'
         $script:DhcpServers = @('192.0.2.53')
         $script:Automatic = 'Disabled'
         $script:Metric = 37
@@ -35,8 +35,8 @@ public sealed class ExitDnsScriptTests
             if (-not $condition) { throw ('Mock assertion failed: ' + $message) }
         }
         function Assert-Original {
-            Assert-That (($script:Servers -join ',') -eq '9.9.9.9,149.112.112.112') 'static DNS was not restored'
-            Assert-That ($script:NameServer -eq '9.9.9.9,149.112.112.112') 'static DNS mode was not restored'
+            Assert-That (($script:Servers -join ',') -eq '192.0.2.99,192.0.2.112') 'static DNS was not restored'
+            Assert-That ($script:NameServer -eq '192.0.2.99,192.0.2.112') 'static DNS mode was not restored'
             Assert-That ($script:Automatic -eq 'Disabled' -and $script:Metric -eq 37) 'manual metric was not restored'
             Assert-That ($null -eq $script:ExitDnsLease) 'lease was not released'
         }
@@ -65,7 +65,7 @@ public sealed class ExitDnsScriptTests
             Assert-That ($InputObject.InterfaceIndex -eq $script:Index -and $InputObject.AddressFamily -eq 2) 'DNS write touched another adapter or address family'
             $script:DnsWrites++
             if ($script:DnsFailBefore -gt 0) { $script:DnsFailBefore--; throw 'mock DNS write failed before applying' }
-            $restoring = $ResetServerAddresses -or ($ServerAddresses -join ',') -eq '9.9.9.9,149.112.112.112'
+            $restoring = $ResetServerAddresses -or ($ServerAddresses -join ',') -eq '192.0.2.99,192.0.2.112'
             if ($restoring -and $script:RestoreFail -gt 0) { $script:RestoreFail--; throw 'mock restore failed' }
             if ($script:IgnoreDnsWrite) { return }
             if ($ResetServerAddresses) {
@@ -131,7 +131,7 @@ public sealed class ExitDnsScriptTests
     [Fact]
     public Task StaticDnsAndManualMetricRoundTrip() => RunAsync("""
         Enter-ExitDns $script:Adapters[0]
-        Assert-That (($script:Servers -join ',') -eq '1.1.1.1,8.8.8.8') 'exit DNS was not applied'
+        Assert-That (($script:Servers -join ',') -eq $script:ExitDnsLease.AppliedDnsKey -and $script:ExitDnsLease.AppliedDnsKey -ne '192.0.2.99,192.0.2.112') 'exit DNS was not applied'
         Assert-That ($script:Automatic -eq 'Disabled' -and $script:Metric -eq 1) 'exit metric was not applied'
         Exit-ExitDns
         Assert-Original
@@ -179,10 +179,10 @@ public sealed class ExitDnsScriptTests
     [Fact]
     public Task UserDnsChangesArePreservedWhileOwnedMetricIsRestored() => RunAsync("""
         Enter-ExitDns $script:Adapters[0]
-        $script:Servers = @('4.2.2.2')
-        $script:NameServer = '4.2.2.2'
+        $script:Servers = @('192.0.2.42')
+        $script:NameServer = '192.0.2.42'
         Exit-ExitDns
-        Assert-That (($script:Servers -join ',') -eq '4.2.2.2' -and $script:DnsWrites -eq 1) 'user DNS was overwritten'
+        Assert-That (($script:Servers -join ',') -eq '192.0.2.42' -and $script:DnsWrites -eq 1) 'user DNS was overwritten'
         Assert-That ($script:Metric -eq 37 -and $script:MetricWrites -eq 2) 'owned metric was not restored'
         Assert-That ($null -eq $script:ExitDnsLease) 'lease was not released'
         """);

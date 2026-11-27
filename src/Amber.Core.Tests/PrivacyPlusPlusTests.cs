@@ -34,16 +34,24 @@ public sealed class PrivacyPlusPlusTests : IAsyncLifetime
         config.ListenAddress = "127.0.0.1";
         config.BackendPort = ((IPEndPoint)_backend.LocalEndpoint).Port;
         _serverKey = _store.LoadServerKey();
+        _store.SaveConfig(config);
+        StartServer(TimeSpan.FromMilliseconds(100));
+        await Task.CompletedTask;
+    }
+
+    /// <summary>Starts the gate server; its first relay check runs one <paramref name="checkInterval"/> after the start.</summary>
+    private void StartServer(TimeSpan checkInterval)
+    {
+        var config = _store.LoadConfig();
         _server = new GateServer(_store, config, _serverKey, _ => { })
         {
             HeartbeatTimeoutOverride = HeartbeatTimeout,
             RecoverDelay = TimeSpan.FromMilliseconds(300),
-            CheckInterval = TimeSpan.FromMilliseconds(100),
+            CheckInterval = checkInterval,
         };
         _server.Start();
         config.PublicPort = _server.Port;
         _store.SaveConfig(config);
-        await Task.CompletedTask;
     }
 
     public async Task DisposeAsync()
@@ -85,6 +93,10 @@ public sealed class PrivacyPlusPlusTests : IAsyncLifetime
             await Task.Delay(50);
         }
     }
+
+    /// <summary>Every relay's heartbeat is up and the server itself has counted them, with the breaker closed.</summary>
+    private Task UntilReady() => Until(() => _relays.All(r => r.Relay.HeartbeatConnected) && _server.HealthyRelays == _relays.Count
+        && _server.RelaysCounted && !_server.BreakerOpen, "ready");
 
     private MemberIdentity Identity(string name) => MemberIdentity.LoadOrCreate(Path.Combine(_root, "client-" + name));
 
@@ -191,8 +203,7 @@ public sealed class PrivacyPlusPlusTests : IAsyncLifetime
         AddRelay();
         AddRelay();
         _store.SetPrivacy(PrivacyLevel.PlusPlus);
-        await Until(() => _relays.All(r => r.Relay.HeartbeatConnected), "heartbeats");
-        await Until(() => !_server.BreakerOpen, "breaker closed");
+        await UntilReady();
         var (membership, identity) = await Member();
         Assert.Equal(PrivacyLevel.PlusPlus, membership.Network!.Level);
         var (game, server) = await Play(membership, identity);
@@ -215,7 +226,7 @@ public sealed class PrivacyPlusPlusTests : IAsyncLifetime
         AddRelay();
         AddRelay();
         _store.SetPrivacy(PrivacyLevel.PlusPlus);
-        await Until(() => !_server.BreakerOpen && _relays.All(r => r.Relay.HeartbeatConnected), "ready");
+        await UntilReady();
         var (membership, identity) = await Member();
         var (game, server) = await Play(membership, identity);
         var changes = new List<bool>();
@@ -245,13 +256,32 @@ public sealed class PrivacyPlusPlusTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task NobodyGetsInBeforeTheServerHasCountedItsRelays()
+    {
+        // A server whose first relay check is an hour away: everything below happens before any check has run.
+        await _server.DisposeAsync();
+        StartServer(TimeSpan.FromHours(1));
+        AddRelay();
+        AddRelay();
+        _store.SetPrivacy(PrivacyLevel.PlusPlus);
+        await Until(() => _relays.All(r => r.Relay.HeartbeatConnected), "heartbeats");
+        // No check has seen privacy++ yet, so the breaker never opened; still nobody is let in.
+        Assert.False(_server.BreakerOpen);
+        Assert.Equal(0, _server.HealthyRelays);
+        var (membership, identity) = await Member();
+        var e = await Assert.ThrowsAnyAsync<Exception>(() => GateClient.Opener(membership, identity)(CancellationToken.None));
+        Assert.True(e is IOException or GateRejectedException, e.ToString());
+        Assert.False(_backend.Pending());
+    }
+
+    [Fact]
     public async Task OneOfThreeRelaysDownDoesNotTripTheBreaker()
     {
         AddRelay();
         AddRelay();
         AddRelay();
         _store.SetPrivacy(PrivacyLevel.PlusPlus);
-        await Until(() => !_server.BreakerOpen && _relays.All(r => r.Relay.HeartbeatConnected), "ready");
+        await UntilReady();
         await _relays[2].Relay.DisposeAsync();
         // Long enough for the server to notice the relay is gone.
         await Task.Delay(HeartbeatTimeout + TimeSpan.FromSeconds(1));
@@ -265,7 +295,7 @@ public sealed class PrivacyPlusPlusTests : IAsyncLifetime
         AddRelay();
         AddRelay();
         _store.SetPrivacy(PrivacyLevel.PlusPlus);
-        await Until(() => !_server.BreakerOpen && _relays.All(r => r.Relay.HeartbeatConnected), "ready");
+        await UntilReady();
         var (membership, identity) = await Member();
         var (game, server) = await Play(membership, identity);
         await Until(() => _server.ActiveSessions == 1, "session registered");
