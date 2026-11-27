@@ -151,6 +151,18 @@ public sealed class TunnelServer : IAsyncDisposable
 
     /// <summary>Places one caller with its own address may hold.</summary>
     public const int MaxPendingPerCaller = 16;
+
+    /// <summary>Game connections one member may have open at once (see <see cref="GameStreamQuota"/>).</summary>
+    public const int MaxGameStreamsPerMember = GameStreamQuota.PerMember;
+
+    /// <summary>Each member's share of game connections; the room gives its split tunnel the same one.</summary>
+    public GameStreamQuota GameQuota { get; init; } = new();
+
+    /// <summary>
+    /// Serves a game stream with the caller it was taken from (the member, its address, or null), in place of the
+    /// route's handler, when the route offers the game at all (see <see cref="ToGamePort"/>).
+    /// </summary>
+    public Func<Stream, object?, CancellationToken, Task>? GameHandler { get; init; }
     private readonly HandshakeSlots _slots = new(MaxPendingHandshakes, MaxPendingPerCaller);
     private long _slotsFullLogged;
     private long _handshakeFailedLogged;
@@ -244,6 +256,14 @@ public sealed class TunnelServer : IAsyncDisposable
         return true;
     }
 
+    /// <summary>
+    /// Hands game streams to <paramref name="port"/>: to the relay listening there in this process with the caller they
+    /// came from, so the relay can limit each member on its own, else over a loopback connection like
+    /// <see cref="ToLocalPort"/>.
+    /// </summary>
+    public static Func<Stream, object?, CancellationToken, Task> ToGamePort(int port) => (stream, owner, ct) =>
+        GamePortRelay.At(port) is { } relay ? relay.ServeStreamAsync(stream, owner, ct) : ToLocalPort(port)(stream, ct);
+
     /// <summary>把服务交给本机的一个 TCP 端口（游戏、聊天）。</summary>
     public static Func<Stream, CancellationToken, Task> ToLocalPort(int port) => async (stream, ct) =>
     {
@@ -328,6 +348,8 @@ public sealed class TunnelServer : IAsyncDisposable
             // A room without members (shared room key only) and the unwrapped SOCKS mode stay limited.
             var authenticated = false;
             var handshakeOk = false;
+            MemberEntry? servedMember = null;
+            object? gameOwner = null;
             try
             {
                 BeforeServeForTest?.Invoke(client);
@@ -347,6 +369,7 @@ public sealed class TunnelServer : IAsyncDisposable
                     if (accepted is null) return;
                     (stream, service, var member) = accepted.Value;
                     authenticated = member is not null;
+                    servedMember = member;
                     handshakeOk = true;
                     // 邀请房间：这个成员的钥匙一作废（踢出、重新批准换了钥匙、房间结束）就断开这条连接。
                     // 握手完之前已经作废的，Register 会立刻调用。
@@ -366,9 +389,20 @@ public sealed class TunnelServer : IAsyncDisposable
                     Interlocked.Increment(ref Rejected);
                     return;
                 }
+                if (service == TunnelService.Game)
+                {
+                    gameOwner = (object?)servedMember ?? CallerOf(client);
+                    if (gameOwner is not null && !GameQuota.TryTake(gameOwner))
+                    {
+                        gameOwner = null;
+                        Interlocked.Increment(ref Rejected);
+                        return;
+                    }
+                }
                 Interlocked.Increment(ref Accepted);
                 served = true;
-                await handler(stream, ct);
+                if (service == TunnelService.Game && GameHandler is { } game) await game(stream, gameOwner, ct);
+                else await handler(stream, ct);
             }
             catch (Exception e) when (e is CryptographicException or IOException or SocketException or EndOfStreamException or OperationCanceledException or PlatformNotSupportedException
                                        or InvalidDataException or ArgumentException or ObjectDisposedException or InvalidOperationException)
@@ -398,6 +432,7 @@ public sealed class TunnelServer : IAsyncDisposable
             finally
             {
                 HandshakeDone();
+                if (gameOwner is not null) GameQuota.GiveBack(gameOwner);
                 await revocation.DisposeAsync();
                 if (stream is not null)
                 {

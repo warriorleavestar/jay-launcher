@@ -37,6 +37,9 @@ public sealed class RoomTransport : IAsyncDisposable
     private ExitPolicy? _exitPolicy;
     private readonly Action<string>? _log;
 
+    // Each member's share of game connections, counted across the single and the split tunnel.
+    private readonly GameStreamQuota _gameQuota = new();
+
     public TunnelServer? Server { get; private set; }
     /// <summary>Host of a room that splits: the per-leg listeners.</summary>
     public SplitTunnelServer? SplitServer { get; private set; }
@@ -132,7 +135,7 @@ public sealed class RoomTransport : IAsyncDisposable
                     TunnelService.Game => TunnelServer.ToLocalPort(room.Port),
                     TunnelService.Chat => TunnelServer.ToLocalPort(RoomChat.Port),
                     _ => null,
-                }, _log, listeners: legs, giveBack: giveBack));
+                }, _log, listeners: legs, giveBack: giveBack) { GameQuota = _gameQuota, GameHandler = TunnelServer.ToGamePort(room.Port) });
             }
         }
 
@@ -152,7 +155,7 @@ public sealed class RoomTransport : IAsyncDisposable
                         stillReady: () => policy.CanForward);
                 },
                 _ => null,
-            }, _log, listen));
+            }, _log, listen) { GameQuota = _gameQuota, GameHandler = TunnelServer.ToGamePort(room.Port) });
         }
 
         if (!o.IsHost && settings.Wraps)

@@ -484,6 +484,14 @@ public static unsafe class WindowsSandbox
     /// <summary>Writes the file system jar into <paramref name="folder"/> (once per content) and returns its path, or null when this build has none.</summary>
     public static string? FileSystemJar(string folder) => EmbeddedJar(FileSystemResource, "jay-fs", folder);
 
+    // ---------------------------------------------------------------- rooms reaching a game in the strong sandbox
+
+    /// <summary>The LAN bridge agent's resource (tools/jay-lan, see <see cref="Multiplayer.GameLanBridge"/>); missing when the build had no JDK.</summary>
+    internal const string LanBridgeResource = "Amber.Core.jay-lan.jar";
+
+    /// <summary>Writes the LAN bridge jar into <paramref name="folder"/> (once per content) and returns its path, or null when this build has none.</summary>
+    public static string? LanBridgeJar(string folder) => EmbeddedJar(LanBridgeResource, "jay-lan", folder);
+
     /// <summary>
     /// Java's "may I write this?" (<c>Files.isWritable</c>, used by zip file systems among others) checks a file's
     /// permissions without its integrity label, so at either sandbox level every file looks read-only to the game, even

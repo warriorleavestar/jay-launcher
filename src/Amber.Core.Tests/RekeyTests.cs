@@ -289,6 +289,139 @@ public sealed class RekeyTests : IDisposable
         }
     }
 
+    /// <summary>One member holding all its game connections doesn't keep another member out, and gets places back as they close.</summary>
+    [Fact]
+    public async Task OneMembersGameConnectionsAreLimitedWithoutKeepingOthersOut()
+    {
+        var settings = new TunnelSettings(TransportMode.High, false);
+        var room = HostRoom(settings);
+        var alice = room.Table.Issue(_alice.PublicKey, "Alice");
+        var bob = room.Table.Issue(_bob.PublicKey, "Bob");
+        await using var server = new TunnelServer(room.Host, settings, 0, _ => async (stream, ct) => await stream.CopyToAsync(stream, ct));
+
+        async Task<Stream> OpenAsync(MemberEntry member) =>
+            await TunnelClient.Wrapped("127.0.0.1", server.Port, GuestRoom(room, member), settings, TunnelService.Game)(default);
+
+        static async Task<bool> EchoesAsync(Stream tunnel, byte value)
+        {
+            try
+            {
+                await tunnel.WriteAsync(new[] { value });
+                await tunnel.FlushAsync();
+                var echo = new byte[1];
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                return await tunnel.ReadAsync(echo, timeout.Token) == 1 && echo[0] == value;
+            }
+            catch (Exception e) when (e is IOException or CryptographicException or ObjectDisposedException or OperationCanceledException or SocketException)
+            {
+                return false;
+            }
+        }
+
+        var held = new List<Stream>();
+        try
+        {
+            for (var i = 0; i < TunnelServer.MaxGameStreamsPerMember; i++)
+            {
+                held.Add(await OpenAsync(alice));
+                Assert.True(await EchoesAsync(held[^1], (byte)i));
+            }
+            // Alice's share is used up: her next game connection is turned away, Bob's is served.
+            await using (var over = await OpenAsync(alice)) Assert.False(await EchoesAsync(over, 0xAA));
+            await using (var other = await OpenAsync(bob)) Assert.True(await EchoesAsync(other, 0xBB));
+
+            // One of Alice's connections closes: she gets that place back.
+            await held[0].DisposeAsync();
+            held.RemoveAt(0);
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+            var again = false;
+            while (!again && DateTime.UtcNow < deadline)
+            {
+                await using var next = await OpenAsync(alice);
+                again = await EchoesAsync(next, 0xCC);
+                if (!again) await Task.Delay(100);
+            }
+            Assert.True(again);
+        }
+        finally
+        {
+            foreach (var s in held) await s.DisposeAsync();
+        }
+    }
+
+    /// <summary>
+    /// The room's tunnel hands each member's game streams to the relay in front of the game together with the member:
+    /// one member holding all its places with connections that never log in doesn't use up the relay's budget for new
+    /// connections it can't tell apart, so others still get in; churning those connections doesn't change that, and a
+    /// kicked member's places come back.
+    /// </summary>
+    [Fact]
+    public async Task OneMembersUnfinishedGameConnectionsDontKeepOthersOutOfTheRelay()
+    {
+        var settings = new TunnelSettings(TransportMode.High, false);
+        var room = HostRoom(settings);
+        var alice = room.Table.Issue(_alice.PublicKey, "Alice");
+        var bob = room.Table.Issue(_bob.PublicKey, "Bob");
+        using var game = new TestGame();
+        await using var relay = new GamePortRelay();
+        relay.SetTarget(game.Port);
+        await using var server = new TunnelServer(room.Host, settings, 0, _ => TunnelServer.ToLocalPort(relay.Port))
+        {
+            GameHandler = TunnelServer.ToGamePort(relay.Port),
+        };
+
+        async Task<Stream> OpenAsync(MemberEntry member) =>
+            await TunnelClient.Wrapped("127.0.0.1", server.Port, GuestRoom(room, member), settings, TunnelService.Game)(default);
+
+        static async Task<bool> EchoesAsync(Stream tunnel, byte value)
+        {
+            try
+            {
+                await tunnel.WriteAsync(new[] { value });
+                await tunnel.FlushAsync();
+                var echo = new byte[1];
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                return await tunnel.ReadAsync(echo, timeout.Token) == 1 && echo[0] == value;
+            }
+            catch (Exception e) when (e is IOException or CryptographicException or ObjectDisposedException or OperationCanceledException or SocketException)
+            {
+                return false;
+            }
+        }
+
+        var held = new List<Stream>();
+        try
+        {
+            // Alice takes every place she has with connections that reach the game and then say nothing.
+            for (var i = 0; i < TunnelServer.MaxGameStreamsPerMember; i++) held.Add(await OpenAsync(alice));
+            Assert.True(await WaitAsync(() => relay.OpenConnectionsTo(game.Port) == TunnelServer.MaxGameStreamsPerMember, 10));
+            Assert.Equal(GamePortRelay.MaxNewUnidentified, TunnelServer.MaxGameStreamsPerMember);
+
+            // Bob still plays.
+            await using (var other = await OpenAsync(bob)) Assert.True(await EchoesAsync(other, 0xB1));
+
+            // Alice churns: drops some and opens new ones straight away. Still only her own places.
+            for (var i = 0; i < 4; i++)
+            {
+                await held[0].DisposeAsync();
+                held.RemoveAt(0);
+            }
+            Assert.True(await WaitAsync(() => relay.OpenConnectionsTo(game.Port) <= TunnelServer.MaxGameStreamsPerMember - 4, 10));
+            for (var i = 0; i < 4; i++) held.Add(await OpenAsync(alice));
+            Assert.True(await WaitAsync(() => relay.OpenConnectionsTo(game.Port) == TunnelServer.MaxGameStreamsPerMember, 10));
+            await using (var other = await OpenAsync(bob)) Assert.True(await EchoesAsync(other, 0xB2));
+
+            // Kicked: every place she held comes back.
+            Assert.True(room.Table.Remove(alice));
+            Assert.True(await WaitAsync(() => relay.OpenConnectionsTo(game.Port) == 0, 10));
+            Assert.Equal(0, server.GameQuota.HeldBy(alice));
+        }
+        finally
+        {
+            foreach (var s in held) await s.DisposeAsync();
+        }
+    }
+
     /// <summary>A connection that fails before its handshake starts still gives its place back.</summary>
     [Fact]
     public async Task FailuresBeforeTheHandshakeFreeTheirPlace()

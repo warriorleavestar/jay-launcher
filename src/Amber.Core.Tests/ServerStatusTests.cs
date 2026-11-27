@@ -148,6 +148,22 @@ public sealed class ServerStatusTests
     }
 
     [Fact]
+    public async Task LocalhostReachesAServerThatOnlyListensOnIpv6()
+    {
+        if (!Socket.OSSupportsIPv6) return;
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var listener = new TcpListener(IPAddress.IPv6Loopback, 0);
+        try { listener.Start(); }
+        catch (SocketException) { return; } // No IPv6 loopback on this machine.
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        var ping = ServerList.PingAsync($"localhost:{port}", TimeSpan.FromSeconds(5), stop.Token);
+        using var client = await listener.AcceptTcpClientAsync(stop.Token);
+        await Reply(client, StatusPacket("{\"description\":\"v6\"}"), stop.Token);
+        var status = await ping;
+        Assert.True(status.Online, status.Error);
+    }
+
+    [Fact]
     public async Task SilentPeerTimesOutAndNextQuerySucceeds()
     {
         Assert.False((await PingResponse([])).Online);

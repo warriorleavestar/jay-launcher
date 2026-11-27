@@ -98,6 +98,33 @@ internal sealed partial class SelfTest
             && HasText(L.T("multiplayer.relay.waiting")));
         await ShotAsync("房间-先开房间等游戏");
         vm.StopGameRelayForTest();
+
+        // A game in the strong sandbox on a known port: the relay goes in front of it and the room is linked at once,
+        // named by the typed port, with the port box still there (a world reopened on a new port). Narrow and wide.
+        using (var sandboxed = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0))
+        {
+            sandboxed.Start();
+            var sandboxPort = ((System.Net.IPEndPoint)sandboxed.LocalEndpoint).Port;
+            vm.BridgedForTest = p => p == sandboxPort;
+            vm.ManualPort = sandboxPort.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            var frontReady = await vm.PrepareGameRelayForTest();
+            await Task.Delay(300);
+            var linkedText = L.F("multiplayer.relay.linked_port", sandboxPort);
+            Check("强沙箱游戏：中继直接接上已知端口，写已接上", frontReady && !vm.IsWaitingForGame && vm.GameRelayForTest?.Target == sandboxPort
+                && Named<Border>("GameLinkPanel")?.IsEffectivelyVisible == true && vm.GameLinkText == linkedText && HasText(linkedText), vm.GameLinkText);
+            Check("强沙箱游戏：端口框和【查找】还在", Named<TextBox>("GameLinkPortBox")?.IsEffectivelyVisible == true
+                && Named<Button>("GameLinkFindButton")?.IsEffectivelyVisible == true);
+            await ShotAsync("房间-强沙箱已接上-1440");
+            window.Width = 600;
+            await Task.Delay(400);
+            Check("强沙箱游戏：窄窗里那一行不被裁掉", Named<TextBlock>("GameLinkText") is { IsEffectivelyVisible: true } line
+                && line.Bounds.Width <= Named<Border>("GameLinkPanel")!.Bounds.Width);
+            await ShotAsync("房间-强沙箱已接上-600");
+            window.Width = 1440;
+            await Task.Delay(300);
+            vm.StopGameRelayForTest();
+            vm.BridgedForTest = null;
+        }
         vm.ManualPort = savedPort;
         vm.SelectedLanGame = savedGame;
         await Task.Delay(200);

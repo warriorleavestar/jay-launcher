@@ -237,8 +237,13 @@ public static class ServerList
             linked.CancelAfter(timeout ?? TimeSpan.FromSeconds(5));
             var (host, port) = ParseAddress(address);
             using var tcp = new TcpClient();
-            await tcp.ConnectAsync(host, port, linked.Token).ConfigureAwait(false);
-            using var stream = tcp.GetStream();
+            // A world on this computer may be a game in the strong sandbox, reached through its LAN bridge. When that
+            // doesn't answer, and for anything else, the address is reached by name as before (so "localhost" still
+            // tries ::1 as well as 127.0.0.1).
+            var bridged = IsLoopbackHost(host) && Multiplayer.GameLanBridge.IsBridged(port)
+                ? await Multiplayer.GameLanBridge.ConnectAsync(port, Timeout.InfiniteTimeSpan, linked.Token, LoopbackAddress(host)).ConfigureAwait(false)
+                : null;
+            using var stream = bridged is not null ? new NetworkStream(bridged, ownsSocket: true) : await ConnectAsync(tcp, host, port, linked.Token).ConfigureAwait(false);
 
             var handshake = new MemoryStream();
             WriteVarInt(handshake, 0x00);
@@ -279,6 +284,20 @@ public static class ServerList
         {
             if (acquired) PingSlots.Release();
         }
+    }
+
+    /// <summary>localhost, 127.x and ::1: this computer, where a world may be a game in the strong sandbox.</summary>
+    internal static bool IsLoopbackHost(string host) =>
+        host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
+        || System.Net.IPAddress.TryParse(host.Trim('[', ']'), out var ip) && System.Net.IPAddress.IsLoopback(ip);
+
+    private static System.Net.IPAddress LoopbackAddress(string host) =>
+        System.Net.IPAddress.TryParse(host.Trim('[', ']'), out var ip) ? ip : System.Net.IPAddress.Loopback;
+
+    private static async Task<NetworkStream> ConnectAsync(TcpClient tcp, string host, int port, CancellationToken ct)
+    {
+        await tcp.ConnectAsync(host, port, ct).ConfigureAwait(false);
+        return tcp.GetStream();
     }
 
     // 状态包很小；先限制完整帧，再在帧内验证 ID 和字符串长度，绝不按内层声明另行分配。
