@@ -17,20 +17,32 @@ public static class ShaderToggle
         return changed;
     }
 
-    /// <summary>Sets <paramref name="key"/>=<paramref name="value"/> in a key=value file. False if the file is missing or already has that value.</summary>
+    /// <summary>
+    /// Sets <paramref name="key"/>=<paramref name="value"/> in a key=value file. False if the file is missing or already has that value.
+    /// Java (and so Iris and OptiFine) uses the last line for a key, so duplicates are dropped: the value lands in the first one.
+    /// </summary>
     internal static bool SetKey(string path, string key, string value)
     {
         if (!File.Exists(path)) return false;
         var lines = File.ReadAllLines(path).ToList();
-        var index = lines.FindIndex(l => l.TrimStart().StartsWith(key + "=", StringComparison.Ordinal));
+        var matches = Enumerable.Range(0, lines.Count).Where(i => IsKey(lines[i], key)).ToList();
         var line = key + "=" + value;
-        if (index >= 0)
+        if (matches.Count == 1 && lines[matches[0]].Trim() == line) return false;
+        if (matches.Count == 0) lines.Add(line);
+        else
         {
-            if (lines[index].Trim() == line) return false;
-            lines[index] = line;
+            lines[matches[0]] = line;
+            for (var i = matches.Count - 1; i > 0; i--) lines.RemoveAt(matches[i]);
         }
-        else lines.Add(line);
         File.WriteAllLines(path, lines);
         return true;
+    }
+
+    private static bool IsKey(string line, string key)
+    {
+        var trimmed = line.TrimStart();
+        if (trimmed.StartsWith('#') || trimmed.StartsWith('!')) return false;
+        var equals = trimmed.IndexOf('=');
+        return equals > 0 && trimmed.AsSpan(0, equals).TrimEnd().SequenceEqual(key);
     }
 }

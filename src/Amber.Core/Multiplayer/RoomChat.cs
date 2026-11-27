@@ -547,6 +547,11 @@ public sealed class ChatHub : IAsyncDisposable
         /// <summary>加入被宣布过（离开时要宣布）。</summary>
         public bool JoinAnnounced;
         /// <summary>
+        /// A newer connection of the same member took over (under <c>_identityGate</c>): nothing more is sent to this one,
+        /// so each message reaches the member over exactly one side of a chat move.
+        /// </summary>
+        public volatile bool Superseded;
+        /// <summary>
         /// 给这条连接发了踢人通知后等它确认：收到 "kicked-ack" 完成为 true，连接先断了完成为 false。
         /// 只属于这条连接，别的成员发 "kicked-ack" 碰不到它。
         /// </summary>
@@ -876,6 +881,7 @@ public sealed class ChatHub : IAsyncDisposable
                         foreach (var old in holders)
                         {
                             old.JoinAnnounced = false;
+                            old.Superseded = true;
                             old.Kick();
                         }
                         member.SenderId = message.SenderId;
@@ -939,9 +945,11 @@ public sealed class ChatHub : IAsyncDisposable
     private void Forward(MemberEntry from, string to, string blob)
     {
         byte[]? frame = null;
+        // Under the takeover lock, like Broadcast: a member's old and new connection never both get the same frame.
+        lock (_identityGate)
         foreach (var target in _members.Values)
         {
-            if (!target.Authenticated || target.Entry is not { Revoked: false } entry || entry.Fingerprint != to || ReferenceEquals(entry, from)) continue;
+            if (!target.Authenticated || target.Superseded || target.Entry is not { Revoked: false } entry || entry.Fingerprint != to || ReferenceEquals(entry, from)) continue;
             frame ??= ChatWire.PrivateFrom(from, blob);
             target.Outbox.Writer.TryWrite(frame);
         }
@@ -959,9 +967,12 @@ public sealed class ChatHub : IAsyncDisposable
     private void Broadcast(byte[] frame)
     {
         var now = Clock().UtcTicks;
+        // A takeover (a member's new connection replacing the old one) happens under _identityGate: a broadcast either
+        // comes before it and reaches the old connection, or after it and reaches the new one, never both.
+        lock (_identityGate)
         foreach (var member in _members.Values)
         {
-            if (!member.Authenticated) continue;
+            if (!member.Authenticated || member.Superseded) continue;
             if (member.Outbox.Writer.TryWrite(frame))
             {
                 Interlocked.Exchange(ref member.FullSince, 0);
