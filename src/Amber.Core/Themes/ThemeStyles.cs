@@ -252,7 +252,7 @@ public static partial class ThemeStyles
             if (tokens.Length != 5) return null;
             var nums = new double[4];
             for (var i = 0; i < 4; i++)
-                if (!double.TryParse(tokens[i], NumberStyles.Float, CultureInfo.InvariantCulture, out nums[i]) || Math.Abs(nums[i]) > 32 || (i == 2 && nums[i] < 0)) return null;
+                if (!double.TryParse(tokens[i], NumberStyles.Float, CultureInfo.InvariantCulture, out nums[i]) || !double.IsFinite(nums[i]) || Math.Abs(nums[i]) > 32 || (i == 2 && nums[i] < 0)) return null;
             if (!ThemePackReader.TryColor(tokens[4], out var color)) return null;
             parts.Add((inset ? "inset " : "") + string.Join(' ', nums.Select(n => n.ToString(CultureInfo.InvariantCulture))) + " " + ThemePackReader.FormatColor(color));
         }

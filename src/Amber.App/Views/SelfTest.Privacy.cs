@@ -27,6 +27,7 @@ internal sealed partial class SelfTest
         var unclassifiedBefore = NetworkPolicy.UnclassifiedCount;
         void Seen(NetworkCategory? c, Uri? u) => Log($"NET {c?.ToString() ?? "UNCLASSIFIED"} {u?.Host}{u?.AbsolutePath}");
         NetworkPolicy.Requested += Seen;
+        var autoUpdateAtStart = AppSettingsAutoUpdate;
         try
         {
             window.Width = 1440;
@@ -38,26 +39,28 @@ internal sealed partial class SelfTest
             Check("“关于和隐私”有自己的页，路由 about", main.CurrentPage is AboutViewModel && main.Shell.Title == L.T("about.title"));
             Check("整页是锁定的安全外观，开头是“Jay 安全提示”", Dispatcher.UIThread.Invoke(() => page.Surface is SafetySurface
                 && page.Promise.BadgeText == L.T("safety.title") && page.Surface.Bounds.Width <= 641), Dispatcher.UIThread.Invoke(() => page.Surface.Bounds.Width.ToString("0")));
+            // The test profile may be reused from an older Jay (no address: daily check off): start from the default.
+            AppSettingsAutoUpdate = true;
+            about.Refresh();
             Check("联网清单正好 5 类，编号 1–5", about.List.Rows.Select(r => r.Number).SequenceEqual(["1", "2", "3", "4", "5"]));
-            Check("现在的状态：没登录、没填更新地址、没在联机", about.List.Rows[1].Status == L.T("about.net.login.none")
-                && about.List.Rows[3].Status == L.T("about.net.update.no_feed") && about.List.Rows[4].Status == L.T("about.net.play.idle"),
+            Check("现在的状态：没登录、每天自动检查更新、没在联机", about.List.Rows[1].Status == L.T("about.net.login.none")
+                && about.List.Rows[3].Status == L.T("about.net.update.auto") && about.List.Rows[4].Status == L.T("about.net.play.idle"),
                 string.Join(" | ", about.List.Rows.Select(r => r.Status)));
             Check("宽窗口：状态在右边一栏", Dispatcher.UIThread.Invoke(() => page.Tier == WidthTier.Wide) && !about.List.IsCompact);
             Check("存在本机的写明凭据怎么加密", about.StoredText.Contains(NetworkList.CredentialMethod, StringComparison.Ordinal));
             await ShotAsync("about-1440");
             await VerifyDownloadAsync(about);
 
-            // Status follows the settings: an update address makes it "only when you click".
-            var feed = AppSettingsFeed;
-            AppSettingsFeed = "https://example.invalid/jay/latest.json";
+            // Status follows the settings: with the daily check off it is "only when you click".
+            AppSettingsAutoUpdate = false;
             about.Refresh();
-            Check("填了更新地址：第 4 项写“只在你点检查更新时”", about.List.Rows[3].Status == L.T("about.net.update.manual"));
-            AppSettingsFeed = feed;
+            Check("关掉每天检查：第 4 项写“只在你点检查更新时”", about.List.Rows[3].Status == L.T("about.net.update.manual"));
+            AppSettingsAutoUpdate = true;
 
             // "Change ›" goes to the setting.
             about.List.ChangeCommand.Execute(about.List.Rows[3]);
-            var revealed = await WaitAsync(() => Dispatcher.UIThread.Invoke(() => window.RevealedField?.Name == "UpdateFeedBox" && window.RevealedField.IsEffectivelyVisible), 3);
-            Check("“改 ›”跳到 设置 › 下载 › 更新地址", revealed && main.CurrentPage is SettingsViewModel);
+            var revealed = await WaitAsync(() => Dispatcher.UIThread.Invoke(() => window.RevealedField?.Name == "AutoUpdateBox" && window.RevealedField.IsEffectivelyVisible), 3);
+            Check("“改 ›”跳到 设置 › 关于 › 每天自动检查", revealed && main.CurrentPage is SettingsViewModel);
 
             // Settings › Privacy shows the same list.
             settings.SelectGroup("privacy");
@@ -95,6 +98,19 @@ internal sealed partial class SelfTest
             await Task.Delay(400);
             Check("换英文：清单跟着换", about.List.Rows[0].Title == "Downloads you start", about.List.Rows[0].Title);
             await ShotAsync("about-600-en");
+            // Row 4 (the update check) has the longest text: at 600 wide in English and Japanese it wraps and nothing spills sideways.
+            foreach (var lang in new[] { "en", "ja" })
+            {
+                L.SetLanguage(lang);
+                await Task.Delay(400);
+                Dispatcher.UIThread.Invoke(() => page.Scroll.Offset = new Avalonia.Vector(0, 420));
+                await Task.Delay(300);
+                Check($"紧凑 {lang}：第 4 项（检查更新）换行后不超出页面宽度", Dispatcher.UIThread.Invoke(() => page.Scroll.Extent.Width <= page.Scroll.Viewport.Width + 1),
+                    Dispatcher.UIThread.Invoke(() => $"{page.Scroll.Extent.Width:0} / {page.Scroll.Viewport.Width:0}"));
+                await ShotAsync($"about-600-{lang}-update");
+            }
+            Dispatcher.UIThread.Invoke(() => page.Scroll.Offset = default);
+            L.SetLanguage("en");
             window.Width = 1440;
             window.Height = 900;
             await Task.Delay(600);
@@ -111,6 +127,7 @@ internal sealed partial class SelfTest
         }
         finally
         {
+            AppSettingsAutoUpdate = autoUpdateAtStart;
             NetworkPolicy.Requested -= Seen;
             L.SetLanguage("zh-Hans");
             settings.ChildMode = false;
@@ -160,9 +177,10 @@ internal sealed partial class SelfTest
         about.VerifyText = null;
     }
 
-    private string? AppSettingsFeed
+    /// <summary>Through the settings page, so its checkbox and the saved settings stay the same.</summary>
+    private bool AppSettingsAutoUpdate
     {
-        get => Page<HomeViewModel>().Service.Settings.UpdateFeedUrl;
-        set => Page<HomeViewModel>().Service.Settings.UpdateFeedUrl = value;
+        get => Page<SettingsViewModel>().AutoUpdate;
+        set => Dispatcher.UIThread.Invoke(() => Page<SettingsViewModel>().AutoUpdate = value);
     }
 }

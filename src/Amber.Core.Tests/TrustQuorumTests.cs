@@ -56,7 +56,7 @@ public sealed class TrustQuorumTests
         Assert.Equal(Owner.Id, parsed.SignerKey);
         Assert.Equal(Info().Nodes, parsed.Info.Nodes);
 
-        // An outsider's extra signature doesn't help, and the trustees' keys are still empty in Jay itself.
+        // An outsider's extra signature doesn't help, and A and C aren't Jay's own trust keys.
         Assert.False(NetworkString.Parse(NetworkString.Cosign(one, Outsider), [TwoOfThree]).Reviewed);
         Assert.False(NetworkString.Parse(two).Reviewed);
     }
@@ -136,12 +136,95 @@ public sealed class TrustQuorumTests
     }
 
     [Fact]
+    public void OnlyTheSelfCheckCanPinABuiltInDirectory()
+    {
+        // Outside a GUI self-check process the built-in network pins no directory key and refuses to pin one.
+        var before = Environment.GetEnvironmentVariable("AMBER_SELFTEST");
+        try
+        {
+            Environment.SetEnvironmentVariable("AMBER_SELFTEST", null);
+            Assert.Throws<InvalidOperationException>(() => PublicNetworkProfile.PinSelfTestDirectory(new byte[32]));
+            Assert.Empty(PublicNetworkProfile.Jay().DirectoryKeys);
+        }
+        finally { Environment.SetEnvironmentVariable("AMBER_SELFTEST", before); }
+    }
+
+    [Fact]
+    public void APinnedKeyPassesTheStrictBuiltInDirectoryAndNoOtherDoes()
+    {
+        // What the self-check's pin amounts to, without touching the static pin: the built-in roots plus one pinned key.
+        var jay = PublicNetworkProfile.Jay();
+        using var pinned = X25519KeyPair.Generate();
+        using var other = X25519KeyPair.Generate();
+        var trust = new DirectoryTrust { Network = jay.NetworkName, Pinned = [pinned.PublicKey], Roots = jay.DirectoryRoots, RootsNeed = jay.DirectoryRootsNeed };
+        Assert.True(trust.Accepts("127.0.0.1", pinned.PublicKey, []));
+        Assert.False(trust.Accepts("127.0.0.1", other.PublicKey, []));
+    }
+
+    [Fact]
     public void BuiltInNetworkUsesTheJayTrustees()
     {
         var jay = PublicNetworkProfile.Jay();
         Assert.Equal(JayTrust.Need, jay.DirectoryRootsNeed);
-        Assert.Equal(JayTrust.Keys.Length, jay.DirectoryRoots.Count);
+        Assert.Equal(JayTrust.Keys.Count, jay.DirectoryRoots.Count);
         Assert.Equal(2, JayTrust.Need);
+    }
+
+    [Fact]
+    public void BuiltInTrustKeysAreTwoOfThree()
+    {
+        // The built-in trust keys: three distinct keys, any two of which are enough. Only signer ids are checked here
+        // (the signatures themselves are verified before the quorum counts them; see the tests above).
+        var quorum = JayTrust.Quorum;
+        Assert.Equal(3, quorum.Keys.Count);
+        Assert.Equal(2, quorum.Need);
+        var ids = quorum.Keys;
+        // Any pair passes, in either order, and with an outsider or a repeat alongside.
+        for (var i = 0; i < ids.Count; i++)
+            for (var j = 0; j < ids.Count; j++)
+                if (i != j)
+                {
+                    Assert.True(quorum.IsMet([ids[i], ids[j]]));
+                    Assert.True(quorum.IsMet([Outsider.Id, ids[i], ids[i], ids[j]]));
+                }
+        Assert.True(quorum.IsMet(ids));
+        // One key alone, even listed twice or with outsiders, is never enough.
+        foreach (var id in ids)
+        {
+            Assert.False(quorum.IsMet([id]));
+            Assert.False(quorum.IsMet([id, id]));
+            Assert.False(quorum.IsMet([id, Outsider.Id, Owner.Id]));
+        }
+        // Unknown keys count for nothing.
+        Assert.False(quorum.IsMet([Outsider.Id, Owner.Id]));
+        Assert.Equal(0, quorum.Count([Outsider.Id, Owner.Id, A.Id]));
+    }
+
+    [Fact]
+    public void BuiltInNetworkDirectoryNeedsATrusteeCertificate()
+    {
+        // With trust keys built in, the built-in network's directory is no longer trusted on first use: it needs a
+        // certificate both trustees signed. Without one, or with signatures from anyone else, it is refused, even
+        // when this address was remembered under trust on first use before the upgrade.
+        var jay = PublicNetworkProfile.Jay();
+        using var identity = X25519KeyPair.Generate();
+        var dir = Directory.CreateTempSubdirectory("jay-dirtrust-");
+        try
+        {
+            var memory = new DirectoryKeyMemory(Path.Combine(dir.FullName, DirectoryKeyMemory.FileName));
+            memory.Remember(jay.NetworkName, "10.235.0.1", identity.PublicKey);
+            var trust = new DirectoryTrust { Network = jay.NetworkName, Roots = jay.DirectoryRoots, RootsNeed = jay.DirectoryRootsNeed, Memory = memory };
+
+            // Control: without roots the same memory still accepts the remembered key, so the refusals below come from strict mode.
+            Assert.True(new DirectoryTrust { Network = jay.NetworkName, Memory = memory }.Accepts("10.235.0.1", identity.PublicKey, []));
+            Assert.True(trust.IsStrict);
+            Assert.False(trust.Accepts("10.235.0.1", identity.PublicKey, []));
+            Assert.False(trust.Accepts("10.235.0.2", identity.PublicKey, []));
+            var one = DirectoryCertificate.Issue(A, identity.PublicKey, jay.NetworkName, DateTimeOffset.UtcNow.AddDays(30));
+            Assert.False(trust.Accepts("10.235.0.1", identity.PublicKey, one));
+            Assert.False(trust.Accepts("10.235.0.1", identity.PublicKey, DirectoryCertificate.Cosign(one, B)));
+        }
+        finally { dir.Delete(true); }
     }
 
     [Fact]
@@ -216,9 +299,12 @@ public sealed class TrustQuorumTests
         // Case, spaces and the look-alikes O/I/L don't matter.
         Assert.Equal(seed, PaperKey.FromLines(lines[0].ToLowerInvariant().Replace(" ", ""), lines[1].Replace('0', 'O').Replace('1', 'I')));
 
-        var typo = lines[1].ToCharArray();
+        // The typo check uses a fixed key: each line's check is 2 characters (10 bits), so a typo in a random key slips
+        // through about once in 1024 runs; with a fixed key the result is the same every run.
+        var vector = PaperKey.ToLines(Enumerable.Range(0, 32).Select(i => (byte)i).ToArray());
+        var typo = vector[1].ToCharArray();
         typo[0] = typo[0] == 'A' ? 'B' : 'A';
-        var e = Assert.Throws<InvalidDataException>(() => PaperKey.FromLines(lines[0], new string(typo)));
+        var e = Assert.Throws<InvalidDataException>(() => PaperKey.FromLines(vector[0], new string(typo)));
         Assert.Contains("2", e.Message);
         Assert.Throws<InvalidDataException>(() => PaperKey.FromLines(lines[0][..^3], lines[1]));
     }

@@ -12,8 +12,16 @@
           <SolidColorBrush x:Key="CardBorder" Color="#DDD5CA" />
           <SolidColorBrush x:Key="PrimaryText" Color="#1F1B17" />
           <SolidColorBrush x:Key="SecondaryText" Color="#5C544B" />
-          <SolidColorBrush x:Key="AccentBrush" Color="#D98A1E" />
-          <SolidColorBrush x:Key="AccentText" Color="#1C1408" />
+          <SolidColorBrush x:Key="AccentBrush" Color="#397A9B" />
+          <SolidColorBrush x:Key="AccentText" Color="#FFFFFF" />
+          <SolidColorBrush x:Key="AccentTint" Color="#DCECF3" />
+          <SolidColorBrush x:Key="PlayBrush" Color="#D98A1E" />
+          <SolidColorBrush x:Key="PlayText" Color="#1C1408" />
+          <SolidColorBrush x:Key="SidebarBackground" Color="#ECE7E0" />
+          <SolidColorBrush x:Key="TopbarBackground" Color="#FAF8F5" />
+          <SolidColorBrush x:Key="NavActiveBackground" Color="#FFFFFF" />
+          <SolidColorBrush x:Key="SuccessBrush" Color="#2E8B57" />
+          <SolidColorBrush x:Key="SuccessTint" Color="#DDF3E6" />
           <SolidColorBrush x:Key="WarningBackground" Color="#FFF1E8" />
           <SolidColorBrush x:Key="WarningBorder" Color="#B54708" />
         </ResourceDictionary>
@@ -23,8 +31,16 @@
           <SolidColorBrush x:Key="CardBorder" Color="#3D3731" />
           <SolidColorBrush x:Key="PrimaryText" Color="#EDE6DC" />
           <SolidColorBrush x:Key="SecondaryText" Color="#B0A89E" />
-          <SolidColorBrush x:Key="AccentBrush" Color="#E89B32" />
-          <SolidColorBrush x:Key="AccentText" Color="#1C1408" />
+          <SolidColorBrush x:Key="AccentBrush" Color="#79B1CC" />
+          <SolidColorBrush x:Key="AccentText" Color="#101820" />
+          <SolidColorBrush x:Key="AccentTint" Color="#203B49" />
+          <SolidColorBrush x:Key="PlayBrush" Color="#E89B32" />
+          <SolidColorBrush x:Key="PlayText" Color="#1C1408" />
+          <SolidColorBrush x:Key="SidebarBackground" Color="#171513" />
+          <SolidColorBrush x:Key="TopbarBackground" Color="#211E1B" />
+          <SolidColorBrush x:Key="NavActiveBackground" Color="#302C28" />
+          <SolidColorBrush x:Key="SuccessBrush" Color="#57C785" />
+          <SolidColorBrush x:Key="SuccessTint" Color="#173D29" />
           <SolidColorBrush x:Key="WarningBackground" Color="#39251C" />
           <SolidColorBrush x:Key="WarningBorder" Color="#EC8956" />
         </ResourceDictionary>
@@ -42,19 +58,69 @@
       <Setter Property="Background" Value="{DynamicResource CardBackground}" />
       <Setter Property="BorderBrush" Value="{DynamicResource CardBorder}" />
       <Setter Property="BorderThickness" Value="1" />
-      <Setter Property="CornerRadius" Value="14" />
+      <Setter Property="CornerRadius" Value="12" />
       <Setter Property="Padding" Value="16" />
+    </Style>
+    <Style Selector="Border.hero-card">
+      <Setter Property="Background" Value="{DynamicResource CardBackground}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="12" />
+      <Setter Property="Padding" Value="22" />
+    </Style>
+    <Style Selector="Border.mobile-sidebar">
+      <Setter Property="Background" Value="{DynamicResource SidebarBackground}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource CardBorder}" />
+    </Style>
+    <Style Selector="Border.mobile-topbar, Border.mobile-bottom">
+      <Setter Property="Background" Value="{DynamicResource TopbarBackground}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource CardBorder}" />
+    </Style>
+    <Style Selector="TextBlock.hint">
+      <Setter Property="Foreground" Value="{DynamicResource SecondaryText}" />
+    </Style>
+    <Style Selector="Button.mobile-nav">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+      <Setter Property="MinHeight" Value="44" />
+      <Setter Property="Padding" Value="12,8" />
+      <Setter Property="CornerRadius" Value="8" />
+    </Style>
+    <Style Selector="Button.mobile-nav.active">
+      <Setter Property="Background" Value="{DynamicResource NavActiveBackground}" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="Button.bottom-nav">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="MinHeight" Value="52" />
+      <Setter Property="Padding" Value="4,3" />
+      <Setter Property="CornerRadius" Value="8" />
+    </Style>
+    <Style Selector="Button.bottom-nav.active">
+      <Setter Property="Background" Value="{DynamicResource AccentTint}" />
+      <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+      <Setter Property="FontWeight" Value="SemiBold" />
     </Style>
     <Style Selector="Button.primary">
       <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
       <Setter Property="Foreground" Value="{DynamicResource AccentText}" />
       <Setter Property="FontWeight" Value="SemiBold" />
-      <Setter Property="CornerRadius" Value="10" />
+      <Setter Property="CornerRadius" Value="8" />
       <Setter Property="MinHeight" Value="48" />
     </Style>
     <Style Selector="Button.secondary">
-      <Setter Property="CornerRadius" Value="10" />
+      <Setter Property="Background" Value="{DynamicResource CardBackground}" />
+      <Setter Property="Foreground" Value="{DynamicResource PrimaryText}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource CardBorder}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="8" />
       <Setter Property="MinHeight" Value="48" />
+    </Style>
+    <Style Selector="Button.play">
+      <Setter Property="Background" Value="{DynamicResource PlayBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource PlayText}" />
+      <Setter Property="Padding" Value="20,12" />
+      <Setter Property="MinWidth" Value="180" />
     </Style>
   </Application.Styles>
 </Application>

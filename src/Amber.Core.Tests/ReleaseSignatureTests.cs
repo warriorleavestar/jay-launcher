@@ -8,7 +8,7 @@ using Amber.Server;
 
 namespace Amber.Core.Tests;
 
-/// <summary>Privacy plan items 2 and 3: releases need 2 of 3 trustees with both algorithms; list changes are signed by the old list.</summary>
+/// <summary>Privacy plan items 2 and 3: releases need ReleaseNeed of the trustees' release keys with both algorithms; list changes are signed by the old list.</summary>
 public sealed class ReleaseSignatureTests : IDisposable
 {
     private static readonly byte[][] Seeds = [.. Enumerable.Range(0, 5).Select(_ => RandomNumberGenerator.GetBytes(32))];
@@ -138,10 +138,33 @@ public sealed class ReleaseSignatureTests : IDisposable
     }
 
     [Fact]
-    public void NoTrusteeKeysAreBuiltInYet()
+    public void BuiltInKeysAreWellFormed()
     {
-        // The three trustees add their release public keys (jay-server key-public) before the first release with this check.
-        foreach (var key in JayTrust.ReleaseKeys) Assert.Equal(TrustSigner.PublicKeySize, Convert.FromBase64String(key).Length);
+        // Each list: full hybrid public keys, no key twice (compared by id), enough of them for its quorum, and the two
+        // lists disjoint.
+        string IdHex(string key) => Convert.ToHexString(TrustSigner.IdOfPublicKey(Convert.FromBase64String(key)));
+        foreach (var (keys, need) in new[] { (JayTrust.Keys, JayTrust.Need), (JayTrust.ReleaseKeys, JayTrust.ReleaseNeed) })
+        {
+            foreach (var key in keys) Assert.Equal(TrustSigner.PublicKeySize, Convert.FromBase64String(key).Length);
+            Assert.Equal(keys.Count, keys.Select(IdHex).Distinct().Count());
+            Assert.True(keys.Count == 0 || keys.Count >= need);
+        }
+        Assert.Empty(JayTrust.ReleaseKeys.Select(IdHex).Intersect(JayTrust.Keys.Select(IdHex)));
+
+        // The full key ids printed when the keys were made (their first 8 bytes are the fingerprints written next to them
+        // in JayTrust): a swapped or mistyped key fails here.
+        string[] Ids(IReadOnlyList<string> keys) => [.. keys.Select(k => Convert.ToHexString(TrustSigner.IdOfPublicKey(Convert.FromBase64String(k))))];
+        Assert.Equal(["9D47BBDA24BF2956AF370F64F4DF2B6FE9A1F89DB71E79A0747D9E616D94E6ED", "75CD82DBE5DF8E4D4856BCE20C662B588CC8AE8441208A79C5FB1CE8BBD8E2D9", "90BD4FF62EA838682081D4A3CDB041ADB69E6AFFE80DF5B0C1AAD8814D941AC0"], Ids(JayTrust.Keys));
+        Assert.Equal(["08039FD2126DE71913B6BC5D9B4A622986A9282B935BE6AEE03590D8B667C034", "73FA5202C401F163C04DDC240089EEE763639A92B34F785A02C84561283FD5CE", "510A4C81E0AE2E4EE5DB0F19B689549A8F9686FB97DC5EFA05BB08FC4A1CEB9F"], Ids(JayTrust.ReleaseKeys));
+        Assert.Equal(["9D47 BBDA 24BF 2956", "75CD 82DB E5DF 8E4D", "90BD 4FF6 2EA8 3868"], JayTrust.Keys.Select(k => TrustCommands.Fingerprint(TrustSigner.IdOfPublicKey(Convert.FromBase64String(k)))));
+        Assert.Equal(["0803 9FD2 126D E719", "73FA 5202 C401 F163", "510A 4C81 E0AE 2E4E"], JayTrust.ReleaseKeys.Select(k => TrustCommands.Fingerprint(TrustSigner.IdOfPublicKey(Convert.FromBase64String(k)))));
+
+        // Changing what Quorum hands out doesn't change the built-in list.
+        var quorum = JayTrust.Quorum;
+        quorum.Keys[0][0] ^= 0xFF;
+        Assert.False(JayTrust.IsNetworkKey(quorum.Keys[0]));
+        Assert.True(JayTrust.IsNetworkKey(JayTrust.Quorum.Keys[0]));
+        Assert.Equal(JayTrust.Keys.Count, JayTrust.Quorum.Keys.Count);
     }
 
     [Fact]

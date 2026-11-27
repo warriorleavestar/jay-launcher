@@ -42,7 +42,7 @@ public sealed class GameDirectory(string root)
     /// </summary>
     public static string Contained(string baseDir, string relative)
     {
-        if (string.IsNullOrEmpty(relative) || relative.Contains(':') || relative.StartsWith('/') || relative.StartsWith('\\') || Path.IsPathRooted(relative)
+        if (string.IsNullOrEmpty(relative) || relative.Contains(':') || relative.Contains('\0') || relative.StartsWith('/') || relative.StartsWith('\\') || Path.IsPathRooted(relative)
             || relative.Split('/', '\\').Any(s => s == ".."))
             throw new InvalidDataException(L.F("core.game.directory.unsafepath", relative));
         var root = Path.GetFullPath(baseDir);

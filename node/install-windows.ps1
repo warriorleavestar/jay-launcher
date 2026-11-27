@@ -20,9 +20,9 @@ param(
 $ErrorActionPreference = "Stop"
 # Same pins as src/Amber.Core/Multiplayer/EasyTier.cs.
 $Version = "2.6.4"
-$Tag = "jay-v2.6.4-1"
-$Commit = "89e36e45d7e2"
-$Sha256 = "780be28da60a2c6c0cdb305998cceb57c79b8474f53812ef1212432709182f83"
+$Tag = "jay-v2.6.4-3"
+$Commit = "9407746b1ce1"
+$Sha256 = "cdb113651de1f37244f16d405447806a76cd9012780a4e519ed7eba062306888"
 $Dir = Join-Path $env:ProgramData "AmberNode"
 $Task = "Amber relay node"
 $Rule = "Amber relay node"
@@ -98,7 +98,9 @@ $bytes = New-Object byte[] 18
 [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
 $secret = -join ($bytes | ForEach-Object { $_.ToString("x2") })
 $net = "amber-node-" + $secret.Substring(0, 12)
-$whitelist = if ($Relay -eq "amber") { "amber-*" } else { "*" }
+# Jay names invite rooms, their lobbies and extra paths jay-…, and rooms opened with a room code amber-….
+# The list is one argument: EasyTier splits it at spaces.
+$whitelist = if ($Relay -eq "amber") { "jay-* amber-*" } else { "*" }
 $arguments = "--network-name $net --network-secret $secret --no-tun --listeners tcp://0.0.0.0:$Port udp://0.0.0.0:$Port " +
              "--relay-network-whitelist `"$whitelist`" --hostname amber-node --rpc-portal 127.0.0.1:15888"
 

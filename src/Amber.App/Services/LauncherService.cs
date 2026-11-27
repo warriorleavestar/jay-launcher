@@ -128,6 +128,20 @@ public sealed class LauncherService : IDisposable
         Accounts = new AccountService(_http, store, AppSettings.DataDir, () => Settings.MicrosoftClientId);
         JayAccounts = new Amber.Core.Identity.JayAccountStore(AppSettings.DataDir);
         JayAccounts.Load();
+        // Jay accounts saved before addresses covered both account keys got new addresses: move the bindings along.
+        // The old addresses stay in the Jay account file, so this runs on every start until the bindings are saved.
+        var moved = JayAccounts.Readdressed;
+        if (store.Accounts.Any(a => a.JayAddress is { } old && moved.ContainsKey(old)))
+        {
+            foreach (var account in store.Accounts)
+                if (account.JayAddress is { } old && moved.TryGetValue(old, out var renamed)) account.JayAddress = renamed;
+            try { store.Save(); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                // Bound correctly in memory for this run; the next start tries to save again.
+                System.Diagnostics.Trace.WriteLine("Jay: saving moved Jay account bindings failed: " + e.Message);
+            }
+        }
         MigrateBakeRuntime(settings);
         if (MigratesPlayerName(store.Accounts.Count, settings.PlayerName, settings.IsFresh,
                 Environment.GetEnvironmentVariable("AMBER_SELFTEST"), Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE")))
@@ -164,6 +178,9 @@ public sealed class LauncherService : IDisposable
         && (!freshSettings || (selfTest is { Length: > 0 } && scope != "firstrun"));
 
     /// <summary>所有长任务（活动中心“进行中”）。</summary>
+    internal event Action? ShowUpdateTask;
+    internal void RevealUpdateTask() => ShowUpdateTask?.Invoke();
+
     public Amber.Core.Activity.TaskCenter Tasks { get; } = new();
 
     /// <summary>所有要你处理的请求（请求条、房间卡、小窗共用，一处处理处处撤掉）。</summary>
@@ -193,7 +210,9 @@ public sealed class LauncherService : IDisposable
             Hashes = new HashCache(Path.Combine(Settings.GameDirectory, ".amber-hashes")),
         };
         var installer = new VanillaInstaller(downloader, directory);
-        var java = new JavaManager(downloader, directory) { AutoDownload = Settings.AutoJavaDownload };
+        // Java belongs to Jay, not to one library folder. Share it when the player switches game directories;
+        // JavaManager still scans the game folder as a migration fallback for runtimes from older builds.
+        var java = new JavaManager(downloader, directory, AppSettings.DataDir) { AutoDownload = Settings.AutoJavaDownload };
         var loaders = new LoaderContext(downloader, directory, installer, java.ForMajorAsync);
         Modrinth = new ModrinthProvider(_http);
         NetworkPolicy.Register(Settings.CurseForgeApiRoot, NetworkCategory.ContentApi);
@@ -223,7 +242,7 @@ public sealed class LauncherService : IDisposable
     }
 
     private string? CurseForgeKey() =>
-        string.IsNullOrWhiteSpace(Settings.CurseForgeApiKey) ? Environment.GetEnvironmentVariable("AMBER_CF_KEY") : Settings.CurseForgeApiKey;
+        CurseForgeBuiltInKey.Resolve(Settings.CurseForgeApiKey, Environment.GetEnvironmentVariable("AMBER_CF_KEY"));
 
     /// <summary>有 Key 或自定义接口地址时才用 CurseForge 查更新。</summary>
     public CurseForgeProvider? CurseForgeIfConfigured =>
@@ -280,6 +299,18 @@ public sealed class LauncherService : IDisposable
     public void SetPinned(string id, bool pinned)
     {
         EnsureMeta(id).Pinned = pinned;
+        SaveQuietly();
+        LibraryChanged?.Invoke();
+    }
+
+    /// <summary>Remember the provider artwork of an installed modpack. Invalid and non-HTTPS URLs are ignored.</summary>
+    public void SetInstanceCover(string id, string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url) || !Uri.TryCreate(url, UriKind.Absolute, out var uri)
+            || uri.Scheme != Uri.UriSchemeHttps) return;
+        var meta = EnsureMeta(id);
+        if (meta.CoverUrl == uri.AbsoluteUri) return;
+        meta.CoverUrl = uri.AbsoluteUri;
         SaveQuietly();
         LibraryChanged?.Invoke();
     }
@@ -405,6 +436,14 @@ public sealed class LauncherService : IDisposable
         var own = InstanceSettings.Load(ctx.Directory, id);
         own.Isolate ??= OtherLauncherSettings.Isolation(ctx.Directory, id);
         return own.Over(Settings.ToGlobalInstanceSettings());
+    }
+
+    internal void PreserveLegacyAndroidWorlds(GameContext context, CancellationToken ct, bool planOnly = false)
+    {
+        var played = (Settings.RecentInstances ?? []).Concat(
+            (Settings.Instances ?? []).Where(pair => pair.Value.LastPlayed.HasValue).Select(pair => pair.Key));
+        LegacyAndroidWorlds.Preserve(context.Directory, AppSettings.DataDir, played,
+            id => !UsesSharedDir(context, id), ct, planOnly);
     }
 
     public string WorkDirFor(string id) => WorkDirFor(Context, id);

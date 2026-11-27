@@ -40,7 +40,8 @@ public abstract class PageViewModel : ObservableObject
     public abstract string Icon { get; }
 
     private Geometry? _iconGeometry;
-    public Geometry IconGeometry => _iconGeometry ??= Geometry.Parse(Icon);
+    /// <summary>The icon with its full 24×24 box kept (see Themes/Icons.axaml), so a stretched icon stays centred.</summary>
+    public Geometry IconGeometry => _iconGeometry ??= Geometry.Parse("M0 0 M24 24 " + Icon);
 
     private bool _activated;
     private int _badge;
@@ -693,6 +694,11 @@ public sealed partial class SettingsViewModel : PageViewModel
     [ObservableProperty] public partial string CurseForgeKey { get; set; }
     [ObservableProperty] public partial string CurseForgeRoot { get; set; }
     [ObservableProperty] public partial string UpdateFeed { get; set; }
+    /// <summary>Check for a signed newer Jay once a day (only a notice; never a download).</summary>
+    [ObservableProperty] public partial bool AutoUpdate { get; set; }
+
+    /// <summary>The daily check exists only on desktops; phones and tablets hide the switch.</summary>
+    public bool AutoUpdateSupported => AutoUpdateCheck.IsSupported;
 
     public string SettingsPath => AppSettings.FilePath;
     public string SettingsPathLabel => L.F("settings.file_path", SettingsPath);
@@ -757,6 +763,7 @@ public sealed partial class SettingsViewModel : PageViewModel
         CurseForgeKey = s.CurseForgeApiKey ?? "";
         CurseForgeRoot = s.CurseForgeApiRoot ?? "";
         UpdateFeed = s.UpdateFeedUrl ?? "";
+        AutoUpdate = s.AutoUpdateCheck;
         SelectedThemeIndex = Math.Max(0, Array.IndexOf(ThemeKeys, s.Theme));
         SelectedMotionIndex = Math.Max(0, Array.IndexOf(Amber.Core.Layout.MotionPreference.Modes, Amber.Core.Layout.MotionPreference.Normalize(s.ReduceMotionMode)));
         SelectedSidebarIndex = (int)Amber.Core.Layout.ShellRules.ParseMode(s.SidebarMode ?? (s.SidebarCollapsed ? "collapsed" : null));
@@ -1075,6 +1082,11 @@ public sealed partial class SettingsViewModel : PageViewModel
     partial void OnCurseForgeKeyChanged(string value) => Persist();
     partial void OnCurseForgeRootChanged(string value) => Persist();
     partial void OnUpdateFeedChanged(string value) => Persist();
+    partial void OnAutoUpdateChanged(bool value)
+    {
+        Persist();
+        if (!_loading) Amber.App.Services.UpdateNotifier.RaiseSwitched(value);
+    }
 
     /// <summary>主题选了立即生效。</summary>
     partial void OnSelectedThemeIndexChanged(int value)
@@ -1169,6 +1181,7 @@ public sealed partial class SettingsViewModel : PageViewModel
         s.CurseForgeApiKey = Blank(CurseForgeKey);
         s.CurseForgeApiRoot = Blank(CurseForgeRoot);
         s.UpdateFeedUrl = Blank(UpdateFeed);
+        s.AutoUpdateCheck = AutoUpdate;
         try
         {
             s.Save();
@@ -1252,6 +1265,20 @@ public sealed class RunLog : ObservableObject
 
     internal void Changed() => Revision++;
 
+    /// <summary>
+    /// How many lines have left <see cref="All"/> from the front (rolled out once the log is full, or cleared), so
+    /// <c>Dropped + i</c> is a sequence number for <c>All[i]</c> that stays the same while older lines roll out.
+    /// </summary>
+    internal long Dropped { get; private set; }
+
+    /// <summary>Removes the oldest <paramref name="count"/> lines and counts them in <see cref="Dropped"/>.</summary>
+    internal void DropOldest(int count)
+    {
+        if (count <= 0) return;
+        All.RemoveRange(0, count);
+        Dropped += count;
+    }
+
     /// <summary>The saved copy of this run's log (instance logs/jay), so earlier runs survive a restart.</summary>
     internal RunLogStore? Store { get; set; }
 
@@ -1263,7 +1290,7 @@ public sealed class RunLog : ObservableObject
 
 public sealed partial class LogViewModel : PageViewModel
 {
-    private const int MaxLines = 5000;
+    internal const int MaxLines = 5000;
 
     /// <summary>最多留几次启动的日志（多开测联机时够用）。</summary>
     internal const int KeptRuns = 6;
@@ -1413,7 +1440,7 @@ public sealed partial class LogViewModel : PageViewModel
         }
         if (clear is not null)
         {
-            clear.All.Clear();
+            clear.DropOldest(clear.All.Count);
             clear.Changed();
             if (clear == Shown)
             {
@@ -1430,7 +1457,7 @@ public sealed partial class LogViewModel : PageViewModel
         foreach (var group in pending.Where(p => (p.Target ?? shown) != shown).GroupBy(p => p.Target!))
         {
             group.Key.All.AddRange(group.Select(p => p.Entry));
-            if (group.Key.All.Count > MaxLines) group.Key.All.RemoveRange(0, group.Key.All.Count - MaxLines);
+            if (group.Key.All.Count > MaxLines) group.Key.DropOldest(group.Key.All.Count - MaxLines);
             group.Key.Changed();
         }
         var batch = pending.Where(p => (p.Target ?? shown) == shown).Select(p => p.Entry).ToList();
@@ -1444,7 +1471,7 @@ public sealed partial class LogViewModel : PageViewModel
         {
             var visibleRemoved = _all.Take(Math.Min(removed, previousCount)).Count(Visible);
             for (var i = 0; i < visibleRemoved; i++) Lines.RemoveAt(0);
-            _all.RemoveRange(0, removed);
+            shown.DropOldest(removed);
         }
         foreach (var entry in batch.Skip(Math.Max(0, removed - previousCount)).Where(Visible)) Lines.Add(entry);
         Recount();

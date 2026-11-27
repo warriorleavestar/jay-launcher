@@ -53,12 +53,92 @@ internal sealed partial class SelfTest
         // No public network added yet: the setup card explains where public rooms come from; with one: the card and its hint.
         Check("公共网络：联机页有公共网络卡片和说明", page is not null && host.IsPublicTab && HasText("multiplayer.public.title")
             && (host.ShowPublicSetup ? HasText("multiplayer.public.setup_body") : HasText("multiplayer.public.hint")));
+        var service = host.TestService;
+        // The volunteer settings need no network or component: checked first, so they run everywhere.
+        {
+            // Volunteer relay settings: the card is there, a home-network address is refused, a public one is saved, then off again
+            // (the self-check must not listen on a public port).
+            Check("Volunteer relay: offered on this network", host.VolunteersAllowed);
+            Dispatcher.UIThread.Invoke(() => { host.VolunteerEnabled = true; host.VolunteerAddress = "192.168.1.20"; });
+            host.SaveVolunteerCommand.Execute(null);
+            Check("Volunteer relay: home-network address refused", !service.Settings.VolunteerNode, host.Status);
+            Dispatcher.UIThread.Invoke(() => host.VolunteerAddress = "jay.example.org");
+            host.SaveVolunteerCommand.Execute(null);
+            Check("Volunteer relay: public address saved", service.Settings.VolunteerNode && service.Settings.VolunteerAddress == "jay.example.org", host.Status);
+            await ShotAsync("Volunteer relay settings");
+            Dispatcher.UIThread.Invoke(() => host.VolunteerEnabled = false);
+            host.SaveVolunteerCommand.Execute(null);
+            Check("Volunteer relay: turned off again", !service.Settings.VolunteerNode, host.Status);
+            // Detect and Test port need the public network; before connecting they say so and do nothing else.
+            // The buttons sit in the collapsed "Volunteer relay" expander on the settings tab: open both first.
+            Dispatcher.UIThread.Invoke(() => host.ShowTabCommand.Execute("settings"));
+            var volunteerExpander = await FindAsync<Expander>(e => Equals(e.Header, L.T("multiplayer.volunteer.title")));
+            if (volunteerExpander is not null) Dispatcher.UIThread.Invoke(() => volunteerExpander.IsExpanded = true);
+            await Task.Delay(300);
+            Check("Volunteer relay: Detect and Test port buttons shown",
+                await FindAsync<Button>(b => ReferenceEquals(b.Command, host.DetectVolunteerAddressCommand)) is not null
+                && await FindAsync<Button>(b => ReferenceEquals(b.Command, host.TestVolunteerPortCommand)) is not null);
+            // Signing with the Jay account is its own switch, off by default (installs that volunteered before stay unsigned);
+            // what it tells the network's operator shows once it is turned on.
+            var signText = L.T("multiplayer.volunteer.sign_privacy");
+            Check("Volunteer relay: signing is off by default", !new Amber.App.Services.AppSettings().VolunteerSigned);
+            var signedBefore = service.Settings.VolunteerSigned;
+            Dispatcher.UIThread.Invoke(() => host.VolunteerSigned = false);
+            Check("Volunteer relay: signing switch shown", await FindAsync<CheckBox>(c => c.Content is TextBlock { Text: var t } && t == L.T("multiplayer.volunteer.sign")) is not null);
+            Check("Volunteer relay: signing privacy text hidden while off", await FindAsync<TextBlock>(t => t.Text == signText && t.IsEffectivelyVisible) is null);
+            Dispatcher.UIThread.Invoke(() => { host.VolunteerEnabled = true; host.VolunteerSigned = true; });
+            await Task.Delay(300);
+            Check("Volunteer relay: signing privacy text shown once turned on", await FindAsync<TextBlock>(t => t.Text == signText && t.IsEffectivelyVisible) is not null);
+            if (await FindAsync<TextBlock>(t => t.Text == signText) is { } signHint)
+            {
+                Dispatcher.UIThread.Invoke(() => signHint.BringIntoView());
+                await Task.Delay(400);
+            }
+            await ShotAsync("Volunteer relay signing");
+            host.SaveVolunteerCommand.Execute(null);
+            Check("Volunteer relay: signing saved", service.Settings.VolunteerSigned, host.Status);
+            // The longest volunteer message wraps in a narrow window, in the languages where it is longest.
+            var width = Dispatcher.UIThread.Invoke(() => window.Width);
+            foreach (var language in new[] { "en", "ja" })
+            {
+                Dispatcher.UIThread.Invoke(() =>
+                {
+                    Amber.Core.Localization.L.SetLanguage(language);
+                    window.Width = 640;
+                    host.VolunteerStatus = L.T("core.mp.public.volunteer_owner");
+                });
+                await Task.Delay(400);
+                var status = await FindAsync<TextBlock>(t => t.Text == host.VolunteerStatus && t.IsEffectivelyVisible);
+                if (status is not null) Dispatcher.UIThread.Invoke(() => status.BringIntoView());
+                Check($"Volunteer relay: long message wraps in a narrow window ({language})",
+                    status is not null && Dispatcher.UIThread.Invoke(() => status.Bounds.Height > status.FontSize * 2 && status.Bounds.Right <= (status.Parent as Control)!.Bounds.Width + 1));
+                await ShotAsync($"Volunteer relay narrow {language}");
+            }
+            Dispatcher.UIThread.Invoke(() =>
+            {
+                Amber.Core.Localization.L.SetLanguage("zh-Hans");
+                window.Width = width;
+                host.VolunteerStatus = "";
+            });
+            Dispatcher.UIThread.Invoke(() => { host.VolunteerSigned = false; host.VolunteerEnabled = false; });
+            host.SaveVolunteerCommand.Execute(null);
+            Check("Volunteer relay: signing turned off again", !service.Settings.VolunteerSigned && !service.Settings.VolunteerNode, host.Status);
+            // Leave the setting as it was found.
+            Dispatcher.UIThread.Invoke(() => host.VolunteerSigned = signedBefore);
+            host.SaveVolunteerCommand.Execute(null);
+            await host.DetectVolunteerAddressCommand.ExecuteAsync(null);
+            Check("Volunteer relay: Detect asks to connect first", host.Status == L.T("multiplayer.volunteer.connect_first") && host.VolunteerAddress == "jay.example.org", host.Status);
+            await host.TestVolunteerPortCommand.ExecuteAsync(null);
+            Check("Volunteer relay: Test port asks to connect first", host.Status == L.T("multiplayer.volunteer.connect_first") && !host.IsCheckingVolunteer, host.Status);
+            // Back to the public rooms tab for the checks below.
+            Dispatcher.UIThread.Invoke(() => host.ShowTabCommand.Execute("public"));
+            await Task.Delay(300);
+        }
         if (!host.IsComponentReady)
         {
             Log("SKIP 公共网络：联机组件没有下载");
             return;
         }
-        var service = host.TestService;
         // 收到的文件放进报告目录（私聊在进房间时就建好了，要在开房间之前设）。
         host.DownloadsDir = Path.Combine(reportDir, "downloads-host");
 
@@ -66,12 +146,15 @@ internal sealed partial class SelfTest
         var nodePort = EasyTierArgs.FreeTcpPort();
         var node = $"tcp://127.0.0.1:{nodePort}";
         // Like jay-server directory: the network's secret for the channel's psk (a mismatch drops every request), and a
-        // directory key kept across runs, since Jay remembers the first key it sees for this network (trust on first use).
+        // directory key kept across runs. The built-in network only trusts directories with a certificate from the Jay
+        // trustees, which this local one can't have, so the self-check pins its key for this run.
         await using var directory = new RoomDirectoryServer(System.Net.IPAddress.Loopback, PublicNetworkProfile.DirectoryPort)
         {
             Identity = DirectoryChannel.LoadOrCreateIdentity(Path.Combine(Amber.App.Services.AppSettings.DataDir, "selftest-directory.key")),
             NetworkSecret = PublicNetworkProfile.JaySecret,
+            UncountedLoopback = true,
         };
+        using var pin = PublicNetworkProfile.PinSelfTestDirectory(directory.Identity.PublicKey);
         using var seed = PublicNetworkSession.Start(service.EasyTier, new PublicNetworkOptions(PublicNetworkProfile.Jay() with { Nodes = [] },
             EasyTierArgs.FreeTcpPort(), EasyTierArgs.FreeTcpPort(), Directory: true, Listeners: [node]), Path.Combine(reportDir, "public-seed"));
 
@@ -79,32 +162,6 @@ internal sealed partial class SelfTest
         host.SavePublicNodesCommand.Execute(null);
         Check("公共网络：保存种子节点", host.HasPublicNodes, host.Status);
 
-        // Volunteer relay settings: the card is there, a home-network address is refused, a public one is saved, then off again
-        // (the self-check must not listen on a public port).
-        Check("Volunteer relay: offered on this network", host.VolunteersAllowed);
-        Dispatcher.UIThread.Invoke(() => { host.VolunteerEnabled = true; host.VolunteerAddress = "192.168.1.20"; });
-        host.SaveVolunteerCommand.Execute(null);
-        Check("Volunteer relay: home-network address refused", !service.Settings.VolunteerNode, host.Status);
-        Dispatcher.UIThread.Invoke(() => host.VolunteerAddress = "jay.example.org");
-        host.SaveVolunteerCommand.Execute(null);
-        Check("Volunteer relay: public address saved", service.Settings.VolunteerNode && service.Settings.VolunteerAddress == "jay.example.org", host.Status);
-        await ShotAsync("Volunteer relay settings");
-        Dispatcher.UIThread.Invoke(() => host.VolunteerEnabled = false);
-        host.SaveVolunteerCommand.Execute(null);
-        Check("Volunteer relay: turned off again", !service.Settings.VolunteerNode, host.Status);
-        // Detect and Test port need the public network; before connecting they say so and do nothing else.
-        // The buttons sit in the collapsed "Volunteer relay" expander on the settings tab: open both first.
-        Dispatcher.UIThread.Invoke(() => host.ShowTabCommand.Execute("settings"));
-        var volunteerExpander = await FindAsync<Expander>(e => Equals(e.Header, L.T("multiplayer.volunteer.title")));
-        if (volunteerExpander is not null) Dispatcher.UIThread.Invoke(() => volunteerExpander.IsExpanded = true);
-        await Task.Delay(300);
-        Check("Volunteer relay: Detect and Test port buttons shown",
-            await FindAsync<Button>(b => ReferenceEquals(b.Command, host.DetectVolunteerAddressCommand)) is not null
-            && await FindAsync<Button>(b => ReferenceEquals(b.Command, host.TestVolunteerPortCommand)) is not null);
-        await host.DetectVolunteerAddressCommand.ExecuteAsync(null);
-        Check("Volunteer relay: Detect asks to connect first", host.Status == L.T("multiplayer.volunteer.connect_first") && host.VolunteerAddress == "jay.example.org", host.Status);
-        await host.TestVolunteerPortCommand.ExecuteAsync(null);
-        Check("Volunteer relay: Test port asks to connect first", host.Status == L.T("multiplayer.volunteer.connect_first") && !host.IsCheckingVolunteer, host.Status);
         service.Settings.PublicNetworkNoticeAccepted = false;
         Dispatcher.UIThread.Invoke(() => host.ShowTabCommand.Execute("public"));
         await Task.Delay(300);
@@ -276,6 +333,8 @@ internal sealed partial class SelfTest
             Check("网络配置：取不到配置文件就不连", !host.IsPublicConnected && !host.IsPublicConnecting && host.Status.Contains("自检公共网络"), host.Status);
         }
 
+        await ReviewLostUpdateAsync(host, registry, someone);
+
         // 别人签的：先提醒（显示签名钥匙），确认后才加。
         var other = new NetworkInfo("selftest-other", "没审核的网络", "jay-selftest-other", "other-secret", ["tcp://other-node.example.invalid:11010"]);
         Dispatcher.UIThread.Invoke(() =>
@@ -313,6 +372,83 @@ internal sealed partial class SelfTest
         });
         Check("换公共网络：删掉后回到 Jay 公共网络", host.SelectedNetworkChoice is { IsBuiltIn: true } && service.Settings.PublicNetworkId is null
             && (service.Settings.PublicNetworks ?? []).Count == 0, host.Status);
+    }
+
+    /// <summary>
+    /// A reviewed network (signed by its owner, co-signed by the registry) gets a newer version that only its owner signed:
+    /// Jay asks first. Cancel keeps the reviewed version, its mark and the saved list; confirming applies the update, the
+    /// mark shows it is no longer reviewed, and the new version is saved. Only the network list changes: nothing is dialled.
+    /// </summary>
+    private async Task ReviewLostUpdateAsync(MultiplayerViewModel host, TrustSigner registry, TrustSigner owner)
+    {
+        var service = host.TestService;
+        const string id = "selftest-update";
+        var v1 = new NetworkInfo(id, "会更新的网络", "jay-selftest-update", "update-secret", ["tcp://update-node.example.invalid:11010"]);
+        var reviewedText = NetworkString.Create(v1, owner, registry);
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            host.NetworkInput = reviewedText;
+            host.AddNetworkCommand.Execute(null);
+        });
+        Check("网络更新：作者签、注册表加签的网络直接加上（审核过）", !host.NetworkConfirmOpen && host.SelectedNetworkChoice is { Id: id, Reviewed: true }
+            && service.Networks.Find(id) is { Reviewed: true, Info.Seq: 1 }, host.Status);
+
+        // The confirm card and its buttons sit in the collapsed "Public networks" expander on the settings tab.
+        Dispatcher.UIThread.Invoke(() => host.ShowTabCommand.Execute("settings"));
+        if (await FindAsync<Expander>(e => Equals(e.Header, L.T("multiplayer.network.title"))) is { } expander)
+        {
+            Dispatcher.UIThread.Invoke(() => expander.IsExpanded = true);
+            await Task.Delay(300);
+            Dispatcher.UIThread.Invoke(() => expander.BringIntoView());
+        }
+
+        // Version 2, signed by the owner only: the review is gone.
+        var savedBefore = (service.Settings.PublicNetworks ?? []).ToList();
+        var ownerOnlyText = NetworkString.Create(v1 with { Seq = 2, Nodes = [.. v1.Nodes, "tcp://update-node-2.example.invalid:11010"] }, owner);
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            host.NetworkInput = ownerOnlyText;
+            host.AddNetworkCommand.Execute(null);
+        });
+        Check("网络更新：新版本没审核了，先提醒、还没换", host.NetworkConfirmOpen && host.NetworkConfirmText.Contains("会更新的网络")
+            && service.Networks.Find(id) is { Reviewed: true, Info.Seq: 1 }, host.Status);
+        await ShotAsync("网络更新失去审核提醒");
+
+        // Cancel: the reviewed version stays, the mark is unchanged and nothing is saved.
+        var cancelled = Press(await FindAsync<Button>(b => ReferenceEquals(b.Command, host.CancelAddNetworkCommand)));
+        if (!cancelled) Dispatcher.UIThread.Invoke(() => host.CancelAddNetworkCommand.Execute(null));
+        Check("网络更新：取消后还是原来审核过的版本，标记不变、没存", cancelled && !host.NetworkConfirmOpen
+            && service.Networks.Find(id) is { Reviewed: true, Info.Seq: 1 }
+            && host.SelectedNetworkChoice is { Id: id, Reviewed: true, NodeCount: 1 } && !host.SelectedNetworkChoice.Label.Contains('⚠')
+            && (service.Settings.PublicNetworks ?? []).SequenceEqual(savedBefore)
+            && (Amber.App.Services.AppSettings.Load().PublicNetworks ?? []).SequenceEqual(savedBefore), host.Status);
+
+        // Confirm: the update is applied, marked as not reviewed, and saved.
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            host.NetworkInput = ownerOnlyText;
+            host.AddNetworkCommand.Execute(null);
+        });
+        var confirmed = host.NetworkConfirmOpen && Press(await FindAsync<Button>(b => ReferenceEquals(b.Command, host.ConfirmAddNetworkCommand)));
+        if (!confirmed) Dispatcher.UIThread.Invoke(() => host.ConfirmAddNetworkCommand.Execute(null));
+        var saved = Amber.App.Services.AppSettings.Load().PublicNetworks ?? [];
+        Check("网络更新：确认后换成新版本，标成未审核", confirmed && !host.NetworkConfirmOpen
+            && service.Networks.Find(id) is { Reviewed: false, Info.Seq: 2 }
+            && host.SelectedNetworkChoice is { Id: id, Reviewed: false, NodeCount: 2 } && host.SelectedNetworkChoice.Label.Contains('⚠')
+            && host.SelectedNetworkChoice.Detail.Contains(L.F("multiplayer.network.unreviewed", host.SelectedNetworkChoice.Signer ?? "")), host.Status);
+        Check("网络更新：确认后的新版本存进设置", (service.Settings.PublicNetworks ?? []).Contains(ownerOnlyText)
+            && saved.Contains(ownerOnlyText) && !saved.Contains(reviewedText)
+            && new PublicNetworkList(saved, service.TrustedNetworkKeys).Find(id) is { Reviewed: false, Info.Seq: 2 }, $"{saved.Count} / {host.Status}");
+        await ShotAsync("网络更新确认后未审核");
+
+        // Leave the list as it was for the steps below.
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            host.RemoveNetworkCommand.Execute(null);
+            host.ShowTabCommand.Execute("public");
+        });
+        await Task.Delay(300);
+        Check("网络更新：删掉后回到 Jay 公共网络", host.SelectedNetworkChoice is { IsBuiltIn: true } && service.Networks.Find(id) is null, host.Status);
     }
 
     /// <summary>

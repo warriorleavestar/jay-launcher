@@ -12,8 +12,8 @@ Jay is a launcher for Minecraft: Java Edition. The first time it opens, a two-st
 ## How to
 - Step 1: change the language at the top right; type a name to add an offline account, or click **Sign in with Microsoft**.
 - Step 2: the latest release is selected; click **Install and play**. You can also click "Choose another version".
-- You can click **Skip** at any time and install later from the [Library](jay:library) with **New**.
+- You can click **Skip** at any time and install later from the [Library](jay:library) with **New instance**.
 
 ## If something goes wrong
 - The name is not accepted: use 3 to 16 English letters, digits or underscores.
-- Installing is slow: choose another download route in [Settings › Download route](jay:settings#Source).
+- Installing is slow: choose another download source in [Settings › Download source](jay:settings#Source).

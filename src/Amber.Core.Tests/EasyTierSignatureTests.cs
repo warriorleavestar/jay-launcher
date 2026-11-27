@@ -6,7 +6,7 @@ using Amber.Core.Multiplayer.Public;
 
 namespace Amber.Core.Tests;
 
-/// <summary>EasyTier builds from Jay's fork are signed by 2 of the 3 Jay trustees, like Jay releases, but can't be swapped with them.</summary>
+/// <summary>EasyTier builds from Jay's fork are signed by the Jay trustees' release keys, like Jay releases, but can't be swapped with them.</summary>
 public sealed class EasyTierSignatureTests
 {
     private static readonly TrustSigner[] T = [.. Enumerable.Range(0, 4).Select(_ => TrustSigner.FromSeed(Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))))];
@@ -55,6 +55,20 @@ public sealed class EasyTierSignatureTests
     }
 
     [Fact]
+    public void EmbeddedBuildKeepsItsOriginalTwoOfTwoTrustList()
+    {
+        using var stream = typeof(EasyTierRelease).Assembly.GetManifestResourceStream(
+            "easytier-signed/" + ReleaseSignature.SignatureFileName)!;
+        using var reader = new StreamReader(stream, Encoding.UTF8);
+        var statement = ReleaseManifest.Parse(reader.ReadToEnd())!.Statement;
+
+        Assert.Equal(2, EasyTierRelease.EmbeddedTrust.Keys.Count);
+        Assert.Equal(2, EasyTierRelease.EmbeddedTrust.Need);
+        Assert.Equal(statement.TrustHash, EasyTierRelease.EmbeddedTrust.Hash);
+        Assert.NotEqual(TrustList.Jay.Hash, EasyTierRelease.EmbeddedTrust.Hash);
+    }
+
+    [Fact]
     public void TwoOfThreeTrusteesPass()
     {
         Assert.Equal(ReleaseVerdict.Valid, Check(Signed(Statement(EmbeddedSums()), T[0], T[2])));
@@ -90,11 +104,14 @@ public sealed class EasyTierSignatureTests
     public void OnlyThisExactBuildPasses()
     {
         var sums = EmbeddedSums();
-        Assert.Equal(ReleaseVerdict.WrongTag, Check(Signed(Statement(sums, tag: "jay-v2.6.4-2"), T[0], T[1])));
-        Assert.Equal(ReleaseVerdict.WrongTag, Check(Signed(Statement(sums, seq: 2), T[0], T[1])));
+        Assert.Equal(ReleaseVerdict.WrongTag, Check(Signed(Statement(sums, tag: EasyTierRelease.ReleaseTag + "0"), T[0], T[1])));
+        Assert.Equal(ReleaseVerdict.WrongTag, Check(Signed(Statement(sums, seq: EasyTierRelease.Seq + 1), T[0], T[1])));
         Assert.Equal(ReleaseVerdict.WrongTag, Check(Signed(Statement(sums, commit: new string('c', 40)), T[0], T[1])));
         // The signature is for a different SHA256SUMS.txt.
-        var other = Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(sums).Replace("15a21e30", "25a21e30", StringComparison.Ordinal));
+        var hash = EasyTierRelease.All[0].Sha256;
+        var tampered = (hash[0] == '0' ? "1" : "0") + hash[1..];
+        var other = Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(sums).Replace(hash, tampered, StringComparison.Ordinal));
+        Assert.NotEqual(sums, other);
         Assert.Equal(ReleaseVerdict.SumsMismatch, Check(Signed(Statement(other), T[0], T[1])));
     }
 

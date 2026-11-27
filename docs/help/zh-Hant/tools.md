@@ -16,4 +16,4 @@ related: settings
 - 試著下載一個檔案：在連線頁開啟「連線有問題？」，展開**下載檔案**。
 
 ## 出問題了
-- 檢查更新沒有反應：需要先在 [設定 › 下載與服務](jay:settings#UpdateFeed) 填更新地址；不填 Jay 不會為此連網。
+- 在[設定 › 關於](jay:settings#AutoUpdate)可開啟自動檢查，或手動檢查。Jay 開啟時每 15 分鐘查一次。Windows、macOS 和 Android 收到已簽署的更新後，點「下載並更新」，再依系統提示確認。原有的遊戲目錄和存檔會保留。也可設定[自訂更新來源](jay:settings#UpdateFeed)。

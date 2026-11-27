@@ -235,7 +235,7 @@ public sealed class RoomSigner
 
     internal static byte[] WithdrawBytes(string id, long seq) => Encoding.UTF8.GetBytes($"jay-withdraw-v1\n{id}\n{seq.ToString(System.Globalization.CultureInfo.InvariantCulture)}");
 
-    private byte[] SignBytes(byte[] message)
+    internal byte[] SignBytes(byte[] message)
     {
         var signer = new Org.BouncyCastle.Crypto.Signers.Ed25519Signer();
         signer.Init(true, _key);

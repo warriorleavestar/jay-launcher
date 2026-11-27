@@ -47,10 +47,10 @@ public sealed partial class FirstRunViewModel : ObservableObject
     public Action<string>? Launch { get; set; }
 
     /// <summary>Asks the window for a modpack file (null when the player cancels).</summary>
-    public Func<Task<string?>>? PickPack { get; set; }
+    internal Func<Task<PackSelection?>>? PickPack { get; set; }
 
     /// <summary>Imports a modpack file and starts it.</summary>
-    public Func<string, Task>? ImportPackAndPlay { get; set; }
+    internal Func<PackSelection, Task>? ImportPackAndPlay { get; set; }
 
     /// <summary>Puts focus on the name box ("Continue" with nothing to continue with).</summary>
     public event Action? FocusName;
@@ -313,9 +313,9 @@ public sealed partial class FirstRunViewModel : ObservableObject
                 OpenNewInstance?.Invoke();
                 return;
             case FirstRunChoice.Pack:
-                if (PickPack is null || await PickPack() is not { } path) return;
+                if (ImportPackAndPlay is null || PickPack is null || await PickPack() is not { } pack) return;
                 Close();
-                if (ImportPackAndPlay is not null) await ImportPackAndPlay(path);
+                await ImportPackAndPlay(pack);
                 return;
         }
         if (Onboarding.LatestRelease is not { } latest) return;

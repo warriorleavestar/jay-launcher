@@ -8,8 +8,30 @@ using Avalonia.Styling;
 
 namespace Amber.App;
 
+public sealed record MobileLaunchProgress(double? Fraction, string Detail, long? Bytes = null, IReadOnlyList<string>? ActiveFiles = null);
+
 public sealed class App : Application
 {
+    private LauncherService? _mobileService;
+
+    /// <summary>Set by the native mobile host so the full launcher uses the same game directory as the embedded runtime.</summary>
+    public static string? MobileGameDirectory { get; set; }
+
+    /// <summary>Starts the selected desktop-style instance in the native mobile game activity.</summary>
+    public static Func<Amber.Core.Launch.LaunchOptions, IProgress<MobileLaunchProgress>?, CancellationToken, Task>? MobileLaunchRequested { get; set; }
+
+    /// <summary>
+    /// Lets the native single-view host recover the software keyboard when its window reports a
+    /// hardware keyboard. Avalonia still owns text composition; the host only shows or hides the IME.
+    /// </summary>
+    public static Action<bool>? MobileTextInputFocusChanged { get; set; }
+
+    /// <summary>
+    /// Gives Android's system Back gesture to the single-view launcher before the native Activity
+    /// is backgrounded. The view returns false at its root so Android can keep its normal behavior.
+    /// </summary>
+    public static Func<bool>? MobileBackRequested { get; set; }
+
     public override void Initialize()
     {
         StartupTrace.Mark("platform");
@@ -74,7 +96,39 @@ public sealed class App : Application
                 });
                 // 清掉以前留下的无痕模式临时配置（Amber 没等到游戏退出就关了、崩溃了之类）。
                 _ = Task.Run(() => Amber.Core.Launch.GameLauncher.SweepNoTrace());
+                // Check for signed releases while the launcher is open.
+                UpdateNotifier.Start(service);
             }
+        }
+        else if (ApplicationLifetime is ISingleViewApplicationLifetime singleView)
+        {
+            var settings = AppSettings.Load();
+            if (settings.IsFresh)
+            {
+                settings.Language = "zh-Hans";
+                settings.FirstRunDone = true;
+            }
+            if (!string.IsNullOrWhiteSpace(MobileGameDirectory))
+                settings.GameDirectory = MobileGameDirectory;
+            settings.Save();
+            Amber.Core.Localization.L.SetLanguage(settings.Language);
+            settings.ReduceMotionMode = Amber.Core.Layout.MotionPreference.Migrate(settings.ReduceMotionMode, settings.ReduceMotion);
+            DensityService.Apply(settings.Density);
+            _mobileService = new LauncherService(settings);
+            if (OperatingSystem.IsAndroid())
+            {
+                // Freeze the pre-upgrade roster before the library can create any new instances.
+                try { _mobileService.PreserveLegacyAndroidWorlds(_mobileService.Context, CancellationToken.None, planOnly: true); }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+                {
+                    // First launch retries and reports any persistent storage error in the task center.
+                }
+            }
+            UpdateNotifier.Start(_mobileService);
+            singleView.MainView = new MobileLauncherView
+            {
+                DataContext = new MainViewModel(_mobileService)
+            };
         }
         base.OnFrameworkInitializationCompleted();
     }

@@ -8,6 +8,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using Amber.Core.Launch;
+using Amber.Core.Multiplayer.Public;
 using Amber.Core.Net;
 
 namespace Amber.Core.Multiplayer;
@@ -24,13 +25,13 @@ public static class EasyTierRelease
     /// <summary>The upstream EasyTier version the hardened build is based on.</summary>
     public const string Version = "2.6.4";
     /// <summary>Release tag of Jay's hardened build.</summary>
-    public const string ReleaseTag = "jay-v2.6.4-1";
+    public const string ReleaseTag = "jay-v2.6.4-3";
     /// <summary>First 12 hex digits of the hardened build's commit; part of every package name.</summary>
-    public const string Commit = "89e36e45d7e2";
+    public const string Commit = "9407746b1ce1";
     /// <summary>The hardened build's full commit, as the trustees' signature names it.</summary>
-    public const string FullCommit = "89e36e45d7e2c45eb7144a10afd272c084ad6d82";
+    public const string FullCommit = "9407746b1ce1dc4d977441c47dfdcb303363a62a";
     /// <summary>Signature seq of this build: one more for every hardened release.</summary>
-    public const long Seq = 1;
+    public const long Seq = 3;
     /// <summary>Component name in the trustees' signature (<see cref="ReleaseStatement.Components"/>).</summary>
     public const string Component = "easytier";
     /// <summary>Install folder name: a new hardened build never reuses files from an older or an upstream install.</summary>
@@ -38,7 +39,6 @@ public static class EasyTierRelease
     public const string SourceUrl = "https://github.com/Yumao-Feather/jay-easytier";
     private const string BaseUrl = SourceUrl + "/releases/download/" + ReleaseTag + "/";
     public const string License = "LGPL-3.0";
-    public const string ProjectUrl = "https://github.com/EasyTier/EasyTier";
 
     public sealed record Asset(string Platform, string Name, string Sha256, long Size, string CoreName, string CliName)
     {
@@ -57,13 +57,15 @@ public static class EasyTierRelease
 
     internal static Asset For(string os, Architecture arch) => (os, arch) switch
     {
-        ("windows", Architecture.X64) => A("windows-x86_64", "780be28da60a2c6c0cdb305998cceb57c79b8474f53812ef1212432709182f83", 12_049_938, true),
-        ("windows", Architecture.Arm64) => A("windows-arm64", "8d90565d4d27e30eca5c6749b5e8562ba8227be5dd4c6e2d8a2afd661a37380f", 11_047_777, true),
-        ("windows", Architecture.X86) => A("windows-i686", "3a03cf82399216112703eda40f0157b6f08f7f2e50b8df41a81ef55255bb7d18", 11_600_648, true),
-        ("macos", Architecture.X64) => A("macos-x86_64", "fd04ff0dd835a5ee573bb1abbdbc110821e04cb28030168ad12836312df89907", 12_547_528),
-        ("macos", Architecture.Arm64) => A("macos-aarch64", "70a2ddc3259a3f8791a4695557091fef7492f4a928780b7eb0289e27e9748501", 11_136_375),
-        ("linux", Architecture.X64) => A("linux-x86_64", "4d2c3e962259fd9c72cee59f23cb707c91aa2702af26413438683446a989fa9a", 13_992_778),
-        ("linux", Architecture.Arm64) => A("linux-aarch64", "15a21e30b1a50cb8cb72e9be297a2dd88856639c5efe7f0fd860154b0034fc49", 12_525_937),
+        // The APK carries the same verified, statically linked Linux executables for its ABI.
+        ("android", Architecture.Arm64 or Architecture.X64) => For("linux", arch),
+        ("windows", Architecture.X64) => A("windows-x86_64", "cdb113651de1f37244f16d405447806a76cd9012780a4e519ed7eba062306888", 11_621_165, true),
+        ("windows", Architecture.Arm64) => A("windows-arm64", "a5ce68a4a6f0e458e10ff3dbabadedacc6ddcf621bd5c4338efe613cabfceefa", 10_643_891, true),
+        ("windows", Architecture.X86) => A("windows-i686", "32e8d1c6b06ba53614c5581295d317f1bcf1d044398631ab486c616e2e9cfe7b", 11_223_763, true),
+        ("macos", Architecture.X64) => A("macos-x86_64", "74e059185ba6cc32e3464cad66eab0ff8c86c5cbbb12b51ffaa41dda38a3724b", 12_104_239),
+        ("macos", Architecture.Arm64) => A("macos-aarch64", "57063f611183f30804f3104498859166845eaa7b9e93a8a769cedb9eca66bc79", 10_738_210),
+        ("linux", Architecture.X64) => A("linux-x86_64", "6ad63ed07f270f2942387d1257ef0db45a31b2e525c73f8aa981c7c94fbcb300", 13_500_986),
+        ("linux", Architecture.Arm64) => A("linux-aarch64", "6c1a99ea81f1e1dd8fc8f13aa6f0df8d9e22925202dda18b4e40ad62ac49f7ac", 12_087_737),
         _ => throw new PlatformNotSupportedException(L.F("core.mp.component.unsupportedplatform", os, arch)),
     };
 
@@ -76,14 +78,20 @@ public static class EasyTierRelease
 
     /// <summary>
     /// The trustees' signature over this build (embedded SHA256SUMS.txt and SHA256SUMS.txt.sigs from the release):
-    /// valid when 2 of the 3 Jay trustees signed exactly this tag, seq and commit as an EasyTier build, and every
+    /// valid when enough Jay release keys (JayTrust.ReleaseNeed) signed exactly this tag, seq and commit as an EasyTier build, and every
     /// pinned package hash above is in the signed list. Checked once per run.
     /// </summary>
     public static ReleaseCheck Signature => SignatureCheck.Value;
 
+    // This immutable EasyTier build was signed before the third release key was added. Keep verifying it against the
+    // exact 2-of-2 list named by its signed statement; Jay releases and future component builds still use TrustList.Jay
+    // (currently 2-of-3). The two keys remain in JayTrust.ReleaseKeys, so this grants no trust to a retired or unknown key.
+    internal static TrustList EmbeddedTrust => new(
+        [.. JayTrust.ReleaseKeys.Take(2).Select(Convert.FromBase64String)], 2);
+
     private static readonly Lazy<ReleaseCheck> SignatureCheck = new(() =>
         CheckSignature(Embedded(ReleaseSignature.SignatureFileName) is { } m ? Encoding.UTF8.GetString(m) : null,
-            Embedded(ReleaseSignature.SumsFileName) ?? [], TrustList.Jay, All));
+            Embedded(ReleaseSignature.SumsFileName) ?? [], EmbeddedTrust, All));
 
     /// <summary>
     /// Whether a package may be installed: always when this Jay has no release keys built in yet
@@ -141,7 +149,9 @@ public static class EasyTierRelease
     private static Asset ForCurrentPlatform()
     {
         var os = OperatingSystem.IsWindows() ? "windows" : OperatingSystem.IsMacOS() ? "macos" : OperatingSystem.IsLinux() ? "linux" : "unknown";
-        return For(os, RuntimeInformation.OSArchitecture);
+        return OperatingSystem.IsAndroid()
+            ? For("android", RuntimeInformation.ProcessArchitecture)
+            : For(os, RuntimeInformation.OSArchitecture);
     }
 
     private static Asset A(string platform, string sha256, long size, bool exe = false)
@@ -205,23 +215,65 @@ public sealed class EasyTierInstaller
 
     private EasyTierRelease.Asset Asset => _asset ?? EasyTierRelease.Current;
     public string InstallDir => Path.Combine(_dataDir, "easytier", EasyTierRelease.InstallTag, Asset.Platform);
-    public string CorePath => Path.Combine(InstallDir, Asset.CoreName);
-    public string CliPath => Path.Combine(InstallDir, Asset.CliName);
+    public const string AndroidNativeDirectoryKey = "Jay.AndroidNativeDirectory";
+    private string Executable(string name) => OperatingSystem.IsAndroid()
+        ? Path.Combine((string?)AppContext.GetData(AndroidNativeDirectoryKey)
+            ?? throw new InvalidOperationException(L.T("mobile.game.component_missing")), $"lib{name}.so")
+        : Path.Combine(InstallDir, name);
+
+    public string CorePath => Executable(Asset.CoreName);
+    public string CliPath => Executable(Asset.CliName);
     /// <summary>发布包里随程序附带的安装包（和 Jay 主程序同目录下的 easytier 文件夹）。</summary>
     public string BundledPath => Path.Combine(_bundledDir, Asset.Name);
     /// <summary>手动导入时需要的文件名。</summary>
     public string ExpectedFileName => Asset.Name;
     /// <summary>The WinDivert driver (full-LAN broadcast relay on Windows) must be there too; if it's missing, extract again.</summary>
-    public bool IsInstalled => File.Exists(CorePath) && File.Exists(CliPath)
+    public bool IsInstalled => (!OperatingSystem.IsAndroid() || EasyTierRelease.SignatureAllowsInstall)
+        && File.Exists(CorePath) && File.Exists(CliPath)
         && (!OperatingSystem.IsWindows() || Asset.DriverName is not { } driver || File.Exists(Path.Combine(InstallDir, driver)));
 
     /// <summary>下载来源，按尝试顺序排列。</summary>
     public IReadOnlyList<(string Name, string Url)> Sources => _sources ?? EasyTierRelease.Sources(Asset, SourceChain.PrefersMirrors());
 
+    /// <summary>
+    /// One lock per install folder, shared by every installer in this process: installers are created per use, and two
+    /// first-time installs would otherwise share the same download file and temporary extract folder.
+    /// </summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, SemaphoreSlim> InstallLocks = new(PathComparer);
+
+    /// <summary>Paths that differ only in case are the same folder on Windows and (by default) macOS.</summary>
+    internal static StringComparer PathComparer => OperatingSystem.IsLinux() ? StringComparer.Ordinal : StringComparer.OrdinalIgnoreCase;
+
+    internal SemaphoreSlim InstallLock => InstallLocks.GetOrAdd(Path.TrimEndingDirectorySeparator(Path.GetFullPath(InstallDir)), _ => new SemaphoreSlim(1, 1));
+
+    /// <summary>
+    /// Tests only: awaited first thing once <see cref="EnsureAsync"/> or <see cref="ImportAsync"/> holds the install lock,
+    /// so a test can hold a real install there and watch the next caller wait. Always null in the app.
+    /// </summary>
+    internal Func<CancellationToken, Task>? WhileLockedForTests { get; set; }
+
+    private Task WhileLocked(CancellationToken ct) => WhileLockedForTests?.Invoke(ct) ?? Task.CompletedTask;
+
     /// <summary>progress 的 CurrentFile 是正在尝试的来源名。</summary>
     public async Task EnsureAsync(IProgress<DownloadProgress>? progress = null, CancellationToken ct = default)
     {
-        if (IsInstalled) return;
+        // Checked only under the lock: mid-install the files can already be in place before they are made runnable.
+        var gate = InstallLock;
+        await gate.WaitAsync(ct);
+        try
+        {
+            await WhileLocked(ct);
+            // Another install may have finished while this one waited.
+            if (IsInstalled) return;
+            if (OperatingSystem.IsAndroid())
+                throw new InvalidDataException(L.T("mobile.game.component_missing"));
+            await InstallAsync(progress, ct);
+        }
+        finally { gate.Release(); }
+    }
+
+    private async Task InstallAsync(IProgress<DownloadProgress>? progress, CancellationToken ct)
+    {
         var failures = new List<EasyTierSourceFailure>();
 
         if (File.Exists(BundledPath))
@@ -270,7 +322,22 @@ public sealed class EasyTierInstaller
     }
 
     /// <summary>用户手动选的安装包：同样要求大小和 SHA-256 与固定值一致。</summary>
-    public Task ImportAsync(string zipPath, CancellationToken ct = default) => InstallFromZipAsync(zipPath, ct);
+    public async Task ImportAsync(string zipPath, CancellationToken ct = default)
+    {
+        if (OperatingSystem.IsAndroid())
+        {
+            await EnsureAsync(ct: ct);
+            return;
+        }
+        var gate = InstallLock;
+        await gate.WaitAsync(ct);
+        try
+        {
+            await WhileLocked(ct);
+            await InstallFromZipAsync(zipPath, ct);
+        }
+        finally { gate.Release(); }
+    }
 
     private async Task InstallFromZipAsync(string zip, CancellationToken ct)
     {
@@ -283,7 +350,7 @@ public sealed class EasyTierInstaller
             if (hash != Asset.Sha256)
                 throw new InvalidDataException(L.F("core.mp.component.hashfailed", hash));
         }
-        // Once release keys are built in, the pinned build must also carry 2 of 3 trustee release signatures.
+        // Once release keys are built in, the pinned build must also carry enough trustee release signatures (JayTrust.ReleaseNeed).
         if (!EasyTierRelease.SignatureAllowsInstall)
             throw new InvalidDataException(L.F("core.mp.component.unsigned", UpdateCheck.Explain(EasyTierRelease.Signature.Verdict)));
         Extract(zip, InstallDir, Asset);
@@ -358,6 +425,19 @@ public sealed record EasyTierOptions(
 {
     /// <summary>封装模式下加入方：本机这个端口经 EasyTier 转发到房主的封装端口（游戏和聊天都走它）。</summary>
     public int? LocalTunnelPort { get; init; }
+    /// <summary>
+    /// Member of a room that splits: one local port per leg, in leg order, each forwarded over that leg's own EasyTier
+    /// network to the host's leg port (<see cref="Transport.SplitSettings.LegPort"/>). Null when the paths aren't set up;
+    /// game and chat then use one path (or fail in a Strict room).
+    /// </summary>
+    public IReadOnlyList<int>? LocalSplitPorts { get; init; }
+    /// <summary>
+    /// Host of a room that splits: the leg ports, bound by <see cref="EasyTierSession.Start"/> before EasyTier starts.
+    /// Null when they couldn't be bound; the leg ports are then not opened to the room and no extra instance starts.
+    /// </summary>
+    public Transport.SplitLegReservation? HostSplitLegs { get; init; }
+    /// <summary>The session found a leg port taken (Auto): the transport then doesn't bind the leg ports either.</summary>
+    public bool HostSplitLegsBusy { get; init; }
     /// <summary>邀请房间的加入方：远程控制连房主用的本机端口（不建网卡时经 EasyTier 或封装通道转到房主的 47662）。</summary>
     public int? LocalRemotePort { get; init; }
     /// <summary>允许房间里的人经自己“仅游戏”转发（只开 SOCKS5，不用建网卡）。</summary>
@@ -374,6 +454,15 @@ public sealed record EasyTierOptions(
     public IReadOnlyList<string> DirectUnderlayAddresses { get; init; } = [];
     /// <summary>当前有 IPv6 直连承载；现有全局出口门禁只支持明确识别的 IPv4 承载。</summary>
     public bool DirectUnderlayUsesIpv6 { get; init; }
+
+    /// <summary>
+    /// The IPv4 addresses a relay named by a domain resolved to when the exit was chosen (see <see cref="ExitRelays"/>);
+    /// keyed by host name. The exit's route plan protects these as relay underlay.
+    /// </summary>
+    public IReadOnlyDictionary<string, IReadOnlyList<string>> RelayAddresses { get; init; } = new Dictionary<string, IReadOnlyList<string>>();
+
+    /// <summary>The peers as configured, before <see cref="ExitRelays"/> pinned domain relays to addresses.</summary>
+    public IReadOnlyList<string>? ConfiguredPeers { get; init; }
 
     /// <summary>
     /// Carry this member's forwarded TCP streams (game, chat, tunnel) over EasyTier's QUIC proxy instead of its
@@ -484,6 +573,9 @@ public static class EasyTierArgs
             // 封装模式：游戏和聊天都由 Amber 先封装，再经这一个转发连到房主的封装端口。
             var tunnel = o.LocalTunnelPort ?? throw new ArgumentException(L.T("core.mp.transport.join_port_required"));
             args.AddRange(["--port-forward", $"tcp://127.0.0.1:{tunnel}/{HostIp}:{Transport.TunnelSettings.Port}"]);
+            // Split rooms: leg 0 runs over this network too, to its own host port. The other legs use the extra instances.
+            if (SplitsOnThisInstance(o) && o.LocalSplitPorts is { Count: > 0 } legs)
+                args.AddRange(["--port-forward", $"tcp://127.0.0.1:{legs[0]}/{HostIp}:{Transport.SplitSettings.LegPort(0)}"]);
         }
         else if (!o.IsHost && !o.Tun)
         {
@@ -524,12 +616,18 @@ public static class EasyTierArgs
                 ports.Add(RoomChat.Port);
                 if (o.Room.FromInvite) ports.Add(RemoteControl.RemoteHub.Port);
             }
+            // Split rooms: leg 0 of each split connection arrives over this network on its own port, opened only when this
+            // machine holds the leg ports (never a port another program is using).
+            if (SplitsOnThisInstance(o) && o.HostSplitLegs is not null) ports.Add(Transport.SplitSettings.LegPort(0));
             if (o.ServesSpeedTest) ports.Add(SpeedTestServer.Port);
         }
         if (o.AllowProxy) ports.Add(o.Room.Tunnel.Wraps ? Transport.TunnelSettings.Port : Transport.TunnelSettings.PlainSocksPort);
         if (ports.Count == 0) ports.Add(1);
         return [.. ports];
     }
+
+    /// <summary>The room splits and this session takes part (wrapped invite room, not full-LAN mode).</summary>
+    internal static bool SplitsOnThisInstance(EasyTierOptions o) => o.Room.FromInvite && o.Room.Tunnel.Wraps && o.Room.Split.Enabled && !o.Tun;
 
     /// <summary>这次会话里本机的虚拟 IP。</summary>
     public static string VirtualIp(EasyTierOptions o) => o.IsHost ? HostIp : Subnet + JoinerHost(o.MachineId);
@@ -580,6 +678,9 @@ public sealed class EasyTierSession : IEasyTierSession
     public bool HasExited => _process.HasExited;
     public event Action<string>? Output;
 
+    /// <summary>The extra instances of a room that splits (null when this session doesn't split).</summary>
+    public SplitPathGroup? SplitPaths { get; private set; }
+
     private EasyTierSession(Process process, string cliPath, EasyTierOptions options, ProcessJob? job)
     {
         _process = process;
@@ -593,13 +694,54 @@ public sealed class EasyTierSession : IEasyTierSession
 
     public static EasyTierSession Start(EasyTierInstaller installer, EasyTierOptions options, string workDir)
     {
-        var (process, job) = Launch(installer.CorePath, EasyTierArgs.Build(options), EasyTierArgs.Environment(options), workDir);
-        var session = new EasyTierSession(process, installer.CliPath, options, job);
-        process.OutputDataReceived += (_, e) => session.OnLine(e.Data);
-        process.ErrorDataReceived += (_, e) => session.OnLine(e.Data);
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
+        options = WithSplitLegs(options, out var legsBusy);
+        EasyTierSession session;
+        try
+        {
+            var (process, job) = Launch(installer.CorePath, EasyTierArgs.Build(options), EasyTierArgs.Environment(options), workDir);
+            session = new EasyTierSession(process, installer.CliPath, options, job);
+            process.OutputDataReceived += (_, e) => session.OnLine(e.Data);
+            process.ErrorDataReceived += (_, e) => session.OnLine(e.Data);
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+        }
+        catch
+        {
+            options.HostSplitLegs?.Dispose();
+            throw;
+        }
+        if (legsBusy) session.OnLine(L.T("core.mp.split.ports_busy"));
+        try
+        {
+            session.SplitPaths = SplitPathGroup.Start(installer, options, workDir, session.PeersAsync, session.OnLine);
+        }
+        catch
+        {
+            session.Dispose();
+            throw;
+        }
         return session;
+    }
+
+    /// <summary>
+    /// A host of a room that splits binds its leg ports first, so EasyTier opens them to the room only when this machine
+    /// holds them. A taken port: Auto goes on without splitting (<paramref name="busy"/>), Strict doesn't start.
+    /// Options carried over from an earlier session never keep that session's ports.
+    /// </summary>
+    internal static EasyTierOptions WithSplitLegs(EasyTierOptions options, out bool busy, IReadOnlyList<int>? ports = null)
+    {
+        busy = false;
+        options = options with { HostSplitLegs = null, HostSplitLegsBusy = false };
+        if (!options.IsHost || !EasyTierArgs.SplitsOnThisInstance(options)) return options;
+        var split = options.Room.Split;
+        var legs = Transport.SplitLegReservation.TryReserve(split.Paths, ports: ports);
+        if (legs is null)
+        {
+            if (Transport.SplitLegReservation.NeedsLegs(split)) throw Transport.SplitLegReservation.Busy(split);
+            busy = true;
+            return options with { HostSplitLegsBusy = true };
+        }
+        return options with { HostSplitLegs = legs };
     }
 
     /// <summary>启动 easytier-core（密钥经环境变量传）；Windows 上放进作业对象。输出要调用方开始读。</summary>
@@ -616,7 +758,7 @@ public sealed class EasyTierSession : IEasyTierSession
             RedirectStandardError = true,
         };
         foreach (var a in args) info.ArgumentList.Add(a);
-        foreach (var (name, value) in environment) info.Environment[name] = value;
+        ApplyEnvironment(info, environment);
         // Mac/Linux：经看门脚本启动，Jay 崩溃或被 kill -9 后一两秒内 easytier-core 跟着结束（不用等下次开房间时清理）。
         EasyTierProcessGuard.Wrap(info);
         var process = Process.Start(info) ?? throw new InvalidOperationException(L.T("core.mp.component.startfailed"));
@@ -638,6 +780,18 @@ public sealed class EasyTierSession : IEasyTierSession
             }
         }
         return (process, job);
+    }
+
+    /// <summary>
+    /// Drops every inherited ET_* variable (easytier-core reads its options from them) and then adds only the given ones,
+    /// matching the elevated hosts, which pass nothing but the room secret.
+    /// </summary>
+    internal static void ApplyEnvironment(ProcessStartInfo info, IReadOnlyDictionary<string, string> environment)
+    {
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        foreach (var name in info.Environment.Keys.Where(k => k.StartsWith("ET_", comparison)).ToList())
+            info.Environment.Remove(name);
+        foreach (var (name, value) in environment) info.Environment[name] = value;
     }
 
     private void OnLine(string? line)
@@ -735,9 +889,13 @@ public sealed class EasyTierSession : IEasyTierSession
 
     public void Dispose()
     {
+        SplitPaths?.Dispose();
+        SplitPaths = null;
+        // Leg ports the transport never took over.
+        Options.HostSplitLegs?.Dispose();
         try
         {
-            if (!_process.HasExited) _process.Kill(true);
+            EasyTierProcessGuard.Stop(_process);
             _process.WaitForExit(3000);
         }
         catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception) { }
@@ -846,7 +1004,7 @@ public sealed class EasyTierLobby : IDisposable
     {
         try
         {
-            if (!_process.HasExited) _process.Kill(true);
+            EasyTierProcessGuard.Stop(_process);
             _process.WaitForExit(3000);
         }
         catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception) { }
