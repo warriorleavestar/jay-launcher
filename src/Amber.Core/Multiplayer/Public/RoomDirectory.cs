@@ -1169,7 +1169,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
 public sealed record DirectoryHit(string Id, string Ip, byte[] HostKey);
 
 /// <summary>
-/// 目录服务的客户端：经公共网络连目录节点（10.235.0.1，网络有备用目录节点时还有 .2 .3 .4，见 <see cref="PublicNetworkProfile.DirectoryIps"/>）。
+/// 目录服务的客户端：经公共网络连目录节点（10.235.0.1，网络有备用目录节点时还有 10.235.255.254 / .253 / .252，见 <see cref="PublicNetworkProfile.DirectoryIps"/>）。
 /// 写（发布、续期、撤下）发给每个在线的目录节点，所以每个目录都有完整的房间表，一台挂了别的照常；
 /// 读（列表）合并所有在线目录的结果，查找按顺序问到有结果为止；捎话、登录交给第一个肯收的。
 /// 备用目录节点之间不用互相信任或同步：房间信息本来就是房主签过名的。
@@ -1193,7 +1193,7 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
     /// <summary>
     /// The directory keys to insist on. Defaults to the network's pinned keys (<see cref="PublicNetworkProfile.DirectoryKeys"/>).
     /// When there are any, every request goes through <see cref="DirectoryChannel"/> and a directory that can't prove it
-    /// holds one of them gets nothing; there is no fallback to the legacy protocol.
+    /// holds one of them gets nothing.
     /// </summary>
     public IReadOnlyList<byte[]> PinnedKeys { get; init; } = network.Profile?.DirectoryKeys ?? [];
 
@@ -1204,8 +1204,8 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
     public int RootsNeed { get; init; } = network.Profile?.DirectoryRootsNeed ?? 1;
 
     /// <summary>
-    /// Where to remember directory keys of networks that pin nothing (trust on first use). Null: such networks use the
-    /// legacy protocol as before.
+    /// Where to remember directory keys of networks that pin nothing (trust on first use). Null: such networks accept any
+    /// directory key for that one connection (encrypted, not authenticated).
     /// </summary>
     public DirectoryKeyMemory? KeyMemory { get; init; }
 
@@ -1327,7 +1327,7 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
 
     /// <summary>
     /// Puts a sealed rendezvous record (<see cref="Rendezvous"/>) on every directory. Always over the authenticated
-    /// channel, never the legacy protocol. True when at least one directory kept it; false when the id is already taken
+    /// channel. True when at least one directory kept it; false when the id is already taken
     /// everywhere that answered.
     /// </summary>
     public async Task<bool> PutRendezvousAsync(byte[] id, byte[] sealedRecord, TimeSpan ttl, CancellationToken ct)
