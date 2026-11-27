@@ -69,6 +69,17 @@ public sealed class ExitTrafficPolicyScriptTests
                         $condition = [Runtime.InteropServices.Marshal]::PtrToStructure([IntPtr]::Add($filter.Conditions, $i * $size), [type]$script:ExitWfpTypes.Condition)
                         if ($condition.Value.Type -eq 4) { $value = [Runtime.InteropServices.Marshal]::ReadInt64($condition.Value.Data.Pointer) }
                         elseif ($condition.Value.Type -eq 3) { $value = $condition.Value.Data.UInt32 }
+                        elseif ($condition.Value.Type -eq 2) { $value = $condition.Value.Data.UInt16 }
+                        elseif ($condition.Value.Type -eq 1) { $value = $condition.Value.Data.UInt8 }
+                        elseif ($condition.Value.Type -eq 11) {
+                            $raw = New-Object byte[] 16
+                            [Runtime.InteropServices.Marshal]::Copy($condition.Value.Data.Pointer, $raw, 0, 16)
+                            $value = (New-Object Net.IPAddress (,$raw)).ToString()
+                        } elseif ($condition.Value.Type -eq 0x101) {
+                            $raw = New-Object byte[] 17
+                            [Runtime.InteropServices.Marshal]::Copy($condition.Value.Data.Pointer, $raw, 0, 17)
+                            $value = (New-Object Net.IPAddress (,[byte[]]$raw[0..15])).ToString() + '/' + $raw[16]
+                        }
                         else { throw 'Unexpected native condition value type' }
                         $conditions += [pscustomobject]@{ Key=$condition.FieldKey.ToString(); Match=$condition.MatchType; Type=$condition.Value.Type; Value=$value }
                     }
@@ -88,6 +99,72 @@ public sealed class ExitTrafficPolicyScriptTests
                 }
                 default { throw ('Unmocked native API ' + $name) }
             }
+        }
+        function Test-InPrefix([string]$address, [string]$prefix) {
+            $parts = $prefix.Split('/')
+            $a = ([Net.IPAddress]::Parse($address)).GetAddressBytes()
+            $p = ([Net.IPAddress]::Parse($parts[0])).GetAddressBytes()
+            $bits = [int]$parts[1]
+            for ($i = 0; $i -lt 16; $i++) {
+                $take = [Math]::Max(0, [Math]::Min(8, $bits - 8 * $i))
+                if ($take -eq 0) { break }
+                $mask = (0xff -shl (8 - $take)) -band 0xff
+                if (($a[$i] -band $mask) -ne ($p[$i] -band $mask)) { return $false }
+            }
+            return $true
+        }
+        # The IPv6 layer with a destination address: like Test-Packet, but the address is text.
+        function Test-Packet6([long]$luid, [string]$address, [uint32]$flags, [int]$index=-1) {
+            if ($index -lt 0) { $index = if ($luid -eq 420042) { 42 } elseif ($luid -eq 700007) { 7 } else { 9 } }
+            foreach ($filter in @($script:Filters | Where-Object { $_.Layer -eq 'a3b3ab6b-3564-488c-9117-f34e82142763' } | Sort-Object Weight -Descending)) {
+                $matched = $true
+                foreach ($condition in $filter.Conditions) {
+                    switch ($condition.Key) {
+                        '4cd62a49-59c3-4969-b7f3-bda5d32890a4' { if ($condition.Value -ne $luid) { $matched = $false } }
+                        'b235ae9a-1d64-49b8-a44c-5ff3d9095045' {
+                            if ($condition.Type -eq 11) { if ($condition.Value -ne $address) { $matched = $false } }
+                            elseif ($condition.Type -eq 0x101) { if (-not (Test-InPrefix $address $condition.Value)) { $matched = $false } }
+                            else { throw 'IPv6 address condition with an IPv4 type' }
+                        }
+                        '632ce23b-5167-435c-86d7-e903684aa80c' { if (($flags -band $condition.Value) -ne $condition.Value) { $matched = $false } }
+                        '667fd755-d695-434a-8af5-d3835a1259bc' { if ($condition.Value -ne $index) { $matched = $false } }
+                        default { throw 'Unexpected packet condition' }
+                    }
+                }
+                if ($matched) { return ($filter.Action -eq 0x1002) }
+            }
+            throw 'Policy has no catch-all rule'
+        }
+        # The ALE connect or receive layer for IPv6: what a program's traffic to or from an address may do there.
+        # No matching filter leaves the decision to the packet layer.
+        function Test-Ale6([string]$layer, [long]$luid, [string]$address, [int]$protocol, [int]$localPort, [int]$remotePort) {
+            foreach ($filter in @($script:Filters | Where-Object { $_.Layer -eq $layer } | Sort-Object Weight -Descending)) {
+                $matched = $true
+                foreach ($condition in $filter.Conditions) {
+                    switch ($condition.Key) {
+                        '4cd62a49-59c3-4969-b7f3-bda5d32890a4' { if ($condition.Value -ne $luid) { $matched = $false } }
+                        'b235ae9a-1d64-49b8-a44c-5ff3d9095045' {
+                            if ($condition.Type -eq 11) { if ($condition.Value -ne $address) { $matched = $false } }
+                            elseif ($condition.Type -eq 0x101) { if (-not (Test-InPrefix $address $condition.Value)) { $matched = $false } }
+                            else { throw 'IPv6 address condition with an IPv4 type' }
+                        }
+                        '3971ef2b-623e-4f9a-8cb1-6e79b806b9a7' { if ($condition.Value -ne $protocol) { $matched = $false } }
+                        '0c1ba1af-5765-453f-af22-a8f791ac775b' { if ($condition.Value -ne $localPort) { $matched = $false } }
+                        'c35a604d-d22b-4e1a-91b4-68f674ee674b' { if ($condition.Value -ne $remotePort) { $matched = $false } }
+                        default { throw 'Unexpected ALE condition' }
+                    }
+                }
+                if ($matched) { return ($filter.Action -eq 0x1002) }
+            }
+            return $true
+        }
+        # A program sending to an IPv6 address: the packet layer and the ALE connect layer must both allow it.
+        # ICMPv6 passes its type as the local port.
+        function Test-Send6([long]$luid, [string]$address, [int]$protocol, [int]$localPort, [int]$remotePort) {
+            return (Test-Packet6 $luid $address 0) -and (Test-Ale6 '4a72393b-319f-44bc-84c3-ba54dcb3b6b4' $luid $address $protocol $localPort $remotePort)
+        }
+        function Test-Receive6([long]$luid, [string]$address, [int]$protocol, [int]$localPort, [int]$remotePort) {
+            return (Test-Ale6 'a3b42c97-9f04-4672-b87e-cee9c483257f' $luid $address $protocol $localPort $remotePort)
         }
         function Test-Packet([string]$layer, [long]$luid, [uint32]$address, [uint32]$flags, [int]$index=-1) {
             if ($index -lt 0) { $index = if ($luid -eq 420042) { 42 } elseif ($luid -eq 700007) { 7 } else { 9 } }
@@ -142,13 +219,14 @@ public sealed class ExitTrafficPolicyScriptTests
         Assert-That ($script:Filters.Count -eq 7) 'unexpected filter count'
         $v4 = '1e5c9fae-8a84-4135-a331-950b54229ecd'
         $v6 = 'a3b3ab6b-3564-488c-9117-f34e82142763'
-        Assert-That (Test-Packet $v4 420042 0x09090909 0) 'TUN DNS was blocked'
-        Assert-That (-not (Test-Packet $v4 700007 0x09090909 0)) 'physical DNS leaked'
+        # 198.51.100.53 (documentation range) as a DNS server: allowed on the TUN, not on the physical adapter.
+        Assert-That (Test-Packet $v4 420042 ([uint32]3325256757) 0) 'TUN DNS was blocked'
+        Assert-That (-not (Test-Packet $v4 700007 ([uint32]3325256757) 0)) 'physical DNS leaked'
         Assert-That (-not (Test-Packet $v4 700007 ([uint32]3221226037) 0)) 'old LAN DNS leaked'
         Assert-That (Test-Packet $v4 700007 ([uint32]3405803786) 0) 'protected underlay was blocked or wrong address byte order'
         Assert-That (-not (Test-Packet $v4 900009 ([uint32]3405803786) 0)) 'underlay escaped through another adapter'
         Assert-That (-not (Test-Packet $v4 700007 ([uint32]3405803787) 0)) 'underlay exception widened beyond one address'
-        Assert-That (-not (Test-Packet $v4 420042 0x09090909 0 7)) 'virtual source identity allowed physical egress'
+        Assert-That (-not (Test-Packet $v4 420042 ([uint32]3325256757) 0 7)) 'virtual source identity allowed physical egress'
         Assert-That (-not (Test-Packet $v6 700007 0 0)) 'physical IPv6 leaked'
         Assert-That (Test-Packet $v4 0 0 1) 'IPv4 loopback blocked'
         Assert-That (Test-Packet $v6 0 0 1) 'IPv6 loopback blocked'
@@ -192,10 +270,115 @@ public sealed class ExitTrafficPolicyScriptTests
         """);
 
     [Fact]
-    public Task NativeIpv6UnderlayIsRejectedInsteadOfSilentlyBlocked() => RunAsync("""
+    public Task Ipv6UnderlayGetsTheSameExactExceptionAndNeighborDiscovery() => RunAsync("""
+        $script:Plan.UnderlayAddresses = @('203.0.113.10', '2001:db8::5', '2001:db8::6')
+        $script:exitRoutes += [pscustomobject]@{ Prefix='2001:db8::5/128'; Index=7; Guid=$script:PhysicalGuid; Hop='fe80::1'; Metric=1; Owned=$true }
+        $script:exitRoutes += [pscustomobject]@{ Prefix='2001:db8::6/128'; Index=7; Guid=$script:PhysicalGuid; Hop='fe80::1'; Metric=1; Owned=$true }
+        Enter-ExitTrafficPolicy $script:Adapters[0] $script:Plan
+        $v4 = '1e5c9fae-8a84-4135-a331-950b54229ecd'
+        # Packet layers: loopback, virtual adapter and block on each, three underlay permits and six link-address permits
+        # (not repeated per address). ALE: ND, listener reports, DHCPv6 and a block for each link address, and the receive
+        # rules for fe80::/10.
+        Assert-That ($script:Filters.Count -eq 32) ('unexpected filter count ' + $script:Filters.Count)
+        Assert-That (Test-Packet6 700007 '2001:db8::5' 0) 'protected IPv6 underlay was blocked'
+        Assert-That (-not (Test-Packet6 900009 '2001:db8::5' 0)) 'IPv6 underlay escaped through another adapter'
+        Assert-That (-not (Test-Packet6 700007 '2001:db8::7' 0)) 'IPv6 exception widened beyond its addresses'
+        Assert-That (-not (Test-Packet6 700007 '2001:db8:ffff::1' 0)) 'physical IPv6 leaked'
+        # Neighbor discovery with the gateway and the solicited-node group, on the physical adapter only.
+        Assert-That (Test-Send6 700007 'fe80::1' 58 135 0) 'neighbor solicitation to the gateway was blocked'
+        Assert-That (Test-Send6 700007 'fe80::1' 58 136 0) 'neighbor advertisement to the gateway was blocked'
+        Assert-That (Test-Send6 700007 'ff02::1:ff00:1' 58 135 0) 'solicited-node multicast was blocked'
+        Assert-That (-not (Test-Packet6 900009 'fe80::1' 0)) 'link permit escaped through another adapter'
+        Assert-That (-not (Test-Packet6 900009 'ff02::1:ff00:1' 0)) 'solicited-node permit escaped through another adapter'
+        # Anything else a program sends to those addresses: DNS, TCP, other ICMPv6, UDP to the solicited-node group.
+        Assert-That (-not (Test-Send6 700007 'fe80::1' 17 50000 53)) 'DNS to the gateway leaked'
+        Assert-That (-not (Test-Send6 700007 'fe80::1' 6 50000 443)) 'TCP to the gateway leaked'
+        Assert-That (-not (Test-Send6 700007 'fe80::1' 58 128 0)) 'echo request to the gateway leaked'
+        Assert-That (-not (Test-Send6 700007 'fe80::2' 17 50000 53)) 'other link-local hosts leaked'
+        Assert-That (-not (Test-Send6 700007 'ff02::1:ff00:1' 17 50000 9)) 'UDP to the solicited-node group leaked'
+        Assert-That (-not (Test-Send6 700007 'ff02::1:ff00:1' 58 136 0)) 'advertisements to the solicited-node group leaked'
+        # Advertisements to all nodes (defending an address in duplicate address detection), and nothing else to them.
+        Assert-That (Test-Send6 700007 'ff02::1' 58 136 0) 'advertisement to all nodes was blocked'
+        Assert-That (-not (Test-Send6 700007 'ff02::1' 58 135 0)) 'solicitations to all nodes leaked'
+        Assert-That (-not (Test-Send6 700007 'ff02::1' 17 50000 9)) 'UDP to all nodes leaked'
+        Assert-That (-not (Test-Send6 900009 'ff02::1' 58 136 0)) 'all-nodes permit escaped through another adapter'
+        # DHCPv6 renewals to the servers group, and nothing else to it.
+        Assert-That (Test-Send6 700007 'ff02::1:2' 17 546 547) 'DHCPv6 renewal was blocked'
+        Assert-That (-not (Test-Send6 700007 'ff02::1:2' 17 50000 547)) 'other UDP to DHCPv6 servers leaked'
+        Assert-That (-not (Test-Send6 700007 'ff02::1:2' 6 50000 547)) 'TCP to DHCPv6 servers leaked'
+        # Listener reports that keep the solicited-node group forwarded where switches snoop MLD: MLDv2 reports to ff02::16,
+        # MLDv1 reports to the group itself and done messages to all routers; nothing else to those groups.
+        Assert-That (Test-Send6 700007 'ff02::16' 58 143 0) 'MLDv2 report was blocked'
+        Assert-That (Test-Send6 700007 'ff02::1:ff00:1' 58 131 0) 'MLDv1 report for the solicited-node group was blocked'
+        Assert-That (Test-Send6 700007 'ff02::2' 58 132 0) 'MLDv1 done was blocked'
+        Assert-That (-not (Test-Send6 700007 'ff02::16' 58 131 0)) 'other ICMPv6 to the MLDv2 group leaked'
+        Assert-That (-not (Test-Send6 700007 'ff02::16' 17 50000 9)) 'UDP to the MLDv2 group leaked'
+        Assert-That (-not (Test-Send6 700007 'ff02::2' 58 133 0)) 'router solicitations leaked'
+        Assert-That (-not (Test-Send6 700007 'ff02::2' 17 50000 9)) 'UDP to all routers leaked'
+        Assert-That (-not (Test-Send6 700007 'ff02::1' 58 143 0)) 'reports to all nodes leaked'
+        Assert-That (-not (Test-Send6 900009 'ff02::16' 58 143 0)) 'MLDv2 permit escaped through another adapter'
+        Assert-That (-not (Test-Packet6 900009 'ff02::16' 0)) 'MLDv2 packet permit escaped through another adapter'
+        # Queries come from the router's link-local address.
+        Assert-That (Test-Receive6 700007 'fe80::1' 58 130 0) 'listener queries were blocked'
+        Assert-That (-not (Test-Packet6 700007 'ff02::fb' 0)) 'mDNS leaked'
+        Assert-That (-not (Test-Packet6 700007 'ff02::1:3' 0)) 'LLMNR leaked'
+        Assert-That (-not (Test-Packet6 700007 'ff05::2' 0)) 'wider multicast leaked'
+        # Programs may receive router and neighbor messages and DHCPv6 replies from the link, nothing else.
+        Assert-That (Test-Receive6 700007 'fe80::1' 58 134 0) 'router advertisements were blocked'
+        Assert-That (Test-Receive6 700007 'fe80::1' 17 546 547) 'DHCPv6 replies were blocked'
+        Assert-That (-not (Test-Receive6 700007 'fe80::1' 17 53 50000)) 'a link-local UDP flow could be opened from outside'
+        Assert-That (-not (Test-Receive6 700007 'fe80::1' 6 8080 50000)) 'a link-local TCP connection was accepted'
+        Assert-That (Test-Receive6 900009 'fe80::1' 6 8080 50000) 'another adapter was restricted'
+        Assert-That (Test-Packet $v4 700007 ([uint32]3405803786) 0) 'IPv4 underlay lost next to IPv6'
+        Assert-That (-not (Test-Packet $v4 700007 ([uint32]3325256757) 0)) 'physical IPv4 leaked'
+        $rules = @($script:Filters | Where-Object { $_.Name -eq 'Amber exit protected underlay' -and $_.Layer -eq 'a3b3ab6b-3564-488c-9117-f34e82142763' })
+        Assert-That ($rules.Count -eq 2 -and @($rules | Where-Object { $_.Conditions.Count -ne 3 }).Count -eq 0) 'IPv6 underlay permit must require LUID, interface index and address'
+        $link = @($script:Filters | Where-Object { $_.Name -eq 'Amber exit IPv6 link addresses' })
+        Assert-That ($link.Count -eq 6 -and @($link | Where-Object { $_.Conditions.Count -ne 3 }).Count -eq 0) 'link permits must require LUID, interface index and address'
+        $ale = @($script:Filters | Where-Object { $_.Layer -eq '4a72393b-319f-44bc-84c3-ba54dcb3b6b4' -or $_.Layer -eq 'a3b42c97-9f04-4672-b87e-cee9c483257f' })
+        Assert-That (@($ale | Where-Object { -not ($_.Conditions | Where-Object { $_.Key -eq '4cd62a49-59c3-4969-b7f3-bda5d32890a4' -and $_.Value -eq 700007 }) }).Count -eq 0) 'ALE rules must be limited to the physical adapter'
+        Exit-ExitTrafficPolicy
+        """);
+
+    [Fact]
+    public Task OnLinkIpv6UnderlayCanAnswerItsNeighborsAndNothingMore() => RunAsync("""
         $script:Plan.UnderlayAddresses = @('2001:db8::5')
+        $script:exitRoutes = @([pscustomobject]@{ Prefix='2001:db8::5/128'; Index=7; Guid=$script:PhysicalGuid; Hop='::'; Metric=1; Owned=$true })
+        Enter-ExitTrafficPolicy $script:Adapters[0] $script:Plan
+        Assert-That (Test-Send6 700007 'ff02::1:ff00:5' 58 135 0) 'solicited-node multicast was blocked'
+        # The peer asks from its link-local address: the answer must get out.
+        Assert-That (Test-Send6 700007 'fe80::5' 58 136 0) 'neighbor advertisement to an on-link peer was blocked'
+        Assert-That (-not (Test-Send6 700007 'fe80::5' 17 50000 53)) 'link-local traffic opened without a gateway'
+        Exit-ExitTrafficPolicy
+        """);
+
+    [Fact]
+    public Task GlobalIpv6GatewayIsLimitedLikeALinkLocalOne() => RunAsync("""
+        $script:Plan.UnderlayAddresses = @('2001:db8::5')
+        $script:exitRoutes = @([pscustomobject]@{ Prefix='2001:db8::5/128'; Index=7; Guid=$script:PhysicalGuid; Hop='2001:db8:1::1'; Metric=1; Owned=$true })
+        Enter-ExitTrafficPolicy $script:Adapters[0] $script:Plan
+        Assert-That (Test-Send6 700007 '2001:db8:1::1' 58 135 0) 'neighbor solicitation to the gateway was blocked'
+        Assert-That (-not (Test-Send6 700007 '2001:db8:1::1' 17 50000 53)) 'DNS to the gateway leaked'
+        Assert-That (-not (Test-Send6 700007 '2001:db8:1::2' 58 135 0)) 'gateway permit widened'
+        Exit-ExitTrafficPolicy
+        """);
+
+    [Fact]
+    public Task Ipv4OnlyPlansKeepIpv6FullyBlocked() => RunAsync("""
+        Enter-ExitTrafficPolicy $script:Adapters[0] $script:Plan
+        Assert-That (-not (Test-Packet6 700007 'fe80::1' 0)) 'link-local IPv6 opened without an IPv6 underlay'
+        Assert-That (-not ($script:Filters | Where-Object { $_.Layer -eq '4a72393b-319f-44bc-84c3-ba54dcb3b6b4' -or $_.Layer -eq 'a3b42c97-9f04-4672-b87e-cee9c483257f' })) 'IPv4-only plan added ALE rules'
+        Exit-ExitTrafficPolicy
+        """);
+
+    [Theory]
+    [InlineData("fe80::5")]
+    [InlineData("ff02::1")]
+    [InlineData("2001:db8::5")]
+    public Task UnsafeOrUnroutedIpv6UnderlayFailsBeforeOpeningEngine(string address) => RunAsync($$"""
+        $script:Plan.UnderlayAddresses = @('{{address}}')
         Expect-Failure { Enter-ExitTrafficPolicy $script:Adapters[0] $script:Plan }
-        Assert-That (-not $script:Events.Contains('FwpmEngineOpen0')) 'IPv6 underlay started policy mutation'
+        Assert-That (-not $script:Events.Contains('FwpmEngineOpen0')) 'IPv6 underlay without a protected route started policy mutation'
         """);
 
     [Fact]

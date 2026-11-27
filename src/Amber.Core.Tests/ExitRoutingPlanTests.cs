@@ -62,6 +62,11 @@ public sealed class ExitRoutingPlanTests
     [InlineData("10.233.144.1")]
     [InlineData("example.com")]
     [InlineData("1.2.3.4; whoami")]
+    [InlineData("fe80::1")]
+    [InlineData("fe80::1%3")]
+    [InlineData("ff02::1")]
+    [InlineData("::")]
+    [InlineData("fec0::1")]
     public void InvalidUnderlayIsRejected(string address) =>
         Assert.Throws<ArgumentException>(() => ExitNetworkPlan.Create(Guest with { DirectUnderlayAddresses = [address] }));
 
@@ -74,13 +79,23 @@ public sealed class ExitRoutingPlanTests
     }
 
     [Fact]
-    public void UntrackedIpv6OrHostnameUnderlayIsRejectedBeforeRouteChanges()
+    public void ARelayNamedByDomainIsRefusedWithItsOwnMessage()
     {
-        Assert.Throws<InvalidOperationException>(() => ExitNetworkPlan.Create(Guest with { DirectUnderlayUsesIpv6 = true }));
-        // A relay named by domain is refused with its own message: its address would get a direct exception for every program.
+        // Its address would get a direct exception for every program, not only EasyTier.
         var e = Assert.Throws<InvalidOperationException>(() => ExitNetworkPlan.Create(Guest with { Peers = ["udp://relay.example:11010"] }));
         Assert.Equal(Amber.Core.Localization.L.T("core.mp.exit.relay_domain"), e.Message);
-        Assert.Throws<InvalidOperationException>(() => ExitNetworkPlan.Create(Guest with { Peers = ["udp://[2001:db8::1]:11010"] }));
+    }
+
+    [Fact]
+    public void Ipv6RelaysAndDirectPeersAreProtectedLikeIpv4()
+    {
+        var plan = Assert.IsType<ExitNetworkPlan>(ExitNetworkPlan.Create(Guest with
+        {
+            Peers = ["udp://[2001:db8::1]:11010", "tcp://203.0.113.10:11010"],
+            DirectUnderlayAddresses = ["2001:DB8:0:0::20", "::ffff:198.51.100.7"],
+        }));
+        // Written the one way every platform script compares (lower case, shortest form); mapped IPv4 is plain IPv4.
+        Assert.Equal(["198.51.100.7", "2001:db8::1", "2001:db8::20", "203.0.113.10"], plan.UnderlayAddresses);
     }
 
     private static Func<string, CancellationToken, Task<System.Net.IPAddress[]>> Lookup(params string[] addresses) =>
@@ -91,13 +106,13 @@ public sealed class ExitRoutingPlanTests
     {
         var options = await ExitRelays.PinAsync(Guest with { Peers = ["tcp://relay.example.org:11010", "wss://ws.example.org:443/et", "udp://127.0.0.1:23000"] },
             Lookup("2001:db8::7", "203.0.113.20", "203.0.113.21"));
-        // TCP is pinned to one IPv4 address; WebSocket keeps its name (TLS needs it) and all its IPv4 addresses are protected.
+        // TCP is pinned to one address, IPv4 first; WebSocket keeps its name (TLS needs it) and all its addresses are protected.
         Assert.Equal(["tcp://203.0.113.20:11010", "wss://ws.example.org:443/et", "udp://127.0.0.1:23000"], options.Peers);
-        Assert.Equal(["203.0.113.20", "203.0.113.21"], options.RelayAddresses["ws.example.org"]);
+        Assert.Equal(["203.0.113.20", "203.0.113.21", "2001:db8::7"], options.RelayAddresses["ws.example.org"]);
         var plan = Assert.IsType<ExitNetworkPlan>(ExitNetworkPlan.Create(options with { Peers = [.. options.Peers.Where(p => !p.Contains("127.0.0.1", StringComparison.Ordinal))] }));
         Assert.Contains("203.0.113.20", plan.UnderlayAddresses);
         Assert.Contains("203.0.113.21", plan.UnderlayAddresses);
-        Assert.DoesNotContain(plan.UnderlayAddresses, a => a.Contains(':', StringComparison.Ordinal));
+        Assert.Contains("2001:db8::7", plan.UnderlayAddresses);
     }
 
     [Fact]
@@ -115,10 +130,20 @@ public sealed class ExitRoutingPlanTests
     }
 
     [Fact]
-    public async Task ARelayWithoutAnIpv4AddressSaysSo()
+    public async Task AnIpv6OnlyRelayIsPinnedInBrackets()
+    {
+        var options = await ExitRelays.PinAsync(Guest with { Peers = ["tcp://relay.example.org:11010", "wss://ws.example.org/et"] }, Lookup("2001:db8::7", "fe80::9"));
+        Assert.Equal(["tcp://[2001:db8::7]:11010", "wss://ws.example.org/et"], options.Peers);
+        // Link-local answers can't be protected, so they are left out.
+        Assert.Equal(["2001:db8::7"], options.RelayAddresses["ws.example.org"]);
+        Assert.Equal(["2001:db8::7"], ExitNetworkPlan.Create(options with { Peers = [options.Peers[0]], DirectUnderlayAddresses = [] })!.UnderlayAddresses);
+    }
+
+    [Fact]
+    public async Task ARelayWithoutAUsableAddressSaysSo()
     {
         var e = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            ExitRelays.PinAsync(Guest with { Peers = ["tcp://relay.example.org:11010"] }, Lookup("2001:db8::7")));
+            ExitRelays.PinAsync(Guest with { Peers = ["tcp://relay.example.org:11010"] }, Lookup("fe80::7", "127.0.0.1")));
         Assert.Contains("relay.example.org", e.Message, StringComparison.Ordinal);
         await Assert.ThrowsAsync<InvalidOperationException>(() => ExitRelays.PinAsync(Guest with { Peers = ["tcp://relay.example.org:11010"] },
             (_, _) => Task.FromException<System.Net.IPAddress[]>(new System.Net.Sockets.SocketException((int)System.Net.Sockets.SocketError.HostNotFound))));
