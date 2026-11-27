@@ -349,6 +349,8 @@ public sealed class AuthlibInjector(HttpClient http, string cacheDir)
             try { bytes = await DownloadAsync(url, limit.Token); }
             catch (HttpRequestException) { continue; }
             catch (InvalidDataException) { wrongBytes = true; continue; }
+            // The connection dropped part way through the body: try the next source.
+            catch (IOException) { continue; }
             catch (OperationCanceledException) when (!ct.IsCancellationRequested) { continue; }
             // Every source must serve exactly the pinned bytes; a mirror that serves anything else is skipped.
             if (!Matches(SHA256.HashData(bytes))) { wrongBytes = true; continue; }

@@ -83,20 +83,21 @@ public sealed class AuthlibInjectorPinTests : IDisposable
     }
 
     /// <summary>Sends headers, then never sends the body.</summary>
-    private sealed class StalledHandler(Dictionary<string, byte[]> bodies, string stalled) : HttpMessageHandler
+    private sealed class StalledHandler(Dictionary<string, byte[]> bodies, string stalled, bool breaks = false) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var url = request.RequestUri!.AbsoluteUri;
             if (url == stalled)
-                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(new StalledStream()) });
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(new StalledStream(breaks)) });
             return Task.FromResult(bodies.TryGetValue(url, out var body)
                 ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(body) }
                 : new HttpResponseMessage(HttpStatusCode.NotFound));
         }
     }
 
-    private sealed class StalledStream : Stream
+    /// <summary>Never sends a byte; with <c>breaks</c>, the connection drops instead.</summary>
+    private sealed class StalledStream(bool breaks = false) : Stream
     {
         public override bool CanRead => true;
         public override bool CanSeek => false;
@@ -107,6 +108,7 @@ public sealed class AuthlibInjectorPinTests : IDisposable
         public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
         public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
         {
+            if (breaks) throw new HttpIOException(HttpRequestError.ResponseEnded, "the connection dropped");
             await Task.Delay(Timeout.Infinite, cancellationToken);
             return 0;
         }
@@ -128,5 +130,13 @@ public sealed class AuthlibInjectorPinTests : IDisposable
         var download = injector.EnsureJarAsync();
         Assert.Same(download, await Task.WhenAny(download, Task.Delay(TimeSpan.FromSeconds(30))));
         Assert.Equal(Good, File.ReadAllBytes(await download));
+    }
+
+    [Fact]
+    public async Task ASourceWhoseBodyBreaksOffGivesWayToTheNext()
+    {
+        using var handler = new StalledHandler(new() { ["https://official.test/a.jar"] = Good }, "https://mirror.test/a.jar", breaks: true);
+        var jar = await new AuthlibInjector(new HttpClient(handler), _dir, Pin("https://mirror.test/a.jar", "https://official.test/a.jar")).EnsureJarAsync();
+        Assert.Equal(Good, File.ReadAllBytes(jar));
     }
 }
