@@ -118,6 +118,8 @@ public sealed record GateInvite(string Host, int Port, byte[] ServerKeyHash, byt
             if (!char.IsAsciiLetterOrDigit(c)) break;
             chars.Append(c);
         }
+        // Words in Latin letters after the code would otherwise run into it: stop at the length the code itself gives.
+        if (ExpectedCharCount(chars) is { } expected && chars.Length > expected) chars.Length = expected;
         var raw = Base32Decode(chars.ToString());
         if (raw is null || raw.Length < 1 + 1 + KeyHashLength + TokenLength + ChecksumLength)
         {
@@ -138,6 +140,33 @@ public sealed record GateInvite(string Host, int Port, byte[] ServerKeyHash, byt
             return null;
         }
         return invite;
+    }
+
+    /// <summary>
+    /// How many Base32 characters a plain code has, read from its first two bytes (version and host or network-id length).
+    /// Null for an unknown version or too short a text: then the text is decoded as it is and reported as it would be.
+    /// </summary>
+    private static int? ExpectedCharCount(StringBuilder chars)
+    {
+        if (chars.Length < 4) return null;
+        var bits = 0;
+        for (var i = 0; i < 4; i++)
+        {
+            var c = char.ToUpperInvariant(chars[i]) switch { 'I' or 'L' => '1', 'O' => '0', var x => x };
+            var v = Crockford.IndexOf(c);
+            if (v < 0) return null;
+            bits = (bits << 5) | v;
+        }
+        var version = (byte)(bits >> 12);
+        var length = (bits >> 4) & 0xFF;
+        int? body = version switch
+        {
+            Version => 1 + 1 + length + 2 + KeyHashLength + TokenLength,
+            VersionRotating => 1 + 1 + length + 2 + KeyHashLength + TokenLength + GateRotation.EncodedLength + GateRotation.SeedLength,
+            VersionLocator => 1 + 1 + length + GateLocator.IdLength + GateLocator.SignerHashLength + KeyHashLength + TokenLength,
+            _ => null,
+        };
+        return body is { } b ? ((b + ChecksumLength) * 8 + 4) / 5 : null;
     }
 
     /// <summary>Opens a sealed invite with its passphrase. Null with a reason for the person (wrong passphrase, damaged).</summary>

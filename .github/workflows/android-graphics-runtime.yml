@@ -5,7 +5,9 @@ on:
     paths:
       - '.github/workflows/android-graphics-runtime.yml'
       - 'scripts/build-android-mobileglues.sh'
+      - 'scripts/build-android-shader-tools.sh'
       - 'third_party/android-mobileglues/**'
+      - 'third_party/android-shader-tools/**'
   workflow_dispatch:
 
 permissions:
@@ -37,8 +39,17 @@ jobs:
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;28.2.13676358"
 
       - name: Build MobileGlues
+        env:
+          JAY_RUN_HOST_TESTS: 1
         run: |
           bash scripts/build-android-mobileglues.sh \
+            "$ANDROID_HOME/ndk/28.2.13676358" \
+            "${{ matrix.architecture }}" \
+            "graphics-${{ matrix.architecture }}"
+
+      - name: Build shader tools
+        run: |
+          bash scripts/build-android-shader-tools.sh \
             "$ANDROID_HOME/ndk/28.2.13676358" \
             "${{ matrix.architecture }}" \
             "graphics-${{ matrix.architecture }}"
