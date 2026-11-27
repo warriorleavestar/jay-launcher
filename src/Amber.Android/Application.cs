@@ -21,6 +21,8 @@ public sealed class Application : AvaloniaAndroidApplication<Amber.App.App>
         AppContext.SetData(Amber.Core.Multiplayer.EasyTierInstaller.AndroidNativeDirectoryKey, ApplicationInfo!.NativeLibraryDir);
         var files = FilesDir!.AbsolutePath;
         Environment.SetEnvironmentVariable("AMBER_DATA_DIR", Path.Combine(files, "amber"));
+        // Before anything reads the device identity or saved servers: seal their wrap keys in the Keystore.
+        Amber.Core.Auth.LocalKeyProtection.Protector = new AndroidKeystoreKeyProtector();
         // The dedicated :game process does not create Avalonia's launcher view model, so it
         // never reaches App.OnFrameworkInitializationCompleted where the saved language is
         // normally applied. Load it at process startup as well, otherwise every in-game touch

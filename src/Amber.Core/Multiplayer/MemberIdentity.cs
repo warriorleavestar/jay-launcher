@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using Amber.Core.Auth;
 using Amber.Core.Identity;
 using Amber.Core.Localization;
 using Amber.Core.Multiplayer.Transport;
@@ -377,16 +378,17 @@ public sealed class MemberIdentity : IDisposable
         var path = Path.Combine(directory, WrapKeyFileName);
         // 长度不对的包裹密钥（比如第一次写入时断电留下的空文件）不可能加密过任何身份：
         // 需要新建时挪成 .broken 再重建，否则损坏分支里重新保存还会读到它，每次启动都失败。
-        if (create && File.Exists(path) && new FileInfo(path).Length != 32)
+        // On mobile the file holds the key sealed by the OS key store (LocalKeyProtection); that form is well formed too.
+        if (create && File.Exists(path) && !LocalKeyProtection.IsWellFormed(File.ReadAllBytes(path)))
             File.Move(path, path + ".broken", true);
         if (!File.Exists(path))
         {
             if (!create) throw new CryptographicException(L.T("core.mp.identity.corrupt"));
-            var created = RandomNumberGenerator.GetBytes(32);
+            var created = RandomNumberGenerator.GetBytes(LocalKeyProtection.KeyLength);
             try
             {
                 // CreateNew：两个 Jay 同时第一次启动时，只有一个能写成，另一个读已经写好的那把，不会互相覆盖。
-                WritePrivate(path, created, FileMode.CreateNew);
+                WritePrivate(path, LocalKeyProtection.Encode(created), FileMode.CreateNew);
                 return created;
             }
             catch (IOException) when (File.Exists(path))
@@ -394,9 +396,18 @@ public sealed class MemberIdentity : IDisposable
                 CryptographicOperations.ZeroMemory(created);
             }
         }
-        var key = File.ReadAllBytes(path);
-        if (key.Length != 32) throw new CryptographicException(L.T("core.mp.identity.corrupt"));
+        byte[] key;
+        bool reseal;
+        try
+        {
+            key = LocalKeyProtection.Decode(File.ReadAllBytes(path), "identity wrap", out reseal);
+        }
+        catch (CryptographicException e)
+        {
+            throw new CryptographicException(L.T("core.mp.identity.corrupt"), e);
+        }
         if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        if (reseal) LocalKeyProtection.TryReseal(path, key, (file, data) => WritePrivate(file, data));
         return key;
     }
 
