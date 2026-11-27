@@ -47,6 +47,9 @@ public sealed partial class ExitPolicy : IDisposable
 
     /// <summary>测试用：可以换掉查公网 IP 的方法和各种间隔。</summary>
     internal Func<CancellationToken, Task<bool>>? Discover { get; set; }
+
+    /// <summary>Tests only: replaces <see cref="IsGloballyRoutable"/>, so tests can use documentation addresses as if they were public.</summary>
+    internal Func<IPAddress, bool>? Routable { get; set; }
     internal TimeSpan ReadyInterval { get; set; } = TimeSpan.FromMinutes(3);
     internal TimeSpan RetryInterval { get; set; } = TimeSpan.FromSeconds(15);
     internal TimeSpan Debounce { get; set; } = TimeSpan.FromSeconds(3);
@@ -352,7 +355,7 @@ public sealed partial class ExitPolicy : IDisposable
         var ip = Normalize(address);
         // 只转 IPv4：路由器的 IPv6 外网地址不在本机任何网段里，拦不全；Minecraft 服务器和 Mojang 都有 IPv4，Java 也优先用 IPv4。
         if (ip.AddressFamily != AddressFamily.InterNetwork) return false;
-        if (!IsGloballyRoutable(ip)) return false;
+        if (!(Routable ?? IsGloballyRoutable)(ip)) return false;
         if (_localAddresses.Contains(ip)) return false;
         lock (_lock)
             if (_publicAddresses.Contains(ip)) return false;

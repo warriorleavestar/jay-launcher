@@ -40,20 +40,22 @@ public class ReverificationFixTests
     public async Task LocalNetworksAreCollectedInTheBackgroundBeforeReady()
     {
         var collected = 0;
-        var home = IPAddress.Parse("8.8.4.4");
+        var home = IPAddress.Parse("203.0.113.4");
         using var policy = new ExitPolicy
         {
             Collector = () =>
             {
                 Interlocked.Increment(ref collected);
-                return ([home], [(IPAddress.Parse("9.9.9.0"), 24)]);
+                return ([home], [(IPAddress.Parse("198.51.100.0"), 24)]);
             },
             Discover = _ => Task.FromResult(true),
+            // Documentation addresses stand in for public ones (real public addresses stay out of the repository).
+            Routable = a => a.AddressFamily == AddressFamily.InterNetwork,
             MaxPublicIpAge = TimeSpan.FromMinutes(5),
         };
         Assert.Equal(0, Volatile.Read(ref collected));
         Assert.False(policy.IsReady);
-        Assert.False(policy.Allows(IPAddress.Parse("8.8.8.8")));
+        Assert.False(policy.Allows(IPAddress.Parse("192.0.2.8")));
 
         policy.Start();
         var watch = System.Diagnostics.Stopwatch.StartNew();
@@ -61,8 +63,8 @@ public class ReverificationFixTests
         Assert.True(policy.IsReady);
         Assert.True(Volatile.Read(ref collected) >= 1);
         Assert.False(policy.Allows(home));
-        Assert.False(policy.Allows(IPAddress.Parse("9.9.9.20")));
-        Assert.True(policy.Allows(IPAddress.Parse("8.8.8.8")));
+        Assert.False(policy.Allows(IPAddress.Parse("198.51.100.20")));
+        Assert.True(policy.Allows(IPAddress.Parse("192.0.2.8")));
     }
 
     // R1：定时器赢了很多次之后，地址变化的唤醒仍然马上生效（不会被之前留下的等待者吞掉）。
@@ -141,7 +143,7 @@ public class ReverificationFixTests
         await Task.Delay(100);
         ok = false;
         Assert.False(await policy.EnsureFreshAsync(TimeSpan.FromSeconds(2), default));
-        Assert.False(policy.Allows(IPAddress.Parse("8.8.8.8")));
+        Assert.False(policy.Allows(IPAddress.Parse("192.0.2.8")));
     }
 
     // R7：出口没准备好时回专门的答复，加入方看到“出口还没准备好”。
@@ -241,7 +243,7 @@ public class ReverificationFixTests
     [Fact]
     public void MappedPrefixDoesNotThrow()
     {
-        Assert.False(ExitPolicy.InNetwork(IPAddress.Parse("8.8.8.8"), IPAddress.Parse("::ffff:10.0.0.0"), 104));
+        Assert.False(ExitPolicy.InNetwork(IPAddress.Parse("192.0.2.8"), IPAddress.Parse("::ffff:10.0.0.0"), 104));
         using var real = new ExitPolicy();
         real.RefreshLocal();
     }
