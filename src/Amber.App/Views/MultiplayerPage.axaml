@@ -1539,7 +1539,8 @@
 
     <!-- On the smallest windows the lobby form is taller than the viewport. Keep its two destinations at thumb reach:
          joining can be submitted after editing the code, and opening a room remains one tap away. -->
-    <StackPanel Grid.Row="4" Spacing="6">
+    <!-- The multiplayer.status region is this whole bottom strip, so a theme layout keeps the compact join bar with it. -->
+    <StackPanel Grid.Row="4" Spacing="6" svc:ThemeRegion.Name="multiplayer.status">
       <Border x:Name="CompactLobbyBar" Classes="card" Margin="0" Padding="8" IsVisible="False">
         <Grid x:Name="CompactLobbyState" ColumnDefinitions="*,*" ColumnSpacing="8">
           <Grid.IsVisible>
@@ -1556,7 +1557,7 @@
       </Border>
 
       <!-- 消息被 ✕ 关掉后整张卡片一起收起，不留空卡片 -->
-      <Border svc:ThemeRegion.Name="multiplayer.status" Classes="card" Margin="0" IsVisible="{Binding #PageStatus.IsShowing}">
+      <Border Classes="card" Margin="0" IsVisible="{Binding #PageStatus.IsShowing}">
         <c:StatusBar x:Name="PageStatus" Message="{Binding StatusInfo}" />
       </Border>
     </StackPanel>

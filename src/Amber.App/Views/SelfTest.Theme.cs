@@ -249,6 +249,19 @@ internal sealed class ThemeSelfTest(MainWindow window, MainViewModel main, strin
         await ShotAsync("layout-multiplayer-no-sandbox-1280x800");
         main.Service.Settings.LaunchWithoutSandbox = wasWithoutSandbox;
         main.Service.NotifySandboxChanged();
+        // Small windows hand the join button to the bottom bar, which moves with the status region under a theme layout.
+        mp.Tab = MultiplayerTab.Play;
+        window.Width = 600;
+        window.Height = 420;
+        await Task.Delay(600);
+        var compactJoin = mpPage.GetVisualDescendants().OfType<Button>().FirstOrDefault(b => b.Name == "CompactLobbyJoinButton");
+        Check("主题布局下的小窗口：底部的【加入】按钮看得见、点得到",
+            mp.IsPlayTab && mp.IsIdle && compactJoin is { IsEffectivelyVisible: true } && compactJoin.Bounds.Height > 10
+                && compactJoin.TranslatePoint(default, mpPage) is { } at && at.Y + compactJoin.Bounds.Height <= mpPage.Bounds.Height + 1,
+            $"{compactJoin?.Bounds} tab={mp.IsPlayTab} idle={mp.IsIdle}");
+        await ShotAsync("layout-multiplayer-600x420");
+        window.Width = 1280;
+        window.Height = 800;
         main.CurrentPage = settings;
         await Task.Delay(300);
     }
