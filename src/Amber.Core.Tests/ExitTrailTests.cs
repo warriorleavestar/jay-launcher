@@ -87,6 +87,52 @@ public sealed class ExitTrailTests : IDisposable
         Assert.StartsWith("(older lines trimmed)", ReadShared(Trail));
     }
 
+    [Fact]
+    public void SecondJayWhileTheFirstRunsKeepsItsTrailAndReportsNoUncleanExit()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        // Stands in for a first Jay that is still running on the same data folder.
+        using var first = Process.Start(new ProcessStartInfo("/bin/sh") { ArgumentList = { "-c", "sleep 30" }, UseShellExecute = false })!;
+        try
+        {
+            var dir = Directory.CreateDirectory(Path.Combine(_dir, ExitTrail.FolderName)).FullName;
+            var marker = Path.Combine(dir, ExitTrail.MarkerName);
+            File.WriteAllText(Trail, "first run breadcrumb\n");
+            File.WriteAllText(marker, first.Id.ToString());
+
+            ExitTrail.Start(_dir, hookProcess: false);
+            Assert.False(ExitTrail.PreviousRunEndedUnexpectedly);
+            Assert.False(File.Exists(Previous));
+            Assert.Contains("first run breadcrumb", ReadShared(Trail));
+            Assert.Equal([first.Id.ToString(), Environment.ProcessId.ToString()], File.ReadAllLines(marker));
+
+            // This run ends cleanly; the first one is still running and keeps its line.
+            ExitTrail.CleanExit("app exit, code 0");
+            Assert.Equal([first.Id.ToString()], File.ReadAllLines(marker));
+        }
+        finally
+        {
+            first.Kill();
+            first.WaitForExit();
+        }
+    }
+
+    [Fact]
+    public void MarkerOfAnEndedProcessIsAnUncleanExit()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        using var ended = Process.Start(new ProcessStartInfo("/bin/sh") { ArgumentList = { "-c", "exit 0" }, UseShellExecute = false })!;
+        ended.WaitForExit();
+        var dir = Directory.CreateDirectory(Path.Combine(_dir, ExitTrail.FolderName)).FullName;
+        File.WriteAllText(Trail, "last words\n");
+        File.WriteAllText(Path.Combine(dir, ExitTrail.MarkerName), ended.Id.ToString());
+
+        ExitTrail.Start(_dir, hookProcess: false);
+        Assert.True(ExitTrail.PreviousRunEndedUnexpectedly);
+        Assert.Contains("last words", ReadShared(Previous));
+        Assert.DoesNotContain("last words", ReadShared(Trail));
+    }
+
     public void Dispose()
     {
         ExitTrail.ResetForTests();
