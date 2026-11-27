@@ -1,0 +1,108 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:l="using:Amber.App.Localization"
+             xmlns:vm="using:Amber.App.ViewModels"
+             x:Class="Amber.App.Views.Controls.HostServerAdvancedPanel"
+             x:DataType="vm:HostServerViewModel">
+  <!-- The server's advanced settings: the same data folder jay-server changes on the command line. -->
+  <Expander x:Name="HostServerAdvancedExpander" HorizontalAlignment="Stretch" Header="{l:T multiplayer.hostserver.adv.title}">
+    <StackPanel Spacing="14" MaxWidth="760" HorizontalAlignment="Left">
+
+      <!-- Protection: basic, Privacy+, Privacy++ -->
+      <StackPanel Spacing="6">
+        <TextBlock FontWeight="SemiBold" Text="{l:T multiplayer.hostserver.adv.privacy}" />
+        <WrapPanel Orientation="Horizontal">
+          <RadioButton x:Name="HostPrivacyBasic" GroupName="HostPrivacy" Margin="0,0,16,4" Tag="0" IsCheckedChanged="OnPrivacyChecked" Content="{l:T multiplayer.hostserver.privacy_basic}" />
+          <RadioButton x:Name="HostPrivacyPlus" GroupName="HostPrivacy" Margin="0,0,16,4" Tag="1" IsCheckedChanged="OnPrivacyChecked" Content="{l:T multiplayer.hostserver.privacy_plus}" />
+          <RadioButton x:Name="HostPrivacyPlusPlus" GroupName="HostPrivacy" Margin="0,0,16,4" Tag="2" IsCheckedChanged="OnPrivacyChecked" Content="{l:T multiplayer.hostserver.privacy_plusplus}" />
+        </WrapPanel>
+        <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{Binding PrivacyExplanation}" />
+      </StackPanel>
+
+      <!-- Relays -->
+      <StackPanel Spacing="6">
+        <TextBlock FontWeight="SemiBold" Text="{l:T multiplayer.hostserver.adv.relays}" />
+        <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.hostserver.adv.relays_hint}" />
+        <TextBlock Classes="hint" FontSize="12" Text="{l:T multiplayer.hostserver.adv.relays_none}" IsVisible="{Binding !Relays.Count}" />
+        <ItemsControl x:Name="HostRelayList" ItemsSource="{Binding Relays}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate DataType="vm:HostRelayItem">
+              <Grid ColumnDefinitions="*,Auto" Margin="0,4,0,0">
+                <StackPanel VerticalAlignment="Center">
+                  <TextBlock Text="{Binding Address}" TextTrimming="CharacterEllipsis" />
+                  <TextBlock Classes="hint" FontSize="12" Text="{Binding State}" TextWrapping="Wrap" />
+                </StackPanel>
+                <WrapPanel Grid.Column="1" Orientation="Horizontal" Margin="12,0,0,0" VerticalAlignment="Center">
+                  <Button Margin="0,0,6,4" Content="{l:T multiplayer.hostserver.adv.new_code}" IsVisible="{Binding !ConfirmRevoke}"
+                          Command="{Binding $parent[ItemsControl].((vm:HostServerViewModel)DataContext).NewRelayCodeCommand}" CommandParameter="{Binding}" />
+                  <Button Margin="0,0,6,4" Content="{l:T common.delete}" IsVisible="{Binding !ConfirmRevoke}"
+                          Command="{Binding $parent[ItemsControl].((vm:HostServerViewModel)DataContext).RemoveRelayCommand}" CommandParameter="{Binding}" />
+                  <Button Margin="0,0,6,4" Content="{l:T multiplayer.hostserver.adv.revoke}" IsVisible="{Binding !ConfirmRevoke}"
+                          Command="{Binding $parent[ItemsControl].((vm:HostServerViewModel)DataContext).RevokeRelayCommand}" CommandParameter="{Binding}" />
+                  <Button Margin="0,0,6,4" Content="{l:T common.cancel}" IsVisible="{Binding ConfirmRevoke}"
+                          Command="{Binding $parent[ItemsControl].((vm:HostServerViewModel)DataContext).CancelRevokeCommand}" CommandParameter="{Binding}" />
+                  <Button Classes="danger" Margin="0,0,6,4" Content="{l:T multiplayer.hostserver.adv.revoke_yes}" IsVisible="{Binding ConfirmRevoke}"
+                          Command="{Binding $parent[ItemsControl].((vm:HostServerViewModel)DataContext).RevokeRelayCommand}" CommandParameter="{Binding}" />
+                </WrapPanel>
+              </Grid>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+        <Grid ColumnDefinitions="*,Auto">
+          <TextBox x:Name="HostRelayAddressBox" Text="{Binding NewRelayAddress}" PlaceholderText="{l:T multiplayer.hostserver.adv.relay_placeholder}" />
+          <Button Grid.Column="1" Margin="6,0,0,0" Content="{l:T multiplayer.hostserver.adv.add_relay}" Command="{Binding AddRelayCommand}" />
+        </Grid>
+        <Border x:Name="HostRelayCodePanel" Classes="card" Margin="0" IsVisible="{Binding HasRelayCode}">
+          <StackPanel Spacing="6">
+            <TextBlock FontSize="12" TextWrapping="Wrap" Text="{Binding RelayCodeFor}" />
+            <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.hostserver.adv.relay_code_hint}" />
+            <SelectableTextBlock FontFamily="Consolas,Menlo,monospace" FontSize="11" TextWrapping="Wrap" Text="{Binding RelayCommandLine}" />
+            <WrapPanel Orientation="Horizontal">
+              <Button Margin="0,0,6,4" Content="{l:T multiplayer.hostserver.adv.copy_code}" Command="{Binding CopyRelayCodeCommand}" />
+              <Button Margin="0,0,6,4" Content="{l:T multiplayer.hostserver.adv.hide_code}" Command="{Binding HideRelayCodeCommand}" />
+            </WrapPanel>
+          </StackPanel>
+        </Border>
+      </StackPanel>
+
+      <!-- Entry port rotation -->
+      <StackPanel Spacing="6">
+        <TextBlock FontWeight="SemiBold" Text="{l:T multiplayer.hostserver.adv.rotation}" />
+        <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.hostserver.adv.rotation_hint}" />
+        <WrapPanel Orientation="Horizontal">
+          <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,0,12,6">
+            <TextBlock VerticalAlignment="Center" Text="{l:T multiplayer.hostserver.adv.rotation_every}" />
+            <TextBox x:Name="HostRotationMinutes" Width="70" Text="{Binding RotationMinutes}" />
+            <TextBlock VerticalAlignment="Center" Text="{l:T multiplayer.hostserver.adv.minutes}" />
+          </StackPanel>
+          <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,0,12,6">
+            <TextBlock VerticalAlignment="Center" Text="{l:T multiplayer.hostserver.adv.port_range}" />
+            <TextBox Width="80" Text="{Binding RotationMinPort}" />
+            <TextBlock VerticalAlignment="Center" Text="–" />
+            <TextBox Width="80" Text="{Binding RotationMaxPort}" />
+          </StackPanel>
+        </WrapPanel>
+        <WrapPanel Orientation="Horizontal">
+          <Button x:Name="HostRotationApply" Margin="0,0,6,4" Command="{Binding ApplyRotationCommand}">
+            <Panel>
+              <TextBlock Text="{l:T multiplayer.hostserver.adv.rotation_turn_on}" IsVisible="{Binding !RotationEnabled}" />
+              <TextBlock Text="{l:T multiplayer.hostserver.adv.rotation_save}" IsVisible="{Binding RotationEnabled}" />
+            </Panel>
+          </Button>
+          <Button Margin="0,0,6,4" Content="{l:T multiplayer.hostserver.adv.rotation_turn_off}" Command="{Binding TurnOffRotationCommand}" IsVisible="{Binding RotationEnabled}" />
+        </WrapPanel>
+        <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{Binding RotationNow}" IsVisible="{Binding RotationNow, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+      </StackPanel>
+
+      <!-- Signed address record (servers without a domain name) -->
+      <StackPanel Spacing="6">
+        <CheckBox x:Name="HostRecordsSwitch" IsChecked="{Binding RecordsEnabled}">
+          <TextBlock TextWrapping="Wrap" Text="{l:T multiplayer.hostserver.adv.records}" />
+        </CheckBox>
+        <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.hostserver.adv.records_hint}" />
+      </StackPanel>
+
+      <TextBlock x:Name="HostAdvancedStatus" FontSize="12" TextWrapping="Wrap" Text="{Binding AdvancedStatus}" IsVisible="{Binding AdvancedStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+    </StackPanel>
+  </Expander>
+</UserControl>

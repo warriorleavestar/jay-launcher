@@ -22,7 +22,7 @@ public sealed class HostMemberItem(GateMember member)
 /// <summary>
 /// 联机页里的“开服”：在这台电脑上跑 Jay 服务器版（网关 + 原版 MC 服务端），和命令行 jay-server 用同一套 Core。
 /// 步骤：填玩家连的地址 → 准备 MC 服务端（下载、Java、EULA）→ 启动 → 给朋友发邀请码。
-/// 隐私+/++、节点、端口轮换这些进阶设置仍用命令行（数据目录相同，见 <see cref="DataDirectory"/>）。关掉 Jay 时服务器存盘停止。
+/// 隐私+/++、中转、端口轮换和地址记录在“高级设置”里（HostServerViewModel.Advanced.cs），和命令行改的是同一个数据目录。关掉 Jay 时服务器存盘停止。
 /// </summary>
 public sealed partial class HostServerViewModel : ObservableObject
 {
@@ -41,6 +41,7 @@ public sealed partial class HostServerViewModel : ObservableObject
     {
         _service = service;
         DataDirectory = root ?? Path.Combine(AppSettings.DataDir, "jay-server");
+        L.Changed += () => Dispatcher.UIThread.Post(() => OnPropertyChanged(nameof(PrivacyExplanation)));
     }
 
     /// <summary>服务器数据目录（命令行用 jay-server --dir 指向它就能管同一台服务器）。</summary>
@@ -123,6 +124,8 @@ public sealed partial class HostServerViewModel : ObservableObject
             var config = Store().LoadConfig();
             PublicHost = config.PublicHost;
             PublicPort = config.PublicPort.ToString();
+            try { LoadAdvanced(Store().Read()); }
+            catch (Exception e) when (e is IOException or System.Text.Json.JsonException) { }
         }
         if (host.IsSetUp)
         {
@@ -388,6 +391,7 @@ public sealed partial class HostServerViewModel : ObservableObject
             InvitePassphrase = "";
             _shownInviteFor = null;
         }
+        RefreshAdvanced(state);
         var names = state.Members.OrderBy(m => m.Name, StringComparer.OrdinalIgnoreCase).Select(m => new HostMemberItem(m)).ToList();
         if (!names.Select(n => n.Detail + n.Name).SequenceEqual(Members.Select(n => n.Detail + n.Name)))
         {
