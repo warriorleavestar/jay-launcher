@@ -138,6 +138,27 @@ public class HelpLibraryTests
     [InlineData("fr", "en")]
     public void HelpLanguageFallsBack(string ui, string expected) => Assert.Equal(expected, HelpLibrary.HelpLanguage(ui));
 
+    /// <summary>The settings article lists the settings groups by their on-screen names, in page order, with the right count.</summary>
+    [Theory]
+    [InlineData("zh-Hans")]
+    [InlineData("zh-Hant")]
+    [InlineData("en")]
+    [InlineData("ja")]
+    public void SettingsArticleListsTheSettingsGroups(string lang)
+    {
+        var article = HelpLibrary.Load(lang).Get("settings");
+        Assert.NotNull(article);
+        var intro = article!.Blocks.First(b => b.Kind == HelpBlockKind.Paragraph).Text;
+        var colon = intro.IndexOfAny([':', '：']);
+        Assert.True(colon > 0, intro);
+        var named = intro[(colon + 1)..].TrimEnd('.', '。').Split([',', '、']).Select(s => s.Trim()).ToArray();
+        var table = Amber.Core.Localization.L.Load(lang);
+        Assert.Equal(SettingsCatalog.Groups.Select(g => table[g.TitleKey]).ToArray(), named);
+        var count = SettingsCatalog.Groups.Count;
+        string[] words = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve"];
+        Assert.Contains(lang == "en" ? $" {words[count]} " : $" {count} ", intro);
+    }
+
     /// <summary>The catalog of official §9.7: every category has articles, in every language.</summary>
     [Theory]
     [InlineData("zh-Hans")]

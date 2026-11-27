@@ -41,6 +41,8 @@ public sealed class TaskHandle
     public string? Detail { get; private set; }
     /// <summary>结束后的结果说明（失败原因、部分成功的明细）。</summary>
     public string? Message { get; private set; }
+    /// <summary>当前正在下载的文件名。只留文件名，不向界面暴露用户的本地路径。</summary>
+    public IReadOnlyList<string> ActiveFiles { get; private set; } = [];
     public bool CanCancel => _cancel is not null && State == TaskState.Running;
     public bool IsRunning => State == TaskState.Running;
     public bool CancelRequested { get; private set; }
@@ -63,13 +65,14 @@ public sealed class TaskHandle
     /// 报告进度。任务已经结束时忽略（迟到的进度回调不能把结果改回“进行中”）。
     /// <paramref name="bytes"/> is the total transferred so far; with it the progress line shows a speed.
     /// </summary>
-    public void Report(double? progress, string? detail = null, long? bytes = null)
+    public void Report(double? progress, string? detail = null, long? bytes = null, IReadOnlyList<string>? activeFiles = null)
     {
         lock (_owner.Gate)
         {
             if (State != TaskState.Running) return;
             Progress = progress is { } p ? Math.Clamp(p, 0, 1) : null;
             if (detail is not null) Detail = detail;
+            if (activeFiles is not null) ActiveFiles = [.. activeFiles];
             _meter.Add(_owner.Now(), Progress, bytes);
         }
         _owner.RaiseChanged(this);
@@ -116,7 +119,7 @@ public sealed class TaskHandle
 public sealed class TaskContext(TaskHandle handle)
 {
     public TaskHandle Handle { get; } = handle;
-    public void Report(double? progress, string? detail = null, long? bytes = null) => Handle.Report(progress, detail, bytes);
+    public void Report(double? progress, string? detail = null, long? bytes = null, IReadOnlyList<string>? activeFiles = null) => Handle.Report(progress, detail, bytes, activeFiles);
 }
 
 /// <summary>
@@ -146,11 +149,6 @@ public sealed class TaskCenter(Func<DateTimeOffset>? clock = null)
     public IReadOnlyList<TaskHandle> Active
     {
         get { lock (Gate) return _all.Where(t => t.IsRunning).ToList(); }
-    }
-
-    public bool HasActive
-    {
-        get { lock (Gate) return _all.Any(t => t.IsRunning); }
     }
 
     /// <summary>所有在跑的、知道进度的任务的平均进度（顶栏活动按钮外圈）。没有在跑的是 null。</summary>
