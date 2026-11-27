@@ -18,10 +18,10 @@ set -euo pipefail
 
 # Same pins as src/Amber.Core/Multiplayer/EasyTier.cs.
 VERSION="2.6.4"
-TAG="jay-v2.6.4-3"
-COMMIT="9407746b1ce1"
-SHA_X86_64="6ad63ed07f270f2942387d1257ef0db45a31b2e525c73f8aa981c7c94fbcb300"
-SHA_AARCH64="6c1a99ea81f1e1dd8fc8f13aa6f0df8d9e22925202dda18b4e40ad62ac49f7ac"
+TAG="jay-v2.6.4-4"
+COMMIT="b26dc3d4756d"
+SHA_X86_64="1ec71827263dd0d25974b430ddcd92d6f6c5a29407e6909c1bed26e19aa083c7"
+SHA_AARCH64="d0223401dfd4b3614c06b55e5b14f0668be882bda1a31113a6dfd7accac0b7bf"
 
 PORT="${PORT:-11010}"
 RELAY="${RELAY:-amber}"
