@@ -104,6 +104,24 @@ public sealed class LocalKeyProtectionTests : IDisposable
     }
 
     [Fact]
+    public void ACutOffSealedWrapKeyIsSetAsideAndTheIdentityMadeAgain()
+    {
+        if (OperatingSystem.IsWindows()) return; // Windows protects the identity with DPAPI instead.
+        LocalKeyProtection.ProtectorForTest = new TestKeyStore();
+        using (MemberIdentity.LoadOrCreate(_dir)) { }
+        var wrapPath = Directory.EnumerateFiles(_dir, "identity.wrap").Single();
+        // Power was lost while the sealed key was first written: only the marker and part of the sealed key are there.
+        var stored = File.ReadAllBytes(wrapPath);
+        File.WriteAllBytes(wrapPath, stored[..(stored.Length - 10)]);
+        foreach (var other in Directory.EnumerateFiles(_dir).Where(f => f != wrapPath)) File.Delete(other);
+        using (var identity = MemberIdentity.LoadOrCreate(_dir)) Assert.NotNull(identity);
+        Assert.True(File.Exists(wrapPath + ".broken"));
+        Assert.Equal(6 + LocalKeyProtection.SealedLength, new FileInfo(wrapPath).Length);
+        // The new identity is saved and loads again.
+        using (var again = MemberIdentity.LoadOrCreate(_dir)) Assert.NotNull(again);
+    }
+
+    [Fact]
     public void ABrokenKeyStoreFallsBackToTheRawKeyFile()
     {
         LocalKeyProtection.ProtectorForTest = new BrokenKeyStore();

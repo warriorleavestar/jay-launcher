@@ -5,7 +5,8 @@ namespace Amber.Core.Auth;
 /// <summary>
 /// Seals the local wrap keys (the 32-byte key files next to the device identity, accounts and saved
 /// servers) with a key the operating system keeps outside the app's files, such as the Android Keystore
-/// or the iOS Keychain. Implementations use the platform's own authenticated encryption.
+/// or the iOS Keychain. Implementations use AES-256-GCM: <see cref="Seal"/> returns a 12-byte nonce, the 32-byte
+/// ciphertext and a 16-byte tag (<see cref="LocalKeyProtection.SealedLength"/> bytes in all).
 /// </summary>
 public interface ILocalKeyProtector
 {
@@ -23,6 +24,8 @@ public interface ILocalKeyProtector
 public static class LocalKeyProtection
 {
     public const int KeyLength = 32;
+    /// <summary>What <see cref="ILocalKeyProtector.Seal"/> returns for a key: nonce, ciphertext and tag.</summary>
+    public const int SealedLength = 12 + KeyLength + 16;
     private static readonly byte[] Magic = "AMBWK1"u8.ToArray();
     private static readonly AsyncLocal<ILocalKeyProtector?> TestProtector = new();
     private static ILocalKeyProtector? s_protector;
@@ -41,9 +44,12 @@ public static class LocalKeyProtection
         set => TestProtector.Value = value;
     }
 
-    /// <summary>True when the file content has a form this class can read (raw or sealed).</summary>
+    /// <summary>
+    /// True when the file content has a form this class can read (raw or sealed), at its full length: a file cut short
+    /// while it was first written (power loss) is not, so the caller can set it aside and make a new key.
+    /// </summary>
     internal static bool IsWellFormed(ReadOnlySpan<byte> stored) =>
-        stored.Length == KeyLength || (stored.StartsWith(Magic) && stored.Length > Magic.Length);
+        stored.Length == KeyLength || (stored.StartsWith(Magic) && stored.Length == Magic.Length + SealedLength);
 
     /// <summary>
     /// The bytes to write for a key. When the key store can't seal (a broken key store on some device), the key
@@ -55,7 +61,9 @@ public static class LocalKeyProtection
         {
             try
             {
-                return [.. Magic, .. protector.Seal(key)];
+                var sealedKey = protector.Seal(key);
+                // Only the full sealed form is written, so a later read can tell a complete file from a cut-off one.
+                if (sealedKey.Length == SealedLength) return [.. Magic, .. sealedKey];
             }
             catch (CryptographicException)
             {
@@ -72,6 +80,7 @@ public static class LocalKeyProtection
         {
             if (Protector is not { } protector)
                 throw new CryptographicException($"The {description} key is sealed by another device's key store");
+            if (stored.Length != Magic.Length + SealedLength) throw new CryptographicException($"Invalid {description} key");
             var key = protector.Open(stored[Magic.Length..]);
             if (key.Length != KeyLength)
             {
