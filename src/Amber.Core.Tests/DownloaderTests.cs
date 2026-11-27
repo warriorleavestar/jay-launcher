@@ -9,7 +9,7 @@ namespace Amber.Core.Tests;
 /// <summary>本机真实 HTTP 服务器，按需模拟范围请求、中断、错误和卡住。</summary>
 internal sealed class TestServer : IDisposable
 {
-    private readonly HttpListener _listener = new();
+    private HttpListener _listener = new();
     private readonly CancellationTokenSource _cts = new();
     private readonly Dictionary<string, byte[]> _files = [];
     public int Port { get; }
@@ -42,15 +42,37 @@ internal sealed class TestServer : IDisposable
 
     public byte[] CorruptFor(string path) => _files[path].Select(b => (byte)(b ^ 0xFF)).ToArray();
 
-    public TestServer()
+    public TestServer() : this(null) { }
+
+    /// <param name="pickPort">Picks the port to try (tests of the retry itself); by default a port the system just handed out.</param>
+    internal TestServer(Func<int>? pickPort)
+    {
+        // The probe frees its port before HttpListener binds it, so a parallel test can grab it in between: retry on a new port.
+        for (var attempt = 1; ; attempt++)
+        {
+            Port = pickPort?.Invoke() ?? FreePort();
+            try
+            {
+                _listener.Prefixes.Add(Root);
+                _listener.Start();
+                break;
+            }
+            catch (HttpListenerException) when (attempt < 5)
+            {
+                _listener.Close();
+                _listener = new HttpListener();
+            }
+        }
+        _ = Task.Run(LoopAsync);
+    }
+
+    private static int FreePort()
     {
         var probe = new TcpListener(IPAddress.Loopback, 0);
         probe.Start();
-        Port = ((IPEndPoint)probe.LocalEndpoint).Port;
+        var port = ((IPEndPoint)probe.LocalEndpoint).Port;
         probe.Stop();
-        _listener.Prefixes.Add(Root);
-        _listener.Start();
-        _ = Task.Run(LoopAsync);
+        return port;
     }
 
     public string Add(string path, byte[] data)
@@ -171,6 +193,62 @@ public class DownloaderTests : IDisposable
     private readonly HttpClient _http = Downloader.CreateHttpClient();
 
     public DownloaderTests() => Directory.CreateDirectory(_root);
+
+    [Fact]
+    public void TheTestServerMovesOnWhenItsPortIsTakenFirst()
+    {
+        var (taken, busy) = TakenPort();
+        using var _ = taken;
+        var tries = 0;
+        var last = 0;
+        // The free ports after the first try are probed and released, so one of them can be taken too: any later try may win.
+        using var server = new TestServer(() => last = ++tries == 1 ? busy : FreeLoopbackPort());
+        Assert.InRange(tries, 2, 5);
+        Assert.NotEqual(busy, server.Port);
+        Assert.Equal(last, server.Port);
+    }
+
+    [Fact]
+    public void TheTestServerGivesUpAfterFiveTakenPorts()
+    {
+        var (taken, busy) = TakenPort();
+        using var _ = taken;
+        var tries = 0;
+        Assert.Throws<HttpListenerException>(() => new TestServer(() => { tries++; return busy; }));
+        Assert.Equal(5, tries);
+    }
+
+    private static int FreeLoopbackPort()
+    {
+        var probe = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+        probe.Start();
+        var port = ((IPEndPoint)probe.LocalEndpoint).Port;
+        probe.Stop();
+        return port;
+    }
+
+    /// <summary>
+    /// A port another HttpListener holds on the same prefix the test server would use. A failed Start closes the
+    /// listener, so every attempt uses a new one; the caller disposes the one that holds the port.
+    /// </summary>
+    private static (HttpListener Holder, int Port) TakenPort()
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            var port = FreeLoopbackPort();
+            var holder = new HttpListener();
+            holder.Prefixes.Add($"http://127.0.0.1:{port}/");
+            try
+            {
+                holder.Start();
+                return (holder, port);
+            }
+            catch (HttpListenerException) when (attempt < 5)
+            {
+                holder.Close();
+            }
+        }
+    }
 
     public void Dispose()
     {

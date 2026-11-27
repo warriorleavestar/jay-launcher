@@ -79,14 +79,14 @@ public sealed class HostLobbyTests
     [Fact]
     public void LobbyArgsAreSeparateFromTheRoom()
     {
-        var host = LobbyArgs.Build(new LobbyOptions("jay-l-0011223344556677", "secret", true, ["tcp://1.2.3.4:11010"], 15000));
+        var host = LobbyArgs.Build(new LobbyOptions("jay-l-0011223344556677", "secret", true, ["tcp://192.0.2.4:11010"], 15000));
         Assert.Contains("10.234.0.1", host);
         Assert.Equal("47660", host[host.IndexOf("--tcp-whitelist") + 1]);
         Assert.Contains("--no-tun", host);
         Assert.Contains("--no-listener", host);
         Assert.DoesNotContain("secret", host);
         Assert.DoesNotContain("--port-forward", host);
-        var guest = LobbyArgs.Build(new LobbyOptions("jay-l-0011223344556677", "secret", false, ["tcp://1.2.3.4:11010"], 15001, 40000));
+        var guest = LobbyArgs.Build(new LobbyOptions("jay-l-0011223344556677", "secret", false, ["tcp://192.0.2.4:11010"], 15001, 40000));
         Assert.Equal("1", guest[guest.IndexOf("--tcp-whitelist") + 1]);
         Assert.Contains("tcp://127.0.0.1:40000/10.234.0.1:47660", guest);
         Assert.StartsWith("10.234.0.", guest[guest.IndexOf("--ipv4") + 1]);
