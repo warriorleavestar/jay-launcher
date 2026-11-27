@@ -40,9 +40,11 @@ public sealed class UpdateCheck(HttpClient http, string dataDir, TrustList? trus
         {
             try
             {
-                return long.TryParse(File.ReadAllText(StatePath).Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var seq) ? seq : 0;
+                if (long.TryParse(File.ReadAllText(StatePath).Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var seq)) return seq;
+                throw new InvalidDataException(L.T("tools.update.verdict.malformed"));
             }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return 0; }
+            catch (FileNotFoundException) { return 0; }
+            catch (DirectoryNotFoundException) { return 0; }
         }
     }
 
@@ -81,7 +83,7 @@ public sealed class UpdateCheck(HttpClient http, string dataDir, TrustList? trus
 
         var check = ReleaseSignature.Verify(sigs, sums, chain, tag, trust, HighestSeq);
         if (!check.IsValid) return new(info, check, empty, assets);
-        Remember(check.Seq);
+        if (!Remember(check.Seq)) return new(info, new(ReleaseVerdict.Rollback, tag, check.Seq), empty, assets);
         return new(info, check, ReleaseSignature.ParseSums(Encoding.UTF8.GetString(sums)), assets);
     }
 
@@ -89,31 +91,58 @@ public sealed class UpdateCheck(HttpClient http, string dataDir, TrustList? trus
     /// Downloads <paramref name="name"/> from a verified release into <paramref name="destinationDir"/>. The file appears
     /// there only when its SHA-256 equals the one in the signed list; otherwise nothing is kept and this throws.
     /// </summary>
-    public async Task<string> DownloadAsync(VerifiedUpdate update, string name, string destinationDir, CancellationToken ct = default)
+    public async Task<string> DownloadAsync(VerifiedUpdate update, string name, string destinationDir, CancellationToken ct = default,
+        Action<long, long?>? progress = null)
     {
-        if (!update.IsVerified) throw new InvalidOperationException("release is not verified");
+        if (!update.IsVerified || update.Check.Seq < HighestSeq)
+            throw new InvalidOperationException(L.T("tools.update.verdict.rollback"));
         if (!update.Sums.TryGetValue(name, out var expected) || !update.Assets.TryGetValue(name, out var url))
-            throw new InvalidDataException($"{name} is not listed in the signed SHA256SUMS.txt");
+            throw new InvalidDataException(L.T("tools.update.verdict.notlisted"));
         Directory.CreateDirectory(destinationDir);
         var target = Path.Combine(destinationDir, name);
-        var partial = target + ".part";
-        using (var scope = Net.NetworkPolicy.Scope(Net.NetworkCategory.UpdateCheck))
+        var partial = target + "." + Guid.NewGuid().ToString("N") + ".part";
+        if (File.Exists(target))
         {
+            await using var cached = File.OpenRead(target);
+            if (Convert.ToHexStringLower(await SHA256.HashDataAsync(cached, ct)) == expected) return target;
+        }
+        try
+        {
+            using var scope = Net.NetworkPolicy.Scope(Net.NetworkCategory.UpdateCheck);
             using var response = await http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
             response.EnsureSuccessStatusCode();
+            const long limit = 1024L * 1024 * 1024;
+            var size = response.Content.Headers.ContentLength;
+            if (size > limit) throw new InvalidDataException(L.T("tools.update.size"));
             await using var source = await response.Content.ReadAsStreamAsync(ct);
-            await using var file = new FileStream(partial, FileMode.Create, FileAccess.Write, FileShare.None);
-            await source.CopyToAsync(file, ct);
+            using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+            long bytes = 0;
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            var buffer = new byte[128 * 1024];
+            await using (var file = new FileStream(partial, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                int n;
+                while ((n = await source.ReadAsync(buffer, ct)) > 0)
+                {
+                    bytes += n;
+                    if (bytes > limit) throw new InvalidDataException(L.T("tools.update.size"));
+                    hash.AppendData(buffer, 0, n);
+                    await file.WriteAsync(buffer.AsMemory(0, n), ct);
+                    if (clock.ElapsedMilliseconds >= 200)
+                    {
+                        progress?.Invoke(bytes, size);
+                        clock.Restart();
+                    }
+                }
+            }
+            if (Convert.ToHexStringLower(hash.GetHashAndReset()) != expected)
+                throw new InvalidDataException(L.T("tools.update.verdict.hashmismatch"));
+            ct.ThrowIfCancellationRequested();
+            File.Move(partial, target, overwrite: true);
+            progress?.Invoke(bytes, size);
+            return target;
         }
-        string actual;
-        await using (var read = File.OpenRead(partial)) actual = Convert.ToHexStringLower(await SHA256.HashDataAsync(read, ct));
-        if (!CryptographicOperations.FixedTimeEquals(Encoding.ASCII.GetBytes(actual), Encoding.ASCII.GetBytes(expected)))
-        {
-            File.Delete(partial);
-            throw new InvalidDataException($"{name}: SHA-256 differs from the signed list");
-        }
-        File.Move(partial, target, overwrite: true);
-        return target;
+        finally { File.Delete(partial); }
     }
 
     /// <summary>Why a release was not offered, in the user's language.</summary>
@@ -132,13 +161,16 @@ public sealed class UpdateCheck(HttpClient http, string dataDir, TrustList? trus
         _ => "tools.update.verdict.malformed",
     });
 
-    private void Remember(long seq)
+    private bool Remember(long seq)
     {
-        if (seq <= HighestSeq) return;
         Directory.CreateDirectory(dataDir);
+        using var stateLock = new FileStream(StatePath + ".lock", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+        var highest = HighestSeq;
+        if (seq <= highest) return seq == highest;
         var temp = StatePath + ".tmp";
         File.WriteAllText(temp, seq.ToString(CultureInfo.InvariantCulture) + "\n");
         File.Move(temp, StatePath, overwrite: true);
+        return true;
     }
 
     private async Task<byte[]> GetAsync(Uri url, int max, CancellationToken ct)
