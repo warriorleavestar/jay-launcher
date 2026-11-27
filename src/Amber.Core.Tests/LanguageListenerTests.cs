@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using Amber.App.Controls.Safety;
 using Amber.App.Localization;
 using Amber.Core.Localization;
 
@@ -62,4 +63,47 @@ public class LanguageListenerTests
         GC.Collect();
         Assert.True(LanguageListeners.LiveCount < baseline + 50, $"还活着 {LanguageListeners.LiveCount}，开始时 {baseline}");
     }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static WeakReference[] MakeSafetySurfaces() => [new(new SafetyPanel { Title = "t" }), new(new PrivacyRow())];
+
+    /// <summary>
+    /// Safety panels are built for every safety dialog, request popup and knock card: listening for language changes
+    /// must not keep them alive after they are closed.
+    /// </summary>
+    [Fact]
+    public void ClosedSafetySurfacesAreCollected()
+    {
+        WeakReference[] weak = [];
+        UiTestThread.Run(() => weak = MakeSafetySurfaces());
+        for (var i = 0; i < 3 && weak.Any(w => w.IsAlive); i++)
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+        }
+        Assert.False(weak[0].IsAlive, "SafetyPanel is still alive");
+        Assert.False(weak[1].IsAlive, "PrivacyRow is still alive");
+    }
+
+    [Fact]
+    public void SafetySurfacesFollowTheLanguage() => UiTestThread.Run(() =>
+    {
+        var before = L.Language;
+        try
+        {
+            L.SetLanguage("en");
+            var panel = new SafetyPanel();
+            var row = new PrivacyRow();
+            L.SetLanguage("zh-Hans");
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            Assert.Equal(L.T("safety.title"), panel.BadgeText);
+            Assert.Equal($"{L.T("main.no_cloud_control")} · {L.T("main.no_telemetry")}", row.Text);
+            Assert.Equal(row.Text, Avalonia.Automation.AutomationProperties.GetName(row));
+        }
+        finally
+        {
+            L.SetLanguage(before);
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+        }
+    });
 }

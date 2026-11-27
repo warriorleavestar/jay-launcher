@@ -50,7 +50,8 @@
           <DataTemplate DataType="l:OptionItem"><TextBlock Text="{Binding Label}" /></DataTemplate>
         </ListBox.ItemTemplate>
       </ListBox>
-      <TextBox x:Name="SearchBox" Grid.Column="1" Text="{Binding Search}" PlaceholderText="{l:T download.search.placeholder}" Margin="10,0" MinWidth="120" />
+      <TextBox x:Name="SearchBox" Grid.Column="1" Text="{Binding Search}" PlaceholderText="{l:T download.search.placeholder}"
+               Margin="10,0" MinWidth="120" MaxWidth="720" />
       <Button x:Name="RefreshButton" Grid.Column="2" Content="{l:T common.refresh}" Command="{Binding RefreshCommand}" />
     </Grid>
 

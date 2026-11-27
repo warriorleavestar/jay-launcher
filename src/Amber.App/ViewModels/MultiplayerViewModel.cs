@@ -119,7 +119,8 @@ public sealed partial class MultiplayerViewModel : PageViewModel
 
     [ObservableProperty] public partial LanGameItem? SelectedLanGame { get; set; }
     [ObservableProperty] public partial string ManualPort { get; set; } = "";
-    [ObservableProperty] public partial bool IsScanning { get; set; }
+    [ObservableProperty, NotifyCanExecuteChangedFor(nameof(HostFromLobbyCommand), nameof(RepeatLastRoomCommand), nameof(CreateDirectRoomCommand))]
+    public partial bool IsScanning { get; set; }
 
     [ObservableProperty] public partial string JoinCode { get; set; } = "";
 
@@ -359,11 +360,29 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         if (IsScanning) return;
         IsScanning = true;
         // What the room was linked to when the scan started: a world picked or a port typed during the scan wins.
+        var previousGames = LanGames.ToArray();
+        var previousSelection = SelectedLanGame;
         var relayAtStart = _gameRelay;
         var checkAtStart = _relayCheck;
         try
         {
             var found = await (ScanForTest ?? (() => Amber.Core.Multiplayer.LanGames.ListenAsync(TimeSpan.FromSeconds(3))))();
+            // A quiet but still reachable local world can miss the multicast window.
+            // Only recheck entries present before the scan; game output may add a newer one meanwhile.
+            if (IsIdle && relayAtStart is null)
+            {
+                var advertised = found.Select(g => g.Port).ToHashSet();
+                var probes = previousGames.Where(item => !advertised.Contains(item.Game.Port))
+                    .Select(async item => (item, alive: await (GamePortReadyForTest ?? GamePortReadyAsync)(item.Game.Port, false)));
+                var checkedGames = await Task.WhenAll(probes);
+                if (IsIdle && _gameRelay is null)
+                    foreach (var (item, alive) in checkedGames)
+                    {
+                        if (alive || !LanGames.Any(g => ReferenceEquals(g, item))) continue;
+                        if (ReferenceEquals(SelectedLanGame, item)) SelectedLanGame = null;
+                        LanGames.Remove(item);
+                    }
+            }
             var fresh = new List<int>();
             foreach (var game in found)
             {
@@ -378,7 +397,8 @@ public sealed partial class MultiplayerViewModel : PageViewModel
                 else if (RelayPickAfterScan(found.Select(g => g.Port).ToList(), fresh, relay.Target, relay.Port) is { } port)
                     LinkFoundGame(port);
             }
-            else SelectedLanGame ??= LanGames.FirstOrDefault();
+            else SelectedLanGame ??= LanGames.FirstOrDefault(g => g.Game.Motd == previousSelection?.Game.Motd)
+                ?? LanGames.FirstOrDefault();
             if (IsIdle && LanGames.Count == 0) SetStatus(StatusMessage.Error("multiplayer.lan.not_found"));
         }
         catch (SocketException e)

@@ -311,6 +311,37 @@ public sealed class GamePortRelayTests
     });
 
     [Fact]
+    public void LobbyRefreshSelectsTheReopenedWorldAndKeepsOtherLiveWorlds() => UiTestThread.Run(() =>
+    {
+        using var service = new LauncherService(new AppSettings { GameDirectory = TestDataDir.Path, PlayerName = "" });
+        var vm = new MultiplayerViewModel(service);
+        var scan = new TaskCompletionSource<List<LanGame>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var quiet = new LanGameItem(new LanGame("Other world", 41230), "log");
+        var closed = new LanGameItem(new LanGame("Reopened world", 41231), "broadcast");
+        vm.LanGames.Add(quiet);
+        vm.LanGames.Add(closed);
+        vm.SelectedLanGame = closed;
+        vm.ScanForTest = () => scan.Task;
+        vm.GamePortReadyForTest = (port, _) => Task.FromResult(port == quiet.Game.Port);
+
+        vm.ScanCommand.Execute(null);
+        Assert.False(vm.HostFromLobbyCommand.CanExecute(null));
+        scan.SetResult([new("Reopened world", 41232)]);
+        Pump(() => !vm.IsScanning);
+        Assert.Equal(41232, vm.SelectedLanGame?.Game.Port);
+        Assert.DoesNotContain(closed, vm.LanGames);
+        Assert.Contains(quiet, vm.LanGames);
+        Assert.True(vm.HostFromLobbyCommand.CanExecute(null));
+
+        vm.GamePortReadyForTest = (_, _) => Task.FromResult(false);
+        vm.ScanForTest = () => Task.FromResult(new List<LanGame>());
+        vm.ScanCommand.Execute(null);
+        Pump(() => !vm.IsScanning);
+        Assert.Empty(vm.LanGames);
+        Assert.Null(vm.SelectedLanGame);
+    });
+
+    [Fact]
     public void APortTypedDuringFindIsNotReplacedByWhatFindFound() => UiTestThread.Run(() =>
     {
         using var service = new LauncherService(new AppSettings { GameDirectory = TestDataDir.Path, PlayerName = "" });

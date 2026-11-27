@@ -74,12 +74,12 @@ public sealed class AutoUpdateCheckTests
     public void RecognisesGitHubReleaseFeeds(string feed, string? pages) => Assert.Equal(pages, AutoUpdateCheck.GitHubReleasePages(feed));
 
     [Fact]
-    public void ChecksOnceADay()
+    public void ChecksAtMostEveryFifteenMinutes()
     {
         var now = DateTimeOffset.UtcNow;
         Assert.True(AutoUpdateCheck.IsDue(null, now));
-        Assert.False(AutoUpdateCheck.IsDue(now.AddHours(-23), now));
-        Assert.True(AutoUpdateCheck.IsDue(now.AddHours(-24), now));
+        Assert.False(AutoUpdateCheck.IsDue(now.AddMinutes(-14), now));
+        Assert.True(AutoUpdateCheck.IsDue(now.AddMinutes(-15), now));
         Assert.True(AutoUpdateCheck.IsDue(now.AddDays(3), now)); // a clock that went backwards doesn't block checks forever
     }
 

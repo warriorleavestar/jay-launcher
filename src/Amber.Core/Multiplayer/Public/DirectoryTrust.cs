@@ -112,7 +112,7 @@ public sealed class DirectoryTrust
     public DirectoryKeyMemory? Memory { get; init; }
     public Func<DateTimeOffset> Clock { get; init; } = () => DateTimeOffset.UtcNow;
 
-    /// <summary>Pinned keys or roots: every request goes through the authenticated channel and the legacy protocol is never used.</summary>
+    /// <summary>Pinned keys or roots: only those keys are accepted; first use is never applied.</summary>
     public bool IsStrict => Pinned.Count > 0 || Roots.Count > 0;
 
     /// <summary>Whether to accept <paramref name="key"/> at <paramref name="address"/>, given the certificate the directory sent.</summary>
@@ -130,7 +130,7 @@ public sealed class DirectoryTrust
         return true;
     }
 
-    /// <summary>For trust on first use: a key is already remembered for this address, so the legacy protocol is off.</summary>
+    /// <summary>For trust on first use: a key is already remembered for this address.</summary>
     public bool Remembers(string address) => Memory?.Get(Network, address) is not null;
 
     private static bool Contains(IReadOnlyList<byte[]> keys, byte[] key)

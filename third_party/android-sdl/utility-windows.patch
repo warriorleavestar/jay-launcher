@@ -1,0 +1,108 @@
+diff --git a/src/video/android/SDL_androidwindow.c b/src/video/android/SDL_androidwindow.c
+index 4652b5f..5e9e4f4 100644
+--- a/src/video/android/SDL_androidwindow.c
++++ b/src/video/android/SDL_androidwindow.c
+@@ -45,6 +45,27 @@ bool Android_CreateWindow(SDL_VideoDevice *_this, SDL_Window *window, SDL_Proper
+         return false;
+     }
+ 
++    // Jay Android: render non-interactive OpenGL utility windows to independent EGL pbuffers.
++    // Only the game's interactive window owns the activity surface, keyboard and pointer focus.
++#ifdef SDL_VIDEO_OPENGL_EGL
++    const SDL_WindowFlags probe_flags = SDL_WINDOW_OPENGL | SDL_WINDOW_UTILITY | SDL_WINDOW_NOT_FOCUSABLE;
++    if ((window->flags & probe_flags) == probe_flags) {
++        data = SDL_calloc(1, sizeof(*data));
++        if (!data) {
++            result = false;
++            goto endfunction;
++        }
++        data->egl_surface = SDL_EGL_CreateOffscreenSurface(_this, window->w, window->h);
++        if (data->egl_surface == EGL_NO_SURFACE) {
++            SDL_free(data);
++            result = SDL_SetError("Could not allocate the offscreen OpenGL probe");
++            goto endfunction;
++        }
++        window->internal = data;
++        goto endfunction;
++    }
++#endif
++
+     if (Android_Window) {
+         result = SDL_SetError("Android only supports one window");
+         goto endfunction;
+@@ -180,22 +201,22 @@ void Android_DestroyWindow(SDL_VideoDevice *_this, SDL_Window *window)
+ 
+     if (window == Android_Window) {
+         Android_Window = NULL;
++    }
+ 
+-        if (window->internal) {
+-            SDL_WindowData *data = window->internal;
++    if (window->internal) {
++        SDL_WindowData *data = window->internal;
+ 
+ #ifdef SDL_VIDEO_OPENGL_EGL
+-            if (data->egl_surface != EGL_NO_SURFACE) {
+-                SDL_EGL_DestroySurface(_this, data->egl_surface);
+-            }
++        if (data->egl_surface != EGL_NO_SURFACE) {
++            SDL_EGL_DestroySurface(_this, data->egl_surface);
++        }
+ #endif
+ 
+-            if (data->native_window) {
+-                ANativeWindow_release(data->native_window);
+-            }
+-            SDL_free(window->internal);
+-            window->internal = NULL;
++        if (data->native_window) {
++            ANativeWindow_release(data->native_window);
+         }
++        SDL_free(window->internal);
++        window->internal = NULL;
+     }
+ 
+     Android_UnlockActivityMutex();
+diff --git a/src/video/SDL_video.c b/src/video/SDL_video.c
+--- a/src/video/SDL_video.c
++++ b/src/video/SDL_video.c
+@@ -6237,7 +6237,10 @@
+     if (_this) {
+         SDL_Window *window;
+         for (window = _this->windows; window; window = window->next) {
+-            SDL_SetKeyboardFocus(window);
++            // Offscreen utility windows must never receive the game's keyboard focus.
++            if (!(window->flags & SDL_WINDOW_NOT_FOCUSABLE)) {
++                SDL_SetKeyboardFocus(window);
++            }
+             SDL_SendWindowEvent(window, SDL_EVENT_WINDOW_RESTORED, 0, 0);
+         }
+     }
+--- a/src/video/android/SDL_androidgl.c
++++ b/src/video/android/SDL_androidgl.c
+@@ -73,6 +73,25 @@
+ 
+     /*_this->egl_data->eglWaitNative(EGL_CORE_NATIVE_ENGINE);
+     _this->egl_data->eglWaitGL();*/
++    // Composite touch feedback into the same back buffer as the game world.
++    if (window == Android_Window) {
++        typedef void (*JayFrameFeedback)(void *, int, int);
++        static JayFrameFeedback feedback;
++        static bool resolved;
++        if (!resolved) {
++            void *host = dlopen("libjayjvm.so", RTLD_NOW | RTLD_NOLOAD);
++            if (host) {
++                feedback = (JayFrameFeedback)dlsym(host, "jay_mining_ring_before_swap");
++                dlclose(host);
++            }
++            resolved = true;
++        }
++        if (feedback) {
++            int w, h;
++            if (SDL_GetWindowSizeInPixels(window, &w, &h))
++                feedback(SDL_GL_GetCurrentContext(), w, h);
++        }
++    }
+     result = SDL_EGL_SwapBuffers(_this, window->internal->egl_surface);
+ 
+     Android_UnlockActivityMutex();
