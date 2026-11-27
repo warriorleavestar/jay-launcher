@@ -16,23 +16,51 @@ internal static class AndroidRuntimeStore
     private const string ManifestName = "runtime-manifest.json";
     private static readonly HttpClient RuntimeClient = CreateRuntimeClient();
 
-    public static string Root(Context context) => Path.Combine(context.FilesDir!.AbsolutePath, "game-runtime");
+    public static bool IsCurrentArchitectureSupported =>
+        CurrentArchitecture() is "arm64-v8a" or "x86_64";
 
-    public static bool IsInstalled(Context context)
+    public static string Root(Context context, bool java25 = false) =>
+        Path.Combine(context.FilesDir!.AbsolutePath, java25 ? "game-runtime-25" : "game-runtime");
+
+    public static bool RequiresJava25(Context context, string versionId)
     {
-        var root = Root(context);
+        var directory = new Amber.Core.Game.GameDirectory(Path.Combine(context.FilesDir!.AbsolutePath, "minecraft"));
+        return File.Exists(directory.VersionJsonPath(versionId)) &&
+               AndroidRuntimeChoice.UsesJava25(directory.ResolveVersion(versionId).JavaVersion?.MajorVersion ?? 8);
+    }
+
+    public static RuntimeArchiveDescriptor? Descriptor(Context context, bool java25)
+    {
+        if (!java25) return AndroidRuntimeCatalog.ForCurrentProcess();
+        var assets = Java25Assets(context);
+        if (assets is null) return null;
+        using var metadata = context.Assets!.Open(assets.DescriptorAsset);
+        var descriptor = JsonSerializer.Deserialize(metadata, AndroidDescriptorContext.Default.RuntimeArchiveDescriptor);
+        return descriptor is not null && descriptor.Architecture == CurrentArchitecture() && descriptor.Validate().Count == 0
+            ? descriptor
+            : null;
+    }
+
+    public static bool IsInstalled(Context context, bool java25 = false)
+    {
+        var root = Root(context, java25);
         var manifestPath = Path.Combine(root, ManifestName);
         if (!File.Exists(manifestPath)) return false;
         try
         {
             var manifest = RuntimeBundleManifest.Read(manifestPath);
-            var descriptor = AndroidRuntimeCatalog.ForCurrentProcess();
+            var java25Assets = java25 ? Java25Assets(context) : null;
+            var descriptor = Descriptor(context, java25);
             // Installation already verifies every SHA-256 before activation. Startup only checks
             // the immutable app-private layout so opening the game never hashes the full JRE on
-            // Android's UI thread.
-            return descriptor is not null &&
-                   string.Equals(manifest.Id, descriptor.Id, StringComparison.Ordinal) &&
-                   RuntimeBundleVerifier.VerifyLayout(root, manifest, CurrentArchitecture());
+            // Android's UI thread. PR/debug APKs intentionally omit the Java 25 download catalog;
+            // that must not invalidate a runtime which a previous signed build already installed.
+            // If this APK does carry a catalog, keep enforcing its exact runtime generation.
+            var catalogPresent = !java25 || java25Assets is not null;
+            var accepted = AndroidRuntimeAssetCatalog.AcceptsInstalledRuntime(
+                manifest.Id, descriptor?.Id, catalogPresent);
+            var layoutValid = RuntimeBundleVerifier.VerifyLayout(root, manifest, CurrentArchitecture());
+            return accepted && layoutValid;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or CryptographicException)
         {
@@ -43,6 +71,7 @@ internal static class AndroidRuntimeStore
     public static async Task<RuntimeBundleManifest> InstallAsync(
         Context context,
         RuntimeArchiveDescriptor descriptor,
+        bool java25,
         IProgress<RuntimeInstallProgress>? progress = null,
         CancellationToken ct = default)
     {
@@ -50,10 +79,12 @@ internal static class AndroidRuntimeStore
         try
         {
             var manifest = await RuntimeArchiveInstaller.InstallAsync(
-                Root(context),
+                Root(context, java25),
                 descriptor,
                 async (archive, token) =>
                 {
+                    var embeddedArchive = java25 ? Java25Assets(context)?.ArchiveAsset : null;
+                    if (embeddedArchive is not null) return context.Assets!.Open(embeddedArchive);
                     response = await RuntimeClient.GetAsync(archive.DownloadUrl, HttpCompletionOption.ResponseHeadersRead, token);
                     response.EnsureSuccessStatusCode();
                     if (response.RequestMessage?.RequestUri?.Scheme != Uri.UriSchemeHttps)
@@ -63,8 +94,9 @@ internal static class AndroidRuntimeStore
                     return await response.Content.ReadAsStreamAsync(token);
                 },
                 progress,
-                ct);
-            MakeRuntimeCodeReadOnly(context, manifest);
+                ct,
+                reuseInstalled: true);
+            MakeRuntimeCodeReadOnly(context, manifest, java25);
             return manifest;
         }
         finally
@@ -80,12 +112,18 @@ internal static class AndroidRuntimeStore
         _ => "unsupported"
     };
 
+    private static AndroidRuntimeAssets? Java25Assets(Context context) =>
+        AndroidRuntimeAssetCatalog.SelectJava25(
+            CurrentArchitecture(),
+            Environment.SystemPageSize,
+            context.Assets?.List("") ?? []);
+
     private static HttpClient CreateRuntimeClient() =>
         Downloader.CreateHttpClient(category: NetworkCategory.Download);
 
-    private static void MakeRuntimeCodeReadOnly(Context context, RuntimeBundleManifest manifest)
+    private static void MakeRuntimeCodeReadOnly(Context context, RuntimeBundleManifest manifest, bool java25)
     {
-        var root = Root(context);
+        var root = Root(context, java25);
         foreach (var file in manifest.Files)
         {
             var mode = UnixFileMode.UserRead | UnixFileMode.GroupRead | UnixFileMode.OtherRead;
@@ -95,3 +133,6 @@ internal static class AndroidRuntimeStore
         }
     }
 }
+
+[System.Text.Json.Serialization.JsonSerializable(typeof(RuntimeArchiveDescriptor))]
+internal sealed partial class AndroidDescriptorContext : System.Text.Json.Serialization.JsonSerializerContext;

@@ -110,7 +110,7 @@ public static class Program
           jay-server network hw-cert --root <根钥匙文件> --request <hardware.request.json> --out <hardware.cert> [--need N] [--secure-boot] [--no-tpm] [--network <网络名>]
               在离线电脑上给节点的硬件签证书（默认：只允许一项硬件标识变化，有 TPM 就必须对上 TPM）。先逐项显示内容和核对码，手打目录节点公钥最后 6 位才签
           jay-server network hw-cert --cosign <hardware.cert> --root <根钥匙文件>
-              另一位信任人在自己的离线电脑上加签（Jay 公共网络看 JayTrust.Need，现在是 2 把要 2 把；自己的网络看 dirRootsNeed），同样先显示再手打确认
+              另一位信任人在自己的离线电脑上加签（Jay 公共网络看 JayTrust.Need，现在是 3 把里任 2 把；自己的网络看 dirRootsNeed），同样先显示再手打确认
           jay-server node bind --install <证书> [--network <连接串或文件>]  只认签名够数的证书（不加 --network 就是 Jay 信任人）
           jay-server directory --network <连接串或文件> ...     用自己的公共网络当节点（不加就是 Jay 公共网络）
           网络 JSON 的格式见 networks/README.md。
@@ -318,7 +318,7 @@ public static class Program
 
     /// <summary>
     /// Release signing for trustees (privacy plan items 2 and 3). Every trustee signs on their own offline machine with
-    /// their own release key (separate from the key that reviews networks); a release needs JayTrust.ReleaseNeed of them (currently 2 of 2). Nothing here can run in CI.
+    /// their own release key (separate from the key that reviews networks); a release needs JayTrust.ReleaseNeed of them (currently 2 of 3). Nothing here can run in CI.
     /// </summary>
     internal static int ReleaseCommand(Options options, TextWriter output, Func<IReadOnlyList<string>, string, string, bool>? confirm = null)
     {

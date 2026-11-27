@@ -281,7 +281,9 @@ public sealed class SpeedTestServerTests
 
     private static async Task AssertClosed(Stream stream)
     {
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        // Far above every deadline under test (they are well under a second), so a busy CI machine running the whole
+        // suite in parallel still sees the close; a connection the server kept open would still time out here.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         try { Assert.Equal(0, await stream.ReadAsync(new byte[1], timeout.Token)); }
         catch (IOException) { }
     }

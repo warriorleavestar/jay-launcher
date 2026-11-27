@@ -46,9 +46,13 @@ public class SpeedTestSecurityTests
             TimeSpan.FromSeconds(1), TimeSpan.FromMilliseconds(300));
         await using var server = new SpeedTestServer(0, limits);
         using var client = await ConnectAsync(server.BoundPort);
-        await client.GetStream().WriteAsync(BitConverter.GetBytes(64L * 1024 * 1024));
+        // Capture the stream while the socket is known to be connected. On a slow CI runner the server's short
+        // total deadline can close the socket between the initial write and TrickleAsync's first GetStream call;
+        // that is the success condition under test, not a failure of the trickle writer.
+        var stream = client.GetStream();
+        await stream.WriteAsync(BitConverter.GetBytes(64L * 1024 * 1024));
         using var stop = new CancellationTokenSource();
-        var trickle = TrickleAsync(client, stop.Token);
+        var trickle = TrickleAsync(stream, stop.Token);
         try { await AssertClosedAsync(client, TimeSpan.FromSeconds(10)); }
         finally { stop.Cancel(); await trickle; }
         await WaitForAsync(() => server.ActiveSessions == 0);
@@ -115,13 +119,13 @@ public class SpeedTestSecurityTests
         while (!condition()) await Task.Delay(10, timeout.Token);
     }
 
-    private static async Task TrickleAsync(TcpClient client, CancellationToken ct)
+    private static async Task TrickleAsync(NetworkStream stream, CancellationToken ct)
     {
         try
         {
             while (true)
             {
-                await client.GetStream().WriteAsync(new byte[] { 1 }, ct);
+                await stream.WriteAsync(new byte[] { 1 }, ct);
                 await Task.Delay(25, ct);
             }
         }
