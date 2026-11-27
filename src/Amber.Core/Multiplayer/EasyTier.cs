@@ -65,13 +65,13 @@ public static class EasyTierRelease
     {
         // The APK carries the same verified, statically linked Linux executables for its ABI.
         ("android", Architecture.Arm64 or Architecture.X64) => For("linux", arch),
-        ("windows", Architecture.X64) => A("windows-x86_64", "cdb113651de1f37244f16d405447806a76cd9012780a4e519ed7eba062306888", 11_621_165, true),
-        ("windows", Architecture.Arm64) => A("windows-arm64", "a5ce68a4a6f0e458e10ff3dbabadedacc6ddcf621bd5c4338efe613cabfceefa", 10_643_891, true),
-        ("windows", Architecture.X86) => A("windows-i686", "32e8d1c6b06ba53614c5581295d317f1bcf1d044398631ab486c616e2e9cfe7b", 11_223_763, true),
-        ("macos", Architecture.X64) => A("macos-x86_64", "74e059185ba6cc32e3464cad66eab0ff8c86c5cbbb12b51ffaa41dda38a3724b", 12_104_239),
-        ("macos", Architecture.Arm64) => A("macos-aarch64", "57063f611183f30804f3104498859166845eaa7b9e93a8a769cedb9eca66bc79", 10_738_210),
-        ("linux", Architecture.X64) => A("linux-x86_64", "6ad63ed07f270f2942387d1257ef0db45a31b2e525c73f8aa981c7c94fbcb300", 13_500_986),
-        ("linux", Architecture.Arm64) => A("linux-aarch64", "6c1a99ea81f1e1dd8fc8f13aa6f0df8d9e22925202dda18b4e40ad62ac49f7ac", 12_087_737),
+        ("windows", Architecture.X64) => A("windows-x86_64", "bc3fc002435e038e75626948ccb92bbd2453522a6626e58268952643d832b3c9", 11_623_966, true),
+        ("windows", Architecture.Arm64) => A("windows-arm64", "8e963acdc9ebd7ed68a39d2f77ccdc71c1671bfb4266204463cdd155515bd6dd", 10_634_843, true),
+        ("windows", Architecture.X86) => A("windows-i686", "455ead99ac54c818b5c9909039bdfe4f43bc423d804c3537a99dba910f9ce6c6", 11_223_550, true),
+        ("macos", Architecture.X64) => A("macos-x86_64", "4dd19601891a2360b83ebffdfb0732d99bad93ec131126634660f6b37db1f739", 12_104_481),
+        ("macos", Architecture.Arm64) => A("macos-aarch64", "6fdafc2b487da341e8bbb734abc1ac4a50f26393860f8ff3aeef8ce765547211", 10_738_585),
+        ("linux", Architecture.X64) => A("linux-x86_64", "fa1f952066b1bf9353e9a898efcdc00284872137d72c738edb927455eaeea1cd", 13_501_115),
+        ("linux", Architecture.Arm64) => A("linux-aarch64", "49c1829e34e6c7fa7ef1f7572fcbadebaba7974a1db123895694e0a5ca8151f1", 12_088_381),
         _ => throw new PlatformNotSupportedException(L.F("core.mp.component.unsupportedplatform", os, arch)),
     };
 
@@ -89,11 +89,8 @@ public static class EasyTierRelease
     /// </summary>
     public static ReleaseCheck Signature => SignatureCheck.Value;
 
-    // This immutable EasyTier build was signed before the third release key was added. Keep verifying it against the
-    // exact 2-of-2 list named by its signed statement; Jay releases and future component builds still use TrustList.Jay
-    // (currently 2-of-3). The two keys remain in JayTrust.ReleaseKeys, so this grants no trust to a retired or unknown key.
-    internal static TrustList EmbeddedTrust => new(
-        [.. JayTrust.ReleaseKeys.Take(2).Select(Convert.FromBase64String)], 2);
+    // The build rebuilt at its new home (warriorleavestar/jay-easytier) is signed under the current list.
+    internal static TrustList EmbeddedTrust => TrustList.Jay;
 
     private static readonly Lazy<ReleaseCheck> SignatureCheck = new(() =>
         CheckSignature(Embedded(ReleaseSignature.SignatureFileName) is { } m ? Encoding.UTF8.GetString(m) : null,
