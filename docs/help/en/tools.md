@@ -16,4 +16,4 @@ The old toolbox is gone; each of its tools now sits where you would look for it.
 - Try a download: open "Connection problems?" in Multiplayer and unfold **Download file**.
 
 ## If something goes wrong
-- Check for updates asks the official Jay releases unless you set your own address in [Settings › Downloads and services](jay:settings#UpdateFeed). A new install also checks once a day by itself (an upgraded Jay keeps that off until you turn it on); switch it in [Settings › About](jay:settings#AutoUpdate). If you run an older Jay in between, it forgets the switch, so check it again afterwards. It only tells you about a new version that the trustees signed and never downloads it.
+- Choose [Settings › About](jay:settings#AutoUpdate) to enable automatic checks or check now. While Jay is open it checks every 15 minutes. A signed update for Windows, macOS or Android appears in the launcher. Choose Download and update, then confirm in the system installer. Jay keeps your game directory. An optional [custom update feed](jay:settings#UpdateFeed) replaces the official feed.

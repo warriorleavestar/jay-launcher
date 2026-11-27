@@ -4,6 +4,7 @@ using Amber.Core.Localization;
 using Amber.Core.Navigation;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Platform;
 using Avalonia.VisualTree;
 
 namespace Amber.App.Views;
@@ -33,12 +34,18 @@ internal sealed partial class SelfTest
             WriteLibraryVersion(game, "quilt-1.20.4", """[{"name":"org.quiltmc:quilt-loader:0.26.0"}]""");
             Directory.CreateDirectory(Path.Combine(game, "versions", "fabric-1.20.1", "mods"));
             Directory.CreateDirectory(empty);
+            const string cachedCoverUrl = "https://cdn.example.test/modpacks/skyblock.png";
+            var cachedCoverPath = InstanceCoverCache.PathFor(cachedCoverUrl);
+            Directory.CreateDirectory(Path.GetDirectoryName(cachedCoverPath)!);
+            await using (var asset = AssetLoader.Open(new Uri("avares://Jay/Assets/jay.png")))
+            await using (var cache = File.Create(cachedCoverPath))
+                await asset.CopyToAsync(cache);
             var now = DateTimeOffset.Now;
             service.Settings.Instances = new()
             {
                 ["fabric-1.20.1"] = new() { DisplayName = "生存整合包", LastPlayed = now.AddDays(-1), PlayMinutes = 2160 },
                 ["forge-1.20.1"] = new() { DisplayName = "工业", State = "incomplete" },
-                ["neoforge-1.21.1"] = new() { DisplayName = "空岛", LastPlayed = now.AddHours(-3) },
+                ["neoforge-1.21.1"] = new() { DisplayName = "空岛", LastPlayed = now.AddHours(-3), CoverUrl = cachedCoverUrl },
                 ["quilt-1.20.4"] = new() { DisplayName = "Tech", Pinned = true },
             };
             service.Settings.RecentInstances = ["fabric-1.20.1", "neoforge-1.21.1"];
@@ -50,6 +57,7 @@ internal sealed partial class SelfTest
             service.SetCurrentInstance("fabric-1.20.1");
             main.Shell.Navigate("library");
             await WaitAsync(() => library.IsLoaded && library.TotalCount == 5, 10);
+            await WaitAsync(() => library.Cards.FirstOrDefault(card => card.Id == "neoforge-1.21.1")?.HasCoverImage == true, 3);
             window.Width = 1024;
             window.Height = 700;
             await Task.Delay(500);
@@ -70,6 +78,38 @@ internal sealed partial class SelfTest
                 string.Join(",", library.Cards.Select(c => c.Id)));
             Check("游戏库：没装完的实例标成有问题", library.Cards.First(c => c.Id == "forge-1.20.1").HasProblem);
             Check("游戏库：中档是封面视图", page?.CardGrid.IsEffectivelyVisible == true && page.CardRows.IsVisible == false);
+            Check("整合包封面：优先显示来源网站图片，而不是字母占位", library.Cards.First(card => card.Id == "neoforge-1.21.1").HasCoverImage);
+
+            var downloadTask = service.Tasks.Track("install", "安装 1.21.11", () => { });
+            downloadTask.Report(0.40, "120/300 个文件", 32 * 1024 * 1024,
+                ["client-1.21.11.jar", "lwjgl-glfw-3.3.3-natives-macos-arm64.jar"]);
+            await Task.Delay(1100);
+            downloadTask.Report(0.42, "126/300 个文件", 42 * 1024 * 1024,
+                ["client-1.21.11.jar", "lwjgl-glfw-3.3.3-natives-macos-arm64.jar"]);
+            await WaitAsync(() => library.ActiveTasks.Count == 1 && page?.InlineTasks.IsEffectivelyVisible == true
+                && library.ActiveTasks[0].Percent == 42 && library.ActiveTasks[0].Speed is > 0, 3);
+            await Task.Delay(100); // let the computed bindings reach the rendered ProgressLine
+            var inlineLine = page?.InlineTaskList.GetVisualDescendants().OfType<Controls.ProgressLine>().FirstOrDefault();
+            Check("游戏下载：游戏库下方出现真实任务进度条", library.HasActiveTasks && inlineLine is not null
+                && inlineLine.Percent == 42 && inlineLine.Step == "126/300 个文件" && inlineLine.CanCancel
+                && inlineLine.Facts.Contains("/s", StringComparison.Ordinal),
+                $"tasks={library.ActiveTasks.Count} percent={inlineLine?.Percent} step={inlineLine?.Step} facts={inlineLine?.Facts}");
+            page?.InlineTasks.BringIntoView();
+            await ShotAsync("library-download-progress");
+            library.OpenDownloadDetailsCommand.Execute(null);
+            await WaitAsync(() => main.Activity.IsOpen && main.Activity.Tasks.Count > 0, 3);
+            var detailTask = main.Activity.Tasks.First(t => t.Handle == downloadTask);
+            detailTask.ToggleDetailsCommand.Execute(null);
+            await Task.Delay(200);
+            var showsFile = window.GetVisualDescendants().OfType<TextBlock>()
+                .Any(text => text.IsEffectivelyVisible && text.Text == "client-1.21.11.jar");
+            Check("下载详情：由用户手动打开并显示正在下载的文件", main.Activity.IsOpen && detailTask.IsExpanded && showsFile);
+            await ShotAsync("library-download-details");
+            main.Activity.CloseCommand.Execute(null);
+            downloadTask.Succeed();
+            await WaitAsync(() => !library.HasActiveTasks, 3);
+            Check("游戏下载：任务完成后进度区自动收起", page?.InlineTasks.IsEffectivelyVisible == false);
+
             await ShotAsync("library-1024-zh");
             await LibraryScrollbarGutterAsync(page);
 

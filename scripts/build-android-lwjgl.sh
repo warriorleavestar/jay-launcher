@@ -9,16 +9,17 @@ fi
 ndk="$1"
 abi="$2"
 output="$3"
-lwjgl_commit="f0ec1437a6149dae00eaa27c47268e5e4efb129f" # LWJGL 3.3.3
-lwjgl_sha="388f5e64c708486cd6693adf40bb0bb01a51b83026298ad19eb764fa6f460784"
-libffi_version="3.4.4"
-libffi_sha="d66c56ad259a82cf2a9dfc408b32bf5da52371500b84745f7fb8b645712df676"
+lwjgl_commit="30fac9b95f99cda97312232be25ba55297bf9951" # signed LWJGL 3.4.3 tag
+lwjgl_sha="db97020d78fb6f6086121fba9c99ac07a50c4188a7658b06d488a2eae021de40"
+libffi_version="3.5.2"
+libffi_sha="f3a3082a23b37c293a4fcd1053147b371f2ff91fa7ea1b2a52e335676bac82dc"
 freetype_commit="45903920b984540bb629bc89f4c010159c23a89a"
 freetype_sha="ce4fe730699b48d643df448655a37ac13b361e7225fec843637a30f1b4ae49e3"
 openal_commit="d9fed51aa6391debc31dbbca550f055c980afe70"
 openal_sha="e6212437f103d15543cf4a478ef6c9a49b0dd5cff19c9f1a71183ab16a6da3fb"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
+compat_source="$(cd "$(dirname "$0")/../third_party/android-lwjgl" && pwd)/libffi-call-plan-compat.c"
 
 case "$abi" in
   arm64-v8a) triple="aarch64-linux-android"; host_triple="aarch64-linux-android"; arch_define="LWJGL_arm64"; ffi_arch="aarch64" ;;
@@ -32,12 +33,19 @@ case "$(uname -s)" in
 esac
 
 toolchain="$ndk/toolchains/llvm/prebuilt/$host"
+make_tool="$ndk/prebuilt/$host/bin/make"
+sdk="$(cd "$ndk/../.." && pwd)"
+cmake="$sdk/cmake/3.22.1/bin/cmake"
+ninja="$sdk/cmake/3.22.1/bin/ninja"
 cc="$toolchain/bin/${triple}26-clang"
 cxx="$toolchain/bin/${triple}26-clang++"
 ar="$toolchain/bin/llvm-ar"
 ranlib="$toolchain/bin/llvm-ranlib"
 strip="$toolchain/bin/llvm-strip"
 readelf="$toolchain/bin/llvm-readelf"
+test -x "$make_tool"
+test -x "$cmake"
+test -x "$ninja"
 
 verify_sha() {
   local expected="$1" file="$2" actual
@@ -58,14 +66,14 @@ tar -xzf "$work/libffi.tar.gz" -C "$work"
 mkdir "$work/libffi-build"
 (
   cd "$work/libffi-build"
-  CC="$cc" CXX="$cxx" AR="$ar" RANLIB="$ranlib" STRIP="$strip" \
+  MAKE="$make_tool" CC="$cc" CXX="$cxx" AR="$ar" RANLIB="$ranlib" STRIP="$strip" \
   NM="$toolchain/bin/llvm-nm" OBJDUMP="$toolchain/bin/llvm-objdump" \
     "$work/libffi-$libffi_version/configure" \
       --host="$host_triple" --disable-shared --enable-static \
       --disable-docs --disable-dependency-tracking --disable-exec-static-tramp \
       --prefix="$work/libffi-install"
-  make -j"${JAY_BUILD_JOBS:-4}"
-  make install
+  "$make_tool" -j"${JAY_BUILD_JOBS:-4}"
+  "$make_tool" install
 )
 
 common_flags=(
@@ -104,6 +112,7 @@ build_library() {
 }
 
 core_sources=(
+  "$compat_source"
   "$lwjgl"/modules/lwjgl/core/src/main/c/*.c
   "$lwjgl"/modules/lwjgl/core/src/generated/c/*.c
   "$lwjgl"/modules/lwjgl/core/src/generated/c/linux/*.c
@@ -133,6 +142,7 @@ build_library lwjgl_tinyfd "$lwjgl/modules/lwjgl/tinyfd/src/main/c" "${tinyfd_so
 
 android_cmake=(
   -G Ninja
+  -DCMAKE_MAKE_PROGRAM="$ninja"
   -DCMAKE_TOOLCHAIN_FILE="$ndk/build/cmake/android.toolchain.cmake"
   -DANDROID_ABI="$abi" -DANDROID_PLATFORM=26
   -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON
@@ -143,20 +153,20 @@ curl -fL --retry 3 "https://codeload.github.com/freetype/freetype/tar.gz/$freety
 verify_sha "$freetype_sha" "$work/freetype.tar.gz"
 mkdir "$work/freetype"
 tar -xzf "$work/freetype.tar.gz" -C "$work/freetype" --strip-components=1
-cmake -S "$work/freetype" -B "$work/freetype-build" "${android_cmake[@]}" \
+"$cmake" -S "$work/freetype" -B "$work/freetype-build" "${android_cmake[@]}" \
   -DFT_DISABLE_ZLIB=TRUE -DFT_DISABLE_BZIP2=TRUE -DFT_DISABLE_PNG=TRUE \
   -DFT_DISABLE_HARFBUZZ=TRUE -DFT_DISABLE_BROTLI=TRUE
-cmake --build "$work/freetype-build" --parallel "${JAY_BUILD_JOBS:-4}"
+"$cmake" --build "$work/freetype-build" --parallel "${JAY_BUILD_JOBS:-4}"
 cp "$(find "$work/freetype-build" -type f -name 'libfreetype.so' -print -quit)" "$output/libfreetype.so"
 
 curl -fL --retry 3 "https://codeload.github.com/kcat/openal-soft/tar.gz/$openal_commit" -o "$work/openal.tar.gz"
 verify_sha "$openal_sha" "$work/openal.tar.gz"
 mkdir "$work/openal"
 tar -xzf "$work/openal.tar.gz" -C "$work/openal" --strip-components=1
-cmake -S "$work/openal" -B "$work/openal-build" "${android_cmake[@]}" \
+"$cmake" -S "$work/openal" -B "$work/openal-build" "${android_cmake[@]}" \
   -DALSOFT_UTILS=OFF -DALSOFT_EXAMPLES=OFF -DALSOFT_BACKEND_OBOE=OFF \
   -DALSOFT_BACKEND_OPENSL=ON -DALSOFT_REQUIRE_OPENSL=ON
-cmake --build "$work/openal-build" --parallel "${JAY_BUILD_JOBS:-4}"
+"$cmake" --build "$work/openal-build" --parallel "${JAY_BUILD_JOBS:-4}"
 cp "$(find "$work/openal-build" -type f -name 'libopenal.so' -print -quit)" "$output/libopenal.so"
 
 cp "$lwjgl/LICENSE.md" "$output/LWJGL-LICENSE.md"

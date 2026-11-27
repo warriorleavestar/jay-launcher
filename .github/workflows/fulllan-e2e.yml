@@ -9,6 +9,8 @@ on:
     paths:
       - 'src/Amber.Core/Multiplayer/**'
       - 'src/Amber.Core/PlatformFeatures.cs'
+      - 'src/Amber.Core/Net/**'
+      - 'build/pins.json'
       - 'tools/FullLanCheck/**'
       - '.github/workflows/fulllan-e2e.yml'
 
