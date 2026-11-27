@@ -154,10 +154,10 @@ public sealed class ReleaseSignatureTests : IDisposable
         // The full key ids printed when the keys were made (their first 8 bytes are the fingerprints written next to them
         // in JayTrust): a swapped or mistyped key fails here.
         string[] Ids(IReadOnlyList<string> keys) => [.. keys.Select(k => Convert.ToHexString(TrustSigner.IdOfPublicKey(Convert.FromBase64String(k))))];
-        Assert.Equal(["9D47BBDA24BF2956AF370F64F4DF2B6FE9A1F89DB71E79A0747D9E616D94E6ED", "75CD82DBE5DF8E4D4856BCE20C662B588CC8AE8441208A79C5FB1CE8BBD8E2D9"], Ids(JayTrust.Keys));
-        Assert.Equal(["08039FD2126DE71913B6BC5D9B4A622986A9282B935BE6AEE03590D8B667C034", "73FA5202C401F163C04DDC240089EEE763639A92B34F785A02C84561283FD5CE"], Ids(JayTrust.ReleaseKeys));
-        Assert.Equal(["9D47 BBDA 24BF 2956", "75CD 82DB E5DF 8E4D"], JayTrust.Keys.Select(k => TrustCommands.Fingerprint(TrustSigner.IdOfPublicKey(Convert.FromBase64String(k)))));
-        Assert.Equal(["0803 9FD2 126D E719", "73FA 5202 C401 F163"], JayTrust.ReleaseKeys.Select(k => TrustCommands.Fingerprint(TrustSigner.IdOfPublicKey(Convert.FromBase64String(k)))));
+        Assert.Equal(["9D47BBDA24BF2956AF370F64F4DF2B6FE9A1F89DB71E79A0747D9E616D94E6ED", "75CD82DBE5DF8E4D4856BCE20C662B588CC8AE8441208A79C5FB1CE8BBD8E2D9", "90BD4FF62EA838682081D4A3CDB041ADB69E6AFFE80DF5B0C1AAD8814D941AC0"], Ids(JayTrust.Keys));
+        Assert.Equal(["08039FD2126DE71913B6BC5D9B4A622986A9282B935BE6AEE03590D8B667C034", "73FA5202C401F163C04DDC240089EEE763639A92B34F785A02C84561283FD5CE", "510A4C81E0AE2E4EE5DB0F19B689549A8F9686FB97DC5EFA05BB08FC4A1CEB9F"], Ids(JayTrust.ReleaseKeys));
+        Assert.Equal(["9D47 BBDA 24BF 2956", "75CD 82DB E5DF 8E4D", "90BD 4FF6 2EA8 3868"], JayTrust.Keys.Select(k => TrustCommands.Fingerprint(TrustSigner.IdOfPublicKey(Convert.FromBase64String(k)))));
+        Assert.Equal(["0803 9FD2 126D E719", "73FA 5202 C401 F163", "510A 4C81 E0AE 2E4E"], JayTrust.ReleaseKeys.Select(k => TrustCommands.Fingerprint(TrustSigner.IdOfPublicKey(Convert.FromBase64String(k)))));
 
         // Changing what Quorum hands out doesn't change the built-in list.
         var quorum = JayTrust.Quorum;
@@ -375,7 +375,7 @@ public sealed class ReleaseSignatureTests : IDisposable
         File.WriteAllText(dataDir, "not a folder");
         var (http, _) = FeedFor("v1.0.0", Files());
         var checker = new UpdateCheck(new HttpClient(http), dataDir, Own);
-        var (status, page) = await Amber.App.ViewModels.ToolsViewModel.RunUpdateCheckAsync(checker, Feed, "0.9.0");
+        var (status, page, _) = await Amber.App.ViewModels.ToolsViewModel.RunUpdateCheckAsync(checker, Feed, "0.9.0");
         Assert.StartsWith(Amber.Core.Localization.L.F("tools.update.failed", ""), status);
         Assert.Null(page);
         // The signatures were fetched, so the failure came after the check, from saving.
@@ -384,7 +384,7 @@ public sealed class ReleaseSignatureTests : IDisposable
 
         // The same release with a writable folder is offered, so only the save made the difference.
         var (fine, _) = FeedFor("v1.0.0", Files());
-        var (okStatus, okPage) = await Amber.App.ViewModels.ToolsViewModel.RunUpdateCheckAsync(
+        var (okStatus, okPage, _) = await Amber.App.ViewModels.ToolsViewModel.RunUpdateCheckAsync(
             new UpdateCheck(new HttpClient(fine), Path.Combine(_dir, "data-writable"), Own), Feed, "0.9.0");
         Assert.False(okStatus.StartsWith(Amber.Core.Localization.L.F("tools.update.failed", ""), StringComparison.Ordinal), okStatus);
         Assert.Equal("https://releases.example.test/v1.0.0", okPage);

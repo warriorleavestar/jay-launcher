@@ -107,6 +107,16 @@ public sealed class GameLauncher(GameDirectory dir)
                 if (++i >= markerIndex) throw new InvalidDataException("The Java class path option has no value.");
                 vmOptions.Add("-Djava.class.path=" + arguments[i]);
             }
+            else if (IsPairedVmOption(arguments[i]))
+            {
+                // The java executable accepts these as two command-line arguments. The JNI
+                // invocation API receives one JavaVMOption at a time and requires the = form;
+                // passing the value as a second option makes JNI_CreateJavaVM return JNI_ERR.
+                var option = arguments[i];
+                if (++i >= markerIndex || arguments[i].StartsWith('-'))
+                    throw new InvalidDataException($"Missing value for embedded Java option {option}.");
+                vmOptions.Add(option + "=" + arguments[i]);
+            }
             else
             {
                 vmOptions.Add(arguments[i]);
@@ -119,6 +129,10 @@ public sealed class GameLauncher(GameDirectory dir)
             arguments.Skip(markerIndex + 2).ToArray(),
             transientDirectory);
     }
+
+    private static bool IsPairedVmOption(string value) => value is
+        "--add-exports" or "--add-modules" or "--add-opens" or "--add-reads" or
+        "--limit-modules" or "--module-path" or "--patch-module" or "--upgrade-module-path";
 
     /// <summary>导出可长期使用的脚本；无痕配置随脚本保存在“脚本名.amber”目录里，不参与启动时的临时文件清理。</summary>
     public string WriteLaunchScript(string path, LaunchOptions options, Action<string>? notice = null)
