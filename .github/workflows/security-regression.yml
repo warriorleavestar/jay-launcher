@@ -48,7 +48,7 @@ jobs:
         if: runner.os == 'Windows'
         run: >-
           dotnet test Amber.Core.Tests -c Release
-          --filter "FullyQualifiedName~ProcessBoundarySecurityTests|FullyQualifiedName~InputParsingSecurityTests|FullyQualifiedName~WorldImportTests|FullyQualifiedName~ServerStatusTests|FullyQualifiedName~SpeedTestServerTests|FullyQualifiedName~SpeedTestSecurityTests|FullyQualifiedName~NbtBudgetTests|FullyQualifiedName~TestMatrixTests"
+          --filter "FullyQualifiedName~ProcessBoundarySecurityTests|FullyQualifiedName~InputParsingSecurityTests|FullyQualifiedName~WorldImportTests|FullyQualifiedName~ServerStatusTests|FullyQualifiedName~SpeedTestServerTests|FullyQualifiedName~SpeedTestSecurityTests|FullyQualifiedName~NbtBudgetTests|FullyQualifiedName~TestMatrixTests|FullyQualifiedName~SystemMotionTests"
           --logger "trx;LogFileName=security.trx" --results-directory ../out/security-tests
 
       # Linux and macOS run the whole suite: tests with Unix-only bodies run nowhere else in CI.

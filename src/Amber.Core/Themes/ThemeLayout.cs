@@ -60,7 +60,7 @@ public static partial class ThemeLayout
         // "Me": game accounts, the Jay account, my friend code, my devices, appearance. accounts.json lays out this page.
         ["me"] = Page("me", ["accounts", "add", "jay", "code", "devices", "appearance", "status"], "title"),
         ["people"] = Page("people", ["list", "detail", "status"], "title"),
-        ["instances"] = Page("instances", ["header", "picker", "details", "status"]),
+        ["instances"] = Page("instances", ["header", "lastrun", "details", "status"]),
         ["downloads"] = Page("downloads", ["search", "filters", "body", "status"], "title"),
         ["content"] = Page("content", ["header", "filters", "body", "status"]),
         ["multiplayer"] = Page("multiplayer", ["tabs", "room", "body", "status"], "title"),

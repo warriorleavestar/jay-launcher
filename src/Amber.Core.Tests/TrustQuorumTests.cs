@@ -171,6 +171,36 @@ public sealed class TrustQuorumTests
     }
 
     [Fact]
+    public void BuiltInTrustKeysAreTwoOfThree()
+    {
+        // The built-in trust keys: three distinct keys, any two of which are enough. Only signer ids are checked here
+        // (the signatures themselves are verified before the quorum counts them; see the tests above).
+        var quorum = JayTrust.Quorum;
+        Assert.Equal(3, quorum.Keys.Count);
+        Assert.Equal(2, quorum.Need);
+        var ids = quorum.Keys;
+        // Any pair passes, in either order, and with an outsider or a repeat alongside.
+        for (var i = 0; i < ids.Count; i++)
+            for (var j = 0; j < ids.Count; j++)
+                if (i != j)
+                {
+                    Assert.True(quorum.IsMet([ids[i], ids[j]]));
+                    Assert.True(quorum.IsMet([Outsider.Id, ids[i], ids[i], ids[j]]));
+                }
+        Assert.True(quorum.IsMet(ids));
+        // One key alone, even listed twice or with outsiders, is never enough.
+        foreach (var id in ids)
+        {
+            Assert.False(quorum.IsMet([id]));
+            Assert.False(quorum.IsMet([id, id]));
+            Assert.False(quorum.IsMet([id, Outsider.Id, Owner.Id]));
+        }
+        // Unknown keys count for nothing.
+        Assert.False(quorum.IsMet([Outsider.Id, Owner.Id]));
+        Assert.Equal(0, quorum.Count([Outsider.Id, Owner.Id, A.Id]));
+    }
+
+    [Fact]
     public void BuiltInNetworkDirectoryNeedsATrusteeCertificate()
     {
         // With trust keys built in, the built-in network's directory is no longer trusted on first use: it needs a
@@ -269,9 +299,12 @@ public sealed class TrustQuorumTests
         // Case, spaces and the look-alikes O/I/L don't matter.
         Assert.Equal(seed, PaperKey.FromLines(lines[0].ToLowerInvariant().Replace(" ", ""), lines[1].Replace('0', 'O').Replace('1', 'I')));
 
-        var typo = lines[1].ToCharArray();
+        // The typo check uses a fixed key: each line's check is 2 characters (10 bits), so a typo in a random key slips
+        // through about once in 1024 runs; with a fixed key the result is the same every run.
+        var vector = PaperKey.ToLines(Enumerable.Range(0, 32).Select(i => (byte)i).ToArray());
+        var typo = vector[1].ToCharArray();
         typo[0] = typo[0] == 'A' ? 'B' : 'A';
-        var e = Assert.Throws<InvalidDataException>(() => PaperKey.FromLines(lines[0], new string(typo)));
+        var e = Assert.Throws<InvalidDataException>(() => PaperKey.FromLines(vector[0], new string(typo)));
         Assert.Contains("2", e.Message);
         Assert.Throws<InvalidDataException>(() => PaperKey.FromLines(lines[0][..^3], lines[1]));
     }

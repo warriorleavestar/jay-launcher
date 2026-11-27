@@ -31,7 +31,10 @@ public class ElevatedGuardNetworkTests
         if (!OperatingSystem.IsWindows()) return;
         using var guard = ElevatedGuard.Start(PowerShell, ["-NoProfile", "-NonInteractive", "-Command", "Write-Output ('pid=' + $PID); Start-Sleep 60"], new Dictionary<string, string>(), elevate: false);
         await guard.WaitForReadyAsync().WaitAsync(TimeSpan.FromSeconds(20));
-        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        // Ready only means the guard started powershell.exe. Its first line can take well over 10 s when the whole
+        // suite runs on a busy CI runner (Windows PowerShell starts slowly), so wait as long as the ready step allows
+        // and more; the limit only guards against a hang.
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         string? line;
         while ((line = guard.RecentOutput.FirstOrDefault(x => x.StartsWith("pid=", StringComparison.Ordinal))) is null) await Task.Delay(50, deadline.Token);
         var pid = int.Parse(line[4..]);

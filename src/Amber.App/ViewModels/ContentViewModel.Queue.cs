@@ -172,7 +172,7 @@ public sealed partial class ContentViewModel
                 {
                     Work.Bytes(bytesBefore + p.BytesDownloaded);
                     Progress = 100.0 * (before + p.CompletedFiles) / Math.Max(1, total);
-                    task.Report(Progress / 100, p.CurrentFile, bytesBefore + p.BytesDownloaded);
+                    task.Report(Progress / 100, p.CurrentFile, bytesBefore + p.BytesDownloaded, p.ActiveFiles);
                     bytesNow = bytesBefore + p.BytesDownloaded;
                     SetStatus(StatusMessage.Info("content.install.progress", before + p.CompletedFiles, total, p.CurrentFile));
                 }), cts.Token);
