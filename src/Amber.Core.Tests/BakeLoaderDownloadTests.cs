@@ -10,6 +10,7 @@ namespace Amber.Core.Tests;
 /// <summary>"Download loader": the pinned zip from Jay's release, accepted only with the pinned SHA-256, then the normal package install.</summary>
 public sealed class BakeLoaderDownloadTests : IDisposable
 {
+    private const string TestReleases = "https://github.com/warriorleavestar/jay-launcher/releases/download/";
     private readonly string _root = Path.Combine(Path.GetTempPath(), "jay-ul-download-" + Guid.NewGuid().ToString("N"));
     private readonly byte[] _good;
     private readonly BakeLoaderRelease _release;
@@ -18,7 +19,7 @@ public sealed class BakeLoaderDownloadTests : IDisposable
     {
         Directory.CreateDirectory(_root);
         _good = PackageZip();
-        _release = new BakeLoaderRelease(BakeLoaderRelease.JayReleases, "0.0.0-test", "universal-loader-0.0.0-test", "amber-ul-0.0.0-test.zip",
+        _release = new BakeLoaderRelease(TestReleases, "0.0.0-test", "universal-loader-0.0.0-test", "amber-ul-0.0.0-test.zip",
             Convert.ToHexStringLower(SHA256.HashData(_good)), _good.Length);
     }
 
@@ -122,7 +123,7 @@ public sealed class BakeLoaderDownloadTests : IDisposable
     [Fact]
     public async Task AnUnpublishedPinDownloadsNothing()
     {
-        var unset = new BakeLoaderRelease(BakeLoaderRelease.JayReleases, "", "", "", "", 0);
+        var unset = new BakeLoaderRelease(TestReleases, "", "", "", "", 0);
         Assert.False(unset.IsPublished);
         Assert.False((_release with { Sha256 = "not-a-hash" }).IsPublished);
         var handler = new Handler((_, _) => throw new InvalidOperationException("no network expected"));

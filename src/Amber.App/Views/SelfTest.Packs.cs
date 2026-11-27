@@ -46,6 +46,8 @@ internal sealed partial class SelfTest
             var shaders = Directory.CreateDirectory(Path.Combine(work, "shaderpacks")).FullName;
             File.WriteAllText(Path.Combine(shaders, "BSL_v8.2.zip"), "zip");
             File.WriteAllText(Path.Combine(shaders, "Complementary.zip"), "zip");
+            // A name outside ASCII: iris.properties is a Java properties file, so it is stored as \u escapes.
+            File.WriteAllText(Path.Combine(shaders, "光影 测试.zip"), "zip");
 
             service.SetCurrentInstance(id);
             main.Shell.Navigate("library/" + id);
@@ -112,7 +114,7 @@ internal sealed partial class SelfTest
             window.Width = 1440;
             window.Height = 760;
             instance.TabIndex = (int)InstanceTab.ShaderPacks;
-            await WaitAsync(() => instance.ShaderPacks.Count == 2, 10);
+            await WaitAsync(() => instance.ShaderPacks.Count == 3, 10);
             await Task.Delay(400);
             Check("光影：没装 Iris 时写明要先装，并给【装 Iris】", !instance.HasShaderLoader
                 && Dispatcher.UIThread.Invoke(() => page.ShaderLoaderCard.IsEffectivelyVisible || page.ShaderNoteBox.IsEffectivelyVisible));
@@ -134,6 +136,15 @@ internal sealed partial class SelfTest
             instance.UseShaderCommand.Execute(null);
             Check("【不用光影】：关掉，选择留着", ShaderSelection.Current(work) is null && instance.ShadersOff
                 && File.ReadAllLines(props).Contains("shaderPack=BSL_v8.2.zip"));
+            const string wide = "光影 测试.zip";
+            instance.UseShaderCommand.Execute(instance.ShaderPacks.Single(p => p.Name == wide));
+            Check("选中文名的光影：iris.properties 里写成 \\u 转义（只有 ASCII）", File.ReadAllLines(props).Contains(@"shaderPack=\u5149\u5f71 \u6d4b\u8bd5.zip")
+                && File.ReadAllText(props).All(c => c < 0x80) && ShaderSelection.Current(work) == wide);
+            instance.LoadShaderPacks();
+            Check("重新打开：中文名的光影仍是选中的那个", instance.ShaderPacks.Single(p => p.IsOn).Name == wide && !instance.ShadersOff);
+            instance.UseShaderCommand.Execute(null);
+            Check("【不用光影】：中文名的选择也留着", ShaderSelection.Current(work) is null && instance.ShadersOff
+                && File.ReadAllLines(props).Contains(@"shaderPack=\u5149\u5f71 \u6d4b\u8bd5.zip"));
             window.Width = 600;
             window.Height = 640;
             await Task.Delay(500);
