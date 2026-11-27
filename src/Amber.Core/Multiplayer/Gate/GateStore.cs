@@ -345,6 +345,13 @@ public sealed class GateStore
         return Read().Members.Where(m => !m.Disabled && m.Devices.Any(d => d.PublicKey == key)).Select(m => m.Name).ToList();
     }
 
+    /// <summary>The device belongs to a member who is disabled for now (and to no member who isn't).</summary>
+    public bool IsDisabledDevice(byte[] devicePublicKey)
+    {
+        var key = Convert.ToBase64String(devicePublicKey);
+        return Read().Members.Any(m => m.Disabled && m.Devices.Any(d => d.PublicKey == key));
+    }
+
     /// <summary>
     /// The spelling the server gets for <paramref name="name"/>: the one recorded at the first join, or <paramref name="typed"/>
     /// (which must match the name apart from letter case), recorded now when there is none yet.
