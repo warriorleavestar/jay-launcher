@@ -413,12 +413,14 @@ public sealed class GameLanBridgeTests : IDisposable
         foreach (var a in new[] { "-NoProfile", "-NonInteractive", "-Command",
                      $"$c=[Net.Sockets.TcpClient]::new('127.0.0.1',{GameLanBridge.PortForTest});$s=$c.GetStream();" +
                      $"$b=[Text.Encoding]::ASCII.GetBytes(\"JAYLAN1 {token} data {id}`n\");$s.Write($b,0,$b.Length);" +
-                     "$s.ReadTimeout=8000;try{$r=$s.ReadByte()}catch{$r=-2};\"R=$r\"" })
+                     // Closed (-1) or reset (-2) both refuse the connection; a read timeout (-3) means it was left open.
+                     "$s.ReadTimeout=8000;try{$r=$s.ReadByte()}catch{$e=$_.Exception.InnerException;" +
+                     "$r=if($e -is [Net.Sockets.SocketException] -and $e.SocketErrorCode -eq 'TimedOut'){-3}else{-2}};\"R=$r\"" })
             powershell.ArgumentList.Add(a);
         using var process = Process.Start(powershell)!;
         var output = await process.StandardOutput.ReadToEndAsync() + await process.StandardError.ReadToEndAsync();
         await process.WaitForExitAsync();
-        Assert.Contains("R=-1", output);
+        Assert.True(output.Contains("R=-1") || output.Contains("R=-2"), output);
         Assert.False(connecting.IsCompleted);
 
         await control.SendAsync(Encoding.ASCII.GetBytes($"fail {id}\n"));
