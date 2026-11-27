@@ -1,3 +1,4 @@
+using Amber.App.Services;
 using Amber.App.ViewModels;
 using Amber.Core.Localization;
 using Avalonia;
@@ -92,7 +93,7 @@ public partial class FirstRunWizard : UserControl
         else if (e.Key == Key.Escape) e.Handled = true;
     }
 
-    private async Task<string?> PickPackAsync()
+    private async Task<PackSelection?> PickPackAsync()
     {
         if (TopLevel.GetTopLevel(this)?.StorageProvider is not { } storage) return null;
         var files = await storage.OpenFilePickerAsync(new FilePickerOpenOptions
@@ -101,6 +102,6 @@ public partial class FirstRunWizard : UserControl
             AllowMultiple = false,
             FileTypeFilter = [new FilePickerFileType(L.T("newinstance.pack.type")) { Patterns = ["*.mrpack", "*.zip"] }],
         });
-        return files.Count > 0 ? files[0].TryGetLocalPath() : null;
+        return files.Count > 0 ? new PackSelection(files[0]) : null;
     }
 }

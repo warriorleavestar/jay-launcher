@@ -10,6 +10,10 @@ public class DirectBridgeContinuityTests
     private static List<Candidate> Loopback(DirectBridge bridge) =>
         [new(PathKind.Lan, new IPEndPoint(IPAddress.Loopback, bridge.SocketEndPoint.Port))];
 
+    // A loopback punch that should succeed returns as soon as the reply arrives, so a generous limit costs nothing when
+    // things work. A short one fails on a busy CI machine, where the receive loop can wait seconds for a thread.
+    private static readonly TimeSpan Connect = TimeSpan.FromSeconds(10);
+
     [Fact]
     public async Task ReprobePreservesEstablishedLocalTransportInBothDirections()
     {
@@ -19,8 +23,8 @@ public class DirectBridgeContinuityTests
         await using var host = new DirectBridge(DirectBridge.CreateSocket(), DirectTestKeys.Bridge, true,
             ((IPEndPoint)hostApp.Client.LocalEndPoint!).Port, _ => { });
         await using var guest = new DirectBridge(DirectBridge.CreateSocket(), DirectTestKeys.Bridge, false, null, _ => { });
-        using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        Assert.NotNull(await guest.PunchAsync(Loopback(host), NatKind.Cone, TimeSpan.FromSeconds(2), limit.Token));
+        using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        Assert.NotNull(await guest.PunchAsync(Loopback(host), NatKind.Cone, Connect, limit.Token));
         var localGuest = new IPEndPoint(IPAddress.Loopback, guest.LocalPort);
         await guestApp.SendAsync("before"u8.ToArray(), localGuest, limit.Token);
         var initial = await hostApp.ReceiveAsync(limit.Token);
@@ -34,7 +38,7 @@ public class DirectBridgeContinuityTests
             guest.DropPeers(preserveLocalTransport: true);
             Assert.Empty(host.Peers);
             Assert.Empty(guest.Peers);
-            Assert.NotNull(await guest.PunchAsync(Loopback(host), NatKind.Cone, TimeSpan.FromSeconds(2), limit.Token));
+            Assert.NotNull(await guest.PunchAsync(Loopback(host), NatKind.Cone, Connect, limit.Token));
 
             // 重打洞后房主先发包：加入方不必重新发包登记 LocalClient，已有会话立即可用。
             await hostApp.SendAsync("host-first"u8.ToArray(), initial.RemoteEndPoint, limit.Token);
@@ -51,10 +55,10 @@ public class DirectBridgeContinuityTests
     {
         await using var host = new DirectBridge(DirectBridge.CreateSocket(), DirectTestKeys.Bridge, true, 1, _ => { });
         await using var guest = new DirectBridge(DirectBridge.CreateSocket(), DirectTestKeys.Bridge, false, null, _ => { });
-        Assert.NotNull(await guest.PunchAsync(Loopback(host), NatKind.Cone, TimeSpan.FromSeconds(2)));
+        Assert.NotNull(await guest.PunchAsync(Loopback(host), NatKind.Cone, Connect));
         // 对方可能已先完成握手；不能再要求 Count 增加才返回成功。
-        Assert.NotNull(await host.PunchAsync(Loopback(guest), NatKind.Cone, TimeSpan.FromSeconds(2)));
-        Assert.NotNull(await guest.PunchAsync(Loopback(host), NatKind.Cone, TimeSpan.FromSeconds(2)));
+        Assert.NotNull(await host.PunchAsync(Loopback(guest), NatKind.Cone, Connect));
+        Assert.NotNull(await guest.PunchAsync(Loopback(host), NatKind.Cone, Connect));
     }
 
     [Fact]
@@ -65,8 +69,8 @@ public class DirectBridgeContinuityTests
         await using var host = new DirectBridge(DirectBridge.CreateSocket(), DirectTestKeys.Bridge, true,
             ((IPEndPoint)hostApp.Client.LocalEndPoint!).Port, _ => { });
         await using var guest = new DirectBridge(DirectBridge.CreateSocket(), DirectTestKeys.Bridge, false, null, _ => { });
-        using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(8));
-        Assert.NotNull(await guest.PunchAsync(Loopback(host), NatKind.Cone, TimeSpan.FromSeconds(2), limit.Token));
+        using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        Assert.NotNull(await guest.PunchAsync(Loopback(host), NatKind.Cone, Connect, limit.Token));
         await guestApp.SendAsync("initial"u8.ToArray(), new IPEndPoint(IPAddress.Loopback, guest.LocalPort), limit.Token);
         var initial = await hostApp.ReceiveAsync(limit.Token);
         var local = Assert.Single(host.Peers).Local!;
@@ -89,7 +93,7 @@ public class DirectBridgeContinuityTests
         await using var host = new DirectBridge(DirectBridge.CreateSocket(), DirectTestKeys.Bridge, true, 1, _ => { })
             { PeerTimeout = TimeSpan.FromMilliseconds(100) };
         await using var guest = new DirectBridge(DirectBridge.CreateSocket(), DirectTestKeys.Bridge, false, null, _ => { });
-        Assert.NotNull(await guest.PunchAsync(Loopback(host), NatKind.Cone, TimeSpan.FromSeconds(2)));
+        Assert.NotNull(await guest.PunchAsync(Loopback(host), NatKind.Cone, Connect));
         var local = Assert.Single(host.Peers).Local!;
         host.DropPeers(preserveLocalTransport: true);
         guest.DropPeers(preserveLocalTransport: true);

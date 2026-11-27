@@ -19,7 +19,8 @@ public sealed class ChaChaPoly : IDisposable
     internal static bool ForceBouncyCastle { get; set; }
 
     /// <summary>True when the system class is used.</summary>
-    public static bool UsesSystem => !ForceBouncyCastle && ChaCha20Poly1305.IsSupported;
+    // Android's native cipher aborts on the empty payload used by the Noise handshake.
+    public static bool UsesSystem => !OperatingSystem.IsAndroid() && !ForceBouncyCastle && ChaCha20Poly1305.IsSupported;
 
     private readonly ChaCha20Poly1305? _system;
     private byte[]? _key;
