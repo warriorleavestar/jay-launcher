@@ -32,15 +32,22 @@ public sealed record RuntimeBundleManifest(
         if (Format != CurrentFormat) errors.Add($"Unsupported runtime manifest format {Format}.");
         if (string.IsNullOrWhiteSpace(Id)) errors.Add("The runtime ID is missing.");
         if (Architecture is not ("arm64-v8a" or "x86_64")) errors.Add("The runtime architecture is not supported.");
-        if (Files.Count == 0) errors.Add("The runtime manifest has no files.");
+        if (Files is null || Files.Count == 0)
+            errors.Add("The runtime manifest has no files.");
 
         var names = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var file in Files)
+        foreach (var file in Files ?? [])
         {
+            if (file is null)
+            {
+                errors.Add("The runtime manifest contains an empty file entry.");
+                continue;
+            }
             if (!IsSafeRelativePath(file.Path)) errors.Add($"Unsafe runtime path: {file.Path}");
             else if (!names.Add(file.Path)) errors.Add($"Duplicate runtime path: {file.Path}");
             if (file.Size <= 0) errors.Add($"Invalid size for {file.Path}.");
-            if (file.Sha256.Length != 64 || file.Sha256.Any(c => !Uri.IsHexDigit(c)))
+            if (string.IsNullOrWhiteSpace(file.Sha256) || file.Sha256.Length != 64 ||
+                file.Sha256.Any(c => !Uri.IsHexDigit(c)))
                 errors.Add($"Invalid SHA-256 for {file.Path}.");
             if (string.IsNullOrWhiteSpace(file.License)) errors.Add($"Missing license for {file.Path}.");
             if (!Uri.TryCreate(file.SourceUrl, UriKind.Absolute, out var source) || source.Scheme != Uri.UriSchemeHttps)

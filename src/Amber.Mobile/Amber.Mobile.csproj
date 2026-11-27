@@ -17,6 +17,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Amber.Core.Tests" />
+    <InternalsVisibleTo Include="Amber.Android" />
   </ItemGroup>
 
   <ItemGroup>

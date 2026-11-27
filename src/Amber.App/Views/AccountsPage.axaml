@@ -22,6 +22,16 @@
     <Style Selector="Border#AddCard Button /template/ ContentPresenter">
       <Setter Property="TextWrapping" Value="Wrap" />
     </Style>
+    <!-- These actions sit in the narrow left column. Pseudo-localized labels must wrap inside
+         the card instead of asking the WrapPanel for more width than the column owns. -->
+    <Style Selector="Button.me-wrap-action">
+      <Setter Property="MaxWidth" Value="190" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Button.me-wrap-action /template/ ContentPresenter">
+      <Setter Property="TextWrapping" Value="Wrap" />
+      <Setter Property="TextAlignment" Value="Center" />
+    </Style>
     <ContainerQuery Name="AccountsPageRoot" Query="max-width:640">
       <Style Selector="Border#AddCard">
         <Setter Property="Width" Value="240" />
@@ -131,8 +141,8 @@
           </ItemsControl>
 
           <WrapPanel ItemSpacing="8" LineSpacing="8" IsVisible="{Binding JayIdle}">
-            <Button x:Name="CreateJayButton" Content="{l:T accounts.jay.create}" Command="{Binding StartCreateJayCommand}" />
-            <Button x:Name="RestoreJayButton" Content="{l:T accounts.jay.restore}" Command="{Binding StartRestoreJayCommand}" />
+            <Button x:Name="CreateJayButton" Classes="me-wrap-action" Content="{l:T accounts.jay.create}" Command="{Binding StartCreateJayCommand}" />
+            <Button x:Name="RestoreJayButton" Classes="me-wrap-action" Content="{l:T accounts.jay.restore}" Command="{Binding StartRestoreJayCommand}" />
           </WrapPanel>
 
           <!-- Step 1: the new words, numbered, in a grid that wraps. -->
@@ -224,7 +234,7 @@
                     Command="{Binding CopyFriendCodeCommand}" VerticalAlignment="Center" />
           </Grid>
           <TextBlock Classes="hint" FontSize="12" Text="{l:T me.code.hint}" TextWrapping="Wrap" />
-          <Button x:Name="OpenPeopleButton" Classes="secondary small" Content="{l:T me.code.people}" Command="{Binding OpenPeopleCommand}" HorizontalAlignment="Left" />
+          <Button x:Name="OpenPeopleButton" Classes="secondary small me-wrap-action" Content="{l:T me.code.people}" Command="{Binding OpenPeopleCommand}" HorizontalAlignment="Left" />
         </StackPanel>
         <TextBlock x:Name="FriendCodeChildNote" Classes="hint" Text="{l:T me.code.child}" IsVisible="{Binding !ShowFriendCode}" TextWrapping="Wrap" />
       </StackPanel>
@@ -247,7 +257,7 @@
         <WrapPanel ItemSpacing="8" LineSpacing="6">
           <Button x:Name="DevicesCreateJay" Classes="small" Content="{l:T me.devices.create_jay}" Command="{Binding StartCreateJayCommand}"
                   IsVisible="{Binding ShowJayIntro}" />
-          <Button x:Name="DeviceSettingsButton" Classes="secondary small" Content="{l:T me.devices.manage}" Command="{Binding OpenDeviceSettingsCommand}" />
+          <Button x:Name="DeviceSettingsButton" Classes="secondary small me-wrap-action" Content="{l:T me.devices.manage}" Command="{Binding OpenDeviceSettingsCommand}" />
         </WrapPanel>
       </StackPanel>
     </Border>

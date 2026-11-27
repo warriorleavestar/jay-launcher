@@ -64,7 +64,7 @@ public sealed partial class DownloadViewModel
     // ---- Modpack file ----
 
     /// <summary>Starts an import (MainViewModel: the import runs on the Discover page, which handles files that need a manual download).</summary>
-    public Func<string, bool, Task>? ImportPackFile { get; set; }
+    internal Func<PackSelection, bool, Task>? ImportPackFile { get; set; }
 
     /// <summary>The Discover page on modpacks.</summary>
     public Action? BrowseModpacks { get; set; }
@@ -74,7 +74,8 @@ public sealed partial class DownloadViewModel
     [NotifyCanExecuteChangedFor(nameof(ImportPackCommand), nameof(ImportPackAndPlayCommand))]
     public partial ModpackInfo? PackInfo { get; set; }
 
-    [ObservableProperty] public partial string? PackPath { get; set; }
+    private PackSelection? _pack;
+    private int _previewGeneration;
     [ObservableProperty] [NotifyPropertyChangedFor(nameof(HasPackError))] public partial string? PackError { get; set; }
 
     public bool HasPackPreview => PackInfo is not null;
@@ -91,22 +92,32 @@ public sealed partial class DownloadViewModel
     }.Concat(p.IsMixed ? [L.F("newinstance.pack.mixed", string.Join(" + ", p.ExtraLoaders))] : []));
 
     /// <summary>The file picker or a drop handed us a pack: read its manifest without importing anything.</summary>
-    public async Task PreviewPackAsync(string path)
+    public Task PreviewPackAsync(string path) => PreviewPackAsync(new PackSelection(path));
+
+    internal async Task PreviewPackAsync(PackSelection selection)
     {
-        PackPath = path;
-        PackInfo = null;
-        PackError = null;
+        ClearPack();
+        var generation = _previewGeneration;
         try
         {
-            PackInfo = await Task.Run(() => ModpackService.Inspect(path));
+            var path = await selection.GetPathAsync();
+            var info = await Task.Run(() => ModpackService.Inspect(path));
+            if (generation != _previewGeneration) return;
+            _pack = selection;
+            PackInfo = info;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException or System.Text.Json.JsonException or NotSupportedException or ArgumentException)
         {
-            PackError = L.F("newinstance.pack.unreadable", ErrorText.Describe(e));
+            if (generation == _previewGeneration)
+                PackError = L.F("newinstance.pack.unreadable", ErrorText.Describe(e));
+        }
+        finally
+        {
+            if (_pack != selection) selection.Dispose();
         }
     }
 
-    private bool CanImportPack() => PackInfo is not null && PackPath is not null;
+    private bool CanImportPack() => PackInfo is not null && _pack is not null;
 
     [RelayCommand(CanExecute = nameof(CanImportPack))]
     private Task ImportPackAsync() => StartPackImport(play: false);
@@ -116,17 +127,19 @@ public sealed partial class DownloadViewModel
 
     private Task StartPackImport(bool play)
     {
-        if (PackPath is not { } path || ImportPackFile is null) return Task.CompletedTask;
+        if (_pack is not { } pack || ImportPackFile is null) return Task.CompletedTask;
         PackInfo = null;
-        PackPath = null;
-        return ImportPackFile(path, play);
+        _pack = null;
+        return ImportPackFile(pack, play);
     }
 
     [RelayCommand]
     private void ClearPack()
     {
         PackInfo = null;
-        PackPath = null;
+        _previewGeneration++;
+        _pack?.Dispose();
+        _pack = null;
         PackError = null;
     }
 

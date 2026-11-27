@@ -222,6 +222,9 @@ public sealed partial class OnboardingViewModel : ObservableObject
     [ObservableProperty]
     public partial bool ProgressIndeterminate { get; set; }
 
+    [ObservableProperty]
+    public partial IReadOnlyList<string> ActiveFiles { get; set; } = [];
+
     /// <summary>Speed and time left for the progress line.</summary>
     public WorkProgress Work { get; } = new();
 
@@ -376,6 +379,7 @@ public sealed partial class OnboardingViewModel : ObservableObject
                     {
                         if (p.Stage != InstallStage.Files || p.Files.TotalFiles == 0) return;
                         Work.Bytes(p.Files.BytesDownloaded);
+                        ActiveFiles = p.Files.ActiveFiles ?? [];
                         DetailText = L.F("onboarding.stage.files", p.Files.CompletedFiles, p.Files.TotalFiles, p.Files.BytesDownloaded / 1024.0 / 1024);
                         GameProgress(100.0 * p.Files.CompletedFiles / p.Files.TotalFiles);
                     }), ct);
@@ -393,6 +397,13 @@ public sealed partial class OnboardingViewModel : ObservableObject
                 DetailText = text;
                 _lastProgress = DateTime.UtcNow;
             });
+            java.FileProgress = new Progress<DownloadProgress>(p =>
+            {
+                ActiveFiles = p.ActiveFiles ?? [];
+                ProgressIndeterminate = false;
+                Progress = 90 + 10.0 * p.CompletedFiles / Math.Max(1, p.TotalFiles);
+                Work.Bytes(p.BytesDownloaded);
+            });
             try
             {
                 await java.ForVersionAsync(_service.Directory.ResolveVersion(id), ct);
@@ -405,6 +416,8 @@ public sealed partial class OnboardingViewModel : ObservableObject
             finally
             {
                 java.Status = null;
+                java.FileProgress = null;
+                ActiveFiles = [];
             }
 
             ct.ThrowIfCancellationRequested();

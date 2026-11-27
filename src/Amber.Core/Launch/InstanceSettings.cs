@@ -115,7 +115,7 @@ public static class MemoryPlanner
             var status = new MemoryStatusEx { Length = (uint)Marshal.SizeOf<MemoryStatusEx>() };
             if (GlobalMemoryStatusEx(ref status)) return (long)(status.AvailPhys / 1024 / 1024);
         }
-        if (OperatingSystem.IsLinux())
+        if (OperatingSystem.IsLinux() || OperatingSystem.IsAndroid())
         {
             try
             {
@@ -141,7 +141,7 @@ public static class MemoryPlanner
 
     public static long TotalPhysicalMb()
     {
-        if (OperatingSystem.IsLinux())
+        if (OperatingSystem.IsLinux() || OperatingSystem.IsAndroid())
         {
             try
             {

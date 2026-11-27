@@ -164,11 +164,13 @@ public sealed partial class MultiplayerViewModel
         }
     }
 
+    private bool CanHostFromLobby => !IsScanning;
+
     /// <summary>
     /// The lobby's open-a-room button: opens the room, makes the first invite (1 use, 10 minutes, needs my approval),
     /// shows the invite card and, when ticked, copies the code (cleared from the clipboard later).
     /// </summary>
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanHostFromLobby))]
     private async Task HostFromLobbyAsync()
     {
         if (StartGameToHost()) return;
