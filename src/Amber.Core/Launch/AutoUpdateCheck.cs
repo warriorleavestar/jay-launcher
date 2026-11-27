@@ -1,9 +1,7 @@
 namespace Amber.Core.Launch;
 
 /// <summary>
-/// The automatic update check: once a day Jay asks the release feed whether there is a newer version. A newer release is
-/// shown only when 2 of the 3 trustees signed it (<see cref="UpdateCheck"/>); Jay never downloads or installs it, the
-/// notice only opens the release page. Users can turn the check off or point it at their own feed.
+/// Scheduling and feed selection for signed launcher update notifications.
 /// </summary>
 public static class AutoUpdateCheck
 {
@@ -17,13 +15,12 @@ public static class AutoUpdateCheck
     public const string OfficialReleasePages = "https://github.com/warriorleavestar/jay-launcher/releases/tag/";
 
     /// <summary>
-    /// Whether this platform has the daily check and the official desktop releases at all: phones and tablets are updated
-    /// by the stores and the preview channel, so there Jay neither checks by itself nor asks the desktop releases.
+    /// Desktop and sideloaded Android builds can check the release feed. iOS uses its store.
     /// </summary>
-    public static bool IsSupported => PlatformFeatures.IsDesktop;
+    public static bool IsSupported => PlatformFeatures.IsDesktop || OperatingSystem.IsAndroid();
 
     /// <summary>How often the automatic check runs.</summary>
-    public static readonly TimeSpan Interval = TimeSpan.FromHours(24);
+    public static readonly TimeSpan Interval = TimeSpan.FromMinutes(15);
 
     /// <summary>The feed to use: the user's own address, or the official one when none is set.</summary>
     public static string FeedFor(string? userFeed) => string.IsNullOrWhiteSpace(userFeed) ? OfficialFeed : userFeed.Trim();

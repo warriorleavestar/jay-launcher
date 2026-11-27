@@ -16,7 +16,9 @@ public sealed class App : Application
 
     public override void OnFrameworkInitializationCompleted()
     {
-        L.SetLanguage(null);
+        // The mobile edition ships for Chinese-speaking players first. Keep desktop's saved
+        // preference independent, while making a fresh Android/iOS install immediately usable.
+        L.SetLanguage("zh-Hans");
         if (ApplicationLifetime is IActivityApplicationLifetime activity)
             activity.MainViewFactory = CreateMainView;
         else if (ApplicationLifetime is ISingleViewApplicationLifetime singleView)

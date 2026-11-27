@@ -8,6 +8,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using Amber.Core.Launch;
+using Amber.Core.Multiplayer.Public;
 using Amber.Core.Net;
 
 namespace Amber.Core.Multiplayer;
@@ -38,7 +39,6 @@ public static class EasyTierRelease
     public const string SourceUrl = "https://github.com/Yumao-Feather/jay-easytier";
     private const string BaseUrl = SourceUrl + "/releases/download/" + ReleaseTag + "/";
     public const string License = "LGPL-3.0";
-    public const string ProjectUrl = "https://github.com/EasyTier/EasyTier";
 
     public sealed record Asset(string Platform, string Name, string Sha256, long Size, string CoreName, string CliName)
     {
@@ -57,6 +57,8 @@ public static class EasyTierRelease
 
     internal static Asset For(string os, Architecture arch) => (os, arch) switch
     {
+        // The APK carries the same verified, statically linked Linux executables for its ABI.
+        ("android", Architecture.Arm64 or Architecture.X64) => For("linux", arch),
         ("windows", Architecture.X64) => A("windows-x86_64", "cdb113651de1f37244f16d405447806a76cd9012780a4e519ed7eba062306888", 11_621_165, true),
         ("windows", Architecture.Arm64) => A("windows-arm64", "a5ce68a4a6f0e458e10ff3dbabadedacc6ddcf621bd5c4338efe613cabfceefa", 10_643_891, true),
         ("windows", Architecture.X86) => A("windows-i686", "32e8d1c6b06ba53614c5581295d317f1bcf1d044398631ab486c616e2e9cfe7b", 11_223_763, true),
@@ -81,9 +83,15 @@ public static class EasyTierRelease
     /// </summary>
     public static ReleaseCheck Signature => SignatureCheck.Value;
 
+    // This immutable EasyTier build was signed before the third release key was added. Keep verifying it against the
+    // exact 2-of-2 list named by its signed statement; Jay releases and future component builds still use TrustList.Jay
+    // (currently 2-of-3). The two keys remain in JayTrust.ReleaseKeys, so this grants no trust to a retired or unknown key.
+    internal static TrustList EmbeddedTrust => new(
+        [.. JayTrust.ReleaseKeys.Take(2).Select(Convert.FromBase64String)], 2);
+
     private static readonly Lazy<ReleaseCheck> SignatureCheck = new(() =>
         CheckSignature(Embedded(ReleaseSignature.SignatureFileName) is { } m ? Encoding.UTF8.GetString(m) : null,
-            Embedded(ReleaseSignature.SumsFileName) ?? [], TrustList.Jay, All));
+            Embedded(ReleaseSignature.SumsFileName) ?? [], EmbeddedTrust, All));
 
     /// <summary>
     /// Whether a package may be installed: always when this Jay has no release keys built in yet
@@ -141,7 +149,9 @@ public static class EasyTierRelease
     private static Asset ForCurrentPlatform()
     {
         var os = OperatingSystem.IsWindows() ? "windows" : OperatingSystem.IsMacOS() ? "macos" : OperatingSystem.IsLinux() ? "linux" : "unknown";
-        return For(os, RuntimeInformation.OSArchitecture);
+        return OperatingSystem.IsAndroid()
+            ? For("android", RuntimeInformation.ProcessArchitecture)
+            : For(os, RuntimeInformation.OSArchitecture);
     }
 
     private static Asset A(string platform, string sha256, long size, bool exe = false)
@@ -205,23 +215,65 @@ public sealed class EasyTierInstaller
 
     private EasyTierRelease.Asset Asset => _asset ?? EasyTierRelease.Current;
     public string InstallDir => Path.Combine(_dataDir, "easytier", EasyTierRelease.InstallTag, Asset.Platform);
-    public string CorePath => Path.Combine(InstallDir, Asset.CoreName);
-    public string CliPath => Path.Combine(InstallDir, Asset.CliName);
+    public const string AndroidNativeDirectoryKey = "Jay.AndroidNativeDirectory";
+    private string Executable(string name) => OperatingSystem.IsAndroid()
+        ? Path.Combine((string?)AppContext.GetData(AndroidNativeDirectoryKey)
+            ?? throw new InvalidOperationException(L.T("mobile.game.component_missing")), $"lib{name}.so")
+        : Path.Combine(InstallDir, name);
+
+    public string CorePath => Executable(Asset.CoreName);
+    public string CliPath => Executable(Asset.CliName);
     /// <summary>发布包里随程序附带的安装包（和 Jay 主程序同目录下的 easytier 文件夹）。</summary>
     public string BundledPath => Path.Combine(_bundledDir, Asset.Name);
     /// <summary>手动导入时需要的文件名。</summary>
     public string ExpectedFileName => Asset.Name;
     /// <summary>The WinDivert driver (full-LAN broadcast relay on Windows) must be there too; if it's missing, extract again.</summary>
-    public bool IsInstalled => File.Exists(CorePath) && File.Exists(CliPath)
+    public bool IsInstalled => (!OperatingSystem.IsAndroid() || EasyTierRelease.SignatureAllowsInstall)
+        && File.Exists(CorePath) && File.Exists(CliPath)
         && (!OperatingSystem.IsWindows() || Asset.DriverName is not { } driver || File.Exists(Path.Combine(InstallDir, driver)));
 
     /// <summary>下载来源，按尝试顺序排列。</summary>
     public IReadOnlyList<(string Name, string Url)> Sources => _sources ?? EasyTierRelease.Sources(Asset, SourceChain.PrefersMirrors());
 
+    /// <summary>
+    /// One lock per install folder, shared by every installer in this process: installers are created per use, and two
+    /// first-time installs would otherwise share the same download file and temporary extract folder.
+    /// </summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, SemaphoreSlim> InstallLocks = new(PathComparer);
+
+    /// <summary>Paths that differ only in case are the same folder on Windows and (by default) macOS.</summary>
+    internal static StringComparer PathComparer => OperatingSystem.IsLinux() ? StringComparer.Ordinal : StringComparer.OrdinalIgnoreCase;
+
+    internal SemaphoreSlim InstallLock => InstallLocks.GetOrAdd(Path.TrimEndingDirectorySeparator(Path.GetFullPath(InstallDir)), _ => new SemaphoreSlim(1, 1));
+
+    /// <summary>
+    /// Tests only: awaited first thing once <see cref="EnsureAsync"/> or <see cref="ImportAsync"/> holds the install lock,
+    /// so a test can hold a real install there and watch the next caller wait. Always null in the app.
+    /// </summary>
+    internal Func<CancellationToken, Task>? WhileLockedForTests { get; set; }
+
+    private Task WhileLocked(CancellationToken ct) => WhileLockedForTests?.Invoke(ct) ?? Task.CompletedTask;
+
     /// <summary>progress 的 CurrentFile 是正在尝试的来源名。</summary>
     public async Task EnsureAsync(IProgress<DownloadProgress>? progress = null, CancellationToken ct = default)
     {
-        if (IsInstalled) return;
+        // Checked only under the lock: mid-install the files can already be in place before they are made runnable.
+        var gate = InstallLock;
+        await gate.WaitAsync(ct);
+        try
+        {
+            await WhileLocked(ct);
+            // Another install may have finished while this one waited.
+            if (IsInstalled) return;
+            if (OperatingSystem.IsAndroid())
+                throw new InvalidDataException(L.T("mobile.game.component_missing"));
+            await InstallAsync(progress, ct);
+        }
+        finally { gate.Release(); }
+    }
+
+    private async Task InstallAsync(IProgress<DownloadProgress>? progress, CancellationToken ct)
+    {
         var failures = new List<EasyTierSourceFailure>();
 
         if (File.Exists(BundledPath))
@@ -270,7 +322,22 @@ public sealed class EasyTierInstaller
     }
 
     /// <summary>用户手动选的安装包：同样要求大小和 SHA-256 与固定值一致。</summary>
-    public Task ImportAsync(string zipPath, CancellationToken ct = default) => InstallFromZipAsync(zipPath, ct);
+    public async Task ImportAsync(string zipPath, CancellationToken ct = default)
+    {
+        if (OperatingSystem.IsAndroid())
+        {
+            await EnsureAsync(ct: ct);
+            return;
+        }
+        var gate = InstallLock;
+        await gate.WaitAsync(ct);
+        try
+        {
+            await WhileLocked(ct);
+            await InstallFromZipAsync(zipPath, ct);
+        }
+        finally { gate.Release(); }
+    }
 
     private async Task InstallFromZipAsync(string zip, CancellationToken ct)
     {
@@ -689,7 +756,7 @@ public sealed class EasyTierSession : IEasyTierSession
             RedirectStandardError = true,
         };
         foreach (var a in args) info.ArgumentList.Add(a);
-        foreach (var (name, value) in environment) info.Environment[name] = value;
+        ApplyEnvironment(info, environment);
         // Mac/Linux：经看门脚本启动，Jay 崩溃或被 kill -9 后一两秒内 easytier-core 跟着结束（不用等下次开房间时清理）。
         EasyTierProcessGuard.Wrap(info);
         var process = Process.Start(info) ?? throw new InvalidOperationException(L.T("core.mp.component.startfailed"));
@@ -711,6 +778,18 @@ public sealed class EasyTierSession : IEasyTierSession
             }
         }
         return (process, job);
+    }
+
+    /// <summary>
+    /// Drops every inherited ET_* variable (easytier-core reads its options from them) and then adds only the given ones,
+    /// matching the elevated hosts, which pass nothing but the room secret.
+    /// </summary>
+    internal static void ApplyEnvironment(ProcessStartInfo info, IReadOnlyDictionary<string, string> environment)
+    {
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        foreach (var name in info.Environment.Keys.Where(k => k.StartsWith("ET_", comparison)).ToList())
+            info.Environment.Remove(name);
+        foreach (var (name, value) in environment) info.Environment[name] = value;
     }
 
     private void OnLine(string? line)
