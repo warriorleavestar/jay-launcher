@@ -478,10 +478,13 @@ public sealed partial class ModpackService(LoaderContext ctx, ModrinthProvider m
         return PickBase(named);
     }
 
-    private static void ExtractPrefix(ZipArchive zip, string prefix, PackTarget target, IReadOnlyCollection<string>? skip = null, Func<string, bool>? skipWhere = null)
+    internal static void ExtractPrefix(ZipArchive zip, string prefix, PackTarget target, IReadOnlyCollection<string>? skip = null, Func<string, bool>? skipWhere = null)
     {
         var entries = zip.Entries.Where(e => e.FullName.StartsWith(prefix, StringComparison.Ordinal) && !e.FullName.EndsWith('/')).ToList();
-        CheckRoom(entries, target.WorkDir);
+        if (entries.Count > MaxEntries) throw new InvalidDataException(L.F("core.content.modpack.toomanyfiles", entries.Count, MaxEntries));
+        // Decide every entry first, then check the room for only the files that are really written: a zipped game
+        // folder can carry gigabytes of shared assets and libraries that are skipped here.
+        var planned = new List<(ZipArchiveEntry Entry, string Path)>();
         foreach (var entry in entries)
         {
             // 前缀后面多出来的斜杠（“overrides//mods/x.jar”）只是多余的分隔符，不是绝对路径：去掉再判断。
@@ -490,6 +493,11 @@ public sealed partial class ModpackService(LoaderContext ctx, ModrinthProvider m
             // 过滤必须使用真正落盘的名字；否则“./launcher_accounts.json”“PCL./Setup.ini”等会绕过排除规则。
             var normalized = Path.GetRelativePath(Path.GetFullPath(target.WorkDir), path).Replace('\\', '/');
             if (skip?.Contains(normalized) == true || skipWhere?.Invoke(normalized) == true) continue;
+            planned.Add((entry, path));
+        }
+        CheckRoom([.. planned.Select(p => p.Entry)], target.WorkDir);
+        foreach (var (entry, path) in planned)
+        {
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             ExtractLimited(entry, path);
         }

@@ -19,9 +19,12 @@ public sealed partial class ModpackService
         if (entries.Count > MaxEntries) throw new InvalidDataException(L.F("core.content.modpack.toomanyfiles", entries.Count, MaxEntries));
         long total = 0;
         foreach (var entry in entries) total = entry.Length > long.MaxValue - total ? long.MaxValue : total + entry.Length;
-        if (FreeSpace(targetDir) is { } free && total > free)
+        if ((FreeSpaceForTest.Value ?? FreeSpace)(targetDir) is { } free && total > free)
             throw new InvalidDataException(L.F("core.content.modpack.nospace", Fmt.Size(total), Fmt.Size(free)));
     }
+
+    /// <summary>Tests only: the free space <see cref="CheckRoom"/> sees, for the calling test's flow only.</summary>
+    internal static readonly AsyncLocal<Func<string, long?>?> FreeSpaceForTest = new();
 
     /// <summary>Free bytes on the drive that holds <paramref name="dir"/> (or its nearest existing parent), or null when unknown.</summary>
     internal static long? FreeSpace(string dir)
