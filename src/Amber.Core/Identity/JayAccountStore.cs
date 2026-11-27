@@ -49,6 +49,8 @@ public sealed class JayAccountStore(string directory)
         lock (_gate) return _items.Select(i => i.Entry).FirstOrDefault(e => e.Address == address);
     }
 
+    /// <summary>The last second <see cref="DateTimeOffset.FromUnixTimeSeconds"/> accepts (end of year 9999).</summary>
+    private const long MaxUnixSeconds = 253_402_300_799;
     // Version 0 entries that couldn't be moved this time (the seed didn't open: a locked file, DPAPI unavailable, ...).
     // They are written back unchanged, so a later start can still move them and the seed is never lost.
     private readonly List<JsonNode> _unmoved = [];
@@ -130,7 +132,7 @@ public sealed class JayAccountStore(string directory)
                     }
                     if (_items.Any(i => i.Entry.Address == address)) continue;
                     var entry = new JayAccountEntry(address!, DeviceCertificate.CleanName((string?)o["label"]), (bool?)o["backedUp"] ?? false,
-                        Math.Max(0, (int?)o["epoch"] ?? 0), DateTimeOffset.FromUnixTimeSeconds(Math.Max(0, (long?)o["created"] ?? 0)),
+                        Math.Max(0, (int?)o["epoch"] ?? 0), DateTimeOffset.FromUnixTimeSeconds(Math.Clamp((long?)o["created"] ?? 0, 0, MaxUnixSeconds)),
                         DeviceCertificate.FromJson(o["device"])) { FormerAddress = former };
                     _items.Add((entry, seed));
                 }
