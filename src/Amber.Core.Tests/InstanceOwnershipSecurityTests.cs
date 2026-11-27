@@ -270,6 +270,23 @@ public sealed class InstanceOwnershipSecurityTests : IDisposable
         return stream.ToArray();
     }
 
+    /// <summary>A loader instance named like its game version would overwrite that version; it is refused before any download.</summary>
+    [Theory]
+    [InlineData(LoaderKind.Fabric)]
+    [InlineData(LoaderKind.Quilt)]
+    [InlineData(LoaderKind.OptiFine)]
+    public async Task ALoaderInstanceCannotTakeTheNameOfItsGameVersion(LoaderKind kind)
+    {
+        ILoaderInstaller installer = kind switch
+        {
+            LoaderKind.Fabric => FabricLikeInstaller.Fabric(_ctx),
+            LoaderKind.Quilt => FabricLikeInstaller.Quilt(_ctx),
+            _ => new OptiFineInstaller(_ctx),
+        };
+        await Assert.ThrowsAsync<InvalidDataException>(() => installer.InstallAsync(new LoaderVersion(kind, "1.21.1", "1.0"), "1.21.1"));
+        Assert.Equal(0, _handler.Requests);
+    }
+
     private sealed class FixtureHandler : HttpMessageHandler
     {
         public int Requests;

@@ -20,14 +20,11 @@ public sealed class AndroidMobilePlatformServices(Context context) : IMobilePlat
                 clipboard.PrimaryClip = ClipData.NewPlainText("Jay Server", serverAddress);
         }
 
-        var gameIntent = new Intent(_context, typeof(GameActivity));
-        gameIntent.AddFlags(ActivityFlags.NewTask);
-        if (!string.IsNullOrWhiteSpace(serverAddress))
-            gameIntent.PutExtra(GameActivity.ServerAddressExtra, serverAddress);
-        _context.StartActivity(gameIntent);
-        return Task.FromResult(AndroidRuntimeStore.IsInstalled(_context)
-            ? MobileGameLauncherResult.Launched
-            : MobileGameLauncherResult.RuntimeSetupOpened);
+        // The launcher owns runtime/game downloads now. Never open the removed full-screen setup Activity directly.
+        var launcherIntent = new Intent(_context, typeof(MainActivity));
+        launcherIntent.AddFlags(ActivityFlags.NewTask | ActivityFlags.SingleTop);
+        _context.StartActivity(launcherIntent);
+        return Task.FromResult(MobileGameLauncherResult.Launched);
     }
 
     public void SetGatewayActive(bool active)

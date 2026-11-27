@@ -16,4 +16,4 @@ related: settings
 - 試著下載一個檔案：在連線頁開啟「連線有問題？」，展開**下載檔案**。
 
 ## 出問題了
-- 檢查更新預設查詢 Jay 官方發布頁，也可以在 [設定 › 下載與服務](jay:settings#UpdateFeed) 換成自己的位址。新裝的 Jay 每天也會自己查一次（從舊版升級的保持關閉，要自己打開），可以在 [設定 › 關於](jay:settings#AutoUpdate) 開關。中途開過舊版 Jay 的話，舊版會忘掉這個開關，回來後再看一眼。只提示信任人簽過名的新版本，從不自動下載。
+- 在[設定 › 關於](jay:settings#AutoUpdate)可開啟自動檢查，或手動檢查。Jay 開啟時每 15 分鐘查一次。Windows、macOS 和 Android 收到已簽署的更新後，點「下載並更新」，再依系統提示確認。原有的遊戲目錄和存檔會保留。也可設定[自訂更新來源](jay:settings#UpdateFeed)。

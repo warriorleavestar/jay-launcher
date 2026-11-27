@@ -41,6 +41,19 @@ public class ActivityTests
     }
 
     [Fact]
+    public void DownloadFileNamesAreCopiedIntoTheTask()
+    {
+        var center = new TaskCenter(Now);
+        var task = center.Track("install", "1.21.11");
+        var files = new List<string> { "client.jar", "logging.xml" };
+
+        task.Report(0.25, "2/8", 1024, files);
+        files.Clear();
+
+        Assert.Equal(["client.jar", "logging.xml"], task.ActiveFiles);
+    }
+
+    [Fact]
     public async Task SameDedupeKeyRunsOnce()
     {
         var center = new TaskCenter(Now);

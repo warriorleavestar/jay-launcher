@@ -1,3 +1,4 @@
+using Amber.App.Localization;
 using Amber.Core.Localization;
 using Avalonia;
 using Avalonia.Controls;
@@ -44,7 +45,8 @@ public class SafetyPanel : SafetySurface
                 _body,
             },
         };
-        L.Changed += () => Avalonia.Threading.Dispatcher.UIThread.Post(() => _badge.Text = L.T("safety.title"));
+        // Weak subscription: a static L.Changed handler would keep every dialog, popup and card that ever showed one alive.
+        LanguageListeners.Add(this, static p => ((SafetyPanel)p)._badge.Text = L.T("safety.title"));
     }
 
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
