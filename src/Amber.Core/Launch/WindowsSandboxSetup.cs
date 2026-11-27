@@ -55,6 +55,30 @@ public static class WindowsSandboxSetup
         ];
     }
 
+    /// <summary>
+    /// Creates the missing parent folder of each granted path that does not exist yet (as the player, before the admin
+    /// step), so <see cref="FoldersToOpen"/> sees it. Otherwise a granted folder that the first launch creates (the
+    /// universal loader's runtime folder on a fresh install) leaves its parent closed, and the next launch asks for
+    /// the admin step again. Returns the paths that were created.
+    /// </summary>
+    public static IReadOnlyList<string> CreateMissingParents(IEnumerable<string?> paths)
+    {
+        var created = new List<string>();
+        foreach (var path in paths)
+        {
+            if (string.IsNullOrEmpty(path) || !Path.IsPathFullyQualified(path)) continue;
+            var full = Path.GetFullPath(path);
+            if (Directory.Exists(full) || File.Exists(full) || Path.GetDirectoryName(full) is not { } parent || Directory.Exists(parent)) continue;
+            try
+            {
+                Directory.CreateDirectory(parent);
+                created.Add(parent);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+        }
+        return created;
+    }
+
     /// <summary>Every folder above <paramref name="path"/>, up to and including the drive root.</summary>
     public static IEnumerable<string> Parents(string path)
     {

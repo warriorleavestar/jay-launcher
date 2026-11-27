@@ -24,7 +24,7 @@ public static class CrossLoader
         public static Capabilities Of(BakePackage package) => new(package.Platforms, package.Bridges, package.Accepts);
 
         /// <summary>
-        /// What the pinned release (jay-loader v0.3.2) runs, from its manifest (platforms, bridges and its <c>accepts</c> array). Used only to tell the player what turning
+        /// What the pinned release (jay-loader v0.4.0) runs, from its manifest (platforms, bridges and its <c>accepts</c> array). Used only to tell the player what turning
         /// on baking would allow before the loader is downloaded; an installed package always speaks for itself.
         /// </summary>
         public static Capabilities PinnedRelease { get; } = new(
@@ -33,12 +33,14 @@ public static class CrossLoader
                 [BakePlatform.Vanilla] = ["1.21.1"],
                 [BakePlatform.NeoForge] = ["1.21.1"],
                 [BakePlatform.Forge] = ["1.20.1"],
+                [BakePlatform.ForgeLegacy] = [BakePlatform.ForgeLegacyMc],
             },
-            ["fmlbridge.jar", "fabricbridge.jar", "fmlbridge-forge.jar", "fabricbridge-forge.jar", "forgecompat.jar"],
+            ["fmlbridge.jar", "fabricbridge.jar", "fmlbridge-forge.jar", "fabricbridge-forge.jar", "forgecompat.jar", "fmlbridge-1.12.2.jar"],
             AcceptTable.Parse(System.Text.Json.Nodes.JsonNode.Parse("""
                 [{"platform":"vanilla","mc":"1.21.1","available":true,"accepts":["fabric","quilt"],"missingBridges":[]},
                  {"platform":"neoforge","mc":"1.21.1","available":true,"accepts":["neoforge","fabric","quilt","forge"],"missingBridges":[]},
-                 {"platform":"forge","mc":"1.20.1","available":true,"accepts":["forge","neoforge","fabric","quilt"],"missingBridges":[]}]
+                 {"platform":"forge","mc":"1.20.1","available":true,"accepts":["forge","neoforge","fabric","quilt"],"missingBridges":[]},
+                 {"platform":"forge-1.12.2","mc":"1.12.2","available":true,"accepts":["forge"],"missingBridges":[]}]
                 """)));
     }
 
@@ -125,7 +127,7 @@ public static class CrossLoader
     public static IReadOnlyList<string> Extras(Capabilities? caps, string? instanceLoader, string? mcVersion)
     {
         if (caps is null || instanceLoader is null || string.IsNullOrEmpty(mcVersion)) return [];
-        var platform = PlatformOf(instanceLoader);
+        var platform = PlatformOf(instanceLoader, mcVersion);
         if (platform is null || !caps.Platforms.TryGetValue(platform, out var versions) || !versions.Contains(mcVersion)) return [];
 
         var native = Native(instanceLoader);
@@ -148,10 +150,12 @@ public static class CrossLoader
     }
 
     /// <summary>The loader platform that runs an instance with this loader (null: none).</summary>
-    public static string? PlatformOf(string? instanceLoader) => instanceLoader switch
+    public static string? PlatformOf(string? instanceLoader, string? mcVersion = null) => instanceLoader switch
     {
         "fabric" or "quilt" => BakePlatform.Vanilla,
         "neoforge" => BakePlatform.NeoForge,
+        // Forge on 1.12.2 is its own platform (v1.3.2), as BakePlatform.KindOf says.
+        "forge" when mcVersion == BakePlatform.ForgeLegacyMc => BakePlatform.ForgeLegacy,
         "forge" => BakePlatform.Forge,
         _ => null,
     };
@@ -161,7 +165,7 @@ public static class CrossLoader
     /// empty when nothing is missing or the package does not say.
     /// </summary>
     public static IReadOnlyList<string> MissingBridges(Capabilities? caps, string? instanceLoader, string? mcVersion) =>
-        caps?.Accepts is { } table && PlatformOf(instanceLoader) is { } platform && !string.IsNullOrEmpty(mcVersion) ? table.Missing(platform, mcVersion) : [];
+        caps?.Accepts is { } table && PlatformOf(instanceLoader, mcVersion) is { } platform && !string.IsNullOrEmpty(mcVersion) ? table.Missing(platform, mcVersion) : [];
 
     /// <summary>The ecosystem a file would run as here: a native one if it has one, else the first extra it ships for; null when neither.</summary>
     public static string? EcosystemOf(string? instanceLoader, IEnumerable<string> fileLoaders, IReadOnlyList<string> extras)

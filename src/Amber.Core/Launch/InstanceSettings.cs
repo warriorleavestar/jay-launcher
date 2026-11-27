@@ -23,6 +23,12 @@ public sealed class InstanceSettings
     public string? PreLaunchCommand { get; set; }
     public string? PostExitCommand { get; set; }
     public string? JoinServer { get; set; }
+    /// <summary>
+    /// Forge 1.12.2 on the universal loader: false starts the game on the stock LaunchWrapper class loader, without the
+    /// loader's transformer cache (slower starts; for a crash that looks cache related). Null or true: the cache is on.
+    /// Per instance only.
+    /// </summary>
+    public bool? LegacyTransformerCache { get; set; }
 
     private static readonly JsonSerializerOptions Options = new()
     {
