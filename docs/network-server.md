@@ -93,6 +93,7 @@ jay-server node remove <房间编号>       # 只删这一次，房主续期时�
 - 封禁名单存在数据目录的 `bans.json`。`--for 30m` / `24h` / `7d` 是临时封禁，到点自动解除；不加就是永久。房主被拒时能看到原因和解封时间。
 - 节点每 5 秒检查一次 `bans.json` 有没有被改过，改了就重新读。几台目录节点想共用一份封禁名单，可以用 rsync、共享盘之类把这个文件同步过去，不用在每台上各执行一次。
 - 封账号只在开了账号登录的节点上有用：Jay 发布房间时会带上登录凭证，节点核对过签名才记下账号。
+- Account bans match the exact account name. Lists saved by older versions (`"v": 1` in `bans.json`) matched the name in any case; at start-up the node ties each such ban to the one account with that name and saves the list as `"v": 2`. A ban that matches no account, or several accounts that differ only in case, keeps matching any case: `node bans` marks it `"anyCase": true` and the log names it. Ban the exact account name, then lift only the old entry with `node unban account <name> --any-case`. When an exact and an old ban share a name, a plain `node unban account <name>` changes nothing and asks for `--exact` or `--any-case`; the panel's Unban button lifts only the row it is on.
 
 ## 要求的 Jay 版本
 
@@ -193,7 +194,7 @@ docker compose -f server/docker/docker-compose.yml exec jay-network /opt/jay-ser
 
 ## 把节点绑定到硬件（防止被整盘拷走冒充）
 
-在节点上 `jay-server node bind`（生成只含加盐哈希的 hardware.request.json）→ 拷到放根钥匙的离线电脑 `jay-server network hw-cert --root <根钥匙> --request hardware.request.json --out hardware.cert` → 第二位信任人在自己的离线电脑上 `jay-server network hw-cert --cosign hardware.cert --root <自己的钥匙>`（Jay 公共网络看 JayTrust.Need，现在是 3 把里任 2 把；自己的网络看 dirRootsNeed；每次签名前逐项显示内容和核对码，要手打目录公钥最后 6 个字符）→ 拷回节点 `jay-server node bind --install hardware.cert`。之后 directory.key、login.key 只以加密形式存在（有 TPM 就封存进 TPM，Linux 上还绑定安全启动状态）。硬件对不上时节点删除数据目录里的 Jay 文件；运行环境被动过（调试器、注入、文件可被别人改、TPM 不解封）时拒绝运行。不需要 root：Linux 上把服务账号加进 tss 组即可（安装脚本会自动加）。换硬件、迁移虚拟机前先 `jay-server node bind --check`。细节和限制见 [security/node-hardware-binding.md](security/node-hardware-binding.md)。
+在节点上 `jay-server node bind`（生成只含加盐哈希的 hardware.request.json）→ 拷到放根钥匙的离线电脑 `jay-server network hw-cert --root <根钥匙> --request hardware.request.json --out hardware.cert` → 第二位信任人在自己的离线电脑上 `jay-server network hw-cert --cosign hardware.cert --root <自己的钥匙>`（Jay 公共网络看 JayTrust.Need，现在是 3 把里任 2 把；自己的网络看 dirRootsNeed；每次签名前逐项显示内容和核对码，要手打目录公钥最后 6 个字符）→ 拷回节点 `jay-server node bind --install hardware.cert`。之后 directory.key、login.key 只以加密形式存在（有 TPM 就封存进 TPM，Linux 上还绑定安全启动状态）。硬件对不上时节点删除数据目录里的 Jay 文件；运行环境被动过（调试器、注入、文件可被别人改、TPM 不解封）时拒绝运行。不需要 root：Linux 上把服务账号加进 tss 组即可（安装脚本会自动加）；手动绑定时也用服务账号运行：`sudo -u jay JAY_SERVER_DIR=/var/lib/jay-network /opt/jay-server/jay-server node bind`。换硬件、迁移虚拟机前先 `jay-server node bind --check`。细节和限制见 [security/node-hardware-binding.md](security/node-hardware-binding.md)。
 
 ## 节点能看到什么
 
