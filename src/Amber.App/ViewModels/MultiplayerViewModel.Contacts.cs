@@ -298,7 +298,7 @@ public sealed partial class MultiplayerViewModel
         catch (Exception e) when (IsMailError(e))
         {
             Contacts.Dismiss(key);
-            SetStatus(StatusMessage.Failure("multiplayer.contacts.mail_failed", e, ErrorText.Of(e)));
+            MailFailed(e);
         }
     }
 
@@ -314,7 +314,7 @@ public sealed partial class MultiplayerViewModel
         try { await post.AcceptAsync(item.Pending.PublicKey, ChatName, default); }
         catch (Exception e) when (IsMailError(e))
         {
-            SetStatus(StatusMessage.Failure("multiplayer.contacts.mail_failed", e, ErrorText.Of(e)));
+            MailFailed(e);
         }
     }
 
@@ -392,6 +392,9 @@ public sealed partial class MultiplayerViewModel
         }
         finally { _checkingMail = false; }
     }
+
+    /// <summary>Sending a friend request or invite through the network failed (also the GUI self-check).</summary>
+    internal void MailFailed(Exception e) => SetStatus(StatusMessage.Failure("multiplayer.contacts.mail_failed", e, ErrorText.Of(e)));
 
     private static bool IsMailError(Exception e) => e is IOException or System.Net.Sockets.SocketException or InvalidDataException
         or OperationCanceledException or TimeoutException or System.Security.Cryptography.CryptographicException or System.Text.Json.JsonException
@@ -498,7 +501,7 @@ public sealed partial class MultiplayerViewModel
         {
             foreach (var (_, pending) in pendings) lobby.Book.Revoke(pending);
             RefreshInvites();
-            SetStatus(StatusMessage.Failure("multiplayer.contacts.mail_failed", e, ErrorText.Of(e)));
+            MailFailed(e);
         }
     }
 

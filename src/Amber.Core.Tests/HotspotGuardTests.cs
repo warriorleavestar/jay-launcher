@@ -23,7 +23,7 @@ public sealed class HotspotGuardTests
         Assert.Equal(JsonValueKind.Null, document.RootElement.GetProperty("env").ValueKind);
     }
 
-    [Fact]
+    [WindowsFact]
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]
     public async Task NoExitRejectsSharingWithoutStoppingTheExistingCore()
     {
@@ -68,7 +68,7 @@ public sealed class HotspotGuardTests
         public void Dispose() { }
     }
 
-    [Theory]
+    [WindowsTheory]
     [InlineData(false)]
     [InlineData(true)]
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]
@@ -95,7 +95,7 @@ public sealed class HotspotGuardTests
     /// The real exit helper: one Windows PowerShell child fed the fixed setup through standard input (no encoded command).
     /// Only steps that touch nothing are used: the lease renewal right after load, and requests it must refuse.
     /// </summary>
-    [Fact]
+    [WindowsFact]
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]
     public void ExitHelperLoadsTheSetupFromStandardInputAndAnswers()
     {

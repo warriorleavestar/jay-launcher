@@ -177,7 +177,7 @@ public class RelayNodeTests
 {
     [Theory]
     [InlineData("tcp://public.easytier.top:11010", true)]
-    [InlineData("udp://1.2.3.4:11010", true)]
+    [InlineData("udp://192.0.2.4:11010", true)]
     [InlineData("quic://node.example.com:11012", true)]
     [InlineData("wg://node.example.com:11011", true)]
     // Jay's EasyTier build has no websocket support, so ws/wss relays could never connect.
@@ -312,7 +312,7 @@ public class ExitNodeArgsTests
 
     [Theory]
     [InlineData("10.233.144.1", false)]
-    [InlineData("8.8.8.8", true)]
+    [InlineData("198.51.100.88", true)]
     [InlineData("not-an-ip", true)]
     public void UsingExitNeedsTunAndRoomMember(string exit, bool tun)
     {

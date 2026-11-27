@@ -60,7 +60,7 @@ public sealed class JayNetworkServerBuilder
     public JayNetworkServerBuilder UseSeeds(IEnumerable<string> seeds)
     {
         foreach (var s in seeds)
-            if (!RelayNodes.IsWellFormed(s)) throw new ArgumentException($"种子节点地址不对：{s}（例：tcp://1.2.3.4:11010）");
+            if (!RelayNodes.IsWellFormed(s)) throw new ArgumentException($"种子节点地址不对：{s}（例：tcp://seed.example.org:11010）");
         Seeds = [.. seeds.Select(s => s.Trim())];
         return this;
     }
@@ -83,6 +83,23 @@ public sealed class JayNetworkServerBuilder
 
     /// <summary>只当种子节点（帮忙转发、分担地区流量），不跑房间目录。一个网络里只能有一个目录节点（它占着 10.235.0.1）。</summary>
     public JayNetworkServerBuilder SeedOnly() { SeedOnlyMode = true; return this; }
+
+    internal RelayLimits? Relay;
+
+    /// <summary>
+    /// Limits relaying other EasyTier networks (rooms) through this node: at most <paramref name="kbpsPerNetwork"/> KB/s
+    /// for any one network (0 = no limit), and only networks matching <paramref name="networks"/> (EasyTier's relay
+    /// whitelist; null = all; blank is refused, since EasyTier reads it as "relay nothing"). This node's own public
+    /// network is never limited.
+    /// </summary>
+    public JayNetworkServerBuilder UseRelayLimits(int kbpsPerNetwork, string? networks = null)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(kbpsPerNetwork);
+        if (networks is not null && string.IsNullOrWhiteSpace(networks))
+            throw new ArgumentException("networks is blank: pass network names (space separated, * allowed), or null for all", nameof(networks));
+        Relay = new RelayLimits(kbpsPerNetwork, networks);
+        return this;
+    }
 
     /// <summary>
     /// 第几个目录节点：1 是主目录（10.235.0.1），2–4 是备用（10.235.0.2–4）。Jay 把房间发给每个在线的目录、合并列表，
@@ -210,6 +227,7 @@ public sealed class JayNetworkServer : IAsyncDisposable
         if (_sealedKeys is null) Guard = null;
         Bans = b.BanListOn ? new BanList(Path.Combine(b.DataDir, "bans.json"), b.Clock) : null;
         Stats = new DirectoryStats();
+        IAccountStore? accountStore = null;
         if (b.Login is { } login) Login = login;
         else if (b.Accounts is { } accounts)
         {
@@ -222,7 +240,30 @@ public sealed class JayNetworkServer : IAsyncDisposable
                 Factors = [new TotpFactor(store), .. b.Factors],
                 RequireSecondFactor = accounts.RequireSecondFactor,
             };
+            accountStore = store;
         }
+        MigrateAccountBans(accountStore);
+    }
+
+    /// <summary>
+    /// Ties account bans saved by older versions to the exact account they name, and tells the admin about the ones that
+    /// can't be tied to one account (they keep matching the name in any case; <c>node bans</c> marks them "anyCase").
+    /// </summary>
+    private void MigrateAccountBans(IAccountStore? store)
+    {
+        if (Bans is not { } bans) return;
+        if (store?.AccountNames() is { } names)
+        {
+            var result = bans.MigrateAccountBans(names);
+            if (result.Migrated > 0) _b.Log($"Ban list: {result.Migrated} account ban(s) from an older version now name the exact account");
+            foreach (var (ban, count) in result.Unresolved)
+                _b.Log($"Ban list: please review the account ban \"{ban.Value}\": "
+                    + (count == 0 ? "no account has this name" : $"{count} accounts have this name in different case")
+                    + "; it keeps matching the name in any case (\"anyCase\" in node bans). Ban the exact account name, then lift only this entry (node unban account <name> --any-case).");
+        }
+        else if (bans.List().Count(b => b.AnyCase) is > 0 and var left)
+            _b.Log($"Ban list: {left} account ban(s) from an older version keep matching names in any case because the account store "
+                + "can't list its accounts (\"anyCase\" in node bans). Please review them.");
     }
 
     private DateTimeOffset Now => _b.Clock?.Invoke() ?? DateTimeOffset.UtcNow;
@@ -280,6 +321,7 @@ public sealed class JayNetworkServer : IAsyncDisposable
             {
                 Volunteers = new VolunteerRegistry(_b.VolunteerProbe, _b.Clock)
                 {
+                    NetworkName = Profile.NetworkName,
                     Blocked = Bans is { } b ? b.IsNodeBanned : null,
                     BlockedOperator = Bans is { } o ? o.IsOperatorBanned : null,
                     RequireOperator = _b.VolunteersSigned,
@@ -304,6 +346,8 @@ public sealed class JayNetworkServer : IAsyncDisposable
                 Observers = observers,
                 Extensions = [.. _b.Extensions],
                 Volunteers = Volunteers,
+                // Jay's own EasyTier package (in secure mode) says whether it maps callers; a custom one isn't assumed to.
+                SourcesMapped = _b.EasyTier is null && PublicNetworkArgs.TellsCallersApart,
                 MinClientVersion = _b.Config?.Policy.MinVersion,
                 RequireAccountToPublish = Login is not null && _b.Config?.Login?.Required == true,
                 Identity = _sealedKeys is not null && _sealedKeys.TryGetValue("directory.key", out var sealedDir)
@@ -339,7 +383,7 @@ public sealed class JayNetworkServer : IAsyncDisposable
             (core, cli) = (installer.CorePath, installer.CliPath);
         }
         var options = new PublicNetworkOptions(Profile, EasyTierArgs.FreeTcpPort(), EasyTierArgs.FreeTcpPort(), Directory: !_b.SeedOnlyMode,
-            Listeners: [$"tcp://0.0.0.0:{_b.ListenPort}", $"udp://0.0.0.0:{_b.ListenPort}"], DirectoryIndex: _b.DirectoryIndex);
+            Listeners: [$"tcp://0.0.0.0:{_b.ListenPort}", $"udp://0.0.0.0:{_b.ListenPort}"], DirectoryIndex: _b.DirectoryIndex, Relay: _b.Relay);
         _network = PublicNetworkSession.Start(core, cli, options, Path.Combine(_b.DataDir, "public-node"));
     }
 
@@ -468,11 +512,14 @@ public sealed class JayNetworkServer : IAsyncDisposable
     /// <summary>The reason on address bans that came with banning an operator (how unbanning finds them).</summary>
     private static string OperatorBanReason(string account) => "with operator " + account;
 
-    /// <summary>Lifts a ban. Lifting an operator ban also lifts the address bans that came with it.</summary>
-    public bool Unban(string kind, string value)
+    /// <summary>
+    /// Lifts a ban (<paramref name="match"/>: see <see cref="BanList.Remove"/>). Lifting an operator ban also lifts the
+    /// address bans that came with it.
+    /// </summary>
+    public bool Unban(string kind, string value, BanMatch match = BanMatch.Auto)
     {
         if (Bans is null) throw new InvalidOperationException("This node has no ban list.");
-        if (!Bans.Remove(kind, value)) return false;
+        if (!Bans.Remove(kind, value, match)) return false;
         if (kind == "operator" && Amber.Core.Identity.JayAddress.Canonical(value.Trim()) is { } account)
             foreach (var node in Bans.List().Where(b => b.Kind == "node" && b.Reason == OperatorBanReason(account)).ToList())
                 Bans.Remove("node", node.Value);
@@ -497,6 +544,8 @@ public sealed class JayNetworkServer : IAsyncDisposable
         if (_admin is not null) await _admin.DisposeAsync();
         _network?.Dispose();
         if (Directory is not null) await Directory.DisposeAsync();
+        // Volunteer checks still waiting or dialling stop too (none is logged after this).
+        if (Volunteers is not null) await Volunteers.DisposeAsync();
     }
 }
 

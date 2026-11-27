@@ -75,7 +75,7 @@ public sealed class PrivateFolderTests
     }
 
     /// <summary>On Windows, for real: a new folder gets the locked ACL; one that inherits its parent's is refused.</summary>
-    [Fact]
+    [WindowsFact]
     public void EnsureLocksANewFolderAndRefusesAnOpenOne()
     {
         if (!OperatingSystem.IsWindows()) return;
