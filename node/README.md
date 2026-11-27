@@ -42,11 +42,12 @@ sudo bash install.sh
 
 ```bash
 curl -fsSLO https://raw.githubusercontent.com/warriorleavestar/jay-launcher/main/node/docker-compose.yml
-# 把文件里的 NODE_SECRET 换成一串随机字符
-docker compose up -d
+curl -fsSLO https://raw.githubusercontent.com/warriorleavestar/jay-launcher/main/node/Dockerfile
+echo "NODE_SECRET=$(head -c 24 /dev/urandom | base64 | tr -d '/+=')" > .env
+docker compose up -d --build
 ```
 
-镜像是 EasyTier 官方的 `easytier/easytier:v2.6.4`。在 Amber 里添加节点 `tcp://你的公网IP:11010`。
+镜像在你的机器上构建：和 `install.sh` 同一个 Jay 加固版 EasyTier（固定版本，校验 SHA-256），底层镜像按摘要固定，容器里也不以 root 运行。没有 `NODE_SECRET` 时 compose 拒绝启动。在 Amber 里添加节点 `tcp://你的公网IP:11010`。
 
 ### 方法三：Windows
 
@@ -97,7 +98,7 @@ Uninstall: `sudo bash uninstall.sh`
 
 ### Option 2: Docker
 
-Download `docker-compose.yml`, replace `NODE_SECRET` with a random string, then `docker compose up -d`. It uses EasyTier's official image `easytier/easytier:v2.6.4`. Add `tcp://<public IP>:11010` in Amber.
+Download `docker-compose.yml` and `Dockerfile` into one folder, write `NODE_SECRET=<a random string>` into `.env` there, then `docker compose up -d --build`. The image is built on your machine from the same pinned, SHA-256-checked Jay EasyTier build as `install.sh`, on a base image pinned by digest, and doesn't run as root. Without `NODE_SECRET` compose refuses to start. Add `tcp://<public IP>:11010` in Amber.
 
 ### Option 3: Windows
 

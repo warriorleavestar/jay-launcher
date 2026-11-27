@@ -31,6 +31,11 @@ public sealed class ThemeLayoutHost
     private readonly string _pageId;
     private readonly Control _original;
     private readonly Dictionary<string, Control> _regions = [];
+    /// <summary>
+    /// Drawers and other overlays on the page: children of its root panel drawn above the rest (ZIndex above 0) that are
+    /// not regions and hold none. A theme lays out the regions; these stay on top of whatever it builds.
+    /// </summary>
+    private readonly List<Control> _overlays = [];
     private readonly Dictionary<Control, Snapshot> _snapshots = [];
     private string? _signature;
 
@@ -51,7 +56,14 @@ public sealed class ThemeLayoutHost
         _original = (Control)view.Content!;
         foreach (var c in _original.GetSelfAndLogicalDescendants().OfType<Control>())
             if (ThemeRegion.GetName(c) is { } name) _regions[name] = c;
+        if (_original is Panel root)
+            foreach (var child in root.Children)
+                if (child.ZIndex > 0 && !_regions.Values.Any(r => ReferenceEquals(r, child) || r.GetLogicalAncestors().Contains(child)))
+                    _overlays.Add(child);
     }
+
+    /// <summary>The page's overlays kept above a theme's layout (self-check).</summary>
+    public IReadOnlyList<Control> Overlays => _overlays;
 
     /// <summary>页面构造函数里 InitializeComponent 之后调用一次。</summary>
     public static ThemeLayoutHost Attach(UserControl view, string pageId)
@@ -81,9 +93,10 @@ public sealed class ThemeLayoutHost
         _signature = signature;
         if (tree is null) { Restore(); return; }
         foreach (var region in _regions.Values) Detach(region);
+        foreach (var overlay in _overlays) Detach(overlay);
         try
         {
-            _view.Content = Build(tree, width);
+            _view.Content = WithOverlays(Build(tree, width));
         }
         catch (Exception e) when (e is InvalidOperationException or ArgumentException)
         {
@@ -105,6 +118,7 @@ public sealed class ThemeLayoutHost
     {
         if (ReferenceEquals(_view.Content, _original) && _snapshots.Count == 0) return;
         foreach (var region in _regions.Values) Detach(region);
+        foreach (var overlay in _overlays) Detach(overlay);
         _view.Content = _original;
         // 按原来的序号从小到大插回去，序号才对得上。
         foreach (var (region, snap) in _snapshots.OrderBy(p => p.Value.Index))
@@ -114,6 +128,16 @@ public sealed class ThemeLayoutHost
             foreach (var (prop, value) in snap.Values) region.SetValue(prop, value);
         }
         _snapshots.Clear();
+    }
+
+    /// <summary>The theme's layout with the page's overlays on top, in one cell, as they were over the page.</summary>
+    private Control? WithOverlays(Control? built)
+    {
+        if (_overlays.Count == 0) return built;
+        var layer = new Grid();
+        if (built is not null) layer.Children.Add(built);
+        foreach (var overlay in _overlays) layer.Children.Add(overlay);
+        return layer;
     }
 
     /// <summary>把区块从当前父控件上取下来；第一次取的时候记下原来的位置和属性。</summary>
