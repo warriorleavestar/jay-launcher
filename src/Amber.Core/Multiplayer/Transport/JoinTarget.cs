@@ -66,7 +66,12 @@ public static partial class JoinTarget
     /// 没写端口时查 SRV：有就用 SRV 给的主机和端口（游戏本身也是这么做的）。
     /// </summary>
     /// <param name="onSkip">不经出口转时说明原因（显示在游戏日志里）。</param>
-    public static async Task<RelayPlan?> ResolveForRelayAsync(string server, CancellationToken ct = default,
+    public static Task<RelayPlan?> ResolveForRelayAsync(string server, CancellationToken ct = default,
+        Func<string, CancellationToken, Task<IPAddress[]>>? resolve = null, Func<string, (string Host, int Port)?>? srv = null, Action<string>? onSkip = null) =>
+        ResolveForRelayAsync(server, ExitPolicy.IsGloballyRoutable, ct, resolve, srv, onSkip);
+
+    /// <param name="isRoutable">Tests only: stands in for <see cref="ExitPolicy.IsGloballyRoutable"/> (see <see cref="ExitPolicy.IsRoutable"/>).</param>
+    internal static async Task<RelayPlan?> ResolveForRelayAsync(string server, Func<IPAddress, bool> isRoutable, CancellationToken ct = default,
         Func<string, CancellationToken, Task<IPAddress[]>>? resolve = null, Func<string, (string Host, int Port)?>? srv = null, Action<string>? onSkip = null)
     {
         RelayPlan? Skip(string reason)
@@ -77,7 +82,7 @@ public static partial class JoinTarget
         if (!TryParse(server, out var typedHost, out var typedPort, out _)) return Skip(L.F("core.mp.join.invalid_address", server));
         if (IPAddress.TryParse(typedHost, out var typedIp))
         {
-            if (!ExitPolicy.IsGloballyRoutable(typedIp)) return Skip(L.F("core.mp.join.local_address", typedHost));
+            if (!isRoutable(typedIp)) return Skip(L.F("core.mp.join.local_address", typedHost));
             if (!IsIPv4(typedIp)) return Skip(IPv6Only);
             return new RelayPlan(typedHost, typedPort, typedHost, typedPort);
         }
@@ -99,7 +104,7 @@ public static partial class JoinTarget
         // 游戏按 SRV 查到的主机和端口去连，握手包里写的也是它们（和直接进时一样）。
         if (IPAddress.TryParse(host, out var ip))
         {
-            if (!ExitPolicy.IsGloballyRoutable(ip)) return Skip(L.F("core.mp.join.points_to_local_address", typedHost));
+            if (!isRoutable(ip)) return Skip(L.F("core.mp.join.points_to_local_address", typedHost));
             if (!IsIPv4(ip)) return Skip(IPv6Only);
             return new RelayPlan(host, port, host, port);
         }
@@ -110,7 +115,7 @@ public static partial class JoinTarget
             // 本机的 Clash / sing-box 等代理会把名字解析成 198.18.0.0/15 的假地址：当成没解析，交给出口去解析。
             var real = addresses.Where(a => !IsFakeIp(a)).ToArray();
             // 本机解析出私有地址的名字（内网 DNS、hosts 文件）不经出口——出口那边解析出来的多半不是同一台机器。
-            if (real.Length > 0 && real.Any(a => !ExitPolicy.IsGloballyRoutable(a))) return Skip(L.F("core.mp.join.resolves_to_lan", host));
+            if (real.Length > 0 && real.Any(a => !isRoutable(a))) return Skip(L.F("core.mp.join.resolves_to_lan", host));
             // 只有 IPv6 地址的服务器：出口只转 IPv4，经出口进不去，直接连（和没开转发时一样）。
             // 看全部结果（包括假 IP）：代理软件的假 IP 是 IPv4，那种情况按名字交给出口解析。
             if (addresses.Length > 0 && !addresses.Any(IsIPv4)) return Skip(IPv6Only);

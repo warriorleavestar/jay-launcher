@@ -34,11 +34,13 @@ fi
 find "$macos" -name '*.pdb' -delete
 chmod +x "$macos/Jay"
 
+# Scale the icon down from the full-size brand artwork (1254 px), never up from the 512 px app asset.
+icon="$root/docs/brand/jay-feather-amber-v1.png"
 for size in 16 32 128 256 512; do
-    sips -z "$size" "$size" "$root/src/Amber.App/Assets/jay.png" \
+    sips -z "$size" "$size" "$icon" \
         --out "$stage/Jay.iconset/icon_${size}x${size}.png" >/dev/null
     double=$((size * 2))
-    sips -z "$double" "$double" "$root/src/Amber.App/Assets/jay.png" \
+    sips -z "$double" "$double" "$icon" \
         --out "$stage/Jay.iconset/icon_${size}x${size}@2x.png" >/dev/null
 done
 iconutil -c icns "$stage/Jay.iconset" -o "$resources/Jay.icns"

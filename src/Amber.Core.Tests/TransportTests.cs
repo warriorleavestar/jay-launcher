@@ -369,8 +369,6 @@ public class TunnelTests
 public class ForwardingTests
 {
     [Theory]
-    [InlineData("8.8.8.8", true)]
-    [InlineData("2606:4700:4700::1111", true)]
     [InlineData("127.0.0.1", false)]
     [InlineData("10.233.144.1", false)]
     [InlineData("192.168.1.10", false)]
@@ -382,8 +380,23 @@ public class ForwardingTests
     [InlineData("fe80::1", false)]
     [InlineData("fd00::1", false)]
     [InlineData("::ffff:192.168.0.1", false)]
+    [InlineData("192.0.2.1", false)]
+    [InlineData("2001:db8::1", false)]
     public void OnlyPublicDestinationsAreForwarded(string address, bool allowed) =>
         Assert.Equal(allowed, Socks5.IsPublic(System.Net.IPAddress.Parse(address)));
+
+    /// <summary>Just outside the reserved ranges is public (built from the range edges, so no real host is named).</summary>
+    [Fact]
+    public void AddressesNextToReservedRangesAreForwarded()
+    {
+        Assert.True(Socks5.IsPublic(TestAddresses.After("10.255.255.255")));
+        Assert.True(Socks5.IsPublic(TestAddresses.Before("100.64.0.0")));
+        Assert.True(Socks5.IsPublic(TestAddresses.After("192.0.2.255")));
+        Assert.True(Socks5.IsPublic(TestAddresses.Before("224.0.0.0")));
+        Assert.True(Socks5.IsPublic(TestAddresses.Before("2001:db8::")));
+        Assert.True(Socks5.IsPublic(TestAddresses.After("2001:db8:ffff:ffff:ffff:ffff:ffff:ffff")));
+        Assert.False(Socks5.IsPublic(TestAddresses.After("2001:db8::")));
+    }
 
     [Fact]
     public async Task RelayRewritesHandshakeAndKeepsForgeMarker()
@@ -470,16 +483,19 @@ public class ForwardingTests
 
 public class ExitPolicyTests
 {
-    private static ExitPolicy Policy() => new(
-        [IPAddress.Parse("192.168.1.20"), IPAddress.Parse("2400:1a00:b1:4e::25"), IPAddress.Parse("2400:1a00:b1:4e:a1b2:c3d4:e5f6:7788"), IPAddress.Parse("10.233.144.7")],
-        [(IPAddress.Parse("192.168.1.0"), 24), (IPAddress.Parse("2400:1a00:b1:4e::"), 64), (IPAddress.Parse("10.233.144.0"), 24)]);
+    private static ExitPolicy Policy(Func<IPAddress, bool>? isRoutable = null) => new(
+        [IPAddress.Parse("192.168.1.20"), IPAddress.Parse("2001:db8:b1:4e::25"), IPAddress.Parse("2001:db8:b1:4e:a1b2:c3d4:e5f6:7788"), IPAddress.Parse("10.233.144.7")],
+        [(IPAddress.Parse("192.168.1.0"), 24), (IPAddress.Parse("2001:db8:b1:4e::"), 64), (IPAddress.Parse("10.233.144.0"), 24)])
+    {
+        IsRoutable = isRoutable ?? ExitPolicy.IsGloballyRoutable,
+    };
 
     [Theory]
     // 本机自己的公网 IPv6（固定的和临时的）、同一网段里的别的设备（路由器 ::1、家里别的电脑）
-    [InlineData("2400:1a00:b1:4e::25")]
-    [InlineData("2400:1a00:b1:4e:a1b2:c3d4:e5f6:7788")]
-    [InlineData("2400:1a00:b1:4e::1")]
-    [InlineData("2400:1a00:b1:4e:1111:2222:3333:4444")]
+    [InlineData("2001:db8:b1:4e::25")]
+    [InlineData("2001:db8:b1:4e:a1b2:c3d4:e5f6:7788")]
+    [InlineData("2001:db8:b1:4e::1")]
+    [InlineData("2001:db8:b1:4e:1111:2222:3333:4444")]
     // 私有、回环、链路本地、CGNAT、组播、广播、ULA、EasyTier 虚拟网段
     [InlineData("127.0.0.1")]
     [InlineData("0.0.0.0")]
@@ -505,32 +521,40 @@ public class ExitPolicyTests
     [InlineData("2001:0:4136:e378:8000:63bf:3f57:fefe")]   // Teredo，客户端 IPv4 取反后是 192.168.1.1
     // 文档、基准测试网段
     [InlineData("2001:db8::1")]
+    [InlineData("198.51.100.88")]
     [InlineData("198.18.0.1")]
     public void DeniesOwnHostAndLocalNetworks(string address) => Assert.False(Policy().Allows(IPAddress.Parse(address)));
 
-    [Theory]
-    [InlineData("8.8.8.8")]
-    [InlineData("1.1.1.1")]
-    [InlineData("::ffff:8.8.8.8")]
-    [InlineData("64:ff9b::808:808")]
-    [InlineData("2002:0808:0808::1")]
-    public void AllowsOtherPublicAddresses(string address) => Assert.True(Policy().Allows(IPAddress.Parse(address)));
+    /// <summary>The same policy, with documentation addresses standing in for public ones (see <see cref="TestAddresses"/>).</summary>
+    private static ExitPolicy PolicyWithTestAddresses() => Policy(TestAddresses.IsRoutable);
 
     [Theory]
-    [InlineData("2606:4700:4700::1111")]
-    [InlineData("2001:4860:4860::8888")]
-    public void GameOnlyExitRefusesIPv6(string address) => Assert.False(Policy().Allows(IPAddress.Parse(address)));
+    [InlineData("198.51.100.88")]
+    [InlineData("203.0.113.11")]
+    [InlineData("::ffff:198.51.100.88")]
+    [InlineData("64:ff9b::c633:6458")]
+    [InlineData("2002:c633:6458::1")]
+    public void AllowsOtherPublicAddresses(string address) => Assert.True(PolicyWithTestAddresses().Allows(IPAddress.Parse(address)));
+
+    [Theory]
+    [InlineData("2001:db8:4700::1111")]
+    [InlineData("2001:db8:4860::8888")]
+    public void GameOnlyExitRefusesIPv6(string address)
+    {
+        Assert.True(TestAddresses.IsRoutable(IPAddress.Parse(address)));
+        Assert.False(PolicyWithTestAddresses().Allows(IPAddress.Parse(address)));
+    }
 
     [Fact]
     public void DeniesRouterPublicIpOnceKnown()
     {
-        var policy = Policy();
-        var wan = IPAddress.Parse("203.1.2.3");
+        var policy = PolicyWithTestAddresses();
+        var wan = IPAddress.Parse("198.51.100.99");
         Assert.True(policy.Allows(wan));
         policy.AddPublicAddress(wan);
         Assert.False(policy.Allows(wan));
-        Assert.False(policy.Allows(IPAddress.Parse("::ffff:203.1.2.3")));
-        Assert.False(policy.Allows(IPAddress.Parse("2002:cb01:0203::1")));
+        Assert.False(policy.Allows(IPAddress.Parse("::ffff:198.51.100.99")));
+        Assert.False(policy.Allows(IPAddress.Parse("2002:c633:6463::1")));
     }
 
     [Fact]
@@ -590,7 +614,7 @@ public class ExitPortTests
         });
         using var client = new TcpClient();
         await client.ConnectAsync(IPAddress.Loopback, port);
-        var e = await Assert.ThrowsAsync<IOException>(() => Socks5.ConnectAsync(client.GetStream(), "8.8.8.8", 25, default));
+        var e = await Assert.ThrowsAsync<IOException>(() => Socks5.ConnectAsync(client.GetStream(), "198.51.100.88", 25, default));
         Assert.Contains("发邮件", e.Message);
         exit.Stop();
     }

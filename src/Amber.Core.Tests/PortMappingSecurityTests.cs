@@ -164,7 +164,7 @@ public class PortMappingSecurityTests
                 var action = request.Headers.TryGetValues("SOAPAction", out var values) ? values.Single() : null;
                 requests.Add((request.Method, request.RequestUri!, action));
                 if (request.Method == HttpMethod.Get) return Ok(Description(control));
-                if (action!.Contains("GetExternalIPAddress")) return Ok("<NewExternalIPAddress>8.8.8.8</NewExternalIPAddress>");
+                if (action!.Contains("GetExternalIPAddress")) return Ok("<NewExternalIPAddress>198.51.100.88</NewExternalIPAddress>");
                 if (redirectCleanup && action.Contains("DeletePortMapping"))
                 {
                     var redirect = new HttpResponseMessage(HttpStatusCode.Redirect);
@@ -176,7 +176,7 @@ public class PortMappingSecurityTests
         });
         Assert.NotNull(result);
         Assert.Equal("UPnP", result.Method);
-        Assert.Equal(new IPEndPoint(IPAddress.Parse("8.8.8.8"), 25565), result.External);
+        Assert.Equal(new IPEndPoint(IPAddress.Parse("198.51.100.88"), 25565), result.External);
         if (redirectCleanup) await Assert.ThrowsAsync<HttpRequestException>(result.Remove!);
         else await result.Remove!();
         Assert.Equal(2, handlers);
