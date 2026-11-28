@@ -201,6 +201,7 @@ Jay 只有一个承诺：**只为你要做的事联网**；唯一的例外是每
 - 少数下载：很老的 Forge（1.5.2 及更早）缺的库从 web.archive.org 下载，Mojang 不提供 Java 的平台（ARM Linux）从 api.adoptium.net 下载 Java，打开烘焙（通用加载器）后从 jay-loader 的发布页下载加载器包。
 - GitHub 下载镜像：联机组件或加载器包从 GitHub 下不下来时，改走第三方镜像 `ghfast.top`、`gh-proxy.com`、`ghproxy.net`（系统时区是中国时先试镜像）。Jay 只接受大小和 SHA-256 与固定值一致的文件。
 - 直连房间会向你设置的 STUN 服务器（默认 `stun.miwifi.com`、`stun.chat.bilibili.com`、`stun.cloudflare.com`，可改可清空）询问你的外部地址，它们不经过游戏数据；也可能请你的路由器临时映射一个端口，结束联机时删掉。
+- 房间和大厅（不论直连房间怎么设置）：联机组件会向 STUN 服务器 `stun.miwifi.com`、`stun.chat.bilibili.com`、`stun.cloudflare.com` 询问这台电脑的公网地址，好让房间里的人尽量直接连上；现在自带的 EasyTier 版本为了 TCP 直连，还会问它内置的 TCP STUN 服务器（`stun.hot-chilli.net`、`stun.fitauto.ru`、`fwa.lifesizecloud.com`、`global.turn.twilio.com`、`turn.cloudflare.com`、`stun.voip.blackberry.com`、`stun.radiojar.com`）。它们只看到你的公网地址，不经手游戏数据。
 </details>
 
 代码完全公开，欢迎自己查。完整的隐私政策和 Jay 对系统的改动见[隐私政策](docs/privacy.md)。
