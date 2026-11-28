@@ -11,6 +11,8 @@ using Amber.Core.Multiplayer;
 namespace Amber.Core.Tests;
 
 /// <summary>Mac/Linux 完整局域网模式：root 守护的命令、核对和广播转发的解析。</summary>
+// Shares UnixExitNetwork.RunForTest with UnixExitNetworkTests, so the two classes never run at the same time.
+[Collection("UnixExitNetwork")]
 public sealed class UnixFullLanTests
 {
     private static byte[] UdpPacket(byte[] src, byte[] dst, ushort srcPort, ushort dstPort, byte[] payload, ushort flags = 0)
@@ -220,5 +222,259 @@ public sealed class UnixFullLanTests
             UnixElevatedGuard.AcceptAnyUserForTest = false;
             File.Delete(core);
         }
+    }
+
+    /// <summary>A stop signal to the root guard (what SIGTERM triggers) ends the core and returns normally, so cleanup runs.</summary>
+    [Fact]
+    public void ElevatedGuardStopsTheCoreWhenAskedToStop()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var core = Path.Combine(Path.GetTempPath(), "jay-fake-core-" + Guid.NewGuid().ToString("N"));
+        File.WriteAllText(core, "#!/bin/sh\necho \"pid=$$\"\nexec sleep 30\n");
+        File.SetUnixFileMode(core, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        Thread? host = null;
+        var result = -1;
+        Action? stop = null;
+        UnixElevatedGuardHost.StopHookForTest = s => stop = s;
+        UnixElevatedGuard.LaunchForTest = command =>
+        {
+            var flag = command.ToList().IndexOf(UnixElevatedGuard.GuardFlag);
+            var args = command.Skip(flag).ToArray();
+            host = new Thread(() => result = UnixElevatedGuardHost.RunForTest(args)) { IsBackground = true };
+            host.Start();
+            return Process.GetCurrentProcess();
+        };
+        UnixElevatedGuard.AcceptAnyUserForTest = true;
+        try
+        {
+            using var guard = UnixElevatedGuard.Start(core, ["one"], new Dictionary<string, string>(), null, "10.233.144.250");
+            guard.WaitForReadyAsync().Wait(TimeSpan.FromSeconds(10));
+            Assert.True(SpinWait.SpinUntil(() => guard.RecentOutput.Any(l => l.StartsWith("pid=", StringComparison.Ordinal)), 5000));
+            var pid = int.Parse(guard.RecentOutput.First(l => l.StartsWith("pid=", StringComparison.Ordinal))[4..]);
+            Assert.True(SpinWait.SpinUntil(() => stop is not null, 5000));
+            stop!();
+            stop();
+            Assert.True(host!.Join(TimeSpan.FromSeconds(10)));
+            Assert.Equal(0, result);
+            Assert.True(SpinWait.SpinUntil(() => !IsRunning(pid), 5000));
+            // Another stop request after the session has ended (a late signal) is harmless.
+            stop();
+        }
+        finally
+        {
+            UnixElevatedGuardHost.StopHookForTest = null;
+            UnixElevatedGuard.LaunchForTest = null;
+            UnixElevatedGuard.AcceptAnyUserForTest = false;
+            File.Delete(core);
+        }
+    }
+
+    /// <summary>A stop that is already pending when a start command arrives wins: no core is started.</summary>
+    [Fact]
+    public void ElevatedGuardStartsNoCoreOnceAskedToStop()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var marker = Path.Combine(Path.GetTempPath(), "jay-fake-core-ran-" + Guid.NewGuid().ToString("N"));
+        var core = Path.Combine(Path.GetTempPath(), "jay-fake-core-" + Guid.NewGuid().ToString("N"));
+        File.WriteAllText(core, $"#!/bin/sh\ntouch '{marker}'\nexec sleep 30\n");
+        File.SetUnixFileMode(core, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        Thread? host = null;
+        var result = -1;
+        // The stop arrives as the session begins, after the start command is already waiting on the socket, so both are
+        // ready at the guard's first wait.
+        UnixElevatedGuardHost.StopHookForTest = s => { Thread.Sleep(500); s(); };
+        UnixElevatedGuard.LaunchForTest = command =>
+        {
+            var flag = command.ToList().IndexOf(UnixElevatedGuard.GuardFlag);
+            var args = command.Skip(flag).ToArray();
+            host = new Thread(() => result = UnixElevatedGuardHost.RunForTest(args)) { IsBackground = true };
+            host.Start();
+            return Process.GetCurrentProcess();
+        };
+        UnixElevatedGuard.AcceptAnyUserForTest = true;
+        try
+        {
+            using var guard = UnixElevatedGuard.Start(core, ["one"], new Dictionary<string, string>(), null, "10.233.144.250");
+            Assert.True(SpinWait.SpinUntil(() => host is not null, 10000));
+            Assert.True(host!.Join(TimeSpan.FromSeconds(10)));
+            Assert.Equal(0, result);
+            Thread.Sleep(300);
+            Assert.False(File.Exists(marker));
+        }
+        finally
+        {
+            UnixElevatedGuardHost.StopHookForTest = null;
+            UnixElevatedGuard.LaunchForTest = null;
+            UnixElevatedGuard.AcceptAnyUserForTest = false;
+            File.Delete(core);
+            File.Delete(marker);
+        }
+    }
+
+    /// <summary>
+    /// A stop while the guard waits for the virtual adapter (which can take up to 30 s) ends the wait at once and runs
+    /// the normal clean-up: the core is stopped and the exit routes are taken down again.
+    /// </summary>
+    [Fact]
+    public void ElevatedGuardStopsWhileWaitingForTheAdapter()
+    {
+        if (!OperatingSystem.IsLinux()) return;
+        var core = Path.Combine(Path.GetTempPath(), "jay-fake-core-" + Guid.NewGuid().ToString("N"));
+        File.WriteAllText(core, "#!/bin/sh\necho \"pid=$$\"\nexec sleep 30\n");
+        File.SetUnixFileMode(core, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        var calls = new List<string>();
+        UnixExitNetwork.RunForTest = (tool, args, _) =>
+        {
+            lock (calls) calls.Add(tool + " " + string.Join(' ', args));
+            return args.Contains("get") ? (0, "203.0.113.10 via 192.168.1.1 dev wlan0 src 192.168.1.20 uid 0") : (0, "");
+        };
+        Thread? host = null;
+        var result = -1;
+        Action? stop = null;
+        UnixElevatedGuardHost.StopHookForTest = s => stop = s;
+        UnixElevatedGuard.LaunchForTest = command =>
+        {
+            var flag = command.ToList().IndexOf(UnixElevatedGuard.GuardFlag);
+            var args = command.Skip(flag).ToArray();
+            host = new Thread(() => result = UnixElevatedGuardHost.RunForTest(args)) { IsBackground = true };
+            host.Start();
+            return Process.GetCurrentProcess();
+        };
+        UnixElevatedGuard.AcceptAnyUserForTest = true;
+        try
+        {
+            // No adapter ever carries this address, so without the stop the guard would wait the full 30 s.
+            using var guard = UnixElevatedGuard.Start(core, ["one"], new Dictionary<string, string>(),
+                new ExitNetworkPlan("10.233.144.250", ["203.0.113.10"], "amberlan-10000"), "10.233.144.250");
+            Assert.True(SpinWait.SpinUntil(() => guard.RecentOutput.Any(l => l.StartsWith("pid=", StringComparison.Ordinal)), 10000));
+            var pid = int.Parse(guard.RecentOutput.First(l => l.StartsWith("pid=", StringComparison.Ordinal))[4..]);
+            var asked = Stopwatch.StartNew();
+            stop!();
+            Assert.True(host!.Join(TimeSpan.FromSeconds(10)));
+            Assert.True(asked.Elapsed < TimeSpan.FromSeconds(10), $"the guard took {asked.Elapsed} to stop");
+            Assert.Equal(0, result);
+            Assert.True(SpinWait.SpinUntil(() => !IsRunning(pid), 5000));
+            lock (calls) Assert.Contains("ip -4 route del 203.0.113.10/32 proto 201", calls);
+        }
+        finally
+        {
+            UnixExitNetwork.RunForTest = null;
+            UnixElevatedGuardHost.StopHookForTest = null;
+            UnixElevatedGuard.LaunchForTest = null;
+            UnixElevatedGuard.AcceptAnyUserForTest = false;
+            File.Delete(core);
+        }
+    }
+
+    private sealed class Step(List<string> log, string name, Action? onDispose = null) : IDisposable
+    {
+        public void Dispose()
+        {
+            onDispose?.Invoke();
+            log.Add(name);
+        }
+    }
+
+    /// <summary>
+    /// The guard's signal handlers outlive the session's clean-up (stopping the core, restoring routes and firewall), so a
+    /// second signal during the clean-up cannot end the process half way; also when the session fails.
+    /// </summary>
+    [Fact]
+    public void SignalHandlersStayUntilTheCleanUpIsOver()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var log = new List<string>();
+        var signalsHeld = 2;
+        var session = new Step(log, "session", () => log.Add(signalsHeld == 2 ? "cleanup with handlers" : "cleanup without handlers"));
+        IDisposable[] signals = [new Step(log, "signal", () => signalsHeld--), new Step(log, "signal", () => signalsHeld--)];
+        Assert.Equal(0, UnixElevatedGuardHost.RunThenCleanUp(() => 0, session, signals));
+        Assert.Equal(["cleanup with handlers", "session", "signal", "signal"], log);
+
+        log.Clear();
+        signalsHeld = 2;
+        session = new Step(log, "session", () => log.Add(signalsHeld == 2 ? "cleanup with handlers" : "cleanup without handlers"));
+        signals = [new Step(log, "signal", () => signalsHeld--), new Step(log, "signal", () => signalsHeld--)];
+        Assert.Throws<InvalidOperationException>(() => UnixElevatedGuardHost.RunThenCleanUp(() => throw new InvalidOperationException(), session, signals));
+        Assert.Equal(["cleanup with handlers", "session", "signal", "signal"], log);
+    }
+
+    /// <summary>
+    /// The real guard entry point in its own process (Jay's own Main, the production signal handlers, only the root check
+    /// switched off) gets a real SIGTERM: it stops the core and exits normally. A second SIGTERM that arrives while it is
+    /// still stopping the core is absorbed too, so the clean-up is not cut short.
+    /// </summary>
+    [Fact]
+    public void RootGuardProcessCleansUpOnRealSigterm()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var app = typeof(Amber.App.Program).Assembly.Location; // Jay itself: its Main hands the guard flag to the guard
+        Assert.True(File.Exists(app), app);
+        // The core ignores SIGTERM but says when it gets one, so the guard's clean-up (TERM, then 5 s, then KILL) is
+        // known to be under way when the second signal is sent.
+        var core = Path.Combine(Path.GetTempPath(), "jay-fake-core-" + Guid.NewGuid().ToString("N"));
+        File.WriteAllText(core, "#!/bin/sh\ntrap 'echo got-term' TERM\necho \"pid=$$\"\nwhile :; do sleep 1 & wait $!; done\n");
+        File.SetUnixFileMode(core, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        Process? child = null;
+        var corePid = 0;
+        UnixElevatedGuard.LaunchForTest = command =>
+        {
+            var flag = command.ToList().IndexOf(UnixElevatedGuard.GuardFlag);
+            var info = new ProcessStartInfo(Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") is { Length: > 0 } host ? host : "dotnet")
+            {
+                UseShellExecute = false,
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            };
+            info.ArgumentList.Add(app);
+            foreach (var a in command.Skip(flag)) info.ArgumentList.Add(a);
+            info.Environment[UnixElevatedGuardHost.NoRootForTestVariable] = "1";
+            child = Process.Start(info)!;
+            child.StandardInput.Close();
+            _ = child.StandardOutput.ReadToEndAsync();
+            _ = child.StandardError.ReadToEndAsync();
+            return Process.GetCurrentProcess();
+        };
+        UnixElevatedGuard.AcceptAnyUserForTest = true;
+        try
+        {
+            using var guard = UnixElevatedGuard.Start(core, ["one"], new Dictionary<string, string>(), null, "10.233.144.250");
+            // Ready: the guard has registered its handlers (before it reads any command) and started the core.
+            Assert.True(guard.WaitForReadyAsync().Wait(TimeSpan.FromSeconds(30)), "guard ready");
+            Assert.True(SpinWait.SpinUntil(() => guard.RecentOutput.Any(l => l.StartsWith("pid=", StringComparison.Ordinal)), 10000), "core started");
+            corePid = int.Parse(guard.RecentOutput.First(l => l.StartsWith("pid=", StringComparison.Ordinal))[4..]);
+
+            Signal(child!.Id);
+            Assert.True(SpinWait.SpinUntil(() => guard.RecentOutput.Contains("got-term"), 10000), "the guard is stopping the core");
+            Assert.False(child.HasExited, "the guard is still cleaning up");
+            Signal(child.Id);
+
+            Assert.True(child.WaitForExit(TimeSpan.FromSeconds(20)), "guard exited");
+            Assert.Equal(0, child.ExitCode);
+            Assert.True(SpinWait.SpinUntil(() => !IsRunning(corePid), 5000), "core stopped");
+            Assert.True(guard.WaitForExit(TimeSpan.FromSeconds(5)));
+        }
+        finally
+        {
+            UnixElevatedGuard.LaunchForTest = null;
+            UnixElevatedGuard.AcceptAnyUserForTest = false;
+            try { if (child is { HasExited: false }) child.Kill(); } catch (InvalidOperationException) { }
+            if (corePid > 0 && IsRunning(corePid)) Process.Start("kill", ["-KILL", corePid.ToString()])!.WaitForExit();
+            child?.Dispose();
+            File.Delete(core);
+        }
+
+        static void Signal(int pid) => Process.Start("kill", ["-TERM", pid.ToString()])!.WaitForExit();
+    }
+
+    private static bool IsRunning(int pid)
+    {
+        try
+        {
+            using var p = Process.GetProcessById(pid);
+            return !p.HasExited;
+        }
+        catch (ArgumentException) { return false; }
+        catch (InvalidOperationException) { return false; }
     }
 }

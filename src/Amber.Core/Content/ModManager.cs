@@ -249,12 +249,12 @@ public sealed partial class ModManager(string modsDir)
         var unknown = bySha1.Where(p => !known.Contains(p.Key)).Select(p => p.Value).ToList();
         var fingerprints = new Dictionary<uint, LocalMod>();
         foreach (var mod in unknown)
-            fingerprints[CurseForgeProvider.Fingerprint(await File.ReadAllBytesAsync(mod.Path, ct))] = mod;
+            fingerprints[await CurseForgeProvider.FingerprintAsync(mod.Path, ct)] = mod;
         var matches = await curseForge.IdentifyByFingerprintAsync(fingerprints.Keys, ct);
+        var byProject = await curseForge.GetFilesForProjectsAsync(matches.Values.Select(f => f.ProjectId).ToList(), mcVersion, loader, ct);
         foreach (var (fp, file) in matches)
         {
-            var files = await curseForge.GetFilesAsync(file.ProjectId, mcVersion, loader, ct);
-            var newest = files.PickPreferred();
+            var newest = byProject.GetValueOrDefault(file.ProjectId)?.PickPreferred();
             if (newest is not null && newest.FileId != file.FileId && newest.Date > file.Date)
                 updates.Add(new ModUpdate(fingerprints[fp].Path, newest));
         }

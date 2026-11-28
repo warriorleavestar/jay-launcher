@@ -125,6 +125,94 @@ public sealed class NetworkAccountsTests : IAsyncDisposable
     }
 
     [Fact]
+    public void AFullFailureTableNeverUnlocksALockedAccount()
+    {
+        var store = new AccountStore(Path.Combine(_dir, "a.json"));
+        store.Set("carol", "password1");
+        var now = DateTimeOffset.UtcNow;
+        for (var i = 0; i < AccountStore.MaxFails; i++) store.RecordFailure("carol", now);
+        Assert.Equal(LoginResult.Locked, store.Check("carol", "password1", now));
+        // Junk names, more than the table holds: carol stays locked and the table stays bounded.
+        for (var i = 0; i < AccountStore.MaxTrackedNames + 50; i++) store.RecordFailure("junk" + i, now + TimeSpan.FromMilliseconds(i));
+        Assert.Equal(LoginResult.Locked, store.Check("carol", "password1", now + TimeSpan.FromMinutes(1)));
+        Assert.True(store.TrackedNames <= AccountStore.MaxTrackedNames);
+    }
+
+    [Fact]
+    public void ExpiredFailuresAreDroppedBeforeAnythingElse()
+    {
+        var store = new AccountStore(Path.Combine(_dir, "a.json"));
+        var start = DateTimeOffset.UtcNow;
+        for (var i = 0; i < AccountStore.MaxTrackedNames; i++) store.RecordFailure("old" + i, start);
+        var later = start + AccountStore.Lockout + TimeSpan.FromSeconds(1);
+        for (var i = 0; i < 3; i++) store.RecordFailure("dave", later);
+        store.RecordFailure("erin", later);
+        // The expired names made room; the live counts survive.
+        Assert.Equal(2, store.TrackedNames);
+        for (var i = 0; i < 2; i++) store.RecordFailure("dave", later);
+        Assert.Equal(LoginResult.Locked, store.Check("dave", "whatever1", later));
+    }
+
+    /// <summary>An account store whose password check waits until released (to hold login slots).</summary>
+    private sealed class SlowStore : IAccountStore
+    {
+        public readonly SemaphoreSlim Go = new(0);
+        public int Entered;
+
+        public LoginResult Check(string name, string password, DateTimeOffset now)
+        {
+            Interlocked.Increment(ref Entered);
+            Go.Wait();
+            return LoginResult.Wrong;
+        }
+
+        public void RecordFailure(string name, DateTimeOffset now) { }
+        public void Succeeded(string name) { }
+        public byte[]? TotpSecret(string name) => null;
+    }
+
+    [Fact]
+    public async Task OnlyAFewLoginsAreCheckedAtOnce()
+    {
+        var store = new SlowStore();
+        var (key, signer) = LoginAuthority.LoadOrCreateKeys(Path.Combine(_dir, "login.key"));
+        var login = new NetworkLogin(true, key.PublicKey, signer.PublicKey);
+        await using var server = new RoomDirectoryServer(IPAddress.Loopback, 0) { Login = new LoginAuthority(store, key, signer, "net1") };
+        JsonObject Ask() => server.Handle(NetworkLoginClient.Request(_guest, login, "x" + Guid.NewGuid().ToString("N")[..8], "password1", DateTimeOffset.UtcNow), source: null);
+        var busy = Enumerable.Range(0, RoomDirectoryServer.MaxConcurrentLogins).Select(_ => Task.Run(Ask)).ToList();
+        while (Volatile.Read(ref store.Entered) < RoomDirectoryServer.MaxConcurrentLogins) await Task.Delay(10);
+        Assert.Equal("busy", Ask()["error"]?.GetValue<string>());
+        store.Go.Release(RoomDirectoryServer.MaxConcurrentLogins);
+        foreach (var reply in await Task.WhenAll(busy)) Assert.Equal("wrong", reply["error"]?.GetValue<string>());
+        Assert.Equal(RoomDirectoryServer.MaxConcurrentLogins, store.Entered);
+    }
+
+    [Fact]
+    public async Task FailedLoginsHaveADirectoryWideBudget()
+    {
+        var store = new AccountStore(Path.Combine(_dir, "a.json"));
+        store.Set("grace", "password1");
+        var (key, signer) = LoginAuthority.LoadOrCreateKeys(Path.Combine(_dir, "login.key"));
+        var login = new NetworkLogin(true, key.PublicKey, signer.PublicKey);
+        var now = DateTimeOffset.UtcNow;
+        await using var server = new RoomDirectoryServer(IPAddress.Loopback, 0, clock: () => now)
+        {
+            Login = new LoginAuthority(store, key, signer, "net1", () => now),
+            FailedLoginsPerMinute = 2,
+        };
+        JsonObject Ask(string user, string password) => server.Handle(NetworkLoginClient.Request(_guest, login, user, password, now), source: null);
+        Assert.Equal("wrong", Ask("nobody", "password1")["error"]?.GetValue<string>());
+        Assert.Equal("wrong", Ask("grace", "wrong-one")["error"]?.GetValue<string>());
+        // Spent: every login is "busy" for the rest of the minute, a right password too (it says nothing about names).
+        Assert.Equal("busy", Ask("grace", "password1")["error"]?.GetValue<string>());
+        Assert.Equal("busy", Ask("nobody", "password1")["error"]?.GetValue<string>());
+        Assert.Equal(Localization.L.T("core.mp.account.busy"),
+            Assert.Throws<InvalidDataException>(() => NetworkLoginClient.Read(Ask("grace", "password1"), _guest, login, "net1", now)).Message);
+        now += TimeSpan.FromMinutes(1);
+        Assert.True(Ask("grace", "password1")["ok"]?.GetValue<bool>());
+    }
+
+    [Fact]
     public void AccountsArePersistedWithoutThePassword()
     {
         var path = Path.Combine(_dir, "a.json");

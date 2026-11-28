@@ -186,7 +186,7 @@ public static class JayAddress
 
     /// <summary>
     /// The check words for an address, in the word list for a UI language (Chinese word list for zh-* and lzh, English
-    /// otherwise), joined with " · ". Every place that shows check words uses this, so both sides always see the same four
+    /// otherwise), joined with " · ". Every place that shows check words uses this, so both sides always see the same
     /// words. Empty for an address that isn't valid.
     /// </summary>
     public static string CheckWordsText(string? address, string uiLanguage)
@@ -196,18 +196,23 @@ public static class JayAddress
         return string.Join(" · ", CheckWords(id, language));
     }
 
+    /// <summary>How many check words an account has: 8 words of 11 bits, so 88 bits of the account id.</summary>
+    public const int CheckWordCount = 8;
+
     /// <summary>
-    /// Four words from the account id (first 44 bits of a SHA-256 over it) that people can read out to each other to confirm
-    /// they see the same account. Not secret, and not part of the recovery phrase.
+    /// Eight words from the account id (the first 88 bits of a SHA-256 over it) that people can read out to each other to
+    /// confirm they see the same account. 88 bits keep it out of reach to make another account with the same words.
+    /// Not secret, and not part of the recovery phrase. The label is new with the length, so old four-word lists can't be
+    /// mistaken for the start of these.
     /// </summary>
     public static string[] CheckWords(ReadOnlySpan<byte> accountId, MnemonicLanguage language)
     {
         Span<byte> hash = stackalloc byte[32];
-        SHA256.HashData([.. "jay-check-words-v2\n"u8, .. accountId], hash);
+        SHA256.HashData([.. "jay-check-words-v3\n"u8, .. accountId], hash);
         var list = Bip39.Wordlist(language);
-        var value = BinaryPrimitives.ReadUInt64BigEndian(hash);
-        var words = new string[4];
-        for (var i = 0; i < 4; i++) words[i] = list[(int)((value >> (64 - 11 * (i + 1))) & 0x7ff)];
+        var value = BinaryPrimitives.ReadUInt128BigEndian(hash);
+        var words = new string[CheckWordCount];
+        for (var i = 0; i < CheckWordCount; i++) words[i] = list[(int)((value >> (128 - 11 * (i + 1))) & 0x7ff)];
         return words;
     }
 }
@@ -290,12 +295,21 @@ public sealed record DeviceCertificate(byte[] AccountEd, byte[] AccountMlDsa, by
         }
     }
 
-    /// <summary>Device names are shown to others: no control characters, trimmed, at most <see cref="MaxNameLength"/> characters.</summary>
+    /// <summary>
+    /// Device names are shown to others on one line: no control, invisible formatting (zero-width, direction marks and
+    /// overrides), line or paragraph separator, surrogate or private-use characters; trimmed, at most
+    /// <see cref="MaxNameLength"/> characters.
+    /// </summary>
     public static string CleanName(string? name)
     {
-        var clean = new string((name ?? "").Where(c => !char.IsControl(c) && !char.IsSurrogate(c) && c is not ('‪' or '‫' or '‬' or '‭' or '‮' or '⁦' or '⁧' or '⁨' or '⁩')).ToArray()).Trim();
+        var clean = new string((name ?? "").Where(Shown).ToArray()).Trim();
         return clean.Length > MaxNameLength ? clean[..MaxNameLength].TrimEnd() : clean;
     }
+
+    private static bool Shown(char c) => char.GetUnicodeCategory(c) is not (System.Globalization.UnicodeCategory.Control
+        or System.Globalization.UnicodeCategory.Format or System.Globalization.UnicodeCategory.LineSeparator
+        or System.Globalization.UnicodeCategory.ParagraphSeparator or System.Globalization.UnicodeCategory.Surrogate
+        or System.Globalization.UnicodeCategory.PrivateUse);
 }
 
 /// <summary>
