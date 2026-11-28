@@ -17,7 +17,7 @@ public sealed class JayAccountItem(JayAccountEntry entry, string boundTo) : Loca
     public string ShortAddress => Entry.ShortAddress;
     public string Title => Entry.Label.Length > 0 ? Entry.Label : Entry.ShortAddress;
 
-    /// <summary>Four words people read out to each other to confirm they see the same account (not the recovery phrase).</summary>
+    /// <summary>Eight words people read out to each other to confirm they see the same account (not the recovery phrase).</summary>
     public string CheckWords
     {
         get => L.F("accounts.jay.check_words", JayAddress.CheckWordsText(Entry.Address, L.Language));
