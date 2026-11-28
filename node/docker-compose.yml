@@ -20,12 +20,12 @@ services:
         ARG TARGETARCH
         RUN set -eu; \
             case "$${TARGETARCH:-$$(uname -m)}" in \
-              amd64|x86_64) arch=x86_64; sha=6ad63ed07f270f2942387d1257ef0db45a31b2e525c73f8aa981c7c94fbcb300 ;; \
-              arm64|aarch64) arch=aarch64; sha=6c1a99ea81f1e1dd8fc8f13aa6f0df8d9e22925202dda18b4e40ad62ac49f7ac ;; \
+              amd64|x86_64) arch=x86_64; sha=1370605d6b6d25c4f44e82540e3732568e29769d96fd9e72a08528bcaced2d1a ;; \
+              arm64|aarch64) arch=aarch64; sha=72a5fb5895cacb30d6ba746ee5bc1ac64f1c7014e12771be13685897f52606f8 ;; \
               *) echo "unsupported architecture" >&2; exit 1 ;; \
             esac; \
-            name="easytier-linux-$${arch}-v2.6.4-jay-9407746b1ce1"; \
-            wget -q -O /et.zip "https://github.com/Yumao-Feather/jay-easytier/releases/download/jay-v2.6.4-3/$${name}.zip"; \
+            name="easytier-linux-$${arch}-v2.6.4-jay-ff0bb20791d9"; \
+            wget -q -O /et.zip "https://github.com/warriorleavestar/jay-easytier/releases/download/jay-v2.6.4-5/$${name}.zip"; \
             echo "$${sha}  /et.zip" | sha256sum -c -; \
             unzip -q /et.zip -d /et; \
             install -m 0755 "/et/easytier-linux-$${arch}/easytier-core" /easytier-core
