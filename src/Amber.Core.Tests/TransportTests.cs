@@ -168,6 +168,40 @@ public class TunnelTests
         return (a.GetStream(), b.GetStream(), a, b);
     }
 
+    /// <summary>
+    /// A room that fails to start on the UI thread cleans up and reports the error instead of hanging: the cleanup must
+    /// not wait for the very thread it blocks.
+    /// </summary>
+    [Fact]
+    public void AFailedStartOnTheUiThreadDoesNotHang()
+    {
+        using var busy = new TcpListener(IPAddress.Loopback, 0);
+        busy.Start();
+        var game = EasyTierArgs.FreeTcpPort();
+        var options = new EasyTierOptions(Room with { Tunnel = new TunnelSettings(TransportMode.High, false) }, false, [], 1,
+            LocalForwardPort: game, LocalChatPort: ((IPEndPoint)busy.LocalEndpoint).Port) { LocalTunnelPort = EasyTierArgs.FreeTcpPort() };
+        Exception? error = null;
+        var thread = new Thread(() =>
+        {
+            SynchronizationContext.SetSynchronizationContext(new NeverRunsContext());
+            try { RoomTransport.Start(options).DisposeAsync().AsTask().Wait(); }
+            catch (Exception e) { error = e; }
+        }) { IsBackground = true };
+        thread.Start();
+        Assert.True(thread.Join(TimeSpan.FromSeconds(10)));
+        Assert.IsAssignableFrom<SocketException>(error);
+        // The game port the failed start had already opened is free again.
+        using var again = new TcpListener(IPAddress.Loopback, game);
+        again.Start();
+    }
+
+    /// <summary>Like a UI thread that is busy: callbacks are queued and never run.</summary>
+    private sealed class NeverRunsContext : SynchronizationContext
+    {
+        public override void Post(SendOrPostCallback d, object? state) { }
+        public override void Send(SendOrPostCallback d, object? state) => throw new NotSupportedException();
+    }
+
     public static TheoryData<TransportMode, bool> Modes()
     {
         var data = new TheoryData<TransportMode, bool>();
@@ -317,6 +351,49 @@ public class TunnelTests
             var tail = new byte[11];
             Assert.True(await SecureStream.ReadExactAsync(server, tail, default));
             Assert.Equal("after cover"u8.ToArray(), tail);
+        }
+    }
+
+    /// <summary>
+    /// With padding buckets, bulk data is cut to fill the largest bucket below the maximum exactly, so a full 32 KB read
+    /// costs about 32 KB on the wire instead of being padded up to one 64 KB record. Every record still has a bucket size.
+    /// </summary>
+    [Fact]
+    public async Task PaddedBulkDataFillsTheLargestBucket()
+    {
+        var (c, s, a, b) = await PairAsync();
+        using (a)
+        using (b)
+        {
+            using var i = new NoiseHandshake(NoisePattern.NNhfspsk0, true, [], RandomNumberGenerator.GetBytes(32));
+            var psk = (byte[])typeof(NoiseHandshake).GetField("_psk", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(i)!;
+            using var r = new NoiseHandshake(NoisePattern.NNhfspsk0, false, [], (byte[])psk.Clone());
+            r.ReadMessage(i.WriteMessage([]));
+            i.ReadMessage(r.WriteMessage([]));
+            var (iSend, iReceive) = i.Split();
+            var (rSend, rReceive) = r.Split();
+            var profile = TransportProfile.For(TransportMode.Extreme) with { CoverTrafficIdle = null };
+            await using var client = new SecureStream(c, iSend, iReceive, profile);
+            await using var server = new SecureStream(s, rSend, rReceive, profile);
+
+            foreach (var size in new[] { 32 * 1024, 16 * 1024 - 3, 100_000 })
+            {
+                var data = RandomNumberGenerator.GetBytes(size);
+                var before = client.BytesOnWire;
+                var records = client.RecordsSent;
+                var write = client.WriteAsync(data).AsTask();
+                var got = new byte[size];
+                Assert.True(await SecureStream.ReadExactAsync(server, got, default));
+                await write;
+                Assert.Equal(data, got);
+                var full = size / (16384 - 3);
+                var rest = size % (16384 - 3);
+                Assert.Equal(full + (rest > 0 ? 1 : 0), client.RecordsSent - records);
+                // Each record: 2-byte length, padded plaintext (a bucket), 16-byte tag.
+                var expected = full * (2 + 16384 + 16) + (rest > 0 ? 2 + client.PaddedLength(3 + rest) + 16 : 0);
+                Assert.Equal(expected, client.BytesOnWire - before);
+                if (size == 32 * 1024) Assert.True(client.BytesOnWire - before < 34_000);
+            }
         }
     }
 

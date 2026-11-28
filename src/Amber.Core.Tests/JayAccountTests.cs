@@ -149,7 +149,7 @@ public sealed class JayAccountTests : IDisposable
         Assert.False(JayAddress.IsValid(account.Address[..^1]));
         Assert.False(JayAddress.IsValid(Bech32m.Encode("abc", Bech32m.ConvertBits(account.PublicKey, 8, 5, true))));
         Assert.Equal($"{account.Address[..8]}…{account.Address[^4..]}", JayAddress.Short(account.Address));
-        Assert.Equal(4, JayAddress.CheckWords(account.Id, MnemonicLanguage.ChineseSimplified).Length);
+        Assert.Equal(8, JayAddress.CheckWords(account.Id, MnemonicLanguage.ChineseSimplified).Length);
         Assert.Equal(JayAddress.CheckWords(account.Id, MnemonicLanguage.English), JayAddress.CheckWords(key, MnemonicLanguage.English));
         // The single-key addresses from before (version 0, the Ed25519 key itself) are not addresses any more.
         Assert.False(JayAddress.IsValid(Bech32m.Encode(JayAddress.Hrp, [0, .. Bech32m.ConvertBits(account.PublicKey, 8, 5, true)!])));
@@ -221,6 +221,41 @@ public sealed class JayAccountTests : IDisposable
         var empty = new JayAccountStore(_dir);
         empty.Load();
         Assert.Empty(empty.Accounts);
+    }
+
+    /// <summary>
+    /// The accounts file can't be read at start (another program holds it): Load doesn't throw, nothing is saved over the
+    /// file while it stays unreadable, and once it can be read again the next change keeps the accounts that were in it.
+    /// </summary>
+    [Fact]
+    public void UnreadableFileIsNeitherFatalNorOverwritten()
+    {
+        using var keys = DeviceKeys.Generate();
+        using var first = JayAccount.FromMnemonic(Bip39.Generate(MnemonicLanguage.English), null);
+        using var second = JayAccount.FromMnemonic(Bip39.Generate(MnemonicLanguage.English), null);
+        new JayAccountStore(_dir).Add(first, "First", backedUp: true, keys, "PC", DateTimeOffset.UtcNow);
+        var path = Path.Combine(_dir, JayAccountStore.FileName);
+        var before = File.ReadAllBytes(path);
+
+        var store = new JayAccountStore(_dir);
+        using (new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            store.Load();
+            Assert.Empty(store.Accounts);
+            Assert.True(store.Unreadable);
+            Assert.Throws<IOException>(() => store.Add(second, "Second", backedUp: true, keys, "PC", DateTimeOffset.UtcNow));
+        }
+        Assert.Equal(before, File.ReadAllBytes(path));
+        Assert.False(File.Exists(path + ".broken"));
+
+        // Readable again: the next change reads the file first and keeps what is in it.
+        store.Add(second, "Second", backedUp: true, keys, "PC", DateTimeOffset.UtcNow);
+        Assert.False(store.Unreadable);
+        var again = new JayAccountStore(_dir);
+        again.Load();
+        Assert.Equal(2, again.Accounts.Count);
+        Assert.Contains(again.Accounts, a => a.Address == first.Address);
+        Assert.Contains(again.Accounts, a => a.Address == second.Address);
     }
 
     /// <summary>An account saved with a version 0 address moves to its version 1 address, and says so for the bindings.</summary>
@@ -366,7 +401,7 @@ public sealed class JayAccountTests : IDisposable
 
     /// <summary>
     /// The "Me" page and the "is this their account?" request both show <see cref="JayAddress.CheckWordsText"/>: the words
-    /// come from the account id in the address, so the owner and the friend see the same four.
+    /// come from the account id in the address, so the owner and the friend see the same eight.
     /// </summary>
     [Fact]
     public void CheckWordsTextMatchesTheAccountsCheckWords()
@@ -375,9 +410,49 @@ public sealed class JayAccountTests : IDisposable
         Assert.True(JayAddress.TryDecode(account.Address, out var id));
         foreach (var (ui, list) in new[] { ("en", MnemonicLanguage.English), ("ja", MnemonicLanguage.English), ("zh-Hans", MnemonicLanguage.ChineseSimplified), ("zh-Hant", MnemonicLanguage.ChineseSimplified), ("lzh", MnemonicLanguage.ChineseSimplified) })
             Assert.Equal(string.Join(" · ", JayAddress.CheckWords(id, list)), JayAddress.CheckWordsText(account.Address, ui));
-        Assert.Equal(4, JayAddress.CheckWordsText(account.Address, "en").Split(" · ").Length);
+        Assert.Equal(8, JayAddress.CheckWordsText(account.Address, "en").Split(" · ").Length);
         Assert.Equal("", JayAddress.CheckWordsText(JayAddress.EncodeVersion0(account.PublicKey), "en"));
         Assert.Equal("", JayAddress.CheckWordsText(null, "en"));
+    }
+
+    /// <summary>
+    /// Eight check words, all from the word list, and different for different accounts.
+    /// </summary>
+    [Fact]
+    public void CheckWordsCoverEightyEightBits()
+    {
+        var seen = new HashSet<string>();
+        for (var i = 0; i < 64; i++)
+        {
+            var id = new byte[32];
+            id[0] = (byte)i;
+            var words = JayAddress.CheckWords(id, MnemonicLanguage.English);
+            Assert.Equal(JayAddress.CheckWordCount, words.Length);
+            Assert.All(words, w => Assert.Contains(w, Bip39.Wordlist(MnemonicLanguage.English)));
+            Assert.True(seen.Add(string.Join(' ', words)));
+        }
+        // The eighth word comes from bits 77-87 of the hash, so it varies like the others.
+        var lastWords = Enumerable.Range(0, 64).Select(i => JayAddress.CheckWords([(byte)i, .. new byte[31]], MnemonicLanguage.English)[^1]).ToHashSet();
+        Assert.True(lastWords.Count > 32);
+    }
+
+    /// <summary>
+    /// Names shown to others keep visible text only: zero-width and direction-mark characters, line separators and
+    /// private-use characters go, so a signed device name can't hide characters or break its line.
+    /// </summary>
+    [Theory]
+    [InlineData("Win\u200Bdows", "Windows")]
+    [InlineData("\u200EmacOS\u200F", "macOS")]
+    [InlineData("Lin\u2028ux", "Linux")]
+    [InlineData("\uFEFFJay\u2060", "Jay")]
+    [InlineData("Jay\u061C\u200D", "Jay")]
+    [InlineData("\uE000iOS", "iOS")]
+    [InlineData("Win\u202Edows", "Windows")]
+    [InlineData("我的 电脑", "我的 电脑")]
+    [InlineData("  Android  ", "Android")]
+    public void CleanNameKeepsOnlyVisibleText(string raw, string expected)
+    {
+        Assert.Equal(expected, DeviceCertificate.CleanName(System.Text.RegularExpressions.Regex.Unescape(raw)));
     }
 
     /// <summary>An entry left in the new file because it couldn't be moved before is moved, and saved, once it can be.</summary>

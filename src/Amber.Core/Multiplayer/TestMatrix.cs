@@ -35,7 +35,9 @@ public sealed record MatrixInputs(
     int MemberCount,
     bool HasNode,
     bool FullLanAllowed,
-    bool Simulated = false);
+    bool Simulated = false,
+    NatKind HostNat = NatKind.Unknown,
+    NatKind GuestNat = NatKind.Unknown);
 
 public interface IMatrixStepRunner
 {
@@ -46,7 +48,9 @@ public static class TestMatrix
 {
     /// <summary>
     /// 根据双方实际有的地址排出要测的组合：IPv6（双方都有）、映射端口（任一方有）、局域网（同网段或模拟）、
-    /// IPv4 打洞（普通）和打洞加喷洒（双方都有外部地址）、第三人中转（3 人以上）、联机节点（配置了的话）。
+    /// IPv4 打洞（双方都有外部地址）、第三人中转（3 人以上）、联机节点（配置了的话）。
+    /// Punch + spray is planned only when one side reports a symmetric NAT: spraying is aimed only at such a side, so
+    /// otherwise the step would send exactly what the plain punch step sends.
     /// 每条路先测默认模式；允许完整局域网时再测完整局域网，以及开出口。
     /// </summary>
     public static List<MatrixStep> Plan(MatrixInputs input)
@@ -59,7 +63,7 @@ public static class TestMatrix
         if (Both(PathKind.Punch))
         {
             routes.Add((RouteKind.Direct, PathKind.Punch));
-            routes.Add((RouteKind.Direct, PathKind.PunchSpray));
+            if (input.HostNat == NatKind.Symmetric || input.GuestNat == NatKind.Symmetric) routes.Add((RouteKind.Direct, PathKind.PunchSpray));
         }
         if (input.MemberCount >= 3) routes.Add((RouteKind.Relay, null));
         if (input.HasNode) routes.Add((RouteKind.Node, null));
