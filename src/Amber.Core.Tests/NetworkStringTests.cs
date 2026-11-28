@@ -1,4 +1,5 @@
 using System.Text;
+using Amber.Core.Localization;
 using Amber.Core.Multiplayer.Public;
 
 namespace Amber.Core.Tests;
@@ -42,6 +43,40 @@ public sealed class NetworkStringTests
         Assert.Throws<InvalidDataException>(() => NetworkString.Parse(forged, Trusted));
         // 把注册表的签名换成自己的钥匙重签：签名对了，但不再是“审核过”。
         Assert.False(NetworkString.Parse(NetworkString.Create(NetworkString.Parse(text, Trusted).Info, Someone), Trusted).Reviewed);
+    }
+
+    /// <summary>
+    /// Older strings may list ws:// or wss:// nodes next to usable ones. Jay's EasyTier build can't connect over websocket,
+    /// so such a string still reads, signs and saves as written, and only its usable nodes are connected to.
+    /// </summary>
+    [Fact]
+    public void WebSocketNodesAreKeptAsSignedButNotConnectedTo()
+    {
+        var info = Info() with { Nodes = ["tcp://node1.example.org:11010", "wss://ws.example.org:443/et", "ws://ws.example.org:80"] };
+        Assert.Null(NetworkString.Validate(info));
+        var text = NetworkString.Create(info, Registry);
+        var parsed = NetworkString.Parse(text, Trusted);
+        Assert.Equal(info.Nodes, parsed.Info.Nodes);
+        Assert.Equal(NetworkString.Split(text).Payload, NetworkString.Split(NetworkString.Create(parsed.Info, Registry)).Payload);
+        Assert.Equal(["tcp://node1.example.org:11010"], parsed.ToProfile().Nodes);
+        // Trustees can co-sign it, and a saved copy is still there after a restart.
+        Assert.Equal(2, NetworkString.Parse(NetworkString.Cosign(text, Someone), Trusted).Signers.Count);
+        var list = new PublicNetworkList([text], Trusted);
+        Assert.Equal(["tcp://node1.example.org:11010"], list.Current(info.Id, null).Nodes);
+    }
+
+    [Fact]
+    public void ANetworkWithOnlyWebSocketNodesIsRefused()
+    {
+        var info = Info() with { Nodes = ["wss://ws.example.org:443", "ws://ws.example.org:80"] };
+        Assert.Equal(L.T("core.mp.network.no_usable_nodes"), NetworkString.Validate(info));
+        var e = Assert.Throws<InvalidDataException>(() => NetworkString.Create(info, Registry));
+        Assert.Equal(L.T("core.mp.network.no_usable_nodes"), e.Message);
+        // The no-public-IP rule covers websocket nodes too.
+        Assert.Equal(L.T("core.mp.network.ip_node"),
+            NetworkString.Validate(Info() with { Nodes = ["tcp://node1.example.org:11010", "wss://203.0.113.5:443"] }));
+        Assert.Equal(L.T("core.mp.network.bad_nodes"),
+            NetworkString.Validate(Info() with { Nodes = ["tcp://node1.example.org:11010", "http://web.example.org:80"] }));
     }
 
     [Theory]
@@ -168,5 +203,33 @@ public sealed class NetworkStringTests
         Assert.False(profile.IsBuiltIn);
         // 选的网络不在了：回到内置的 Jay 网络。
         Assert.True(list.Current("gone", null).IsBuiltIn);
+    }
+
+    /// <summary>
+    /// Anyone can sign their own string, so an "exp" outside the range of dates, or a number that doesn't fit, must read
+    /// as a bad string (<see cref="InvalidDataException"/>) and not escape as another exception type.
+    /// </summary>
+    [Theory]
+    [InlineData("9223372036854775807")]
+    [InlineData("-9223372036854775808")]
+    [InlineData("99999999999999999999")]
+    [InlineData("1.5")]
+    [InlineData("\"soon\"")]
+    public void AnExpiryOutsideTheDateRangeIsABadString(string exp)
+    {
+        var json = Info().ToJson();
+        json["exp"] = System.Text.Json.Nodes.JsonNode.Parse(exp);
+        var payload = Encoding.UTF8.GetBytes(json.ToJsonString());
+        var signature = Registry.Sign([.. "jay-network-v2\n"u8, .. payload]);
+        var text = "JAYNET2-" + NetworkString.Base64Url(payload) + "." + NetworkString.Base64Url(signature.Encode());
+        Assert.Throws<InvalidDataException>(() => NetworkString.Parse(text, Trusted));
+        Assert.Null(NetworkString.TryParse(text, Trusted));
+
+        // The same string with an ordinary expiry still reads.
+        json["exp"] = DateTimeOffset.UtcNow.AddDays(30).ToUnixTimeSeconds();
+        payload = Encoding.UTF8.GetBytes(json.ToJsonString());
+        signature = Registry.Sign([.. "jay-network-v2\n"u8, .. payload]);
+        text = "JAYNET2-" + NetworkString.Base64Url(payload) + "." + NetworkString.Base64Url(signature.Encode());
+        Assert.True(NetworkString.Parse(text, Trusted).Reviewed);
     }
 }

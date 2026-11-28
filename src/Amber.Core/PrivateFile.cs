@@ -40,8 +40,10 @@ public static class PrivateFile
     }
 
     /// <summary>
-    /// Creates the directory owner-only when it doesn't exist yet: 0700 on macOS and Linux, and on Windows an access list
-    /// for this user, SYSTEM and Administrators that doesn't inherit from the parent. Existing directories are left as they are.
+    /// Creates the directory owner-only when it doesn't exist yet: 0700 on macOS and Linux, and so every missing folder
+    /// above it (the mode given to <see cref="Directory.CreateDirectory(string, UnixFileMode)"/> covers only the last one);
+    /// on Windows an access list for this user, SYSTEM and Administrators that doesn't inherit from the parent.
+    /// Existing directories are left as they are.
     /// </summary>
     public static void EnsureDirectory(string dir)
     {
@@ -51,8 +53,11 @@ public static class PrivateFile
             var full = Path.GetFullPath(dir);
             if (Path.GetDirectoryName(full) is { } parent) Directory.CreateDirectory(parent);
             new DirectoryInfo(full).Create(LockedDirectory());
+            return;
         }
-        else Directory.CreateDirectory(dir, OwnerOnlyDirectory);
+        var unixParent = Path.GetDirectoryName(Path.GetFullPath(dir));
+        if (unixParent is not null) EnsureDirectory(unixParent);
+        Directory.CreateDirectory(dir, OwnerOnlyDirectory);
     }
 
     /// <summary>A new file (it must not exist yet) that only this user can read, opened for writing.</summary>

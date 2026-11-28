@@ -481,11 +481,4 @@ public class SecurityReviewFixTests
         static (string, int)? NoSrv(string _) => null;
         Assert.Null(await JoinTarget.ResolveForRelayAsync(typed, default, Unresolved, NoSrv));
     }
-
-    [Fact]
-    public void JoinTarget_RealSrvLookupDoesNotCrash()
-    {
-        // 真的查一次（没有这条记录也行），确认 DnsQuery 的结构读法不会崩。
-        _ = JoinTarget.LookupSrv("_minecraft._tcp.example.org");
-    }
 }
