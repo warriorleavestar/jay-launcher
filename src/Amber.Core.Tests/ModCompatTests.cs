@@ -85,6 +85,37 @@ public class ModCompatTests : IDisposable
         Assert.Null(ModCompat.Read(Jar("x.jar", ("readme.txt", "hi"))));
     }
 
+    [Fact]
+    public void QuiltDependsMayBePlainIdsOrObjects()
+    {
+        // quilt.mod.json allows a depends entry that is just a mod id; "jars" entries of the wrong shape are skipped.
+        const string quilt = """
+            {"quilt_loader":{"id":"q","version":"1","depends":[
+              "qsl", "minecraft", {"id":"minecraft","versions":">=1.21"}, {"id":"soft","optional":true},
+              {"id":"hard","optional":false}, {"id":"odd","optional":"yes"}, 7, {"versions":"*"}]}}
+            """;
+        var mod = ModCompat.Read(Jar("q.jar", ("quilt.mod.json", quilt)))!;
+        Assert.Equal(["quilt"], mod.Loaders);
+        Assert.Equal(["qsl", "hard", "odd"], mod.For("quilt")!.RequiredDeps);
+        Assert.Equal(">=1.21", mod.For("quilt")!.MinecraftRange);
+
+        var fabric = ModCompat.Read(Jar("j.jar", ("fabric.mod.json", """{"id":"f","jars":["a.jar",{"file":5},{"file":"META-INF/jars/b.jar"}]}""")))!;
+        Assert.Equal(["fabric"], fabric.Loaders);
+    }
+
+    [Theory]
+    [InlineData("quilt.mod.json", "[]")]
+    [InlineData("quilt.mod.json", "\"quilt\"")]
+    [InlineData("META-INF/jarjar/metadata.json", "[]")]
+    [InlineData("META-INF/jarjar/metadata.json", """{"jars":["a.jar",7,{"path":5}]}""")]
+    public void MetadataThatIsNotAnObjectIsReadAsIfItWereAbsent(string entry, string json)
+    {
+        // Indexing a JSON array or string by name throws; a downloaded jar with such a file must still be readable.
+        var mod = ModCompat.Read(Jar("odd.jar", ("fabric.mod.json", """{"id":"f"}"""), (entry, json)))!;
+        Assert.Equal(["fabric"], mod.Loaders);
+        Assert.Equal(["f"], mod.Ids);
+    }
+
     /// <summary>像 Sinytra Connector 的 -full.jar：外壳没有元数据，真正的模组在 META-INF/jarjar 里。</summary>
     [Fact]
     public void ReadsNestedJarJarMods()
