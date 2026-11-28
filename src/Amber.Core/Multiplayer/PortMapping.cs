@@ -10,8 +10,19 @@ using System.Xml.Linq;
 
 namespace Amber.Core.Multiplayer;
 
-/// <summary>路由器上开的一个端口映射。Dispose 时删掉映射。</summary>
-public sealed record PortMappingResult(string Method, IPEndPoint External, Func<Task>? Remove);
+/// <summary>
+/// 路由器上开的一个端口映射。Dispose 时删掉映射。
+/// <paramref name="Renew"/> asks the router again for the same mapping (true when it still maps the same external port);
+/// <paramref name="Lease"/> is how long the router keeps it without a renewal.
+/// </summary>
+public sealed record PortMappingResult(string Method, IPEndPoint External, Func<Task>? Remove,
+    Func<CancellationToken, Task<bool>>? Renew = null, TimeSpan? Lease = null)
+{
+    /// <summary>The lease Jay asks for.</summary>
+    public static readonly TimeSpan RequestedLease = TimeSpan.FromSeconds(LeaseSeconds);
+
+    internal const int LeaseSeconds = 7200;
+}
 
 /// <summary>
 /// 请路由器把一个外部 UDP 端口转到本机（UPnP IGD 和 NAT-PMP）。只改路由器上的临时映射（带租期），
@@ -19,25 +30,68 @@ public sealed record PortMappingResult(string Method, IPEndPoint External, Func<
 /// </summary>
 public static partial class PortMapping
 {
-    public static async Task<PortMappingResult?> TryMapAsync(int localPort, Action<string> log, CancellationToken ct = default)
+    /// <summary>
+    /// What the router said before any mapping was asked for: where its UPnP description is, and the external address
+    /// NAT-PMP reports. Finding these only waits for answers and changes nothing on the router, so it can run while STUN
+    /// is still classifying the NAT; the mapping itself is asked for afterwards (<see cref="MapAsync"/>).
+    /// </summary>
+    public sealed record GatewayInfo(IPAddress? Gateway, IPAddress? UpnpLocalIp, Uri? UpnpLocation, IPAddress? PmpExternal)
     {
+        public static readonly GatewayInfo None = new(null, null, null, null);
+    }
+
+    public static async Task<PortMappingResult?> TryMapAsync(int localPort, Action<string> log, CancellationToken ct = default) =>
+        await MapAsync(await FindGatewayAsync(log, ct), localPort, log, ct);
+
+    /// <summary>Looks for UPnP and NAT-PMP on the default gateway at the same time. Never asks for a mapping.</summary>
+    public static async Task<GatewayInfo> FindGatewayAsync(Action<string> log, CancellationToken ct = default)
+    {
+        var gateway = DefaultGateway();
+        if (gateway is null)
+        {
+            log(L.T("core.mp.natpmp.nogateway"));
+            return GatewayInfo.None;
+        }
+        var upnp = FindUpnpAsync(gateway, log, ct);
+        var pmp = FindNatPmpAsync(new IPEndPoint(gateway, 5351), log, ct);
         try
         {
-            if (await TryUpnpAsync(localPort, log, ct) is { } upnp) return upnp;
+            await Task.WhenAll(upnp, pmp);
         }
-        catch (Exception e) when (e is SocketException or HttpRequestException or IOException or InvalidDataException or System.Xml.XmlException or OperationCanceledException or FormatException)
+        catch when (ct.IsCancellationRequested)
         {
-            if (ct.IsCancellationRequested) throw;
-            log(L.T("core.mp.upnp.failed") + e.Message);
+            throw new OperationCanceledException(ct);
         }
-        try
+        var (localIp, location) = upnp.Result;
+        return new GatewayInfo(gateway, localIp, location, pmp.Result);
+    }
+
+    /// <summary>Asks the router found by <see cref="FindGatewayAsync"/> for a mapping: UPnP first, then NAT-PMP.</summary>
+    public static async Task<PortMappingResult?> MapAsync(GatewayInfo found, int localPort, Action<string> log, CancellationToken ct = default)
+    {
+        if (found is { Gateway: { } gateway, UpnpLocalIp: { } localIp, UpnpLocation: { } location })
         {
-            if (await TryNatPmpAsync(localPort, log, ct) is { } pmp) return pmp;
+            try
+            {
+                if (await MapUpnpAsync(localPort, gateway, localIp, location, log, ct) is { } upnp) return upnp;
+            }
+            catch (Exception e) when (e is SocketException or HttpRequestException or IOException or InvalidDataException or System.Xml.XmlException or OperationCanceledException or FormatException)
+            {
+                if (ct.IsCancellationRequested) throw;
+                log(L.T("core.mp.upnp.failed") + e.Message);
+            }
         }
-        catch (Exception e) when (e is SocketException or OperationCanceledException)
+        if (found is { Gateway: { } pmpGateway, PmpExternal: { } external } && IsPublic(external))
         {
-            if (ct.IsCancellationRequested) throw;
-            log(L.T("core.mp.natpmp.failed") + e.Message);
+            try
+            {
+                if (await MapNatPmpAsync(localPort, new IPEndPoint(pmpGateway, 5351), external, log, ct) is { } pmp) return pmp;
+            }
+            catch (Exception e) when (e is SocketException or OperationCanceledException)
+            {
+                if (ct.IsCancellationRequested) throw;
+                log(L.T("core.mp.natpmp.failed") + e.Message);
+            }
         }
         log(L.T("core.mp.pcp.skipped"));
         return null;
@@ -54,19 +108,26 @@ public static partial class PortMapping
 
     // ---- UPnP IGD ----
 
-    private static async Task<PortMappingResult?> TryUpnpAsync(int localPort, Action<string> log, CancellationToken ct)
+    private static async Task<(IPAddress? LocalIp, Uri? Location)> FindUpnpAsync(IPAddress gateway, Action<string> log, CancellationToken ct)
     {
-        var gateway = DefaultGateway();
-        if (gateway is null || !IsGatewayAddress(gateway)) return null;
-        var localIp = LocalAddressTowards(gateway);
-        var location = await DiscoverAsync(gateway, localIp, ct);
-        if (location is null)
+        if (!IsGatewayAddress(gateway)) return (null, null);
+        try
         {
-            log(L.T("core.mp.upnp.notfound"));
-            return null;
+            var localIp = LocalAddressTowards(gateway);
+            var location = await DiscoverAsync(gateway, localIp, ct);
+            if (location is null)
+            {
+                log(L.T("core.mp.upnp.notfound"));
+                return (null, null);
+            }
+            log(L.T("core.mp.upnp.gateway") + location.Host);
+            return (localIp, location);
         }
-        log(L.T("core.mp.upnp.gateway") + location.Host);
-        return await MapUpnpAsync(localPort, gateway, localIp, location, log, ct);
+        catch (Exception e) when (e is SocketException or OperationCanceledException && !ct.IsCancellationRequested)
+        {
+            log(L.T("core.mp.upnp.failed") + e.Message);
+            return (null, null);
+        }
     }
 
     internal static async Task<PortMappingResult?> MapUpnpAsync(int localPort, IPAddress gateway, IPAddress localIp,
@@ -103,7 +164,7 @@ public static partial class PortMapping
 
         var args = $"<NewRemoteHost></NewRemoteHost><NewExternalPort>{localPort}</NewExternalPort><NewProtocol>UDP</NewProtocol>" +
                    $"<NewInternalPort>{localPort}</NewInternalPort><NewInternalClient>{localIp}</NewInternalClient><NewEnabled>1</NewEnabled>" +
-                   $"<NewPortMappingDescription>Jay</NewPortMappingDescription><NewLeaseDuration>7200</NewLeaseDuration>";
+                   $"<NewPortMappingDescription>Jay</NewPortMappingDescription><NewLeaseDuration>{PortMappingResult.LeaseSeconds}</NewLeaseDuration>";
         await SoapAsync(http, control!, type, "AddPortMapping", args, ct);
         log(L.F("core.mp.upnp.mapped", localPort, localIp, localPort));
         return new PortMappingResult("UPnP", new IPEndPoint(externalIp, localPort), async () =>
@@ -112,7 +173,21 @@ public static partial class PortMapping
             using var h = new GatewayHttp(gateway, localIp, location, handlerFactory?.Invoke(), TimeSpan.FromSeconds(3));
             await SoapAsync(h, control!, type, "DeletePortMapping",
                 $"<NewRemoteHost></NewRemoteHost><NewExternalPort>{localPort}</NewExternalPort><NewProtocol>UDP</NewProtocol>", CancellationToken.None);
-        });
+        }, async renewCt =>
+        {
+            // Renewing is the same AddPortMapping again, under the same destination, proxy and redirect limits.
+            try
+            {
+                using var h = new GatewayHttp(gateway, localIp, location, handlerFactory?.Invoke());
+                await SoapAsync(h, control!, type, "AddPortMapping", args, renewCt);
+                return true;
+            }
+            catch (Exception e) when (e is HttpRequestException or SocketException or IOException or InvalidDataException
+                                          or OperationCanceledException && !renewCt.IsCancellationRequested)
+            {
+                return false;
+            }
+        }, PortMappingResult.RequestedLease);
     }
 
     private static async Task<Uri?> DiscoverAsync(IPAddress gateway, IPAddress localIp, CancellationToken ct)
@@ -265,39 +340,49 @@ public static partial class PortMapping
 
     // ---- NAT-PMP（RFC 6886）----
 
-    private static async Task<PortMappingResult?> TryNatPmpAsync(int localPort, Action<string> log, CancellationToken ct)
+    /// <summary>The external address NAT-PMP reports (RFC 6886, 3.2); asks for no mapping.</summary>
+    private static async Task<IPAddress?> FindNatPmpAsync(IPEndPoint target, Action<string> log, CancellationToken ct)
     {
-        var gateway = DefaultGateway();
-        if (gateway is null)
+        try
         {
-            log(L.T("core.mp.natpmp.nogateway"));
+            using var udp = new UdpClient(AddressFamily.InterNetwork);
+            var address = await PmpRequestAsync(udp, target, [0, 0], 12, ct);
+            if (address is null)
+            {
+                log(L.T("core.mp.natpmp.noresponse"));
+                return null;
+            }
+            var externalIp = new IPAddress(address.AsSpan(8, 4).ToArray());
+            log(L.F("core.mp.natpmp.external", externalIp));
+            return externalIp;
+        }
+        catch (Exception e) when (e is SocketException or OperationCanceledException && !ct.IsCancellationRequested)
+        {
+            log(L.T("core.mp.natpmp.failed") + e.Message);
             return null;
         }
-        return await MapNatPmpAsync(localPort, new IPEndPoint(gateway, 5351), log, ct);
     }
 
-    internal static async Task<PortMappingResult?> MapNatPmpAsync(int localPort, IPEndPoint target, Action<string> log, CancellationToken ct)
+    /// <summary>Asks <paramref name="target"/> for its external address, then for a mapping when that address is public (tests).</summary>
+    internal static async Task<PortMappingResult?> MapNatPmpAsync(int localPort, IPEndPoint target, Action<string> log, CancellationToken ct) =>
+        await FindNatPmpAsync(target, log, ct) is { } externalIp && IsPublic(externalIp)
+            ? await MapNatPmpAsync(localPort, target, externalIp, log, ct)
+            : null;
+
+    private static async Task<PortMappingResult?> MapNatPmpAsync(int localPort, IPEndPoint target, IPAddress externalIp, Action<string> log, CancellationToken ct)
     {
         using var udp = new UdpClient(AddressFamily.InterNetwork);
-        var address = await PmpRequestAsync(udp, target, [0, 0], 12, ct);
-        if (address is null)
-        {
-            log(L.T("core.mp.natpmp.noresponse"));
-            return null;
-        }
-        var externalIp = new IPAddress(address.AsSpan(8, 4).ToArray());
-        log(L.F("core.mp.natpmp.external", externalIp));
-        if (!IsPublic(externalIp)) return null;
         var mapRequest = new byte[12];
         mapRequest[1] = 1;
         BinaryPrimitives.WriteUInt16BigEndian(mapRequest.AsSpan(4), (ushort)localPort);
         BinaryPrimitives.WriteUInt16BigEndian(mapRequest.AsSpan(6), (ushort)localPort);
-        BinaryPrimitives.WriteUInt32BigEndian(mapRequest.AsSpan(8), 7200);
+        BinaryPrimitives.WriteUInt32BigEndian(mapRequest.AsSpan(8), PortMappingResult.LeaseSeconds);
         var mapped = await PmpRequestAsync(udp, target, mapRequest, 16, ct);
         if (mapped is null || BinaryPrimitives.ReadUInt16BigEndian(mapped.AsSpan(2)) != 0) return null;
         // The reply names the internal port it maps: it has to be the one that was asked for.
         if (BinaryPrimitives.ReadUInt16BigEndian(mapped.AsSpan(8)) != localPort) return null;
         var externalPort = BinaryPrimitives.ReadUInt16BigEndian(mapped.AsSpan(10));
+        var lease = PmpLease(mapped);
         log(L.F("core.mp.natpmp.mapped", externalPort, localPort));
         return new PortMappingResult("NAT-PMP", new IPEndPoint(externalIp, externalPort), async () =>
         {
@@ -306,7 +391,31 @@ public static partial class PortMapping
             BinaryPrimitives.WriteUInt16BigEndian(delete.AsSpan(6), 0);
             BinaryPrimitives.WriteUInt32BigEndian(delete.AsSpan(8), 0);
             await u.SendAsync(delete, target);
-        });
+        }, async renewCt =>
+        {
+            // The same request again (RFC 6886, 3.3); it must still map the same external port.
+            try
+            {
+                using var u = new UdpClient(AddressFamily.InterNetwork);
+                var again = await PmpRequestAsync(u, target, mapRequest, 16, renewCt);
+                return again is not null && BinaryPrimitives.ReadUInt16BigEndian(again.AsSpan(2)) == 0
+                    && BinaryPrimitives.ReadUInt16BigEndian(again.AsSpan(10)) == externalPort;
+            }
+            catch (Exception e) when (e is SocketException or OperationCanceledException && !renewCt.IsCancellationRequested)
+            {
+                return false;
+            }
+        }, lease);
+    }
+
+    /// <summary>
+    /// The lifetime a NAT-PMP mapping reply grants (bytes 12–15), at most the lease that was asked for. A short grant is
+    /// kept as it is, so the renewal comes before the router lets the mapping go.
+    /// </summary>
+    internal static TimeSpan PmpLease(ReadOnlySpan<byte> reply)
+    {
+        var seconds = reply.Length >= 16 ? BinaryPrimitives.ReadUInt32BigEndian(reply[12..]) : 0;
+        return TimeSpan.FromSeconds(seconds == 0 ? PortMappingResult.LeaseSeconds : Math.Min(seconds, PortMappingResult.LeaseSeconds));
     }
 
     private static async Task<byte[]?> PmpRequestAsync(UdpClient udp, IPEndPoint target, byte[] request, int expected, CancellationToken ct)
