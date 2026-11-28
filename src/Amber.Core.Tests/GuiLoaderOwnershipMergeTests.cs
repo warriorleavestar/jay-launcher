@@ -289,6 +289,8 @@ public sealed class GuiLoaderOwnershipMergeTests : IDisposable
             if (path.EndsWith("promotions_slim.json", StringComparison.Ordinal)) return Text("""{"promos":{}}""");
             if (path.StartsWith("/api/maven/versions/", StringComparison.Ordinal))
                 return Text($$"""{"versions":["{{version.Version}}"]}""");
+            // The official repository publishes no hash in this test, so the installer downloads as before.
+            if (path.EndsWith(".sha1", StringComparison.Ordinal)) return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
             if (!path.EndsWith(".jar", StringComparison.Ordinal) && !path.EndsWith(".zip", StringComparison.Ordinal))
                 throw new InvalidOperationException("未安排的测试请求：" + path);
 
