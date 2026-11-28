@@ -209,8 +209,19 @@ public sealed class ReleaseSignatureTests : IDisposable
         chain = ReleaseSignature_Chain(Next, third, 8, T[3], T[0], chain);
         Assert.Equal(third.Hash, TrustChain.Resolve(Own, third.Hash, chain)!.Hash);
         Assert.Equal(third.Hash, TrustChain.Resolve(Next, third.Hash, chain)!.Hash);
-        // A change older than a release already accepted can't be replayed.
-        Assert.Null(TrustChain.Resolve(Own, third.Hash, chain, highestSeq: 7));
+        // Link seqs are not compared with release seqs: a release made after the changes still resolves.
+        Assert.Equal(third.Hash, TrustChain.Resolve(Own, third.Hash, chain, minChainSeq: 8)!.Hash);
+        Assert.Equal(8, TrustChain.Walk(Own, third.Hash, chain)!.Value.Seq);
+        // Once the change at seq 8 was followed, the lists it retired can't be brought back.
+        Assert.Null(TrustChain.Resolve(Own, Next.Hash, chain, minChainSeq: 8));
+        Assert.Null(TrustChain.Resolve(Own, Own.Hash, chain, minChainSeq: 8));
+        Assert.Equal([Own.Hash, Next.Hash, third.Hash], TrustChain.Walk(Own, third.Hash, chain)!.Value.Lists);
+        // Nor can the retired list sign a newer change of its own that goes around the list that replaced it.
+        var evil = new TrustList([T[3].PublicKey, T[4].PublicKey], 2);
+        var fork = ReleaseSignature_Chain(Own, evil, 9, T[1], T[2]);
+        Assert.Equal(evil.Hash, TrustChain.Resolve(Own, evil.Hash, fork, minChainSeq: 8)!.Hash);
+        Assert.Null(TrustChain.Resolve(Own, evil.Hash, fork, minChainSeq: 8, throughHash: third.Hash));
+        Assert.Equal(third.Hash, TrustChain.Resolve(Own, third.Hash, chain, minChainSeq: 8, throughHash: third.Hash)!.Hash);
         // Tampering with a link's keys breaks it.
         var json = JsonNode.Parse(chain)!.AsArray();
         json[0]!["keys"]![2] = Convert.ToBase64String(T[4].PublicKey);
@@ -367,12 +378,96 @@ public sealed class ReleaseSignatureTests : IDisposable
     }
 
     [Fact]
+    public async Task AVerifiedReleaseWhoseNumberCannotBeSavedEndsTheManualCheckAsAFailure()
+    {
+        // The data folder can't be written (here a file stands where it should be): the release verifies, saving its
+        // seq throws, and Settings › About reports a failed check with no page to open instead of the command faulting.
+        var dataDir = Path.Combine(_dir, "data-blocked");
+        File.WriteAllText(dataDir, "not a folder");
+        var (http, _) = FeedFor("v1.0.0", Files());
+        var checker = new UpdateCheck(new HttpClient(http), dataDir, Own);
+        var (status, page, _) = await Amber.App.ViewModels.ToolsViewModel.RunUpdateCheckAsync(checker, Feed, "0.9.0");
+        Assert.StartsWith(Amber.Core.Localization.L.F("tools.update.failed", ""), status);
+        Assert.Null(page);
+        // The signatures were fetched, so the failure came after the check, from saving.
+        Assert.Contains(http.Requests, r => r.Url.EndsWith(ReleaseSignature.SignatureFileName, StringComparison.Ordinal));
+        Assert.Equal(0, checker.HighestSeq);
+
+        // The same release with a writable folder is offered, so only the save made the difference.
+        var (fine, _) = FeedFor("v1.0.0", Files());
+        var (okStatus, okPage, _) = await Amber.App.ViewModels.ToolsViewModel.RunUpdateCheckAsync(
+            new UpdateCheck(new HttpClient(fine), Path.Combine(_dir, "data-writable"), Own), Feed, "0.9.0");
+        Assert.False(okStatus.StartsWith(Amber.Core.Localization.L.F("tools.update.failed", ""), StringComparison.Ordinal), okStatus);
+        Assert.Equal("https://releases.example.test/v1.0.0", okPage);
+    }
+
+    [Fact]
     public async Task UpdateCheckFollowsTheTrustChain()
     {
         var chain = ReleaseSignature_Chain(Own, Next, 6, T[1], T[2]);
         var (http, _) = FeedFor("v1.0.0", Files(Statement(tag: "v1.0.0", seq: 7, trust: Next.Hash), [T[3], T[0]], chain: chain));
-        var update = await new UpdateCheck(new HttpClient(http), Path.Combine(_dir, "data-chain"), Own).CheckAsync(Feed, "0.9.0");
+        var dataDir = Path.Combine(_dir, "data-chain");
+        var update = await new UpdateCheck(new HttpClient(http), dataDir, Own).CheckAsync(Feed, "0.9.0");
         Assert.True(update!.IsVerified);
+
+        // The next daily check of the same release (and of a later one under the new list) still verifies.
+        var checker = new UpdateCheck(new HttpClient(http), dataDir, Own);
+        Assert.Equal(7, checker.HighestSeq);
+        Assert.Equal(6, checker.ChainSeq);
+        Assert.True((await checker.CheckAsync(Feed, "0.9.0"))!.IsVerified);
+        var (later, _) = FeedFor("v1.0.1", Files(Statement(tag: "v1.0.1", seq: 9, trust: Next.Hash), [T[3], T[0]], chain: chain));
+        Assert.True((await new UpdateCheck(new HttpClient(later), dataDir, Own).CheckAsync(Feed, "0.9.0"))!.IsVerified);
+
+        // A release signed by the retired list is refused once the change was followed, even with a newer seq.
+        var (retired, _) = FeedFor("v1.0.2", Files(Statement(tag: "v1.0.2", seq: 10), [T[0], T[2]]));
+        Assert.Equal(ReleaseVerdict.BrokenChain, (await new UpdateCheck(new HttpClient(retired), dataDir, Own).CheckAsync(Feed, "0.9.0"))!.Check.Verdict);
+        // So is one whose chain is a newer change the retired list signed to a list of its choosing.
+        Assert.Equal(Next.Hash, checker.ChainHash);
+        var evil = new TrustList([T[3].PublicKey, T[4].PublicKey], 2);
+        var (forked, _) = FeedFor("v1.0.3", Files(Statement(tag: "v1.0.3", seq: 11, trust: evil.Hash), [T[3], T[4]],
+            chain: ReleaseSignature_Chain(Own, evil, 10, T[1], T[2])));
+        Assert.Equal(ReleaseVerdict.BrokenChain, (await new UpdateCheck(new HttpClient(forked), dataDir, Own).CheckAsync(Feed, "0.9.0"))!.Check.Verdict);
+        // A build with the new list built in starts from its own list.
+        Assert.Equal(0, new UpdateCheck(new HttpClient(http), dataDir, Next).ChainSeq);
+    }
+
+    [Theory]
+    [InlineData("[]", false)]
+    [InlineData("\"v9.9.9\"", false)]
+    [InlineData("{\"tag_name\":5}", false)]
+    [InlineData("{\"tag_name\":\"v9.9.9\",\"html_url\":7}", true)]
+    [InlineData("{\"tag_name\":\"v9.9.9\",\"body\":[1],\"assets\":[1,\"x\",{\"name\":3},{\"name\":\"a.zip\",\"browser_download_url\":{}}]}", true)]
+    public async Task UpdateCheckSurvivesAFeedOfTheWrongShape(string json, bool namesAVersion)
+    {
+        // A feed address that returns a list, an error page shaped as JSON or wrongly typed fields never ends as an
+        // InvalidOperationException out of JsonElement: without a version the check fails, with one the update is
+        // reported as unsigned and the wrongly typed fields are left out.
+        var http = new FakeHttp();
+        http.On(Feed, json);
+        var checker = new UpdateCheck(new HttpClient(http), Path.Combine(_dir, "data-shape"), Own);
+        if (!namesAVersion)
+        {
+            await Assert.ThrowsAsync<InvalidDataException>(() => checker.CheckAsync(Feed, "0.9.0"));
+            return;
+        }
+        var update = await checker.CheckAsync(Feed, "0.9.0");
+        Assert.NotNull(update);
+        Assert.False(update!.IsVerified);
+        Assert.Equal("9.9.9", update.Info.Version);
+        Assert.Null(update.Info.Url);
+        Assert.Null(update.Info.Notes);
+    }
+
+    [Theory]
+    [InlineData("not a url")]
+    [InlineData("releases.example.test/latest")]
+    [InlineData("file:///etc/passwd")]
+    public async Task UpdateCheckRefusesAFeedAddressThatIsNotHttp(string feed)
+    {
+        var http = new FakeHttp();
+        var checker = new UpdateCheck(new HttpClient(http), Path.Combine(_dir, "data-url"), Own);
+        await Assert.ThrowsAsync<InvalidDataException>(() => checker.CheckAsync(feed, "0.9.0"));
+        Assert.Empty(http.Requests);
     }
 
     [Fact]

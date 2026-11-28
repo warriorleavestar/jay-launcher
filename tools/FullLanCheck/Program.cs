@@ -195,7 +195,7 @@ static class FullLanCheck
                 Log("已切到经房主上网");
                 Check("防漏规则已装", FirewallPresent(), FirewallDump());
                 var dnsExit = DnsSnapshot();
-                Check("DNS 换成 1.1.1.1 / 8.8.8.8", dnsExit.Contains("1.1.1.1") && dnsExit.Contains("8.8.8.8"), dnsExit);
+                Check("DNS 换成出口用的公共解析服务器", dnsExit.Contains(ExitDnsServers.Primary) && dnsExit.Contains(ExitDnsServers.Secondary), dnsExit);
                 Check("经虚拟网卡还能连房主", await ConnectThroughTunAsync(game), "");
                 // 同一台机器上房主自己的出站也被本机的出口路由和防漏规则管着，这里不判断能不能上网，只记下来；真正经出口上网在两台机器上测。
                 Log($"（仅记录）开出口后访问外网：{(await InternetAsync() ? "通" : "不通")}");

@@ -6,7 +6,10 @@ namespace Amber.Core.Launch;
 /// What the game process may see when it runs in the OS sandbox (privacy plan item 15): its own instance folder, the
 /// Java runtime, the shared game files (versions, libraries, assets), the universal loader's runtime folder and the
 /// few files Jay names on its command line. Everything else of the player's (Jay's data folder with its keys,
-/// browser profiles, other files) stays out of reach. Network: outbound, plus loopback to Jay for multiplayer.
+/// browser profiles, other files) stays out of reach on Linux and with the Windows AppContainer. On macOS the profile
+/// allows by default and hides only Jay's data folder, the keychains and a fixed list of private folders
+/// (<see cref="MacSandbox.PrivateHomeFolders"/>); the Windows standard level only lowers the integrity level.
+/// Network: outbound, plus loopback to Jay for multiplayer.
 /// <para>
 /// The grants are platform-neutral; <see cref="LinuxSandbox"/> turns them into a bubblewrap command line and
 /// <see cref="MacSandbox"/> into a sandbox-exec profile. A grant that is a file is granted alone, never its folder.
@@ -135,6 +138,24 @@ public static class GameSandbox
         var home = Path.GetFileName(bin) is "bin" ? Path.GetDirectoryName(bin) : null;
         // macOS JDKs keep java in Contents/Home/bin; granting Contents/Home is enough.
         return home ?? bin;
+    }
+
+    /// <summary>
+    /// <paramref name="args"/> without one occurrence of each of <paramref name="remove"/> (compared exactly), in order.
+    /// </summary>
+    public static IEnumerable<string> Without(IEnumerable<string> args, IEnumerable<string> remove)
+    {
+        var left = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var r in remove) left[r] = left.GetValueOrDefault(r) + 1;
+        foreach (var arg in args)
+        {
+            if (left.TryGetValue(arg, out var n) && n > 0)
+            {
+                left[arg] = n - 1;
+                continue;
+            }
+            yield return arg;
+        }
     }
 
     /// <summary>Existing files named in arguments (-javaagent:…, -Dx=/path, a bare path). Folders are not granted this way.</summary>

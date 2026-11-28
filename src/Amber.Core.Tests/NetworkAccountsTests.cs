@@ -125,6 +125,94 @@ public sealed class NetworkAccountsTests : IAsyncDisposable
     }
 
     [Fact]
+    public void AFullFailureTableNeverUnlocksALockedAccount()
+    {
+        var store = new AccountStore(Path.Combine(_dir, "a.json"));
+        store.Set("carol", "password1");
+        var now = DateTimeOffset.UtcNow;
+        for (var i = 0; i < AccountStore.MaxFails; i++) store.RecordFailure("carol", now);
+        Assert.Equal(LoginResult.Locked, store.Check("carol", "password1", now));
+        // Junk names, more than the table holds: carol stays locked and the table stays bounded.
+        for (var i = 0; i < AccountStore.MaxTrackedNames + 50; i++) store.RecordFailure("junk" + i, now + TimeSpan.FromMilliseconds(i));
+        Assert.Equal(LoginResult.Locked, store.Check("carol", "password1", now + TimeSpan.FromMinutes(1)));
+        Assert.True(store.TrackedNames <= AccountStore.MaxTrackedNames);
+    }
+
+    [Fact]
+    public void ExpiredFailuresAreDroppedBeforeAnythingElse()
+    {
+        var store = new AccountStore(Path.Combine(_dir, "a.json"));
+        var start = DateTimeOffset.UtcNow;
+        for (var i = 0; i < AccountStore.MaxTrackedNames; i++) store.RecordFailure("old" + i, start);
+        var later = start + AccountStore.Lockout + TimeSpan.FromSeconds(1);
+        for (var i = 0; i < 3; i++) store.RecordFailure("dave", later);
+        store.RecordFailure("erin", later);
+        // The expired names made room; the live counts survive.
+        Assert.Equal(2, store.TrackedNames);
+        for (var i = 0; i < 2; i++) store.RecordFailure("dave", later);
+        Assert.Equal(LoginResult.Locked, store.Check("dave", "whatever1", later));
+    }
+
+    /// <summary>An account store whose password check waits until released (to hold login slots).</summary>
+    private sealed class SlowStore : IAccountStore
+    {
+        public readonly SemaphoreSlim Go = new(0);
+        public int Entered;
+
+        public LoginResult Check(string name, string password, DateTimeOffset now)
+        {
+            Interlocked.Increment(ref Entered);
+            Go.Wait();
+            return LoginResult.Wrong;
+        }
+
+        public void RecordFailure(string name, DateTimeOffset now) { }
+        public void Succeeded(string name) { }
+        public byte[]? TotpSecret(string name) => null;
+    }
+
+    [Fact]
+    public async Task OnlyAFewLoginsAreCheckedAtOnce()
+    {
+        var store = new SlowStore();
+        var (key, signer) = LoginAuthority.LoadOrCreateKeys(Path.Combine(_dir, "login.key"));
+        var login = new NetworkLogin(true, key.PublicKey, signer.PublicKey);
+        await using var server = new RoomDirectoryServer(IPAddress.Loopback, 0) { Login = new LoginAuthority(store, key, signer, "net1") };
+        JsonObject Ask() => server.Handle(NetworkLoginClient.Request(_guest, login, "x" + Guid.NewGuid().ToString("N")[..8], "password1", DateTimeOffset.UtcNow), source: null);
+        var busy = Enumerable.Range(0, RoomDirectoryServer.MaxConcurrentLogins).Select(_ => Task.Run(Ask)).ToList();
+        while (Volatile.Read(ref store.Entered) < RoomDirectoryServer.MaxConcurrentLogins) await Task.Delay(10);
+        Assert.Equal("busy", Ask()["error"]?.GetValue<string>());
+        store.Go.Release(RoomDirectoryServer.MaxConcurrentLogins);
+        foreach (var reply in await Task.WhenAll(busy)) Assert.Equal("wrong", reply["error"]?.GetValue<string>());
+        Assert.Equal(RoomDirectoryServer.MaxConcurrentLogins, store.Entered);
+    }
+
+    [Fact]
+    public async Task FailedLoginsHaveADirectoryWideBudget()
+    {
+        var store = new AccountStore(Path.Combine(_dir, "a.json"));
+        store.Set("grace", "password1");
+        var (key, signer) = LoginAuthority.LoadOrCreateKeys(Path.Combine(_dir, "login.key"));
+        var login = new NetworkLogin(true, key.PublicKey, signer.PublicKey);
+        var now = DateTimeOffset.UtcNow;
+        await using var server = new RoomDirectoryServer(IPAddress.Loopback, 0, clock: () => now)
+        {
+            Login = new LoginAuthority(store, key, signer, "net1", () => now),
+            FailedLoginsPerMinute = 2,
+        };
+        JsonObject Ask(string user, string password) => server.Handle(NetworkLoginClient.Request(_guest, login, user, password, now), source: null);
+        Assert.Equal("wrong", Ask("nobody", "password1")["error"]?.GetValue<string>());
+        Assert.Equal("wrong", Ask("grace", "wrong-one")["error"]?.GetValue<string>());
+        // Spent: every login is "busy" for the rest of the minute, a right password too (it says nothing about names).
+        Assert.Equal("busy", Ask("grace", "password1")["error"]?.GetValue<string>());
+        Assert.Equal("busy", Ask("nobody", "password1")["error"]?.GetValue<string>());
+        Assert.Equal(Localization.L.T("core.mp.account.busy"),
+            Assert.Throws<InvalidDataException>(() => NetworkLoginClient.Read(Ask("grace", "password1"), _guest, login, "net1", now)).Message);
+        now += TimeSpan.FromMinutes(1);
+        Assert.True(Ask("grace", "password1")["ok"]?.GetValue<bool>());
+    }
+
+    [Fact]
     public void AccountsArePersistedWithoutThePassword()
     {
         var path = Path.Combine(_dir, "a.json");
@@ -238,6 +326,51 @@ public sealed class NetworkAccountsTests : IAsyncDisposable
     {
         Assert.Equal("GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", TotpFactor.Base32("12345678901234567890"u8.ToArray()));
         Assert.StartsWith("otpauth://totp/net1%3Aalice?secret=", TotpFactor.Uri("net1", "alice", TotpFactor.NewSecret()));
+    }
+
+    /// <summary>
+    /// The login reply comes from a directory node: wrongly typed fields, bad base64 or a sealed body that isn't the
+    /// expected JSON end as a failed login (<see cref="InvalidDataException"/>), while a good reply, a wrong password
+    /// and a second-factor request read as before.
+    /// </summary>
+    [Fact]
+    public void AMalformedLoginReplyIsAFailedLogin()
+    {
+        var store = new AccountStore(Path.Combine(_dir, "accounts.json"));
+        var (key, signer) = LoginAuthority.LoadOrCreateKeys(Path.Combine(_dir, "login.key"));
+        var authority = new LoginAuthority(store, key, signer, "net1") { Factors = [new PinFactor("4321")] };
+        var login = new NetworkLogin(true, key.PublicKey, signer.PublicKey);
+        store.Set("free", "password1");
+        store.Set("alice", "password1");
+        var now = DateTimeOffset.UtcNow;
+        JsonObject Ask(string user, string password, Dictionary<string, string>? factors = null) =>
+            authority.Handle(NetworkLoginClient.Request(_guest, login, user, password, now, factors));
+
+        Assert.Equal("free", NetworkLoginClient.Read(Ask("free", "password1"), _guest, login, "net1", now).Parsed.User);
+        var need = Assert.Throws<SecondFactorRequiredException>(() => NetworkLoginClient.Read(Ask("alice", "password1"), _guest, login, "net1", now));
+        Assert.Equal("pin", Assert.Single(need.Need).Name);
+        var withPin = Ask("alice", "password1", new() { ["pin"] = "4321" });
+        Assert.Equal("alice", NetworkLoginClient.Read(withPin, _guest, login, "net1", now).Parsed.User);
+        var wrong = Assert.Throws<InvalidDataException>(() => NetworkLoginClient.Read(Ask("alice", "nope"), _guest, login, "net1", now));
+        Assert.Equal(Amber.Core.Localization.L.T("core.mp.account.wrong"), wrong.Message);
+
+        string Sealed(string json) => Convert.ToBase64String(PrivateSeal.Seal(key, _guest.PublicKey, System.Text.Encoding.UTF8.GetBytes(json)));
+        JsonObject[] bad =
+        [
+            new() { ["ok"] = "yes" },
+            new() { ["ok"] = false, ["error"] = 5 },
+            new() { ["ok"] = true, ["b"] = 7 },
+            new() { ["ok"] = true, ["b"] = "%%% not base64" },
+            new() { ["ok"] = true, ["b"] = Sealed("not json") },
+            new() { ["ok"] = true, ["b"] = Sealed("""{"token":5}""") },
+            new() { ["ok"] = false, ["error"] = "factor", ["b"] = Sealed("""{"need":[{"name":5,"prompt":"x"}]}""") },
+            new() { ["ok"] = false, ["error"] = "factor", ["b"] = Sealed("""{"need":[{"name":"pin","prompt":"x"}],"wrong":"yes"}""") },
+        ];
+        foreach (var reply in bad)
+        {
+            var e = Record.Exception(() => NetworkLoginClient.Read(reply, _guest, login, "net1", now));
+            Assert.True(e is not null && e.GetType() == typeof(InvalidDataException), $"{reply.ToJsonString()}: {e?.GetType().Name}");
+        }
     }
 
     private sealed class PinFactor(string pin) : ILoginFactor

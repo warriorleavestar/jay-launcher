@@ -68,6 +68,21 @@ public class StunParseTests
     }
 
     [Theory]
+    [InlineData("stun.example.test:99999999999")]
+    [InlineData("stun.example.test:70000")]
+    [InlineData("stun.example.test:0")]
+    [InlineData("stun.example.test:-1")]
+    [InlineData("stun.example.test:abc")]
+    public async Task StunServerWithABadPortIsSkipped(string server)
+    {
+        // Typed into the free-text STUN box: a bad entry must be the FormatException every caller skips, not an OverflowException.
+        await Assert.ThrowsAsync<FormatException>(() => Stun.ResolveAsync(server, default));
+        using var socket = new System.Net.Sockets.Socket(System.Net.Sockets.AddressFamily.InterNetwork, System.Net.Sockets.SocketType.Dgram, System.Net.Sockets.ProtocolType.Udp);
+        socket.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+        Assert.Null(await Stun.QueryAsync(socket, server, TimeSpan.FromSeconds(2), default));
+    }
+
+    [Theory]
     [InlineData("192.168.1.2", false)]
     [InlineData("100.70.1.1", false)]
     [InlineData("172.20.0.1", false)]
@@ -208,6 +223,53 @@ public class DirectBridgeTests
         Assert.Empty(host.Peers);
     }
 
+    /// <summary>
+    /// Only the host has a router-mapped port and both sides allow only the mapped path (the test's "mapped port" step):
+    /// the guest's probe aimed at that port is recognised as the mapped path on both sides.
+    /// </summary>
+    [Fact]
+    public async Task MappedPathWorksWhenOnlyOneSideHasAMapping()
+    {
+        await using var host = new DirectBridge(DirectBridge.CreateSocket(), DirectTestKeys.Bridge, true, 1, _ => { }) { OwnsMappedPort = true };
+        await using var guest = new DirectBridge(DirectBridge.CreateSocket(), DirectTestKeys.Bridge, false, null, _ => { });
+        host.SetAllowedPaths([PathKind.Mapped]);
+        guest.SetAllowedPaths([PathKind.Mapped]);
+        List<Candidate> hostCandidates = [new(PathKind.Mapped, new IPEndPoint(IPAddress.Loopback, host.SocketEndPoint.Port))];
+        guest.SetRemoteCandidates(hostCandidates);
+        var hostWait = host.WaitForPeerAsync(TimeSpan.FromSeconds(5));
+        var peer = await guest.PunchAsync(hostCandidates, NatKind.Open, TimeSpan.FromSeconds(5));
+        Assert.NotNull(peer);
+        Assert.Equal(PathKind.Mapped, peer!.Path);
+        Assert.Equal(PathKind.Mapped, (await hostWait)!.Path);
+    }
+
+    /// <summary>
+    /// A port-preserving NAT gives the STUN and the mapped candidate one endpoint. It counts as the mapped path, but
+    /// while only plain punching is allowed (that test step) it is the punched path, so the probe is not refused.
+    /// </summary>
+    [Fact]
+    public void ASharedEndpointIsThePathThatIsAllowed()
+    {
+        var at = IPEndPoint.Parse("198.51.100.7:40000");
+        List<Candidate> remote = [new(PathKind.Punch, at), new(PathKind.Mapped, at)];
+        Assert.Equal(PathKind.Mapped, DirectBridge.SharedEndpointPath(remote, at, Enum.GetValues<PathKind>().ToHashSet()));
+        Assert.Equal(PathKind.Mapped, DirectBridge.SharedEndpointPath(remote, at, new HashSet<PathKind> { PathKind.Mapped }));
+        Assert.Equal(PathKind.Punch, DirectBridge.SharedEndpointPath(remote, at, new HashSet<PathKind> { PathKind.Punch }));
+        Assert.Equal(PathKind.Punch, DirectBridge.SharedEndpointPath(remote, at, new HashSet<PathKind> { PathKind.PunchSpray }));
+        Assert.Equal(PathKind.Punch, DirectBridge.SharedEndpointPath(remote, IPEndPoint.Parse("198.51.100.8:40000"), new HashSet<PathKind> { PathKind.Mapped }));
+    }
+
+    /// <summary>A probe that claims to be aimed at a mapped port is not believed by a side that holds none.</summary>
+    [Fact]
+    public async Task MappedClaimNeedsAMappingOnTheReceivingSide()
+    {
+        await using var host = new DirectBridge(DirectBridge.CreateSocket(), DirectTestKeys.Bridge, true, 1, _ => { });
+        await using var guest = new DirectBridge(DirectBridge.CreateSocket(), DirectTestKeys.Bridge, false, null, _ => { });
+        host.SetAllowedPaths([PathKind.Mapped]);
+        Assert.Null(await guest.PunchAsync([new(PathKind.Mapped, new IPEndPoint(IPAddress.Loopback, host.SocketEndPoint.Port))], NatKind.Open, TimeSpan.FromSeconds(1.5)));
+        Assert.Empty(host.Peers);
+    }
+
     [Fact]
     public async Task WrongRoomKeyIsIgnored()
     {
@@ -228,10 +290,15 @@ public class TestMatrixTests
         var host = new[] { C(PathKind.IPv6, "[2001:db8::1]:1"), C(PathKind.Punch, "203.0.113.5:1"), C(PathKind.Lan, "192.168.1.5:1") };
         var guest = new[] { C(PathKind.Punch, "198.51.100.7:1"), C(PathKind.Lan, "10.0.0.5:1") };
         var steps = TestMatrix.Plan(new MatrixInputs(host, guest, 2, false, false));
-        Assert.Equal([PathKind.Punch, PathKind.PunchSpray], steps.Select(s => s.Path!.Value));
+        // Neither side is symmetric: spraying would send nothing extra, so there is no spray step.
+        Assert.Equal([PathKind.Punch], steps.Select(s => s.Path!.Value));
         Assert.All(steps, s => Assert.False(s.FullLan));
+        Assert.Equal([PathKind.Punch, PathKind.PunchSpray],
+            TestMatrix.Plan(new MatrixInputs(host, guest, 2, false, false, HostNat: NatKind.Cone, GuestNat: NatKind.Symmetric)).Select(s => s.Path!.Value));
+        Assert.Equal([PathKind.Punch, PathKind.PunchSpray],
+            TestMatrix.Plan(new MatrixInputs(host, guest, 2, false, false, HostNat: NatKind.Symmetric, GuestNat: NatKind.Open)).Select(s => s.Path!.Value));
 
-        var full = TestMatrix.Plan(new MatrixInputs(host, [.. guest, C(PathKind.IPv6, "[2001:db8:1::2]:1")], 3, true, true));
+        var full = TestMatrix.Plan(new MatrixInputs(host, [.. guest, C(PathKind.IPv6, "[2001:db8:1::2]:1")], 3, true, true, GuestNat: NatKind.Symmetric));
         // IPv6、打洞、喷洒、中转、节点，各 3 步（经别人上网只有 Windows 能用，其他系统各 2 步）
         Assert.Equal((PlatformFeatures.FullTrafficExit ? 3 : 2) * 5, full.Count);
         if (PlatformFeatures.FullTrafficExit) Assert.Contains(full, s => s.Route == RouteKind.Relay && s.FullLan && s.Exit);
