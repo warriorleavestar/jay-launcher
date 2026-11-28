@@ -6,7 +6,7 @@ namespace Amber.Core.Multiplayer;
 /// </summary>
 internal static class ExitDnsScript
 {
-    internal const string Script = """
+    internal const string Script = $$"""
         $script:ExitDnsLease = $null
 
         function Get-ExitDnsIndex($adapter) {
@@ -135,7 +135,7 @@ internal static class ExitDnsScript
                     if ($null -eq $currentAdapter) { throw 'Exit DNS adapter disappeared' }
                     $dns = Get-ExitDnsConfiguration $currentAdapter
                     $metric = Get-ExitDnsMetric $currentAdapter
-                    if ($dns.IsStatic -and $dns.Key -eq '1.1.1.1,8.8.8.8' -and $metric.Automatic -eq 'Disabled' -and $metric.Metric -eq 1) { return }
+                    if ($dns.IsStatic -and $dns.Key -eq '{{ExitDnsServers.Key}}' -and $metric.Automatic -eq 'Disabled' -and $metric.Metric -eq 1) { return }
                     throw 'Exit DNS active configuration was changed externally'
                 }
                 Exit-ExitDns
@@ -147,14 +147,14 @@ internal static class ExitDnsScript
             $originalMetric = Get-ExitDnsMetric $currentAdapter
             $lease = [pscustomobject]@{
                 Guid = $guid; OriginalDns = $originalDns; OriginalMetric = $originalMetric
-                AppliedDnsKey = '1.1.1.1,8.8.8.8'; DnsPending = $false; MetricPending = $false; CachePending = $false
+                AppliedDnsKey = '{{ExitDnsServers.Key}}'; DnsPending = $false; MetricPending = $false; CachePending = $false
             }
             $script:ExitDnsLease = $lease
             try {
                 if (-not $originalDns.IsStatic -or $originalDns.Key -ne $lease.AppliedDnsKey) {
                     $lease.DnsPending = $true
                     $lease.CachePending = $true
-                    Set-DnsClientServerAddress -InputObject $originalDns.DnsObject -ServerAddresses @('1.1.1.1', '8.8.8.8') -ErrorAction Stop | Out-Null
+                    Set-DnsClientServerAddress -InputObject $originalDns.DnsObject -ServerAddresses @('{{ExitDnsServers.Primary}}', '{{ExitDnsServers.Secondary}}') -ErrorAction Stop | Out-Null
                 }
                 $appliedDns = Get-ExitDnsConfiguration $currentAdapter
                 if (-not $appliedDns.IsStatic -or $appliedDns.Key -ne $lease.AppliedDnsKey) { throw 'Exit DNS server readback failed' }
