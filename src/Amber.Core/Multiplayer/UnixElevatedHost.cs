@@ -24,13 +24,25 @@ public static class UnixElevatedGuardHost
     public static bool IsGuardInvocation(string[] args) => args.Length > 0 && args[0] == UnixElevatedGuard.GuardFlag;
 
     /// <summary>守护入口，返回进程退出码：0 正常结束，2 参数或环境不对，3 核对失败，4 运行中出错。</summary>
-    public static int Run(string[] args) => Run(args, requireRoot: true, RestoreSystemLeftovers);
+    public static int Run(string[] args) =>
+        Run(args, requireRoot: Environment.GetEnvironmentVariable(NoRootForTestVariable) != "1", handleSignals: true, RestoreSystemLeftovers);
 
     /// <summary>
-    /// 测试用：在测试进程里以当前用户身份跑守护。It never touches system files, even when the tests run as root: the
-    /// leftover check at each start goes to <paramref name="restoreLeftovers"/>, which does nothing unless a test gives one.
+    /// Tests only: set to "1", a guard started as its own process runs as the current user. Everything else, the signal
+    /// handlers included, is exactly what the root guard does; without root it can only do what the user can anyway.
     /// </summary>
-    internal static int RunForTest(string[] args, Action? restoreLeftovers = null) => Run(args, requireRoot: false, restoreLeftovers ?? (() => { }));
+    internal const string NoRootForTestVariable = "AMBER_ET_GUARD_TEST_NO_ROOT";
+
+    /// <summary>
+    /// 测试用：在测试进程里以当前用户身份跑守护（不接管测试进程的信号）。It never touches system files, even when the tests
+    /// run as root: the leftover check at each start goes to <paramref name="restoreLeftovers"/>, which does nothing unless
+    /// a test gives one.
+    /// </summary>
+    internal static int RunForTest(string[] args, Action? restoreLeftovers = null) =>
+        Run(args, requireRoot: false, handleSignals: false, restoreLeftovers ?? (() => { }));
+
+    /// <summary>Tests: receives the running session's stop action (what a SIGTERM does in the real guard).</summary>
+    internal static Action<Action>? StopHookForTest;
 
     /// <summary>
     /// A guard killed during an exit session may have left Jay's temporary resolv.conf in place: put the original back,
@@ -41,7 +53,7 @@ public static class UnixElevatedGuardHost
         if (OperatingSystem.IsLinux() && UnixIds.EffectiveUserId() == 0) UnixExitNetwork.RestoreLeftoverResolvConf();
     }
 
-    private static int Run(string[] args, bool requireRoot, Action restoreLeftovers)
+    private static int Run(string[] args, bool requireRoot, bool handleSignals, Action restoreLeftovers)
     {
         if (args.Length != 5 || !uint.TryParse(args[2], out var uid) || !int.TryParse(args[3], out var jayPid)) return 2;
         if (requireRoot && UnixIds.EffectiveUserId() != 0) return 2;
@@ -63,8 +75,34 @@ public static class UnixElevatedGuardHost
             }
         }
         catch (Exception e) when (e is IOException or SocketException or UnauthorizedAccessException or ArgumentException) { return 3; }
-        using var session = new GuardSession(socket, corePath, restoreLeftovers);
-        return session.Run();
+        var session = new GuardSession(socket, corePath, restoreLeftovers);
+        // A signal (logout, kill, Ctrl+C in a terminal) must still take down the core, routes and firewall rules:
+        // stop the session and clean up instead of letting the runtime end the process. The handlers stay in place
+        // until the clean-up is over, so a second signal during it is absorbed too.
+        var signals = new List<IDisposable>();
+        if (handleSignals)
+            foreach (var signal in new[] { PosixSignal.SIGTERM, PosixSignal.SIGINT, PosixSignal.SIGHUP, PosixSignal.SIGQUIT })
+                signals.Add(PosixSignalRegistration.Create(signal, ctx => { ctx.Cancel = true; session.RequestStop(); }));
+        StopHookForTest?.Invoke(session.RequestStop);
+        return RunThenCleanUp(session.Run, session, signals);
+    }
+
+    /// <summary>
+    /// Runs <paramref name="run"/>, then disposes <paramref name="session"/> (stopping the core, restoring routes, DNS and
+    /// firewall), and only then <paramref name="signals"/>: a signal that arrives while the session cleans up still finds
+    /// a handler and cannot cut the clean-up short.
+    /// </summary>
+    internal static int RunThenCleanUp(Func<int> run, IDisposable session, IReadOnlyList<IDisposable> signals)
+    {
+        try
+        {
+            try { return run(); }
+            finally { session.Dispose(); }
+        }
+        finally
+        {
+            foreach (var r in signals) r.Dispose();
+        }
     }
 
     private sealed class GuardSession(Socket socket, string corePath, Action restoreLeftovers) : IDisposable
@@ -75,6 +113,14 @@ public static class UnixElevatedGuardHost
         private IDisposable? _relay;
         private UnixExitNetwork? _exit;
         private readonly ManualResetEventSlim _coreExited = new(false);
+        private readonly ManualResetEventSlim _stop = new(false);
+
+        /// <summary>Safe to call any number of times, from a signal handler too, also once the session is disposed.</summary>
+        public void RequestStop()
+        {
+            try { _stop.Set(); }
+            catch (ObjectDisposedException) { }
+        }
 
         public int Run()
         {
@@ -84,7 +130,8 @@ public static class UnixElevatedGuardHost
             {
                 while (true)
                 {
-                    var index = WaitHandle.WaitAny([((IAsyncResult)pending).AsyncWaitHandle, _coreExited.WaitHandle]);
+                    var index = WaitHandle.WaitAny([((IAsyncResult)pending).AsyncWaitHandle, _coreExited.WaitHandle, _stop.WaitHandle]);
+                    if (index == 2) return 0;
                     if (index == 1)
                     {
                         Send("error " + B64("easytier-core exited"));
@@ -101,6 +148,11 @@ public static class UnixElevatedGuardHost
                             StartCore(cmd);
                             Send($"started {cmd.N}");
                         }
+                        catch (StopRequestedException)
+                        {
+                            // Asked to stop while starting: end like any other stop; Dispose cleans up what was set up.
+                            return 0;
+                        }
                         catch (Exception e) when (e is IOException or InvalidOperationException or System.ComponentModel.Win32Exception or UnauthorizedAccessException)
                         {
                             StopCore();
@@ -111,15 +163,26 @@ public static class UnixElevatedGuardHost
                     pending = reader.ReadLineAsync();
                 }
             }
-            catch (Exception e) when (e is IOException or JsonException or ObjectDisposedException or SocketException or AggregateException)
+            catch (Exception)
             {
+                // Any error ends the session the same way, so the caller's using block always removes what it set up.
                 return 4;
             }
+        }
+
+        /// <summary>Thrown inside <see cref="StartCore"/> when a stop (a signal) arrives part way through a start.</summary>
+        private sealed class StopRequestedException : Exception;
+
+        private void ThrowIfStopRequested()
+        {
+            if (_stop.IsSet) throw new StopRequestedException();
         }
 
         private void StartCore(UnixGuardCommand cmd)
         {
             StopCore();
+            // A stop can arrive together with (or before) a start command; it wins, and no new core is started.
+            ThrowIfStopRequested();
             try { restoreLeftovers(); }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Send("error " + B64(e.Message)); }
             var core = ResolveCore();
@@ -144,6 +207,7 @@ public static class UnixElevatedGuardHost
             info.Environment["PATH"] = "/usr/sbin:/usr/bin:/sbin:/bin";
             if (cmd.Env is { } env && env.TryGetValue(EasyTierArgs.SecretVariable, out var secret)) info.Environment[EasyTierArgs.SecretVariable] = secret;
             _coreExited.Reset();
+            ThrowIfStopRequested();
             var process = Process.Start(info) ?? throw new InvalidOperationException("easytier-core did not start");
             _core = process;
             process.StandardInput.Close();
@@ -186,13 +250,15 @@ public static class UnixElevatedGuardHost
             if ((File.GetUnixFileMode(path) & (UnixFileMode.GroupWrite | UnixFileMode.OtherWrite)) != 0) throw new IOException("easytier-core is writable by others");
         }
 
-        private static string? WaitForTun(System.Net.IPAddress ip, Process core)
+        /// <summary>Waits up to 30 s for the virtual adapter; a stop request ends the wait at once.</summary>
+        private string? WaitForTun(System.Net.IPAddress ip, Process core)
         {
             for (var i = 0; i < 60 && !core.HasExited; i++)
             {
                 if (UnixBroadcastRelay.FindByAddress(ip) is { } tun) return tun.Name;
-                Thread.Sleep(500);
+                if (_stop.Wait(500)) throw new StopRequestedException();
             }
+            ThrowIfStopRequested();
             return null;
         }
 
@@ -249,6 +315,7 @@ public static class UnixElevatedGuardHost
             StopCore();
             _stream.Dispose();
             _coreExited.Dispose();
+            _stop.Dispose();
         }
     }
 }
