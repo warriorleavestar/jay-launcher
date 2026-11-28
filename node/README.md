@@ -42,12 +42,11 @@ sudo bash install.sh
 
 ```bash
 curl -fsSLO https://raw.githubusercontent.com/warriorleavestar/jay-launcher/main/node/docker-compose.yml
-curl -fsSLO https://raw.githubusercontent.com/warriorleavestar/jay-launcher/main/node/Dockerfile
 echo "NODE_SECRET=$(head -c 24 /dev/urandom | base64 | tr -d '/+=')" > .env
 docker compose up -d --build
 ```
 
-镜像在你的机器上构建：和 `install.sh` 同一个 Jay 加固版 EasyTier（固定版本，校验 SHA-256），底层镜像按摘要固定，容器里也不以 root 运行。没有 `NODE_SECRET` 时 compose 拒绝启动。在 Jay 联机设置的“中转服务器”里添加节点 `tcp://你的公网IP:11010`。
+镜像在你的机器上构建：下载 Jay 加固版 EasyTier 的固定版本（和安装脚本相同）并校验 SHA-256，不用 EasyTier 官方镜像（官方镜像没有 Jay 的加固补丁）。和安装脚本一样只支持 x86_64 和 arm64 的主机（32 位 ARM、RISC-V 暂时用不了）。需要 Docker Compose 2.17 或更新；换了新的 `docker-compose.yml` 后用 `docker compose up -d --build` 重新构建。没有 `.env` 里的 `NODE_SECRET` 时 compose 拒绝启动。在 Jay 联机设置的“中转服务器”里添加节点 `tcp://你的公网IP:11010`。
 
 ### 方法三：Windows
 
@@ -98,7 +97,7 @@ Uninstall: `sudo bash uninstall.sh`
 
 ### Option 2: Docker
 
-Download `docker-compose.yml` and `Dockerfile` into one folder, write `NODE_SECRET=<a random string>` into `.env` there, then `docker compose up -d --build`. The image is built on your machine from the same pinned, SHA-256-checked Jay EasyTier build as `install.sh`, on a base image pinned by digest, and doesn't run as root. Without `NODE_SECRET` compose refuses to start. Add `tcp://<public IP>:11010` in Jay (Multiplayer settings, relay servers).
+Download `docker-compose.yml`, write `NODE_SECRET=<a random string>` into `.env` next to it, then `docker compose up -d --build`. The image is built on your machine from Jay's hardened EasyTier build (the same pinned version as the install script), checked by SHA-256; it doesn't use EasyTier's official image, which has none of Jay's hardening patches. Like the install script, it supports x86_64 and arm64 hosts only (not 32-bit ARM or RISC-V for now). Needs Docker Compose 2.17 or later; after downloading a new `docker-compose.yml`, run `docker compose up -d --build`. Without `NODE_SECRET` compose refuses to start. Add `tcp://<public IP>:11010` in Jay (Multiplayer settings, relay servers).
 
 ### Option 3: Windows
 

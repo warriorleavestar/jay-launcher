@@ -248,9 +248,34 @@ public sealed class AccountStore : IAccountStore
     {
         lock (_gate)
         {
-            var fails = _fails.TryGetValue(name, out var f) && f.Until > now ? f.Fails + 1 : 1;
+            var known = _fails.TryGetValue(name, out var f);
+            if (!known && _fails.Count >= MaxTrackedNames) TrimFailures(now);
+            var fails = known && f.Until > now ? f.Fails + 1 : 1;
             _fails[name] = (fails, now + Lockout);
         }
+    }
+
+    /// <summary>How many names the failure table holds before it is trimmed (see <see cref="TrimFailures"/>).</summary>
+    internal const int MaxTrackedNames = 10_000;
+
+    /// <summary>Names in the failure table (tests).</summary>
+    internal int TrackedNames
+    {
+        get { lock (_gate) return _fails.Count; }
+    }
+
+    /// <summary>
+    /// Makes room in a full failure table. Entries whose window has passed go first; if that isn't enough, names that
+    /// aren't locked go, the ones closest to expiring first. A locked name is never dropped, so filling the table with
+    /// junk names can't unlock anybody. Called under the gate.
+    /// </summary>
+    private void TrimFailures(DateTimeOffset now)
+    {
+        foreach (var name in _fails.Where(p => p.Value.Until <= now).Select(p => p.Key).ToList()) _fails.Remove(name);
+        if (_fails.Count < MaxTrackedNames) return;
+        var excess = _fails.Count - MaxTrackedNames + 1;
+        foreach (var name in _fails.Where(p => p.Value.Fails < MaxFails).OrderBy(p => p.Value.Until).Take(excess).Select(p => p.Key).ToList())
+            _fails.Remove(name);
     }
 
     /// <summary>整个登录都通过了：清掉失败次数。</summary>
@@ -277,7 +302,6 @@ public sealed class AccountStore : IAccountStore
         {
             // 密码对了也先不清失败次数：两步验证也过了才算登录成功（见 Succeeded），不然有密码的人能一直试验证码。
             if (ok) return account!.Disabled ? LoginResult.Disabled : LoginResult.Ok;
-            if (_fails.Count > 10_000) _fails.Clear();
         }
         RecordFailure(clean, now);
         return LoginResult.Wrong;
@@ -410,6 +434,17 @@ public static class NetworkLoginClient
     /// <summary>解开节点的回复，验凭证（签名、网络、绑定的是自己）。失败抛 <see cref="InvalidDataException"/>，要两步验证抛 <see cref="SecondFactorRequiredException"/>，消息给用户看。</summary>
     public static (string Token, AccountToken Parsed) Read(JsonObject reply, X25519KeyPair me, NetworkLogin login, string network, DateTimeOffset now)
     {
+        // The reply comes from a directory node: wrongly typed fields, bad base64 or bad JSON inside are a failed login
+        // (InvalidDataException, which callers show), not an exception type nobody handles.
+        try { return ReadReply(reply, me, login, network, now); }
+        catch (Exception e) when (e is InvalidOperationException or FormatException or JsonException or ArgumentException)
+        {
+            throw new InvalidDataException(L.T("core.mp.account.failed"), e);
+        }
+    }
+
+    private static (string Token, AccountToken Parsed) ReadReply(JsonObject reply, X25519KeyPair me, NetworkLogin login, string network, DateTimeOffset now)
+    {
         if (reply["ok"]?.GetValue<bool>() != true && reply["error"]?.GetValue<string>() == "factor"
             && PrivateSeal.Open(me, login.Key, Convert.FromBase64String(reply["b"]?.GetValue<string>() ?? "")) is { } sealedNeed
             && JsonNode.Parse(sealedNeed) is JsonObject needed)
@@ -429,6 +464,7 @@ public static class NetworkLoginClient
                 "disabled" => "core.mp.account.disabled",
                 "factor_setup" => "core.mp.factor.setup",
                 "time" => "core.mp.account.time",
+                "busy" => "core.mp.account.busy",
                 "op" => "core.mp.account.unsupported",
                 _ => "core.mp.account.failed",
             }));

@@ -736,6 +736,5 @@ jobs:
             --repo "${GITHUB_REPOSITORY}" \
             --verify-tag \
             --draft \
-            --notes "代码签名政策 / Code signing policy: https://github.com/${GITHUB_REPOSITORY}/blob/main/docs/code-signing-policy.md" \
             --generate-notes \
             --title "Jay ${GITHUB_REF_NAME}"

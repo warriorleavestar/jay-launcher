@@ -124,7 +124,15 @@ public static class TunnelHandshake
             var (send, receive) = hs.Split();
             var (i2r, r2i) = Masks(binding);
             var secure = new SecureStream(stream, send, receive, profile, sendMask: r2i, receiveMask: i2r);
-            if (key.Attestor is { } attestor) await MemberChannel.ProveAsInitiatorAsync(secure, attestor, binding, ct);
+            try
+            {
+                if (key.Attestor is { } attestor) await MemberChannel.ProveAsInitiatorAsync(secure, attestor, binding, ct);
+            }
+            catch
+            {
+                secure.Abort();
+                throw;
+            }
             return secure;
         }
         finally
@@ -154,7 +162,15 @@ public static class TunnelHandshake
             var (send, receive) = hs.Split();
             var (i2r, r2i) = Masks(binding);
             var secure = new SecureStream(stream, send, receive, profile, sendMask: i2r, receiveMask: r2i);
-            await MemberChannel.HostAttestAsync(secure, member, binding, ct);
+            try
+            {
+                await MemberChannel.HostAttestAsync(secure, member, binding, ct);
+            }
+            catch
+            {
+                secure.Abort();
+                throw;
+            }
             return (secure, service, member);
         }
         finally

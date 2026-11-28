@@ -32,6 +32,41 @@ public class ReverificationFixTests
         return (iSend, iReceive, rSend, rReceive);
     }
 
+    /// <summary>
+    /// Creating the policy doesn't read the network interfaces (it may run on the UI thread); the background loop collects
+    /// them before the public address lookup, and nothing is allowed until both are done.
+    /// </summary>
+    [Fact]
+    public async Task LocalNetworksAreCollectedInTheBackgroundBeforeReady()
+    {
+        var collected = 0;
+        var home = IPAddress.Parse("203.0.113.4");
+        using var policy = new ExitPolicy
+        {
+            Collector = () =>
+            {
+                Interlocked.Increment(ref collected);
+                return ([home], [(IPAddress.Parse("198.51.100.0"), 24)]);
+            },
+            Discover = _ => Task.FromResult(true),
+            // Documentation addresses stand in for public ones (real public addresses stay out of the repository).
+            IsRoutable = TestAddresses.IsRoutable,
+            MaxPublicIpAge = TimeSpan.FromMinutes(5),
+        };
+        Assert.Equal(0, Volatile.Read(ref collected));
+        Assert.False(policy.IsReady);
+        Assert.False(policy.Allows(IPAddress.Parse("192.0.2.8")));
+
+        policy.Start();
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        while (!policy.IsReady && watch.ElapsedMilliseconds < 5000) await Task.Delay(10);
+        Assert.True(policy.IsReady);
+        Assert.True(Volatile.Read(ref collected) >= 1);
+        Assert.False(policy.Allows(home));
+        Assert.False(policy.Allows(IPAddress.Parse("198.51.100.20")));
+        Assert.True(policy.Allows(IPAddress.Parse("192.0.2.8")));
+    }
+
     // R1：定时器赢了很多次之后，地址变化的唤醒仍然马上生效（不会被之前留下的等待者吞掉）。
     [Fact]
     public async Task R1_WakeAfterManyTimerRounds()

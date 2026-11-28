@@ -39,6 +39,9 @@ public sealed record RoomCode(string Network, string Secret, int Port)
     /// <summary>邀请房间里自己的成员钥匙（加入方是房主发来的；房主自己也有一把，给本机的聊天客户端用）。</summary>
     public MemberKey? Member { get; init; }
 
+    /// <summary>The last part of this member's room address as the host handed it out; null when the host gave none.</summary>
+    public int? MemberHost { get; init; }
+
     /// <summary>邀请房间的网络是第几版：房主踢人后换网络名和密钥，版本加一。只接受比当前大的。</summary>
     public int Epoch { get; init; } = 1;
 

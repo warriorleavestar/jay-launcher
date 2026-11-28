@@ -183,20 +183,34 @@ public static class LinuxSandbox
             if (s_probed) return s_probeProblem;
             s_probed = true;
             if (Bubblewrap is not { } bwrap) return s_probeProblem = L.T("core.launch.sandbox.linux.no_bwrap");
-            try
+            return s_probeProblem = RunProbe(bwrap,
+                ["--unshare-all", "--share-net", "--die-with-parent", "--ro-bind", "/", "/", "--proc", "/proc", "--dev", "/dev", "--", "true"], 10_000);
+        }
+    }
+
+    /// <summary>
+    /// Runs one test sandbox and returns why it failed, or null when it exited cleanly. Both pipes are read in the
+    /// background so the wait is really bounded: a probe that hangs is killed after <paramref name="timeoutMs"/>.
+    /// </summary>
+    internal static string? RunProbe(string exe, IReadOnlyList<string> args, int timeoutMs)
+    {
+        try
+        {
+            var psi = new ProcessStartInfo(exe) { RedirectStandardError = true, RedirectStandardOutput = true, UseShellExecute = false };
+            foreach (var a in args) psi.ArgumentList.Add(a);
+            using var p = Process.Start(psi)!;
+            var error = p.StandardError.ReadToEndAsync();
+            _ = p.StandardOutput.ReadToEndAsync();
+            if (!p.WaitForExit(timeoutMs) || !error.Wait(2_000))
             {
-                var psi = new ProcessStartInfo(bwrap) { RedirectStandardError = true, RedirectStandardOutput = true, UseShellExecute = false };
-                foreach (var a in new[] { "--unshare-all", "--share-net", "--die-with-parent", "--ro-bind", "/", "/", "--proc", "/proc", "--dev", "/dev", "--", "true" })
-                    psi.ArgumentList.Add(a);
-                using var p = Process.Start(psi)!;
-                var error = p.StandardError.ReadToEnd();
-                if (!p.WaitForExit(10_000)) { p.Kill(); return s_probeProblem = L.F("core.launch.sandbox.linux.failed", "timeout"); }
-                return s_probeProblem = p.ExitCode == 0 ? null : L.F("core.launch.sandbox.linux.failed", error.Trim().Split('\n')[0]);
+                try { p.Kill(entireProcessTree: true); } catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception) { }
+                return L.F("core.launch.sandbox.linux.failed", "timeout");
             }
-            catch (Exception e) when (e is System.ComponentModel.Win32Exception or IOException)
-            {
-                return s_probeProblem = L.F("core.launch.sandbox.linux.failed", e.Message);
-            }
+            return p.ExitCode == 0 ? null : L.F("core.launch.sandbox.linux.failed", error.Result.Trim().Split('\n')[0]);
+        }
+        catch (Exception e) when (e is System.ComponentModel.Win32Exception or IOException)
+        {
+            return L.F("core.launch.sandbox.linux.failed", e.Message);
         }
     }
 

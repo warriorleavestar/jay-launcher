@@ -60,7 +60,15 @@ internal sealed class UnixElevatedGuard : IElevatedGuard
     /// <summary>
     /// 请求 root 权限并等守护连上来（这一步会等用户在密码框里确认，和 Windows 的 UAC 一样）。用户取消时抛 <see cref="OperationCanceledException"/>。
     /// </summary>
-    public static UnixElevatedGuard Start(string corePath, IReadOnlyList<string> args, IReadOnlyDictionary<string, string> env, ExitNetworkPlan? network, string virtualIp)
+    public static UnixElevatedGuard Start(string corePath, IReadOnlyList<string> args, IReadOnlyDictionary<string, string> env, ExitNetworkPlan? network, string virtualIp) =>
+        StartAsync(corePath, args, env, network, virtualIp).GetAwaiter().GetResult();
+
+    /// <summary>
+    /// Like <see cref="Start"/>, without blocking a thread while the password dialog is open. Cancelling closes the dialog
+    /// (the launcher is ended) and throws <see cref="OperationCanceledException"/>.
+    /// </summary>
+    public static async Task<UnixElevatedGuard> StartAsync(string corePath, IReadOnlyList<string> args, IReadOnlyDictionary<string, string> env,
+        ExitNetworkPlan? network, string virtualIp, CancellationToken ct = default)
     {
         // 经别人上网要 ip + nft（Linux）：缺的话在请求权限之前就拒绝。
         if (network is not null && !UnixExitNetwork.Supported) throw new PlatformNotSupportedException(L.T("core.mp.exit.unixtools"));
@@ -72,8 +80,9 @@ internal sealed class UnixElevatedGuard : IElevatedGuard
         {
             listener.Bind(new UnixDomainSocketEndPoint(socketPath));
             listener.Listen(1);
+            ct.ThrowIfCancellationRequested();
             launcher = Launch(GuardCommandLine(socketPath, corePath));
-            var accepted = AcceptRoot(listener, launcher);
+            var accepted = await AcceptRootAsync(listener, launcher, ct).ConfigureAwait(false);
             var guard = new UnixElevatedGuard(accepted);
             guard.Enqueue(args, env, virtualIp, network);
             return guard;
@@ -137,29 +146,63 @@ internal sealed class UnixElevatedGuard : IElevatedGuard
     /// 等 root 连上来：别的进程（不是 root）连上就断开接着等。启动器先退出且不是正常返回（用户取消、没授权）时不再等。
     /// macOS 的 osascript 在用户确认后正常退出（守护在后台），这种情况接着等守护连上来。
     /// </summary>
-    private static Socket AcceptRoot(Socket listener, Process launcher)
+    private static async Task<Socket> AcceptRootAsync(Socket listener, Process launcher, CancellationToken ct)
     {
-        var deadline = DateTime.UtcNow + ConnectTimeout;
-        while (true)
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(ConnectTimeout);
+        Task<Socket>? accept = null;
+        try
         {
-            var left = deadline - DateTime.UtcNow;
-            if (left <= TimeSpan.Zero) throw new IOException(L.T("core.mp.guard.pipefailed"));
-            if (listener.Poll(TimeSpan.FromMilliseconds(Math.Min(250, left.TotalMilliseconds)), SelectMode.SelectRead))
+            var exited = launcher.WaitForExitAsync(timeout.Token);
+            while (true)
             {
-                var client = listener.Accept();
-                var peer = UnixIds.PeerUserId(client);
-                if (peer is 0u || AcceptAnyUserForTest && peer == UnixIds.EffectiveUserId()) return client;
-                client.Dispose();
-                continue;
-            }
-            if (launcher.HasExited && launcher.ExitCode != 0)
-            {
-                // pkexec：126 = 用户关掉了密码框，127 = 没通过认证；osascript 用户取消时也是非零退出（守护在后台，不会让 osascript 失败）。
-                if (OperatingSystem.IsMacOS() || launcher.ExitCode is 126 or 127)
-                    throw new OperationCanceledException(L.T(OperatingSystem.IsMacOS() ? "core.mp.component.elevationdeclined.mac" : "core.mp.component.elevationdeclined.linux"));
-                throw new IOException(L.F("core.mp.guard.exitcode", launcher.ExitCode));
+                accept ??= listener.AcceptAsync(timeout.Token).AsTask();
+                await Task.WhenAny(accept, exited).ConfigureAwait(false);
+                if (accept.IsCompletedSuccessfully)
+                {
+                    var client = accept.Result;
+                    accept = null;
+                    var peer = UnixIds.PeerUserId(client);
+                    if (peer is 0u || AcceptAnyUserForTest && peer == UnixIds.EffectiveUserId()) return client;
+                    client.Dispose();
+                    continue;
+                }
+                if (accept.IsCompleted || exited.IsCanceled || exited.IsFaulted)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    throw new IOException(L.T("core.mp.guard.pipefailed"));
+                }
+                // The launcher ended. macOS's osascript ends normally once the guard runs in the background: keep waiting.
+                if (launcher.ExitCode == 0)
+                {
+                    exited = Task.Delay(Timeout.Infinite, timeout.Token);
+                    continue;
+                }
+                ThrowLauncherFailure(launcher);
             }
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Close the password dialog too: nobody is waiting for it any more.
+            if (launcher.Id != Environment.ProcessId)
+            {
+                try { if (!launcher.HasExited) launcher.Kill(); }
+                catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception) { }
+            }
+            throw;
+        }
+        finally
+        {
+            if (accept is { IsCompletedSuccessfully: false }) _ = accept.ContinueWith(t => { if (t.IsCompletedSuccessfully) t.Result.Dispose(); }, TaskScheduler.Default);
+        }
+    }
+
+    private static void ThrowLauncherFailure(Process launcher)
+    {
+        // pkexec：126 = 用户关掉了密码框，127 = 没通过认证；osascript 用户取消时也是非零退出（守护在后台，不会让 osascript 失败）。
+        if (OperatingSystem.IsMacOS() || launcher.ExitCode is 126 or 127)
+            throw new OperationCanceledException(L.T(OperatingSystem.IsMacOS() ? "core.mp.component.elevationdeclined.mac" : "core.mp.component.elevationdeclined.linux"));
+        throw new IOException(L.F("core.mp.guard.exitcode", launcher.ExitCode));
     }
 
     private static string ShellQuote(string s) => "'" + s.Replace("'", "'\\''", StringComparison.Ordinal) + "'";

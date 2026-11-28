@@ -48,29 +48,61 @@ public sealed class UpdateCheck(HttpClient http, string dataDir, TrustList? trus
         }
     }
 
+    public const string ChainStateFileName = "trust-chain-seq.txt";
+
+    private string ChainStatePath => Path.Combine(dataDir, ChainStateFileName);
+
+    private string OwnHash => (trust ?? TrustList.Jay).Hash;
+
+    /// <summary>
+    /// The seq of the newest trustee change this install has followed from the list it was built with (0 when none).
+    /// Stored with that list's hash: a build with a different list built in starts again from 0.
+    /// </summary>
+    public long ChainSeq => ReadChainState().Seq;
+
+    /// <summary>The hash of the list the newest followed change introduced (null when none): later chains must pass through it.</summary>
+    public string? ChainHash => ReadChainState().Hash;
+
+    /// <summary>The state file holds "own-list-hash seq reached-list-hash".</summary>
+    private (long Seq, string? Hash) ReadChainState()
+    {
+        try
+        {
+            var parts = File.ReadAllText(ChainStatePath).Trim().Split(' ');
+            return parts.Length == 3 && parts[0] == OwnHash
+                   && long.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var seq) && seq > 0
+                ? (seq, parts[2])
+                : (0, null);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return (0, null); }
+    }
+
     /// <summary>Null when no feed is set or there is nothing newer; otherwise the newer release with its signature verdict.</summary>
     public async Task<VerifiedUpdate?> CheckAsync(string? feedUrl, string currentVersion, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(feedUrl)) return null;
         using var scope = Net.NetworkPolicy.Scope(Net.NetworkCategory.UpdateCheck);
-        using var doc = JsonDocument.Parse(await http.GetStringAsync(feedUrl, ct));
+        // The feed address is typed by the user and the reply comes from the network: neither may throw anything but
+        // the exceptions callers already report (a bad address or a reply of the wrong shape is InvalidDataException).
+        if (!Uri.TryCreate(feedUrl.Trim(), UriKind.Absolute, out var feed) || (feed.Scheme != Uri.UriSchemeHttps && feed.Scheme != Uri.UriSchemeHttp))
+            throw new InvalidDataException(L.T("tools.download.invalid_url"));
+        using var doc = JsonDocument.Parse(await http.GetStringAsync(feed, ct));
         var root = doc.RootElement;
-        var tag = (root.TryGetProperty("tag_name", out var t) ? t.GetString() : null)
-                  ?? throw new InvalidDataException(L.T("core.launch.update.missingversion"));
+        var tag = Text(root, "tag_name") ?? throw new InvalidDataException(L.T("core.launch.update.missingversion"));
         if (!UpdateChecker.IsNewer(tag, currentVersion)) return null;
         string? page = null;
-        if (root.TryGetProperty("html_url", out var u) && u.GetString() is { } url)
+        if (Text(root, "html_url") is { } url)
         {
             if (!UpdateChecker.TryGetSafeUpdateUrl(url, out var validated)) throw new InvalidDataException(L.T("tools.download.invalid_url"));
             page = validated!.AbsoluteUri;
         }
-        var info = new UpdateInfo(tag.TrimStart('v', 'V'), page, root.TryGetProperty("body", out var b) ? b.GetString() : null);
+        var info = new UpdateInfo(tag.TrimStart('v', 'V'), page, Text(root, "body"));
 
         var assets = new Dictionary<string, Uri>(StringComparer.Ordinal);
         if (root.TryGetProperty("assets", out var list) && list.ValueKind == JsonValueKind.Array)
             foreach (var a in list.EnumerateArray())
-                if (a.TryGetProperty("name", out var n) && n.GetString() is { Length: > 0 } name && name == Path.GetFileName(name)
-                    && a.TryGetProperty("browser_download_url", out var d) && UpdateChecker.TryGetSafeUpdateUrl(d.GetString(), out var link)
+                if (Text(a, "name") is { Length: > 0 } name && name == Path.GetFileName(name)
+                    && UpdateChecker.TryGetSafeUpdateUrl(Text(a, "browser_download_url"), out var link)
                     && link!.Scheme == Uri.UriSchemeHttps)
                     assets.TryAdd(name, link);
 
@@ -81,9 +113,11 @@ public sealed class UpdateCheck(HttpClient http, string dataDir, TrustList? trus
         var sigs = Encoding.UTF8.GetString(await GetAsync(sigsUrl, MaxSigs, ct));
         var chain = assets.TryGetValue(ReleaseSignature.ChainFileName, out var chainUrl) ? Encoding.UTF8.GetString(await GetAsync(chainUrl, MaxChain, ct)) : null;
 
-        var check = ReleaseSignature.Verify(sigs, sums, chain, tag, trust, HighestSeq);
+        var (chainSeq, chainHash) = ReadChainState();
+        var check = ReleaseSignature.Verify(sigs, sums, chain, tag, trust, HighestSeq, chainSeq: chainSeq, chainHash: chainHash);
         if (!check.IsValid) return new(info, check, empty, assets);
         if (!Remember(check.Seq)) return new(info, new(ReleaseVerdict.Rollback, tag, check.Seq), empty, assets);
+        RememberChain(check.ChainSeq, check.ChainHash);
         return new(info, check, ReleaseSignature.ParseSums(Encoding.UTF8.GetString(sums)), assets);
     }
 
@@ -161,6 +195,12 @@ public sealed class UpdateCheck(HttpClient http, string dataDir, TrustList? trus
         _ => "tools.update.verdict.malformed",
     });
 
+    /// <summary>The string value of <paramref name="name"/>, or null when the element is not an object or the value is not a string.</summary>
+    private static string? Text(JsonElement element, string name) =>
+        element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
+
     private bool Remember(long seq)
     {
         Directory.CreateDirectory(dataDir);
@@ -171,6 +211,15 @@ public sealed class UpdateCheck(HttpClient http, string dataDir, TrustList? trus
         File.WriteAllText(temp, seq.ToString(CultureInfo.InvariantCulture) + "\n");
         File.Move(temp, StatePath, overwrite: true);
         return true;
+    }
+
+    private void RememberChain(long seq, string? hash)
+    {
+        if (seq <= ChainSeq || hash is null) return;
+        Directory.CreateDirectory(dataDir);
+        var temp = ChainStatePath + ".tmp";
+        File.WriteAllText(temp, OwnHash + " " + seq.ToString(CultureInfo.InvariantCulture) + " " + hash + "\n");
+        File.Move(temp, ChainStatePath, overwrite: true);
     }
 
     private async Task<byte[]> GetAsync(Uri url, int max, CancellationToken ct)

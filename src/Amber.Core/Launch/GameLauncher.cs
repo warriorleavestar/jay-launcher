@@ -140,12 +140,22 @@ public sealed class GameLauncher(GameDirectory dir)
         var scriptPath = Path.GetFullPath(path);
         var (launcher, mapped) = ForCurrentCodePage(options, notice);
         var args = launcher.BuildArguments(mapped, notice, out _, scriptPath + ".amber");
-        return Toolbox.WriteLaunchScript(scriptPath, mapped.JavaPath, mapped.WorkingDirectory ?? launcher.GameDir.Root,
-            args, mapped.Session.AccessToken);
+        var workDir = mapped.WorkingDirectory ?? launcher.GameDir.Root;
+        // The script gets the same legacy home as a launch from Jay, or old versions would write to the real .minecraft.
+        var legacyHome = launcher.LegacyHomeFor(launcher.GameDir.ResolveVersion(mapped.VersionId), workDir, notice);
+        if (legacyHome is not null && !OperatingSystem.IsWindows()) args.Insert(0, "-Duser.home=" + legacyHome);
+        return Toolbox.WriteLaunchScript(scriptPath, mapped.JavaPath, workDir, args, mapped.Session.AccessToken,
+            appData: OperatingSystem.IsWindows() ? legacyHome : null);
     }
 
     /// <summary>noTraceDir：这次无痕模式配置放的临时目录（没生成时为 null），用完由调用方删掉。</summary>
-    internal List<string> BuildArguments(LaunchOptions options, Action<string>? notice, out string? noTraceDir, string? scriptConfigDir = null)
+    /// <param name="fromVersion">
+    /// Collects the arguments that come from the version JSON. The game can rewrite that file, so the sandbox grants
+    /// nothing for the files these name (see <see cref="Sandbox"/>).
+    /// </param>
+    /// <param name="jayFiles">Collects files Jay itself made for this launch that the game must be able to read.</param>
+    internal List<string> BuildArguments(LaunchOptions options, Action<string>? notice, out string? noTraceDir, string? scriptConfigDir = null,
+        List<string>? fromVersion = null, List<string>? jayFiles = null)
     {
         noTraceDir = null;
         var version = dir.ResolveVersion(options.VersionId);
@@ -217,7 +227,12 @@ public sealed class GameLauncher(GameDirectory dir)
                     logPath = ChatLogFilter.Prepare(logPath, noTraceDir);
                     notice?.Invoke(L.T("core.launch.notrace.on"));
                 }
-                args.Add(AsciiPaths.MapArgument(logArg.Replace("${path}", logPath), notice));
+                var logging = AsciiPaths.MapArgument(logArg.Replace("${path}", logPath), notice);
+                args.Add(logging);
+                // The argument's text comes from the version JSON either way, so it names nothing the sandbox grants.
+                // With no-trace the file is Jay's own filtered copy, granted by itself.
+                fromVersion?.Add(logging);
+                if (options.NoTrace) jayFiles?.Add(AsciiPaths.MapArgument(logPath, notice));
             }
             else if (options.NoTrace)
             {
@@ -250,7 +265,9 @@ public sealed class GameLauncher(GameDirectory dir)
             // Forge 的 ignoreList 里写的是 ${version_name}.jar，意思是“客户端 jar”；
             // 这里的 classpath 直接用原版 jar，所以在 JVM 参数里 version_name 要指向它。
             var jvmVars = new Dictionary<string, string>(vars) { ["version_name"] = jarId, ["primary_jar_name"] = jarId + ".jar" };
-            args.AddRange(Expand(jvm, rules).Select(a => Substitute(a, jvmVars)));
+            var versionJvm = Expand(jvm, rules).Select(a => Substitute(a, jvmVars)).ToList();
+            args.AddRange(versionJvm);
+            fromVersion?.AddRange(versionJvm);
         }
         else
         {
@@ -264,18 +281,29 @@ public sealed class GameLauncher(GameDirectory dir)
 
         if (options.Baked is { } bakedMain)
         {
-            args.Add(bakedMain.MainClass);
+            args.Add(CheckedMainClass(bakedMain.MainClass, options.VersionId));
+            fromVersion?.Add(bakedMain.MainClass);
             args.AddRange(bakedMain.GameArgsPrefix.Select(a => AsciiPaths.MapArgument(a, notice)));
         }
         else
         {
-            args.Add(version.MainClass ?? throw new InvalidDataException(L.F("core.launch.game.missingmainclass", options.VersionId)));
+            var main = CheckedMainClass(version.MainClass ?? throw new InvalidDataException(L.F("core.launch.game.missingmainclass", options.VersionId)), options.VersionId);
+            args.Add(main);
+            fromVersion?.Add(main);
         }
 
         if (version.Arguments?.Game is { Count: > 0 } game)
-            args.AddRange(Expand(game, rules).Select(a => Substitute(a, vars)));
+        {
+            var versionGame = Expand(game, rules).Select(a => Substitute(a, vars)).ToList();
+            args.AddRange(versionGame);
+            fromVersion?.AddRange(versionGame);
+        }
         if (version.MinecraftArguments is { } legacy)
-            args.AddRange(legacy.Split(' ', StringSplitOptions.RemoveEmptyEntries).Select(a => Substitute(a, vars)));
+        {
+            var versionLegacy = legacy.Split(' ', StringSplitOptions.RemoveEmptyEntries).Select(a => Substitute(a, vars)).ToList();
+            args.AddRange(versionLegacy);
+            fromVersion?.AddRange(versionLegacy);
+        }
 
         if (options.WindowWidth is not null && version.Arguments is null)
             args.AddRange(["--width", vars["resolution_width"], "--height", vars["resolution_height"]]);
@@ -331,7 +359,7 @@ public sealed class GameLauncher(GameDirectory dir)
                 ExtraJvmArgs = options.ExtraJvmArgs.Select(a => AsciiPaths.MapArgument(Map(a), onOutput)).ToList(),
                 ExtraGameArgs = options.ExtraGameArgs.Select(a => AsciiPaths.MapArgument(Map(a), onOutput)).ToList(),
             };
-            return (new GameLauncher(new GameDirectory(root)) { BaseRules = BaseRules, RealRoot = dir.Root, NoTraceRoot = NoTraceRoot }, mapped);
+            return (new GameLauncher(new GameDirectory(root)) { BaseRules = BaseRules, RealRoot = dir.Root, NoTraceRoot = NoTraceRoot, LegacyHomeDataDir = LegacyHomeDataDir }, mapped);
         }
         // 游戏目录和 Java 都是英文路径，参数里也可能带别处的路径（比如外置登录的 -javaagent 指向数据目录）。
         var args = options with
@@ -344,6 +372,9 @@ public sealed class GameLauncher(GameDirectory dir)
 
     private Process LaunchCore(LaunchOptions options, Action<string>? onOutput)
     {
+        // Before any game from this folder runs: record it as seen, so settings a game writes later are never taken for
+        // settings that were there before (see InstanceSettingsTrust). No record, no launch.
+        InstanceSettingsTrust.EnsureAdopted(new GameDirectory(RealRoot ?? dir.Root));
         var version = dir.ResolveVersion(options.VersionId);
         ExtractNatives(options.VersionId, version);
         var workDir = options.WorkingDirectory ?? dir.Root;
@@ -364,14 +395,15 @@ public sealed class GameLauncher(GameDirectory dir)
             CreateNoWindow = true,
         };
         // 1.6 以前的版本（和 Jay 装的老 Forge）会按系统家目录写文件，先准备指向本实例的隔离家目录。
-        var realWorkDir = RealRoot is { } real ? AsciiPaths.Remap(workDir, dir.Root, real) : workDir;
-        var legacyHome = IsPreLaunchwrapperHome(version) ? AsciiPaths.LegacyHome(realWorkDir, onOutput) : null;
+        var legacyHome = LegacyHomeFor(version, workDir, onOutput);
         string? noTraceDir = null;
+        List<string> fromVersion = [];
+        List<string> jayFiles = [];
         try
         {
             if (legacyHome is not null && !OperatingSystem.IsWindows())
                 psi.ArgumentList.Add("-Duser.home=" + legacyHome);
-            foreach (var arg in BuildArguments(options, onOutput, out noTraceDir)) psi.ArgumentList.Add(arg);
+            foreach (var arg in BuildArguments(options, onOutput, out noTraceDir, fromVersion: fromVersion, jayFiles: jayFiles)) psi.ArgumentList.Add(arg);
         }
         catch
         {
@@ -393,12 +425,14 @@ public sealed class GameLauncher(GameDirectory dir)
         {
             if (options.Sandbox.Enabled && GameSandbox.IsSupported)
             {
-                windowsLevel = Sandbox(psi, options.Sandbox, workDir, legacyHome, onOutput);
+                windowsLevel = Sandbox(psi, options.Sandbox, workDir, legacyHome, fromVersion, jayFiles, onOutput);
                 sandboxed = true;
                 onOutput?.Invoke(windowsLevel switch
                 {
                     WindowsSandboxLevel.Strong => L.T("core.launch.sandbox.on_strong"),
                     WindowsSandboxLevel.Standard => L.T("core.launch.sandbox.on_standard"),
+                    // The macOS profile only hides named folders; it must not promise what the Linux sandbox does.
+                    _ when OperatingSystem.IsMacOS() => L.T("core.launch.sandbox.on_mac"),
                     _ => L.T("core.launch.sandbox.on"),
                 });
             }
@@ -437,9 +471,14 @@ public sealed class GameLauncher(GameDirectory dir)
     /// when the sandbox cannot start; the game is then not launched. On Windows the process is started by
     /// <see cref="WindowsSandbox.Start"/> afterwards, at the level returned here.
     /// </summary>
-    private WindowsSandboxLevel? Sandbox(ProcessStartInfo psi, SandboxOptions sandbox, string workDir, string? legacyHome, Action<string>? onOutput)
+    private WindowsSandboxLevel? Sandbox(ProcessStartInfo psi, SandboxOptions sandbox, string workDir, string? legacyHome,
+        IReadOnlyList<string> fromVersion, IReadOnlyList<string> jayFiles, Action<string>? onOutput)
     {
-        List<string> extraReadOnly = [];
+        // Files named only by the version JSON's arguments get no grant of their own: the game can rewrite that JSON,
+        // and a grant would let its next launch read any file (Jay's data folder included). What those arguments
+        // legitimately name (libraries, the client jar, log configs) is inside the granted game folders anyway.
+        IEnumerable<string> Named() => GameSandbox.Without(psi.ArgumentList, fromVersion);
+        List<string> extraReadOnly = [.. jayFiles];
         var natives = GameSandbox.NativeExtractArguments(workDir);
         for (var i = 0; i < natives.Count; i++) psi.ArgumentList.Insert(i, natives[i]);
         WindowsSandboxLevel? windowsLevel = null;
@@ -451,7 +490,7 @@ public sealed class GameLauncher(GameDirectory dir)
             // Checked before any strong-only argument goes on the command line.
             if (windowsLevel == WindowsSandboxLevel.Strong)
             {
-                var planned = GameSandbox.For(workDir, dir.Root, psi.FileName, psi.ArgumentList, sandbox,
+                var planned = GameSandbox.For(workDir, dir.Root, psi.FileName, Named(), sandbox, extraReadOnly,
                     extraReadWrite: legacyHome is null ? null : [legacyHome]);
                 if (WindowsSandboxSetup.FoldersToOpen(planned.ReadWrite.Concat(planned.ReadOnly)) is { Count: > 0 } closed)
                 {
@@ -492,7 +531,7 @@ public sealed class GameLauncher(GameDirectory dir)
                 extraReadOnly.Add(fs);
             }
         }
-        var grants = GameSandbox.For(workDir, dir.Root, psi.FileName, psi.ArgumentList, sandbox, extraReadOnly,
+        var grants = GameSandbox.For(workDir, dir.Root, psi.FileName, Named(), sandbox, extraReadOnly,
             extraReadWrite: legacyHome is null ? null : [legacyHome]);
         if (grants.Problem() is { } problem) throw new SandboxUnavailableException(problem);
         GameSandbox.FilterEnvironment(psi.Environment);
@@ -522,6 +561,15 @@ public sealed class GameLauncher(GameDirectory dir)
 
     private string NewNoTraceDir() => Path.Combine(NoTraceRoot, Guid.NewGuid().ToString("N")[..12]);
 
+    /// <summary>
+    /// The main class goes where Java reads its options up to the first plain word: a value that Java would read as an
+    /// option or an argument file instead (-javaagent:…, @file) is refused.
+    /// </summary>
+    internal static string CheckedMainClass(string main, string versionId) =>
+        main.Length == 0 || main[0] is '-' or '@' || main.Any(char.IsWhiteSpace)
+            ? throw new InvalidDataException(L.F("core.launch.game.bad_main_class", versionId))
+            : main;
+
     /// <summary>只删 Amber 自己在 NoTraceRoot 下建的目录。删掉了（或本来就没有）返回 true。</summary>
     internal bool DeleteNoTraceDir(string? path) =>
         path is null || !NoTraceDirs.IsUnder(NoTraceRoot, path) || NoTraceDirs.TryDelete(path);
@@ -542,6 +590,22 @@ public sealed class GameLauncher(GameDirectory dir)
     /// 还在被运行中的游戏用的、刚建好还没启动游戏的、删不掉的都跳过。返回删掉了几个。
     /// </summary>
     public static int SweepNoTrace(string? root = null) => NoTraceDirs.Sweep(root ?? DefaultNoTraceRoot, DateTime.UtcNow);
+
+    /// <summary>Tests: where the legacy homes go instead of Jay's data folder.</summary>
+    internal string? LegacyHomeDataDir { get; init; }
+
+    /// <summary>
+    /// The separate home folder for a version that writes to the system home (see <see cref="IsPreLaunchwrapperHome"/>),
+    /// or null for any other version. Throws when it can't be made: such a game would otherwise write into the
+    /// player's real .minecraft.
+    /// </summary>
+    internal string? LegacyHomeFor(VersionJson version, string workDir, Action<string>? log)
+    {
+        if (!IsPreLaunchwrapperHome(version)) return null;
+        var realWorkDir = RealRoot is { } real ? AsciiPaths.Remap(workDir, dir.Root, real) : workDir;
+        return AsciiPaths.LegacyHome(realWorkDir, log, LegacyHomeDataDir)
+               ?? throw new InvalidOperationException(L.T("core.launch.game.legacyhomefailed"));
+    }
 
     /// <summary>1.6.1（2013-06-25）以前发布的版本，或者 Amber 装的老 Forge。</summary>
     internal static bool IsPreLaunchwrapperHome(VersionJson version) =>

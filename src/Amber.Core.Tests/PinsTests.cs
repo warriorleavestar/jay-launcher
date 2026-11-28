@@ -56,7 +56,7 @@ public sealed class PinsTests
 
     public static TheoryData<string, Architecture> EasyTierPlatforms => new()
     {
-        { "windows", Architecture.X64 }, { "windows", Architecture.Arm64 }, { "windows", Architecture.X86 },
+        { "windows", Architecture.X64 }, { "windows", Architecture.Arm64 },
         { "macos", Architecture.X64 }, { "macos", Architecture.Arm64 },
         { "linux", Architecture.X64 }, { "linux", Architecture.Arm64 },
     };
@@ -128,24 +128,10 @@ public sealed class PinsTests
     }
 
     [Fact]
-    public void TheDockerRelayNodeBuildsThePinnedEasyTier()
+    public void TheDockerRelayNodeRefusesToStartWithoutASecret()
     {
-        var dockerfile = File.ReadAllText(Path.Combine(Repo, "node", "Dockerfile"));
+        // The image itself is checked in EasyTierHardenedBuildTests; here: no placeholder secret ships in the file.
         var compose = File.ReadAllText(Path.Combine(Repo, "node", "docker-compose.yml"));
-        foreach (var id in new[] { "easytier-linux-x86_64", "easytier-linux-aarch64" })
-        {
-            var pin = Pins.Get(id);
-            Assert.Contains(pin.Sha256!, dockerfile, StringComparison.Ordinal);
-            Assert.Contains(pin.Urls[0].Replace(pin.Platform!.Split('-')[1], "${arch}", StringComparison.Ordinal), dockerfile, StringComparison.Ordinal);
-        }
-        Assert.Contains("sha256sum -c", dockerfile, StringComparison.Ordinal);
-        // Every base image is pinned by digest, and nothing runs as root.
-        foreach (var line in dockerfile.Split('\n').Where(l => l.StartsWith("ARG BASE=", StringComparison.Ordinal)))
-            Assert.Matches("@sha256:[0-9a-f]{64}$", line.Trim());
-        Assert.Contains("USER 65532", dockerfile, StringComparison.Ordinal);
-        // The compose file builds that image, pulls nothing by tag, and refuses to start without a secret.
-        Assert.Contains("build: .", compose, StringComparison.Ordinal);
-        Assert.DoesNotContain("easytier/easytier", compose, StringComparison.Ordinal);
         Assert.Contains("${NODE_SECRET:?", compose, StringComparison.Ordinal);
     }
 
