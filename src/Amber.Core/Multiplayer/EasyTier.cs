@@ -25,11 +25,11 @@ public static class EasyTierRelease
     /// <summary>The upstream EasyTier version the hardened build is based on.</summary>
     public const string Version = "2.6.4";
     /// <summary>Release tag of Jay's hardened build.</summary>
-    public const string ReleaseTag = "jay-v2.6.4-3";
+    public const string ReleaseTag = "jay-v2.6.4-5";
     /// <summary>First 12 hex digits of the hardened build's commit; part of every package name.</summary>
-    public const string Commit = "9407746b1ce1";
+    public const string Commit = "ff0bb20791d9";
     /// <summary>The hardened build's full commit, as the trustees' signature names it.</summary>
-    public const string FullCommit = "9407746b1ce1dc4d977441c47dfdcb303363a62a";
+    public const string FullCommit = "ff0bb20791d950e0d390c0e123e033d72d3fad92";
     /// <summary>
     /// Whether this build can give each caller of a local service its own address (<see cref="Public.PublicNetworkArgs.LoopbackSourceVariable"/>,
     /// jay-v2.6.4-5 and later). Set it with the bump. It only does so for callers on secure-mode connections, so callers
@@ -37,7 +37,7 @@ public static class EasyTierRelease
     /// </summary>
     public const bool MapsCallers = false;
     /// <summary>Signature seq of this build: one more for every hardened release.</summary>
-    public const long Seq = 3;
+    public const long Seq = 5;
     /// <summary>Component name in the trustees' signature (<see cref="ReleaseStatement.Components"/>).</summary>
     public const string Component = "easytier";
     /// <summary>Install folder name: a new hardened build never reuses files from an older or an upstream install.</summary>
@@ -65,13 +65,13 @@ public static class EasyTierRelease
     {
         // The APK carries the same verified, statically linked Linux executables for its ABI.
         ("android", Architecture.Arm64 or Architecture.X64) => For("linux", arch),
-        ("windows", Architecture.X64) => A("windows-x86_64", "bc3fc002435e038e75626948ccb92bbd2453522a6626e58268952643d832b3c9", 11_623_966, true),
-        ("windows", Architecture.Arm64) => A("windows-arm64", "8e963acdc9ebd7ed68a39d2f77ccdc71c1671bfb4266204463cdd155515bd6dd", 10_634_843, true),
-        ("windows", Architecture.X86) => A("windows-i686", "455ead99ac54c818b5c9909039bdfe4f43bc423d804c3537a99dba910f9ce6c6", 11_223_550, true),
-        ("macos", Architecture.X64) => A("macos-x86_64", "4dd19601891a2360b83ebffdfb0732d99bad93ec131126634660f6b37db1f739", 12_104_481),
-        ("macos", Architecture.Arm64) => A("macos-aarch64", "6fdafc2b487da341e8bbb734abc1ac4a50f26393860f8ff3aeef8ce765547211", 10_738_585),
-        ("linux", Architecture.X64) => A("linux-x86_64", "fa1f952066b1bf9353e9a898efcdc00284872137d72c738edb927455eaeea1cd", 13_501_115),
-        ("linux", Architecture.Arm64) => A("linux-aarch64", "49c1829e34e6c7fa7ef1f7572fcbadebaba7974a1db123895694e0a5ca8151f1", 12_088_381),
+        ("windows", Architecture.X64) => A("windows-x86_64", "d8ef722d2ce7d6f80f9248d81c89959c9889ee172397df137e26e39a83cd8936", 11_675_193, true),
+        ("windows", Architecture.Arm64) => A("windows-arm64", "c6ead2ba21ce1b1e353e3d94beddc75d4255a7e732daae69aaac99305e506033", 10_648_015, true),
+        ("windows", Architecture.X86) => A("windows-i686", "025c28432b6815eef6a116ace9861228647347aaae424d75f5b82a542bd2eb33", 11_280_537, true),
+        ("macos", Architecture.X64) => A("macos-x86_64", "6e22ad4bea0176c8cb41d4dacd3dd3d84ae8876e5f8aa422a3c57a7233f4cc27", 12_160_260),
+        ("macos", Architecture.Arm64) => A("macos-aarch64", "3a119541319a459128f09f2d93af2106c65f729e287f5523dc13e8e19b9d5273", 10_755_110),
+        ("linux", Architecture.X64) => A("linux-x86_64", "1370605d6b6d25c4f44e82540e3732568e29769d96fd9e72a08528bcaced2d1a", 13_578_055),
+        ("linux", Architecture.Arm64) => A("linux-aarch64", "72a5fb5895cacb30d6ba746ee5bc1ac64f1c7014e12771be13685897f52606f8", 12_125_198),
         _ => throw new PlatformNotSupportedException(L.F("core.mp.component.unsupportedplatform", os, arch)),
     };
 
