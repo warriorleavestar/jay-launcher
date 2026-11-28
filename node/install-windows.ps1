@@ -2,7 +2,7 @@
 Jay 联机节点（Windows，适合一直开着的电脑或 Windows 服务器）
 Jay relay node for Windows (an always-on PC or Windows Server)
 
-下载 Jay 加固版 EasyTier 的固定版本并校验 SHA-256（源码 https://github.com/Yumao-Feather/jay-easytier），注册一个开机运行的计划任务（只做中继，不建虚拟网卡），
+下载 Jay 加固版 EasyTier 的固定版本并校验 SHA-256（源码 https://github.com/warriorleavestar/jay-easytier），注册一个开机运行的计划任务（只做中继，不建虚拟网卡），
 在 Windows 防火墙放行 TCP/UDP 端口，最后打印节点地址；-PublicHost 是域名时还打印 Jay 节点分享码。
 用管理员 PowerShell 运行 / run in an elevated PowerShell:
   powershell -ExecutionPolicy Bypass -File install-windows.ps1 [-Port 11010] [-Relay amber|all] [-NodeName 名字] [-PublicHost 公网IP]
@@ -20,9 +20,9 @@ param(
 $ErrorActionPreference = "Stop"
 # Same pins as src/Amber.Core/Multiplayer/EasyTier.cs.
 $Version = "2.6.4"
-$Tag = "jay-v2.6.4-3"
-$Commit = "9407746b1ce1"
-$Sha256 = "cdb113651de1f37244f16d405447806a76cd9012780a4e519ed7eba062306888"
+$Tag = "jay-v2.6.4-5"
+$Commit = "ff0bb20791d9"
+$Sha256 = "d8ef722d2ce7d6f80f9248d81c89959c9889ee172397df137e26e39a83cd8936"
 $Dir = Join-Path $env:ProgramData "AmberNode"
 $Task = "Amber relay node"
 $Rule = "Amber relay node"
@@ -77,7 +77,7 @@ if ($Uninstall) {
 
 if ($Port -lt 1024 -or $Port -gt 65535) { throw "Port 要在 1024-65535 之间" }
 $asset = "easytier-windows-x86_64-v$Version-jay-$Commit.zip"
-$url = "https://github.com/Yumao-Feather/jay-easytier/releases/download/$Tag/$asset"
+$url = "https://github.com/warriorleavestar/jay-easytier/releases/download/$Tag/$asset"
 $tmp = Join-Path $env:TEMP ("amber-node-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Force $tmp | Out-Null
 try {

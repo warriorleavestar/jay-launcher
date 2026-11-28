@@ -127,7 +127,7 @@ Jay 的窗口需要桌面会话（X11，或带 XWayland 的 Wayland）和下面�
 - **演练和排查。** 演练模式不联网，带你走一遍敲门流程；“连接有问题？”抽屉能跑完整测试矩阵，生成去掉了密钥的报告。
 - **Jay 服务器**（实验）。在 VPS 或局域网电脑上开一个只有 Jay 能进的 Minecraft 服务器。玩家用一次性的 `JAYS2-` 邀请加入；陌生连接一个字节都收不到。
 
-联机基于开源项目 [EasyTier](https://github.com/EasyTier/EasyTier)（LGPL-3.0），用的是 Jay 维护的加固版本（[jay-easytier](https://github.com/Yumao-Feather/jay-easytier)），发布包里已经带上；只有这份缺失或用不了时 Jay 才下载并校验。默认模式不需要管理员权限，也不安装驱动。
+联机基于开源项目 [EasyTier](https://github.com/EasyTier/EasyTier)（LGPL-3.0），用的是 Jay 维护的加固版本（[jay-easytier](https://github.com/warriorleavestar/jay-easytier)），发布包里已经带上；只有这份缺失或用不了时 Jay 才下载并校验。默认模式不需要管理员权限，也不安装驱动。
 
 ### 🔐 隐私与安全
 
@@ -319,7 +319,7 @@ Jay 以 [PolyForm Noncommercial 1.0.0 许可证](LICENSE)公开源码。个人�
 
 任何地方（包括旧文档、发布说明和别处的副本）如果还说 Jay 是“开源”或“MIT”，都是过时的描述，以 [LICENSE](LICENSE) 和 [COMMERCIAL-EXCEPTION.md](COMMERCIAL-EXCEPTION.md) 为准。发现这样的描述，请[提 issue](https://github.com/warriorleavestar/jay-launcher/issues/new/choose)。
 
-联机使用的 [EasyTier](https://github.com/EasyTier/EasyTier)（LGPL-3.0）加固版（源码在 [jay-easytier](https://github.com/Yumao-Feather/jay-easytier)）是独立项目，Jay 的发布包把它放在 `easytier` 文件夹里（附许可证和源码链接）。Linux 版内置的思源黑体（Noto Sans SC）使用 SIL Open Font License 1.1（[OFL.txt](src/Amber.App/Assets/Fonts/OFL.txt)）。
+联机使用的 [EasyTier](https://github.com/EasyTier/EasyTier)（LGPL-3.0）加固版（源码在 [jay-easytier](https://github.com/warriorleavestar/jay-easytier)）是独立项目，Jay 的发布包把它放在 `easytier` 文件夹里（附许可证和源码链接）。Linux 版内置的思源黑体（Noto Sans SC）使用 SIL Open Font License 1.1（[OFL.txt](src/Amber.App/Assets/Fonts/OFL.txt)）。
 
 <div align="center">
 <br>

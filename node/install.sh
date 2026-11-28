@@ -2,7 +2,7 @@
 # Jay 联机节点一键部署（Linux，x86_64 / arm64，systemd）
 # Jay relay node installer (Linux, x86_64 / arm64, systemd)
 #
-# 下载 Jay 加固版 EasyTier 的 easytier-core（固定版本，校验 SHA-256；源码 https://github.com/Yumao-Feather/jay-easytier），以普通用户身份作为 systemd 服务运行，
+# 下载 Jay 加固版 EasyTier 的 easytier-core（固定版本，校验 SHA-256；源码 https://github.com/warriorleavestar/jay-easytier），以普通用户身份作为 systemd 服务运行，
 # 只做中继（--no-tun，不建虚拟网卡，不需要 root 权限运行）。
 #
 # 用法 / usage（以 root 运行 / run as root）:
@@ -18,10 +18,10 @@ set -euo pipefail
 
 # Same pins as src/Amber.Core/Multiplayer/EasyTier.cs.
 VERSION="2.6.4"
-TAG="jay-v2.6.4-3"
-COMMIT="9407746b1ce1"
-SHA_X86_64="6ad63ed07f270f2942387d1257ef0db45a31b2e525c73f8aa981c7c94fbcb300"
-SHA_AARCH64="6c1a99ea81f1e1dd8fc8f13aa6f0df8d9e22925202dda18b4e40ad62ac49f7ac"
+TAG="jay-v2.6.4-5"
+COMMIT="ff0bb20791d9"
+SHA_X86_64="1370605d6b6d25c4f44e82540e3732568e29769d96fd9e72a08528bcaced2d1a"
+SHA_AARCH64="72a5fb5895cacb30d6ba746ee5bc1ac64f1c7014e12771be13685897f52606f8"
 
 PORT="${PORT:-11010}"
 RELAY="${RELAY:-amber}"
@@ -66,7 +66,7 @@ need unzip
 command -v sha256sum >/dev/null 2>&1 || die "需要 sha256sum（coreutils）"
 
 ASSET="easytier-linux-${ARCH}-v${VERSION}-jay-${COMMIT}.zip"
-URL="https://github.com/Yumao-Feather/jay-easytier/releases/download/${TAG}/${ASSET}"
+URL="https://github.com/warriorleavestar/jay-easytier/releases/download/${TAG}/${ASSET}"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -113,7 +113,7 @@ ARGS="${ARGS} --relay-network-whitelist '${WHITELIST}' --hostname amber-node --r
 cat > "${UNIT_DIR}/${SERVICE}.service" <<UNIT
 [Unit]
 Description=Jay relay node (EasyTier ${VERSION})
-Documentation=https://github.com/Yumao-Feather/jay-easytier
+Documentation=https://github.com/warriorleavestar/jay-easytier
 After=network-online.target
 Wants=network-online.target
 

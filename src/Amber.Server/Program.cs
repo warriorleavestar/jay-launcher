@@ -139,7 +139,7 @@ public static class Program
               换信任人：旧名单里够数的人签了，旧版 Jay 才认新名单（名单文件每行一把完整公钥）；
               加 --cosign-sums 时同一次还签一份写新名单的发布签名（两样都核对，口令只输一次）
           jay-server release verify <安装包> [--tag <v0.9.0>]   核对安装包、清单、签名和 trust-chain.json（放在安装包旁边）
-          EasyTier 加固版（Yumao-Feather/jay-easytier）的发布也要 Jay 发版钥匙签够数（现在是 2 把要 2 把）：prepare 和 verify 加 --component easytier，--tag 用它自己的（例如 jay-v2.6.4-1）
+          EasyTier 加固版（warriorleavestar/jay-easytier）的发布也要 Jay 发版钥匙签够数（现在是 2 把要 2 把）：prepare 和 verify 加 --component easytier，--tag 用它自己的（例如 jay-v2.6.4-1）
 
         通用选项：--dir <数据目录>（默认是程序旁边的 jay-server-data，也可以用环境变量 JAY_SERVER_DIR）
         """;

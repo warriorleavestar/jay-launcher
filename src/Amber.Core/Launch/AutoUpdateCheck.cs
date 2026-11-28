@@ -6,7 +6,7 @@ namespace Amber.Core.Launch;
 public static class AutoUpdateCheck
 {
     // warriorleavestar/jay-launcher is the repository where the trustee-signed Jay releases are published (the hardened
-    // EasyTier build lives separately in Yumao-Feather/jay-easytier and is not a Jay update feed).
+    // EasyTier build lives separately in warriorleavestar/jay-easytier and is not a Jay update feed).
 
     /// <summary>The official release feed: the latest published (non-draft, non-prerelease) GitHub release.</summary>
     public const string OfficialFeed = "https://api.github.com/repos/warriorleavestar/jay-launcher/releases/latest";
