@@ -52,7 +52,8 @@ public static partial class ModCompat
         "minecraft", "java", "fabricloader", "fabric-loader", "quilt_loader", "forge", "neoforge", "fml", "javafml", "mixinextras",
     };
 
-    public static ModRequirements? Read(string path)
+    /// <summary>Reads a jar by path. Kept for the unit tests; the app reads jars it already has open through <see cref="ReadZip"/>.</summary>
+    internal static ModRequirements? Read(string path)
     {
         try
         {

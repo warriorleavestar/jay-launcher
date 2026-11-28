@@ -214,7 +214,11 @@ public partial class MultiplayerViewModel
         if (!VolunteersAllowed) return;
         try
         {
-            var nodes = await DirectoryClient(network).NodesAsync(ct);
+            var listed = await DirectoryClient(network).NodesAsync(ct);
+            // By address: each name resolved here and used only when all its addresses are public.
+            var nodes = new List<string>();
+            foreach (var node in listed)
+                if (await VolunteerNodes.PinAsync(node, ct) is { } address) nodes.Add(address);
             if (nodes.Count == 0) return;
             VolunteerCache.Remember(profile.Id, nodes);
             var have = new HashSet<string>(profile.Nodes.Concat(network.Options.ExtraPeers ?? []), StringComparer.OrdinalIgnoreCase);

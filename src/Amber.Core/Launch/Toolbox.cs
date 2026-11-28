@@ -92,9 +92,10 @@ public static class Toolbox
     }
 
     /// <summary>生成启动脚本，方便不开启动器直接跑。令牌会写进脚本，所以默认换成占位符。</summary>
-    public static string WriteLaunchScript(string path, string javaPath, string workDir, IReadOnlyList<string> args, string accessToken)
+    /// <param name="appData">Windows only: the APPDATA the game gets (the separate home of an old version), or null to keep the user's.</param>
+    public static string WriteLaunchScript(string path, string javaPath, string workDir, IReadOnlyList<string> args, string accessToken, string? appData = null)
     {
-        var script = BuildLaunchScript(javaPath, workDir, args, accessToken, OperatingSystem.IsWindows());
+        var script = BuildLaunchScript(javaPath, workDir, args, accessToken, OperatingSystem.IsWindows(), appData);
         File.WriteAllText(path, script, new UTF8Encoding(false));
         if (!OperatingSystem.IsWindows())
             File.SetUnixFileMode(path, File.GetUnixFileMode(path)
@@ -102,10 +103,10 @@ public static class Toolbox
         return path;
     }
 
-    internal static string BuildLaunchScript(string javaPath, string workDir, IReadOnlyList<string> args, string accessToken, bool windows)
+    internal static string BuildLaunchScript(string javaPath, string workDir, IReadOnlyList<string> args, string accessToken, bool windows, string? appData = null)
     {
         // NUL 无法传给操作系统。
-        if (javaPath.Contains('\0') || workDir.Contains('\0') || args.Any(a => a.Contains('\0')))
+        if (javaPath.Contains('\0') || workDir.Contains('\0') || args.Any(a => a.Contains('\0')) || appData?.Contains('\0') == true)
             throw new ArgumentException(L.T("core.launch.script.invaliddata"));
         // 离线账号的“0”只是占位符，不能把内存大小、版本号和文件路径里的 0 也替换掉。
         var values = args.Select(a => accessToken.Length > 0 && accessToken != "0"
@@ -121,8 +122,10 @@ public static class Toolbox
             builder.Append("\"%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\" -NoLogo -NoProfile -ExecutionPolicy Bypass -Command \"")
                 .Append(WindowsBootstrap.ReplaceLineEndings(" ")).AppendLine("\"");
             builder.AppendLine("exit /b %errorlevel%");
-            builder.AppendLine("# AMBER_LAUNCH_DATA_V1");
-            builder.AppendLine(JsonSerializer.Serialize(new[] { javaPath, workDir }.Concat(values).ToArray(), AmberJsonContext.Default.StringArray));
+            // V2 carries the APPDATA for the game as its third item; V1 (no APPDATA change) stays as it was.
+            builder.AppendLine(appData is null ? "# AMBER_LAUNCH_DATA_V1" : "# AMBER_LAUNCH_DATA_V2");
+            var head = appData is null ? new[] { javaPath, workDir } : [javaPath, workDir, appData];
+            builder.AppendLine(JsonSerializer.Serialize(head.Concat(values).ToArray(), AmberJsonContext.Default.StringArray));
         }
         else
         {
@@ -152,12 +155,14 @@ public static class Toolbox
         };
         try{
             $lines=[IO.File]::ReadAllLines($env:AMBER_LAUNCH_SCRIPT);
-            $i=[Array]::IndexOf($lines,'# AMBER_LAUNCH_DATA_V1');if($i -lt 0){throw 'Missing launch data'};
-            $data=ConvertFrom-Json -InputObject $lines[$i+1];if($data.Count -lt 2){throw 'Invalid launch data'};
+            $first=3;$i=[Array]::IndexOf($lines,'# AMBER_LAUNCH_DATA_V2');
+            if($i -lt 0){$first=2;$i=[Array]::IndexOf($lines,'# AMBER_LAUNCH_DATA_V1')};if($i -lt 0){throw 'Missing launch data'};
+            $data=ConvertFrom-Json -InputObject $lines[$i+1];if($data.Count -lt $first){throw 'Invalid launch data'};
             foreach($item in $data){if($item -isnot [string] -or $item.Contains([char]0)){throw 'Invalid launch data'}};
             $quoted=New-Object 'Collections.Generic.List[string]';
-            for($n=2;$n -lt $data.Count;$n++){$quoted.Add((Quote $data[$n]))};
+            for($n=$first;$n -lt $data.Count;$n++){$quoted.Add((Quote $data[$n]))};
             $start=New-Object Diagnostics.ProcessStartInfo;$start.FileName=$data[0];$start.WorkingDirectory=$data[1];
+            if($first -eq 3){$start.EnvironmentVariables['APPDATA']=$data[2]};
             $start.Arguments=[string]::Join(' ',$quoted);$start.UseShellExecute=$false;
             $process=[Diagnostics.Process]::Start($start);$process.WaitForExit();exit $process.ExitCode;
         }catch{[Console]::Error.WriteLine($_.Exception.Message);exit 1}

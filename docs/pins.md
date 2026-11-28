@@ -21,8 +21,8 @@ Each entry has these fields:
 
 - `src/Amber.Core/Amber.Core.csproj` embeds the file. The universal loader download (`BakeLoaderRelease.Pinned`) reads its pin straight from it.
 - `scripts/attach-loader.ps1` reads the `jay-loader` pin from it.
-- Some pins are also written elsewhere: EasyTier in `EasyTier.cs`, `scripts/bundle-easytier.sh` and the relay node install scripts, and the Java runtime manifest in `JavaRuntimeInstaller.cs`. `PinsTests` (run by CI's validate job) fails when any of them disagrees with `pins.json`. It also fails when a pin lists a file in `usedBy` that doesn't exist, or a `usedBy` file doesn't mention the pin.
-- `scripts/bundle-easytier.sh` checks the size and SHA-256 of the EasyTier package it bundles before putting it in a release.
+- Some pins are also written elsewhere: EasyTier in `EasyTier.cs`, in the embedded signed list `src/Amber.Core/Multiplayer/EasyTierSigned/SHA256SUMS.txt` and in the relay node install scripts, and the Java runtime manifest in `JavaRuntimeInstaller.cs`. `PinsTests` (run by CI's validate job) fails when any of them disagrees with `pins.json`, and `EasyTierSignatureTests` checks the embedded signed list. It also fails when a pin lists a file in `usedBy` that doesn't exist, or a `usedBy` file doesn't mention the pin.
+- `scripts/bundle-easytier.sh` reads the EasyTier pin from `pins.json` and checks the size and SHA-256 of the package before putting it in a release.
 
 To change a pin, edit `pins.json` first, then the places the test names.
 
