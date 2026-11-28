@@ -32,7 +32,7 @@ public sealed class GateRecordPublisher : IAsyncDisposable
 
     /// <summary>Starts watching the records setting; publishes whenever records are on.</summary>
     public static GateRecordPublisher Start(GateStore store, GateConfig config, string workDir, Action<string> log) =>
-        new(ct => RunAsync(store, config, (network, c) => JoinAsync(network, workDir, c), log, Poll, Retry, ct));
+        new(ct => RunAsync(store, config, (network, c) => JoinAsync(network, workDir, KeyMemory(store), c), log, Poll, Retry, ct));
 
     /// <summary>Test hook: the same loop with another way to join and other intervals.</summary>
     internal static GateRecordPublisher Start(GateStore store, GateConfig config, Func<string, CancellationToken, Task<IJoined>> join,
@@ -44,6 +44,9 @@ public sealed class GateRecordPublisher : IAsyncDisposable
         network == PublicNetworkProfile.Jay().Id ? PublicNetworkProfile.Jay()
         : NetworkString.Parse(network, trusted: []).ToProfile();
 
+    /// <summary>Where this gate remembers directory keys: <see cref="DirectoryKeyMemory.FileName"/> in the gate's data folder.</summary>
+    public static DirectoryKeyMemory KeyMemory(GateStore store) => new(Path.Combine(store.Directory, DirectoryKeyMemory.FileName));
+
     /// <summary>One put of the current record. Throws the directory's rejection or the connection error.</summary>
     public static async Task PublishOnceAsync(RoomDirectoryClient directories, GateStore store, GateConfig config, DateTimeOffset now, CancellationToken ct)
     {
@@ -53,14 +56,15 @@ public sealed class GateRecordPublisher : IAsyncDisposable
         await directories.PutRecordAsync(record, ct);
     }
 
-    private sealed class Joined(PublicNetworkSession session) : IJoined
+    private sealed class Joined(PublicNetworkSession session, DirectoryKeyMemory keys) : IJoined
     {
-        public RoomDirectoryClient Directories { get; } = new(session);
+        // The directory keys of networks that pin none are remembered in the gate's own folder (trust on first use).
+        public RoomDirectoryClient Directories { get; } = new(session) { KeyMemory = keys };
         public bool HasExited => session.HasExited;
         public void Dispose() => session.Dispose();
     }
 
-    private static async Task<IJoined> JoinAsync(string network, string workDir, CancellationToken ct)
+    private static async Task<IJoined> JoinAsync(string network, string workDir, DirectoryKeyMemory keys, CancellationToken ct)
     {
         var profile = Profile(network);
         PublicNetworkSession session;
@@ -74,7 +78,7 @@ public sealed class GateRecordPublisher : IAsyncDisposable
         try
         {
             await session.WaitForDirectoryAsync(TimeSpan.FromMinutes(2), ct);
-            return new Joined(session);
+            return new Joined(session, keys);
         }
         catch
         {

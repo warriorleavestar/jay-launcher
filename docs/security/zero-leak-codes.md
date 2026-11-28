@@ -23,7 +23,7 @@ Codes that must travel are either public by design (a public key) or never leave
 `JAYC1-` + Crockford Base32 of the X25519 identity public key and a 2-byte check (55 characters).
 `Contacts/ContactCode.cs`. Parsing ignores case, spaces and dashes, and refuses a code with a wrong check.
 
-JAYF1 device codes are a different thing: they find a device's hidden room.
+JAYF2 device codes (older JAYF1) are a different thing: they find a device's hidden room.
 
 ## Adding a contact: the emoji check
 
@@ -115,16 +115,18 @@ jay-server network paper-check --key <usb>/jay-trustee.key   # check the hand-co
 # on each directory node: print its directory public key (makes directory.key on first use)
 jay-server network dir-key --dir <node data dir>
 
-# trustee 1, offline, with only that public key:
+# the first key, offline, with only that public key:
 jay-server network dir-cert --root <usb>/jay-trustee.key --network jay-public-v1 --dir-key <node's key> --out directory.cert --days 365
-# trustee 2, on their own offline machine, adds their signature to the same file:
+# the second key, on its own offline machine, adds its signature to the same file:
 jay-server network dir-cert --cosign directory.cert --root <usb>/jay-trustee.key
 # copy directory.cert into the node's data dir; the node logs "directory certificate" at start
 ```
 
 No trustee key goes on a server, CI, a cloud drive, a chat or the repository. Certificates are not secret. A new or
-re-keyed node needs only a new certificate, not a Jay release. If one trustee loses their key, the other two can still
-sign; replacing a trustee needs a release with the new public key.
+re-keyed node needs only a new certificate, not a Jay release. With two keys and both needed, losing either one stops
+new certificates and reviews until a release carries a replacement key (once there are three trustees, the other two can
+still sign); replacing a key always needs a release with the new public key. Until a third trustee joins, this guards
+against one stolen key, not against that one person.
 
 ## Direct links without an IP in any code (done)
 
