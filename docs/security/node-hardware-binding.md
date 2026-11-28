@@ -43,13 +43,15 @@ A node operator can bind a node to the machine it runs on. All of it happens off
 | Runtime integrity: debugger/tracer attached (`TracerPid`, `IsDebuggerPresent`), code-injection variables (`LD_PRELOAD`, `LD_AUDIT`, `DYLD_INSERT_LIBRARIES`, `DOTNET_STARTUP_HOOKS`, profiler variables), program, its folder or the data dir writable by group/others, Secure Boot off when the certificate requires it | **Refuse to run**, exit 78. Nothing is deleted. |
 | TPM refuses to unseal while its endorsement key still matches (boot state changed) | **Refuse to run**, exit 78. Nothing is deleted. |
 | Certificate validly signed but short of the network's root quorum (e.g. the node was started with the wrong `--network`) | **Refuse to run**, exit 78. Nothing is deleted. |
+| Certificate names a network (`hw-cert --network`, the network's id or EasyTier network name) that isn't this node's | **Refuse to run**, exit 78. Nothing is deleted. `node bind --install` refuses it too. |
 | Certificate missing, or any signature on it invalid | **Wipe**, exit 77 |
-| Fewer than `need` identifiers match, or a mandatory one (TPM) doesn't | **Wipe**, exit 77 |
+| An identifier can't be read at all (a tool failed or timed out, the service user isn't in `tss`), and the ones that were read would pass on their own; or the certificate requires a TPM and none is usable | **Refuse to run**, exit 78. Nothing is deleted. |
+| Fewer than `need` identifiers match, or a mandatory one (TPM) was read and doesn't match | **Wipe**, exit 77 |
 | `hardware.wrap` or a `*.key.hw` file doesn't open, or the sealed directory key isn't the certified one | **Wipe**, exit 77 |
 
 While the node runs, the runtime checks repeat every 10 seconds. If one fails, the node stops with exit 78.
 
-Wrong hardware leads to a wipe. A tampered runtime only leads to a refusal, because those signals have innocent causes, such as an admin attaching a debugger or a system update changing the boot chain.
+Wrong hardware leads to a wipe. A tampered runtime or an identifier that can't be read only leads to a refusal, because those signals have innocent causes, such as an admin attaching a debugger, a system update changing the boot chain, or a missing tool. A copy on other hardware still can't open the sealed keys, because the identifiers it can't read can't rebuild the key either.
 
 ## The wipe
 

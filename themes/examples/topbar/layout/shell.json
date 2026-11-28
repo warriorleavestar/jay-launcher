@@ -1,9 +1,8 @@
 {
   // 导航放到顶上，只留图标；内容最宽 1280，居中。
   "nav": "top",
-  "navStyle": "icons",
+  "navStyle": "rail",
   "contentMaxWidth": 1280,
-  // 联机提到前面，工具和日志藏起来（还能从别的页面跳过去）。启动页和设置页藏不掉。
-  "pages": ["home", "multiplayer", "instances", "content", "downloads", "accounts", "settings"],
-  "hidden": ["tools", "log"]
+  // 联机提到游戏库后面，发现放最后。设置和头像不在这里，藏不掉。
+  "pages": ["library", "multiplayer", "people", "discover"]
 }

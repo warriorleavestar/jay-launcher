@@ -160,6 +160,23 @@ internal sealed class ThemeSelfTest(MainWindow window, MainViewModel main, strin
             }
             """),
             ("layout/pages/content.json", """{ "type": "dock", "children": [ { "type": "region", "name": "content.status", "dock": "top" }, { "type": "region", "name": "content.header", "dock": "top" }, { "type": "region", "name": "content.filters", "dock": "top" }, "content.body" ] }"""),
+            // The multiplayer page as the example `topbar` theme lays it out: its drawers must still open over it.
+            ("layout/pages/multiplayer.json", """
+            {
+              "wide": { "type": "grid", "columns": ["*", "320"], "rows": ["auto", "auto", "auto", "*"], "spacing": 12, "children": [
+                  { "type": "region", "name": "multiplayer.title", "columnSpan": 2 },
+                  { "type": "region", "name": "multiplayer.tabs", "row": 1, "columnSpan": 2 },
+                  { "type": "region", "name": "multiplayer.room", "row": 2, "columnSpan": 2 },
+                  { "type": "region", "name": "multiplayer.body", "row": 3 },
+                  { "type": "stack", "row": 3, "column": 1, "spacing": 12, "valign": "start", "children": ["multiplayer.status"] } ] },
+              "default": { "type": "dock", "children": [
+                  { "type": "region", "name": "multiplayer.title", "dock": "top" },
+                  { "type": "region", "name": "multiplayer.tabs", "dock": "top" },
+                  { "type": "region", "name": "multiplayer.room", "dock": "top" },
+                  { "type": "region", "name": "multiplayer.status", "dock": "bottom" },
+                  "multiplayer.body" ] }
+            }
+            """),
             // Places only some instance regions; Jay adds the other required ones itself.
             ("layout/pages/instances.json", """{ "type": "dock", "children": [ { "type": "region", "name": "instances.status", "dock": "top" }, { "type": "region", "name": "instances.header", "dock": "top" }, "instances.details" ] }"""));
         settings.ImportThemePack(path);
@@ -215,10 +232,60 @@ internal sealed class ThemeSelfTest(MainWindow window, MainViewModel main, strin
             && instancePage.DetailsCard.Parent is not null,
             instancePage is null ? "找不到实例页" : string.Join(",", instancePage.ThemeLayout.Regions.Keys.Order()));
         await ShotAsync("layout-instance-760x440");
-        main.CurrentPage = main.Pages.OfType<MultiplayerViewModel>().Single();
+        var mp = main.Pages.OfType<MultiplayerViewModel>().Single();
+        main.CurrentPage = mp;
         window.Width = 1280;
         window.Height = 800;
+        await Task.Delay(600);
+        var mpPage = window.GetVisualDescendants().OfType<MultiplayerPage>().First();
+        Check("联机页用主题的布局，抽屉还在页面上（“连接有问题？”、演练、小课堂）",
+            mpPage.ThemeLayout.UsingThemeLayout && mpPage.ThemeLayout.Overlays.Count >= 3
+            && new Control[] { mpPage.DiagnosticsDrawer, mpPage.DrillDrawer, mpPage.LessonDrawer }.All(d => d.GetVisualAncestors().Contains(mpPage)),
+            $"overlays {mpPage.ThemeLayout.Overlays.Count}");
+        mp.DiagnosticsOpen = true;
+        await Task.Delay(500);
+        Check("主题布局下点“连接有问题？”：抽屉盖在页面上看得见",
+            mpPage.DiagnosticsDrawer.IsEffectivelyVisible && mpPage.DiagnosticsDrawer.Bounds.Width > 300 && mpPage.DiagnosticsDrawer.Bounds.Height > 300,
+            $"{mpPage.DiagnosticsDrawer.Bounds}");
+        await ShotAsync("layout-multiplayer-drawer-1280x800");
+        mp.DiagnosticsOpen = false;
+        await Task.Delay(300);
         await ShotAsync("layout-multiplayer-1280x800");
+        // Privacy plan item 15: the no-sandbox line moves with the title region, so a theme layout keeps it on screen.
+        var wasWithoutSandbox = main.Service.Settings.LaunchWithoutSandbox;
+        main.Service.Settings.LaunchWithoutSandbox = true;
+        main.Service.NotifySandboxChanged();
+        await Task.Delay(400);
+        var noSandbox = mpPage.GetVisualDescendants().OfType<Border>().FirstOrDefault(b => b.Name == "NoSandboxLine");
+        Check("主题布局下开着“不用沙盒启动”：隐私提示行还在联机页上看得见",
+            noSandbox is { IsEffectivelyVisible: true } && noSandbox.Bounds.Height > 10 && noSandbox.GetVisualAncestors().Contains(mpPage),
+            $"{noSandbox?.Bounds}");
+        await ShotAsync("layout-multiplayer-no-sandbox-1280x800");
+        main.Service.Settings.LaunchWithoutSandbox = wasWithoutSandbox;
+        main.Service.NotifySandboxChanged();
+        // Small windows hand the join button to the bottom bar, which moves with the status region under a theme layout.
+        mp.Tab = MultiplayerTab.Play;
+        window.Width = 600;
+        window.Height = 420;
+        await Task.Delay(600);
+        var compactJoin = mpPage.GetVisualDescendants().OfType<Button>().FirstOrDefault(b => b.Name == "CompactLobbyJoinButton");
+        Check("主题布局下的小窗口：底部的【加入】按钮看得见、点得到",
+            mp.IsPlayTab && mp.IsIdle && compactJoin is { IsEffectivelyVisible: true } && compactJoin.Bounds.Height > 10
+                && compactJoin.TranslatePoint(default, mpPage) is { } at && at.Y + compactJoin.Bounds.Height <= mpPage.Bounds.Height + 1,
+            $"{compactJoin?.Bounds} tab={mp.IsPlayTab} idle={mp.IsIdle}");
+        await ShotAsync("layout-multiplayer-600x420");
+        // Back to the default theme in this small window: the drawers keep the size the page gave them for it, not the
+        // one they had when the theme was turned on in the wide window.
+        settings.ResetThemePackCommand.Execute(null);
+        await Task.Delay(500);
+        Check("小窗口里恢复默认主题：抽屉保持铺满的尺寸",
+            !mpPage.ThemeLayout.UsingThemeLayout && double.IsNaN(mpPage.DiagnosticsDrawer.Width)
+            && mpPage.DiagnosticsDrawer.HorizontalAlignment == Avalonia.Layout.HorizontalAlignment.Stretch,
+            $"width {mpPage.DiagnosticsDrawer.Width} align {mpPage.DiagnosticsDrawer.HorizontalAlignment}");
+        settings.ImportThemePack(path);
+        await Task.Delay(500);
+        window.Width = 1280;
+        window.Height = 800;
         main.CurrentPage = settings;
         await Task.Delay(300);
     }

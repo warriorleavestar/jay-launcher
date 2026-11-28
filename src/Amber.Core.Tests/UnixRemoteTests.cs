@@ -55,6 +55,22 @@ public class UnixRemoteTests
     }
 
     [Fact]
+    public void Mac_ClickCountFollowsQuickPressesInOnePlace()
+    {
+        var c = new ClickCounter();
+        Assert.Equal(1, c.Down(RemoteMouseButton.Left, 100, 100, 1000));
+        Assert.Equal(1, c.Up(RemoteMouseButton.Left));
+        Assert.Equal(2, c.Down(RemoteMouseButton.Left, 102, 99, 1200)); // double-click
+        Assert.Equal(2, c.Up(RemoteMouseButton.Left));
+        Assert.Equal(3, c.Down(RemoteMouseButton.Left, 101, 100, 1400)); // triple-click
+        Assert.Equal(3, c.Down(RemoteMouseButton.Left, 101, 100, 1500)); // capped
+        Assert.Equal(1, c.Down(RemoteMouseButton.Left, 101, 100, 2100)); // too slow
+        Assert.Equal(1, c.Down(RemoteMouseButton.Left, 120, 100, 2200)); // moved away
+        Assert.Equal(1, c.Down(RemoteMouseButton.Right, 120, 100, 2300)); // other button
+        Assert.Equal(1, c.Up(RemoteMouseButton.Left));
+    }
+
+    [Fact]
     public void Mac_MouseEventTypes()
     {
         Assert.Equal(1u, MouseEvents.Down(RemoteMouseButton.Left));

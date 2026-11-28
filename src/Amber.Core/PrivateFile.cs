@@ -19,7 +19,17 @@ public static class PrivateFile
     internal const string LocalSystem = "S-1-5-18";
     internal const string Administrators = "S-1-5-32-544";
 
-    public static void WriteAllText(string path, string text)
+    public static void WriteAllText(string path, string text) =>
+        Write(path, stream =>
+        {
+            using var writer = new StreamWriter(stream, new System.Text.UTF8Encoding(false), leaveOpen: true);
+            writer.Write(text);
+        });
+
+    /// <summary>Like <see cref="WriteAllText"/>, for binary secrets.</summary>
+    public static void WriteAllBytes(string path, byte[] bytes) => Write(path, stream => stream.Write(bytes));
+
+    private static void Write(string path, Action<FileStream> write)
     {
         var full = Path.GetFullPath(path);
         EnsureDirectory(Path.GetDirectoryName(full)!);
@@ -27,8 +37,10 @@ public static class PrivateFile
         try
         {
             using (var stream = CreateNew(temp))
-            using (var writer = new StreamWriter(stream, new System.Text.UTF8Encoding(false)))
-                writer.Write(text);
+            {
+                write(stream);
+                stream.Flush(true);
+            }
             // A move on the same volume keeps the temporary file's own access list (Windows) and mode (macOS/Linux).
             File.Move(temp, full, overwrite: true);
         }
@@ -68,9 +80,13 @@ public static class PrivateFile
         return new FileStream(path, new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write, Share = FileShare.None, UnixCreateMode = OwnerOnly });
     }
 
+    /// <summary>The SIDs a private file or folder grants full control to on Windows.</summary>
     [SupportedOSPlatform("windows")]
-    private static IEnumerable<SecurityIdentifier> Allowed() =>
-        [WindowsIdentity.GetCurrent().User!, new SecurityIdentifier(LocalSystem), new SecurityIdentifier(Administrators)];
+    internal static SecurityIdentifier[] Owners()
+    {
+        using var identity = WindowsIdentity.GetCurrent();
+        return [identity.User!, new SecurityIdentifier(LocalSystem), new SecurityIdentifier(Administrators)];
+    }
 
     /// <summary>The access list for a secret file on Windows: full control for this user, SYSTEM and Administrators; no inherited rules.</summary>
     [SupportedOSPlatform("windows")]
@@ -78,7 +94,7 @@ public static class PrivateFile
     {
         var security = new FileSecurity();
         security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
-        foreach (var sid in Allowed())
+        foreach (var sid in Owners())
             security.AddAccessRule(new FileSystemAccessRule(sid, FileSystemRights.FullControl, AccessControlType.Allow));
         return security;
     }
@@ -90,7 +106,7 @@ public static class PrivateFile
         var security = new DirectorySecurity();
         security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
         const InheritanceFlags both = InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit;
-        foreach (var sid in Allowed())
+        foreach (var sid in Owners())
             security.AddAccessRule(new FileSystemAccessRule(sid, FileSystemRights.FullControl, both, PropagationFlags.None, AccessControlType.Allow));
         return security;
     }

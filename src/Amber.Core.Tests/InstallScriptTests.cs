@@ -112,13 +112,13 @@ public sealed class InstallScriptTests : IDisposable
     private static string[] NetworkCalls(bool newUser, bool tss) =>
     [
         "id -u",
-        "id jay",
-        .. newUser ? new[] { "useradd --system --home /var/lib/jay-network --shell /usr/sbin/nologin jay" } : Array.Empty<string>(),
+        "id jay-network",
+        .. newUser ? new[] { "useradd --system --home /var/lib/jay-network --shell /usr/sbin/nologin jay-network" } : Array.Empty<string>(),
         "install -d -m 0755 /opt/jay-server",
-        "install -d -m 0700 -o jay -g jay /var/lib/jay-network",
+        "install -d -m 0700 -o jay-network -g jay-network /var/lib/jay-network",
         "install -m 0755 <root>/pkg/jay-server /opt/jay-server/jay-server",
         "getent group tss",
-        .. tss ? new[] { "usermod -aG tss jay" } : Array.Empty<string>(),
+        .. tss ? new[] { "usermod -aG tss jay-network" } : Array.Empty<string>(),
         "systemctl daemon-reload",
         "systemctl enable jay-network",
         "systemctl restart jay-network",
@@ -136,7 +136,7 @@ public sealed class InstallScriptTests : IDisposable
         Assert.Equal(NetworkCalls(newUser: true, tss), run.Calls);
         var unit = File.ReadAllText(Path.Combine(UnitDir, "jay-network.service"));
         Assert.Equal(tss, unit.Contains("\nSupplementaryGroups=tss\n", StringComparison.Ordinal));
-        Assert.Equal(tss ? "tss" : "", File.ReadAllText(Path.Combine(State, "groups-jay")));
+        Assert.Equal(tss ? "tss" : "", File.ReadAllText(Path.Combine(State, "groups-jay-network")));
         Assert.Contains("--listen 11010", Running("jay-network"), StringComparison.Ordinal);
     }
 
@@ -144,13 +144,13 @@ public sealed class InstallScriptTests : IDisposable
     public async Task Network_ExistingUser_KeepsItsOtherGroups()
     {
         if (OperatingSystem.IsWindows()) return;
-        File.WriteAllText(Path.Combine(State, "user-jay"), "");
-        File.WriteAllText(Path.Combine(State, "groups-jay"), "adm,video");
+        File.WriteAllText(Path.Combine(State, "user-jay-network"), "");
+        File.WriteAllText(Path.Combine(State, "groups-jay-network"), "adm,video");
         File.WriteAllText(Path.Combine(State, "group-tss"), "");
         var run = await RunNetwork(port: 11010);
         Assert.True(run.Exit == 0, run.Output);
         Assert.Equal(NetworkCalls(newUser: false, tss: true), run.Calls);
-        Assert.Equal("adm,video,tss", File.ReadAllText(Path.Combine(State, "groups-jay")));
+        Assert.Equal("adm,video,tss", File.ReadAllText(Path.Combine(State, "groups-jay-network")));
     }
 
     [Fact]

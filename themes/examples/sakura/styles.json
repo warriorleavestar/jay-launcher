@@ -6,7 +6,9 @@
   "button.secondary": { "radius": 20, "border": "#F2C4D4" },
   "card": { "borderWidth": 0, "radius": 18, "shadow": "0 6 20 0 #1FE0538A" },
   "sidebar": { "background": "linear(180, #3A2430, #2A1A22)" },
+  "topbar": { "background": "linear(180, #3A2430, #2A1A22)" },
   "nav.item": { "radius": 12 },
+  "rail.item": { "radius": 12 },
   "input": { "radius": 12, ":focus": { "border": "token:Accent" } },
   "combobox": { "radius": 12 },
   "heading": { "foreground": "#8A2E55" }

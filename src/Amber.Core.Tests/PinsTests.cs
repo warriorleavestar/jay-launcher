@@ -128,6 +128,14 @@ public sealed class PinsTests
     }
 
     [Fact]
+    public void TheDockerRelayNodeRefusesToStartWithoutASecret()
+    {
+        // The image itself is checked in EasyTierHardenedBuildTests; here: no placeholder secret ships in the file.
+        var compose = File.ReadAllText(Path.Combine(Repo, "node", "docker-compose.yml"));
+        Assert.Contains("${NODE_SECRET:?", compose, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AMalformedPinsFileIsRefused()
     {
         static Stream S(string json) => new MemoryStream(Encoding.UTF8.GetBytes(json));

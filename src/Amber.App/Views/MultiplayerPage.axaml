@@ -10,8 +10,9 @@
              x:Class="Amber.App.Views.MultiplayerPage"
              x:DataType="vm:MultiplayerViewModel">
   <Grid RowDefinitions="Auto,Auto,Auto,*,Auto">
-    <StackPanel Spacing="6" Margin="0,0,14,0">
-      <TextBlock svc:ThemeRegion.Name="multiplayer.title" Classes="h1" Text="{l:T multiplayer.title}" />
+    <!-- The title region holds the no-sandbox line too, so a theme layout that moves the title can't drop it. -->
+    <StackPanel svc:ThemeRegion.Name="multiplayer.title" Spacing="6" Margin="0,0,14,0">
+      <TextBlock Classes="h1" Text="{l:T multiplayer.title}" />
       <!-- Privacy plan item 15: while "Launch without sandbox" is on, this line stays on every tab. -->
       <Border x:Name="NoSandboxLine" Classes="callout warning" Padding="10,6" Margin="0,0,0,8" IsVisible="{Binding RunsWithoutSandbox}">
         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
@@ -1538,7 +1539,8 @@
 
     <!-- On the smallest windows the lobby form is taller than the viewport. Keep its two destinations at thumb reach:
          joining can be submitted after editing the code, and opening a room remains one tap away. -->
-    <StackPanel Grid.Row="4" Spacing="6">
+    <!-- The multiplayer.status region is this whole bottom strip, so a theme layout keeps the compact join bar with it. -->
+    <StackPanel Grid.Row="4" Spacing="6" svc:ThemeRegion.Name="multiplayer.status">
       <Border x:Name="CompactLobbyBar" Classes="card" Margin="0" Padding="8" IsVisible="False">
         <Grid x:Name="CompactLobbyState" ColumnDefinitions="*,*" ColumnSpacing="8">
           <Grid.IsVisible>
@@ -1555,7 +1557,7 @@
       </Border>
 
       <!-- 消息被 ✕ 关掉后整张卡片一起收起，不留空卡片 -->
-      <Border svc:ThemeRegion.Name="multiplayer.status" Classes="card" Margin="0" IsVisible="{Binding #PageStatus.IsShowing}">
+      <Border Classes="card" Margin="0" IsVisible="{Binding #PageStatus.IsShowing}">
         <c:StatusBar x:Name="PageStatus" Message="{Binding StatusInfo}" />
       </Border>
     </StackPanel>

@@ -13,19 +13,26 @@ BIN_DIR=/opt/jay-server
 DATA=/var/lib/jay-network
 # UNIT_DIR: where the unit file goes; only the script tests point it elsewhere.
 UNIT="${UNIT_DIR:-/etc/systemd/system}/jay-network.service"
+# Its own user: a Minecraft server run by jay-server (user `jay`) on the same machine can't read the node's keys.
+SVC_USER=jay-network
 
 [[ "$(id -u)" -eq 0 ]] || { echo "要用 sudo 运行"; exit 1; }
 [[ -x "$HERE/jay-server" ]] || { echo "没找到 $HERE/jay-server：在解压好的 JayServer 文件夹里运行这个脚本"; exit 1; }
 command -v systemctl >/dev/null || { echo "这台机器没有 systemd；直接运行 ./jay-server directory 或者用 server/docker"; exit 1; }
 [[ "$PORT" =~ ^[0-9]+$ ]] && (( PORT >= 1 && PORT <= 65535 )) || { echo "PORT 要是 1–65535"; exit 1; }
 
-id jay >/dev/null 2>&1 || useradd --system --home "$DATA" --shell /usr/sbin/nologin jay
+id "$SVC_USER" >/dev/null 2>&1 || useradd --system --home "$DATA" --shell /usr/sbin/nologin "$SVC_USER"
+# Earlier versions ran the node as the shared `jay` user: stop it and hand its data over (links are not followed).
+if [[ -d "$DATA" && "$(stat -c %U "$DATA")" != "$SVC_USER" ]]; then
+  systemctl stop jay-network 2>/dev/null || true
+  chown -R -h "$SVC_USER:$SVC_USER" "$DATA"
+fi
 install -d -m 0755 "$BIN_DIR"
-install -d -m 0700 -o jay -g jay "$DATA"
+install -d -m 0700 -o "$SVC_USER" -g "$SVC_USER" "$DATA"
 install -m 0755 "$HERE/jay-server" "$BIN_DIR/jay-server"
 
 ARGS=(directory --listen "$PORT")
-copy() { install -m 0640 -o jay -g jay "$1" "$DATA/$2"; }
+copy() { install -m 0640 -o "$SVC_USER" -g "$SVC_USER" "$1" "$DATA/$2"; }
 if [[ -n "${NETWORK:-}" ]]; then copy "$NETWORK" network.jaynet; ARGS+=(--network "$DATA/network.jaynet"); fi
 if [[ -n "${CONFIG:-}" ]]; then copy "$CONFIG" config.json; ARGS+=(--config "$DATA/config.json"); fi
 if [[ -n "${BLOCKED_WORDS:-}" ]]; then copy "$BLOCKED_WORDS" blocked-words.txt; ARGS+=(--blocked-words "$DATA/blocked-words.txt"); fi
@@ -36,9 +43,9 @@ if [[ -n "${BLOCKED_WORDS:-}" ]]; then copy "$BLOCKED_WORDS" blocked-words.txt; 
 [[ -n "${EXTRA:-}" ]] && ARGS+=(${EXTRA})
 
 # The node user may use the TPM (hardware binding, docs/security/node-hardware-binding.md) when the tss group exists.
-# The service gets the group through the unit; the user joins it too, so `sudo -u jay ... node bind` sees the TPM.
+# The service gets the group through the unit; the user joins it too, so `sudo -u jay-network ... node bind` sees the TPM.
 TPM_GROUP=""
-if getent group tss >/dev/null; then TPM_GROUP="SupplementaryGroups=tss"; usermod -aG tss jay; fi
+if getent group tss >/dev/null; then TPM_GROUP="SupplementaryGroups=tss"; usermod -aG tss "$SVC_USER"; fi
 
 cat > "$UNIT" <<UNIT
 # 由 install-network-node.sh 生成。改参数：改这里的 ExecStart，然后 systemctl daemon-reload && systemctl restart jay-network
@@ -49,8 +56,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=jay
-Group=jay
+User=$SVC_USER
+Group=$SVC_USER
 Environment=JAY_SERVER_DIR=$DATA
 ExecStart=$BIN_DIR/jay-server ${ARGS[*]}
 Restart=on-failure
@@ -62,7 +69,18 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=$DATA
+# jay-server's own data (a Minecraft server on the same machine) is none of the node's business.
+InaccessiblePaths=-/var/lib/jay-server
 PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+# Not PrivateDevices (hardware binding uses /dev/tpmrm0) and not MemoryDenyWriteExecute (.NET compiles code at run time).
 
 [Install]
 WantedBy=multi-user.target
@@ -80,7 +98,7 @@ systemctl enable jay-network
 systemctl restart jay-network
 echo
 echo "装好了。看日志：journalctl -u jay-network -f"
-echo "看状态：sudo -u jay JAY_SERVER_DIR=$DATA $BIN_DIR/jay-server node status"
+echo "看状态：sudo -u $SVC_USER JAY_SERVER_DIR=$DATA $BIN_DIR/jay-server node status"
 echo "云服务器还要在安全组里放行 TCP 和 UDP $PORT。玩家的 Jay 里公共节点填 tcp://<这台机器的公网地址>:$PORT"
-[[ "${ACCOUNTS:-0}" == 1 ]] && echo "加账号：sudo -u jay JAY_SERVER_DIR=$DATA $BIN_DIR/jay-server account add <账号>；login 段在 journalctl 里"
+[[ "${ACCOUNTS:-0}" == 1 ]] && echo "加账号：sudo -u $SVC_USER JAY_SERVER_DIR=$DATA $BIN_DIR/jay-server account add <账号>；login 段在 journalctl 里"
 exit 0

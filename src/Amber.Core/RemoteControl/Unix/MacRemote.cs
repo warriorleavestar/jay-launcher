@@ -178,6 +178,7 @@ public sealed class MacInputSink : IInputSink
     private RemoteMouseButton _held;
     private ulong _flags;
     private readonly HashSet<ushort> _modifiersDown = [];
+    private readonly ClickCounter _clicks = new();
 
     public void Mouse(RemoteMouseAction action, RemoteMouseButton button, int desktopX, int desktopY, int delta)
     {
@@ -191,11 +192,12 @@ public sealed class MacInputSink : IInputSink
                     break;
                 case RemoteMouseAction.Down when button != RemoteMouseButton.None:
                     _held = button;
-                    Post(MacCg.CGEventCreateMouseEvent(0, MouseEvents.Down(button), at, MouseEvents.ButtonNumber(button)), clickState: true);
+                    Post(MacCg.CGEventCreateMouseEvent(0, MouseEvents.Down(button), at, MouseEvents.ButtonNumber(button)),
+                        clickState: _clicks.Down(button, desktopX, desktopY, Environment.TickCount64));
                     break;
                 case RemoteMouseAction.Up when button != RemoteMouseButton.None:
                     if (_held == button) _held = RemoteMouseButton.None;
-                    Post(MacCg.CGEventCreateMouseEvent(0, MouseEvents.Up(button), at, MouseEvents.ButtonNumber(button)), clickState: true);
+                    Post(MacCg.CGEventCreateMouseEvent(0, MouseEvents.Up(button), at, MouseEvents.ButtonNumber(button)), clickState: _clicks.Up(button));
                     break;
                 case RemoteMouseAction.Wheel or RemoteMouseAction.HWheel when delta != 0:
                     var lines = RemoteKeyCodes.WheelNotches(delta) * Math.Sign(delta);
@@ -232,15 +234,42 @@ public sealed class MacInputSink : IInputSink
         }
     }
 
-    private static void Post(nint ev, bool clickState = false)
+    private static void Post(nint ev, int clickState = 0)
     {
         if (ev == 0) return;
-        if (clickState) MacCg.CGEventSetIntegerValueField(ev, MacCg.MouseClickState, 1);
+        if (clickState > 0) MacCg.CGEventSetIntegerValueField(ev, MacCg.MouseClickState, clickState);
         MacCg.CGEventPost(MacCg.HidEventTap, ev);
         MacCg.CFRelease(ev);
     }
 
     public void Dispose() { }
+}
+
+/// <summary>
+/// The click count macOS reads from an injected mouse event (double-click, triple-click): another press of the same
+/// button within the double-click time and a few pixels of the last one counts up, anything else starts at 1. The
+/// release carries the count of its press.
+/// </summary>
+internal sealed class ClickCounter
+{
+    /// <summary>macOS's default double-click interval.</summary>
+    public const long IntervalMs = 500;
+    public const int Slop = 4;
+    public const int Max = 3;
+
+    private RemoteMouseButton _button;
+    private int _x, _y, _count;
+    private long _at;
+
+    public int Down(RemoteMouseButton button, int x, int y, long nowMs)
+    {
+        var again = _count > 0 && button == _button && nowMs - _at <= IntervalMs && Math.Abs(x - _x) <= Slop && Math.Abs(y - _y) <= Slop;
+        _count = again ? Math.Min(_count + 1, Max) : 1;
+        (_button, _x, _y, _at) = (button, x, y, nowMs);
+        return _count;
+    }
+
+    public int Up(RemoteMouseButton button) => button == _button && _count > 0 ? _count : 1;
 }
 
 /// <summary>CGEvent 的鼠标事件类型和按键编号（单独放出来方便测试）。</summary>
