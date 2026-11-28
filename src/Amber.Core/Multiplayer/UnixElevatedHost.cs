@@ -24,12 +24,17 @@ public static class UnixElevatedGuardHost
     public static bool IsGuardInvocation(string[] args) => args.Length > 0 && args[0] == UnixElevatedGuard.GuardFlag;
 
     /// <summary>守护入口，返回进程退出码：0 正常结束，2 参数或环境不对，3 核对失败，4 运行中出错。</summary>
-    public static int Run(string[] args) =>
-        Run(args, requireRoot: Environment.GetEnvironmentVariable(NoRootForTestVariable) != "1", handleSignals: true, RestoreSystemLeftovers);
+    public static int Run(string[] args)
+    {
+        // A test guard runs as its own process but, like RunForTest, never touches system files, even as root.
+        var test = Environment.GetEnvironmentVariable(NoRootForTestVariable) == "1";
+        return Run(args, requireRoot: !test, handleSignals: true, test ? () => { } : RestoreSystemLeftovers);
+    }
 
     /// <summary>
     /// Tests only: set to "1", a guard started as its own process runs as the current user. Everything else, the signal
-    /// handlers included, is exactly what the root guard does; without root it can only do what the user can anyway.
+    /// handlers included, is exactly what the root guard does, except that it leaves system files alone (no leftover check);
+    /// without root it can only do what the user can anyway.
     /// </summary>
     internal const string NoRootForTestVariable = "AMBER_ET_GUARD_TEST_NO_ROOT";
 

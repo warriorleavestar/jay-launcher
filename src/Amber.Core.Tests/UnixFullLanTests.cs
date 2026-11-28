@@ -781,6 +781,11 @@ public sealed class UnixFullLanTests
         var core = Path.Combine(Path.GetTempPath(), "jay-fake-core-" + Guid.NewGuid().ToString("N"));
         File.WriteAllText(core, "#!/bin/sh\necho \"pid=$$\"\nexec sleep 30\n");
         File.SetUnixFileMode(core, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        // Entering the routes first puts back what a killed guard left: keep that off the real /etc and /run.
+        var system = Directory.CreateTempSubdirectory("jay-guard-system-");
+        UnixExitNetwork.ResolvConf = Path.Combine(system.FullName, "resolv.conf");
+        UnixExitNetwork.RuntimeDir = Path.Combine(system.FullName, "run");
+        Directory.CreateDirectory(UnixExitNetwork.RuntimeDir);
         var calls = new List<string>();
         UnixExitNetwork.RunForTest = (tool, args, _) =>
         {
@@ -817,6 +822,9 @@ public sealed class UnixFullLanTests
         }
         finally
         {
+            UnixExitNetwork.ResolvConf = "/etc/resolv.conf";
+            UnixExitNetwork.RuntimeDir = "/run";
+            system.Delete(true);
             UnixExitNetwork.RunForTest = null;
             UnixElevatedGuardHost.StopHookForTest = null;
             UnixElevatedGuard.LaunchForTest = null;
