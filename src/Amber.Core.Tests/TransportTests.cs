@@ -168,6 +168,40 @@ public class TunnelTests
         return (a.GetStream(), b.GetStream(), a, b);
     }
 
+    /// <summary>
+    /// A room that fails to start on the UI thread cleans up and reports the error instead of hanging: the cleanup must
+    /// not wait for the very thread it blocks.
+    /// </summary>
+    [Fact]
+    public void AFailedStartOnTheUiThreadDoesNotHang()
+    {
+        using var busy = new TcpListener(IPAddress.Loopback, 0);
+        busy.Start();
+        var game = EasyTierArgs.FreeTcpPort();
+        var options = new EasyTierOptions(Room with { Tunnel = new TunnelSettings(TransportMode.High, false) }, false, [], 1,
+            LocalForwardPort: game, LocalChatPort: ((IPEndPoint)busy.LocalEndpoint).Port) { LocalTunnelPort = EasyTierArgs.FreeTcpPort() };
+        Exception? error = null;
+        var thread = new Thread(() =>
+        {
+            SynchronizationContext.SetSynchronizationContext(new NeverRunsContext());
+            try { RoomTransport.Start(options).DisposeAsync().AsTask().Wait(); }
+            catch (Exception e) { error = e; }
+        }) { IsBackground = true };
+        thread.Start();
+        Assert.True(thread.Join(TimeSpan.FromSeconds(10)));
+        Assert.IsAssignableFrom<SocketException>(error);
+        // The game port the failed start had already opened is free again.
+        using var again = new TcpListener(IPAddress.Loopback, game);
+        again.Start();
+    }
+
+    /// <summary>Like a UI thread that is busy: callbacks are queued and never run.</summary>
+    private sealed class NeverRunsContext : SynchronizationContext
+    {
+        public override void Post(SendOrPostCallback d, object? state) { }
+        public override void Send(SendOrPostCallback d, object? state) => throw new NotSupportedException();
+    }
+
     public static TheoryData<TransportMode, bool> Modes()
     {
         var data = new TheoryData<TransportMode, bool>();
