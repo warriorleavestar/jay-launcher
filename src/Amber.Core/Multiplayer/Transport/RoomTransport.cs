@@ -67,7 +67,9 @@ public sealed class RoomTransport : IAsyncDisposable
         }
         catch
         {
-            t.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            // Start runs on the UI thread: clean up off its synchronization context, or a continuation that wants
+            // to come back to it would wait for this very thread and never run.
+            Task.Run(() => t.DisposeAsync().AsTask()).GetAwaiter().GetResult();
             throw;
         }
     }

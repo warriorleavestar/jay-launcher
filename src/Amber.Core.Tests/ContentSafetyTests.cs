@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.IO.Compression;
 using System.Net;
 using System.Text;
@@ -50,32 +51,6 @@ public sealed class ContentSafetyTests : IDisposable
             ModpackService.PackSource.TempRootOverride = null;
         }
         Assert.Empty(Directory.EnumerateFileSystemEntries(temp));
-    }
-
-    [Theory]
-    [InlineData("""{"version":"..\\..\\evil","download_url":"https://example.org/a.jar"}""")]
-    [InlineData("""{"version":"../evil","download_url":"https://example.org/a.jar"}""")]
-    [InlineData("""{"version":"1.2.3","download_url":"http://example.org/a.jar"}""")]
-    [InlineData("""{"version":1,"download_url":"https://example.org/a.jar"}""")]
-    public async Task AnAuthlibFeedWithABadVersionOrAddressIsRefused(string feed)
-    {
-        var http = new FakeHttp().On("https://authlib-injector.yushi.moe/artifact/latest.json", feed)
-            .On("https://example.org/a.jar", "jar").On("http://example.org/a.jar", "jar");
-        var cache = Path.Combine(_root, "cache");
-        await Assert.ThrowsAsync<InvalidDataException>(() => new AuthlibInjector(new HttpClient(http), cache).EnsureJarAsync());
-        Assert.Empty(Directory.EnumerateFileSystemEntries(_root, "*", SearchOption.AllDirectories).Where(p => !p.StartsWith(cache, StringComparison.Ordinal)));
-        Assert.Empty(Directory.EnumerateFiles(cache));
-    }
-
-    [Fact]
-    public async Task AGoodAuthlibFeedIsDownloadedUnderItsVersion()
-    {
-        var http = new FakeHttp().On("https://authlib-injector.yushi.moe/artifact/latest.json", """{"version":"1.2.5","download_url":"https://example.org/a.jar"}""")
-            .On("https://example.org/a.jar", "jar");
-        var path = await new AuthlibInjector(new HttpClient(http), Path.Combine(_root, "cache")).EnsureJarAsync();
-        Assert.Equal("authlib-injector-1.2.5.jar", Path.GetFileName(path));
-        Assert.Equal("jar", File.ReadAllText(path));
-        Assert.Empty(Directory.EnumerateFiles(Path.GetDirectoryName(path)!, "*.tmp"));
     }
 
     [Theory]
@@ -151,15 +126,18 @@ public sealed class ContentSafetyTests : IDisposable
         Assert.Empty(Directory.EnumerateFiles(_root, "*.tmp"));
     }
 
+    /// <summary>A pin for a test jar served from example.org.</summary>
+    private static Pins.Pin JarPin(byte[] jar) => new(AuthlibInjector.PinId, "authlib-injector", "1.2.5", null, null, null,
+        "authlib-injector-1.2.5.jar", ["https://example.org/a.jar"], null, null, Convert.ToHexStringLower(SHA256.HashData(jar)), null, jar.Length, []);
+
     [Fact]
     public async Task AnAuthlibJarThatCannotBeMovedIntoPlaceLeavesNoTempFile()
     {
-        var http = new FakeHttp().On("https://authlib-injector.yushi.moe/artifact/latest.json", """{"version":"1.2.5","download_url":"https://example.org/a.jar"}""")
-            .On("https://example.org/a.jar", "jar");
+        var http = new FakeHttp().On("https://example.org/a.jar", "jar");
         var cache = Path.Combine(_root, "cache");
         Directory.CreateDirectory(Path.Combine(cache, "authlib-injector-1.2.5.jar"));
         // Windows reports a folder in the way as access denied, other systems as an I/O error.
-        var e = await Assert.ThrowsAnyAsync<Exception>(() => new AuthlibInjector(new HttpClient(http), cache).EnsureJarAsync());
+        var e = await Assert.ThrowsAnyAsync<Exception>(() => new AuthlibInjector(new HttpClient(http), cache, JarPin("jar"u8.ToArray())).EnsureJarAsync());
         Assert.True(e is IOException or UnauthorizedAccessException, e.ToString());
         Assert.Empty(Directory.EnumerateFiles(cache, "*.tmp"));
     }
@@ -168,9 +146,9 @@ public sealed class ContentSafetyTests : IDisposable
     public async Task TheSameAuthlibJarFetchedAtOnceIsSavedForEveryCaller()
     {
         var jar = Encoding.ASCII.GetBytes(new string('j', 512 * 1024));
-        var http = new GatedHttp(4, jar, """{"version":"1.2.5","download_url":"https://example.org/a.jar"}""");
+        var http = new GatedHttp(4, jar);
         var cache = Path.Combine(_root, "cache");
-        var paths = await Task.WhenAll(Enumerable.Range(0, 4).Select(_ => Task.Run(() => new AuthlibInjector(new HttpClient(http), cache).EnsureJarAsync())));
+        var paths = await Task.WhenAll(Enumerable.Range(0, 4).Select(_ => Task.Run(() => new AuthlibInjector(new HttpClient(http), cache, JarPin(jar)).EnsureJarAsync())));
         Assert.Single(paths.Distinct());
         Assert.Equal(512 * 1024, new FileInfo(paths[0]).Length);
         Assert.Empty(Directory.EnumerateFiles(cache, "*.tmp"));

@@ -248,22 +248,32 @@ public sealed partial class ToolsViewModel : PageViewModel
             UpdateStatus = L.T("tools.update.store");
             return;
         }
+        // Privacy plan item 2: a newer release is offered only when enough Jay release keys signed it.
+        (UpdateStatus, UpdateUrl, _installOffer) = await RunUpdateCheckAsync(new UpdateCheck(service.Http, AppSettings.DataDir), feed, UpdateChecker.CurrentVersion);
+        CanInstallUpdate = _installOffer is not null;
+    }
+
+    /// <summary>
+    /// Asks <paramref name="feed"/> through <paramref name="check"/> and says what the manual check shows. A check that
+    /// fails (no answer, a reply it can't read, or the accepted release number not saved) is a status line with no page.
+    /// A verified release that has an installer for this platform comes back as <c>Offer</c>, with no page.
+    /// </summary>
+    internal static async Task<(string Status, string? Page, VerifiedUpdate? Offer)> RunUpdateCheckAsync(UpdateCheck check, string feed, string currentVersion)
+    {
         try
         {
-            // Privacy plan item 2: a newer release is offered only when enough Jay release keys signed it.
-            var update = await new UpdateCheck(service.Http, AppSettings.DataDir).CheckAsync(feed, UpdateChecker.CurrentVersion);
-            (UpdateStatus, UpdateUrl) = DescribeUpdate(feed, update);
+            var update = await check.CheckAsync(feed, currentVersion);
+            var (status, page) = DescribeUpdate(feed, update);
+            // A verified release with an installer for this platform is offered as Download and update instead of a page.
             if (update != null && LauncherUpdate.PackageFor(update) != null)
-            {
-                _installOffer = update;
-                CanInstallUpdate = true;
-                UpdateUrl = null;
-                UpdateStatus = L.F("tools.update.available", update.Info.Version, UpdateChecker.CurrentVersion);
-            }
+                return (L.F("tools.update.available", update.Info.Version, currentVersion), null, update);
+            return (status, page, null);
         }
-        catch (Exception e) when (e is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException or InvalidDataException or IOException or UnauthorizedAccessException)
+        catch (Exception e) when (e is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException or InvalidDataException
+                                      or IOException or UnauthorizedAccessException)
         {
-            UpdateStatus = L.F("tools.update.failed", e.Message);
+            // IOException / UnauthorizedAccessException: the accepted release number could not be saved (read-only data folder).
+            return (L.F("tools.update.failed", e.Message), null, null);
         }
     }
 

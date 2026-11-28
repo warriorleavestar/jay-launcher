@@ -150,6 +150,9 @@ public sealed class EasyTierInstallTests : IDisposable
 
         Assert.True(installer.IsInstalled);
         Assert.Contains(handler.Requests, u => u.Contains("c.test"));
+        // The elevated guard gets the checked download, not the broken bundle.
+        Assert.Equal(installer.KeptPackagePath, installer.PackagePath);
+        Assert.Equal(_good, File.ReadAllBytes(installer.PackagePath));
         // 装好后下载用的临时文件不留。
         Assert.False(File.Exists(Path.Combine(_root, "data", "easytier", "download", _asset.Name)));
     }
@@ -188,6 +191,80 @@ public sealed class EasyTierInstallTests : IDisposable
         File.WriteAllBytes(good, _good);
         await installer.ImportAsync(good).WaitAsync(Bound);
         Assert.True(installer.IsInstalled);
+        Assert.Equal(_good, File.ReadAllBytes(installer.PackagePath));
+    }
+
+    [Fact]
+    public async Task APackageIsKeptForTheElevatedGuard()
+    {
+        var (installer, _) = Create(_ => Bytes(_good));
+        await installer.EnsureAsync();
+        Assert.True(installer.IsInstalled);
+        Assert.Equal(_good, File.ReadAllBytes(installer.PackagePath));
+        // Without the package (an install from before it was kept) the component counts as missing and is fetched again.
+        File.Delete(installer.KeptPackagePath);
+        Assert.False(installer.IsInstalled);
+        await installer.EnsureAsync();
+        Assert.True(installer.IsInstalled);
+    }
+
+    [Fact]
+    public async Task AKeptPackageCutShortIsNotTakenForInstalled()
+    {
+        var (installer, handler) = Create(_ => Bytes(_good));
+        await installer.EnsureAsync().WaitAsync(Bound);
+        Assert.Equal(installer.KeptPackagePath, installer.PackagePath);
+        // A copy cut short by a crash, as an older Jay that copied straight to the kept name could leave it.
+        File.WriteAllBytes(installer.KeptPackagePath, _good[..(_good.Length / 2)]);
+        Assert.False(installer.IsInstalled);
+        await installer.EnsureAsync().WaitAsync(Bound);
+        Assert.True(installer.IsInstalled);
+        Assert.Equal(_good, File.ReadAllBytes(installer.KeptPackagePath));
+        Assert.Equal(2, handler.Requests.Count);
+        // No temporary copy is left beside it.
+        Assert.Equal([installer.KeptPackagePath], Directory.EnumerateFiles(Path.GetDirectoryName(installer.KeptPackagePath)!));
+    }
+
+    [Fact]
+    public async Task AKeptPackageOfTheRightSizeButOtherContentDoesNotShadowTheBundledOne()
+    {
+        var bundle = Bundle("bundle-shadow");
+        var (installer, _) = Create(NoNetwork, bundle);
+        await installer.EnsureAsync().WaitAsync(Bound);
+        File.WriteAllBytes(installer.KeptPackagePath, Tampered());
+        Assert.Equal(installer.BundledPath, installer.PackagePath);
+        Assert.True(installer.IsInstalled);
+        // Installing from the bundle again drops the damaged copy.
+        Directory.Delete(installer.InstallDir, recursive: true);
+        await installer.EnsureAsync().WaitAsync(Bound);
+        Assert.False(File.Exists(installer.KeptPackagePath));
+        Assert.Equal(installer.BundledPath, installer.PackagePath);
+    }
+
+    [Fact]
+    public async Task AKeptPackageChangedAfterItWasCheckedIsCheckedAgain()
+    {
+        var (installer, _) = Create(_ => Bytes(_good));
+        await installer.EnsureAsync().WaitAsync(Bound);
+        Assert.True(installer.IsInstalled);
+        File.WriteAllBytes(installer.KeptPackagePath, Tampered());
+        File.SetLastWriteTimeUtc(installer.KeptPackagePath, DateTime.UtcNow.AddMinutes(1));
+        Assert.False(installer.IsInstalled);
+    }
+
+    [Fact]
+    public async Task StaleTemporaryCopiesOfTheKeptPackageAreRemoved()
+    {
+        var (installer, _) = Create(_ => Bytes(_good));
+        await installer.EnsureAsync().WaitAsync(Bound);
+        var stale = installer.KeptPackagePath + ".tmp-0123";
+        var fresh = installer.KeptPackagePath + ".tmp-4567";
+        File.WriteAllBytes(stale, [1]);
+        File.WriteAllBytes(fresh, [2]);
+        File.SetLastWriteTimeUtc(stale, DateTime.UtcNow - EasyTierInstaller.StaleDownloadAge - TimeSpan.FromHours(1));
+        installer.RemoveOldInstalls();
+        Assert.False(File.Exists(stale));
+        Assert.True(File.Exists(fresh));
     }
 
     [Fact]
@@ -276,8 +353,10 @@ public sealed class EasyTierInstallTests : IDisposable
     public async Task ImportAndAutomaticInstallIntoTheSameFolderDoNotInterleave(bool automaticFirst)
     {
         var data = Path.Combine(_root, "data-mixed");
-        var (auto, autoHandler) = Create(NoNetwork, Bundle("bundle-mixed"), data);
-        var import = Create(NoNetwork, dataDir: data).Installer;
+        // Both belong to the same Jay, so they share its bundled package: the elevated guard's copy counts toward "installed".
+        var bundle = Bundle("bundle-mixed");
+        var (auto, autoHandler) = Create(NoNetwork, bundle, data);
+        var import = Create(NoNetwork, bundle, data).Installer;
         var zip = WriteFile("import.zip", _good);
         Task Start(EasyTierInstaller i) => i == auto ? i.EnsureAsync() : i.ImportAsync(zip);
         var (holder, waiter) = automaticFirst ? (auto, import) : (import, auto);
@@ -405,5 +484,89 @@ public sealed class EasyTierInstallTests : IDisposable
     {
         Assert.Equal(L.T("common.request_timeout"), EasyTierInstaller.Describe(new TaskCanceledException()));
         Assert.Equal(L.T("common.request_timeout"), EasyTierInstaller.Describe(new TimeoutException("x", new TaskCanceledException())));
+    }
+
+    [Fact]
+    public async Task InstallRemovesOldBuildsButKeepsWorkFoldersAndFolderInUse()
+    {
+        var data = Path.Combine(_root, "data");
+        var easytier = Path.Combine(data, "easytier");
+        var upstream = Path.Combine(easytier, "2.4.5", "test-x64");
+        var oldBuild = Path.Combine(easytier, "2.6.4-jay-0123456789ab", "test-x64");
+        var inUse = Path.Combine(easytier, "2.6.4-jay-ba9876543210", "test-x64");
+        var lobby = Path.Combine(easytier, "lobby");
+        foreach (var dir in new[] { upstream, oldBuild, inUse, lobby }) Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(lobby, "keep.txt"), "work");
+        var downloads = Path.Combine(easytier, "download");
+        Directory.CreateDirectory(downloads);
+        var oldPart = Path.Combine(downloads, "easytier-test-x64-v2.6.3.zip.part");
+        var freshPart = Path.Combine(downloads, "easytier-test-x64-v2.6.5.zip.part");
+        File.WriteAllText(oldPart, "x");
+        File.SetLastWriteTimeUtc(oldPart, DateTime.UtcNow - EasyTierInstaller.StaleDownloadAge - TimeSpan.FromHours(1));
+        File.WriteAllText(freshPart, "x");
+        var bundle = Path.Combine(_root, "bundle");
+        Directory.CreateDirectory(bundle);
+        File.WriteAllBytes(Path.Combine(bundle, _asset.Name), _good);
+        var downloader = new Downloader(new HttpClient(new Handler(_ => throw new InvalidOperationException())), new SourceChain([new OfficialSource()]));
+        var installer = new EasyTierInstaller(downloader, data, bundle, _asset, [])
+        {
+            RunningForTest = () => [Path.Combine(inUse, "easytier-core.exe")],
+            OtherJayRunningForTest = () => false,
+        };
+
+        await installer.EnsureAsync();
+
+        Assert.True(installer.IsInstalled);
+        Assert.False(Directory.Exists(Path.GetDirectoryName(upstream)));
+        Assert.False(Directory.Exists(Path.GetDirectoryName(oldBuild)));
+        Assert.True(Directory.Exists(inUse));
+        Assert.True(File.Exists(Path.Combine(lobby, "keep.txt")));
+        Assert.False(File.Exists(oldPart));
+        Assert.True(File.Exists(freshPart));
+    }
+
+    [Fact]
+    public async Task OldBuildsStayWhenARunningEasyTierCannotBeChecked()
+    {
+        var data = Path.Combine(_root, "data");
+        var oldBuild = Path.Combine(data, "easytier", "2.6.4-jay-0123456789ab", "test-x64");
+        Directory.CreateDirectory(oldBuild);
+        var bundle = Path.Combine(_root, "bundle");
+        Directory.CreateDirectory(bundle);
+        File.WriteAllBytes(Path.Combine(bundle, _asset.Name), _good);
+        var downloader = new Downloader(new HttpClient(new Handler(_ => throw new InvalidOperationException())), new SourceChain([new OfficialSource()]));
+        var installer = new EasyTierInstaller(downloader, data, bundle, _asset, []) { RunningForTest = () => null, OtherJayRunningForTest = () => false };
+
+        await installer.EnsureAsync();
+        await installer.EnsureAsync();
+
+        Assert.True(installer.IsInstalled);
+        Assert.True(Directory.Exists(oldBuild));
+    }
+
+    /// <summary>
+    /// Another Jay is open (an older one may have just installed its build and be waiting to start it): old builds stay,
+    /// even though no EasyTier program runs from them.
+    /// </summary>
+    [Fact]
+    public async Task OldBuildsStayWhileAnotherJayRuns()
+    {
+        var data = Path.Combine(_root, "data");
+        var oldBuild = Path.Combine(data, "easytier", "2.6.4-jay-0123456789ab", "test-x64");
+        Directory.CreateDirectory(oldBuild);
+        var bundle = Path.Combine(_root, "bundle");
+        Directory.CreateDirectory(bundle);
+        File.WriteAllBytes(Path.Combine(bundle, _asset.Name), _good);
+        var downloader = new Downloader(new HttpClient(new Handler(_ => throw new InvalidOperationException())), new SourceChain([new OfficialSource()]));
+        var otherJay = true;
+        var installer = new EasyTierInstaller(downloader, data, bundle, _asset, []) { RunningForTest = () => [], OtherJayRunningForTest = () => otherJay };
+
+        await installer.EnsureAsync();
+        Assert.True(installer.IsInstalled);
+        Assert.True(Directory.Exists(oldBuild));
+        // Once it has closed, a later start removes them.
+        otherJay = false;
+        await installer.EnsureAsync();
+        Assert.False(Directory.Exists(Path.GetDirectoryName(oldBuild)));
     }
 }

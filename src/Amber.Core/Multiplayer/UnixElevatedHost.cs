@@ -8,7 +8,9 @@ using System.Text.Json;
 namespace Amber.Core.Multiplayer;
 
 /// <summary>
-/// Mac/Linux 守护模式（以 root 运行）：<c>Jay --amber-et-guard 套接字 用户uid Jay进程号 easytier-core路径</c>。
+/// Mac/Linux 守护模式（以 root 运行）：<c>Jay --amber-et-guard 套接字 用户uid Jay进程号 安装包路径</c>。
+/// The guard checks the package and runs easytier-core only from its own root-owned copy (<see cref="ElevatedCoreStore"/>),
+/// never from the user's data folder.
 /// 先核对套接字是那个 Jay 进程（对端进程号和 uid）建的才读命令；按命令启动、重启、结束 easytier-core，输出经套接字送回；
 /// 完整局域网模式下顺带转发本机游戏发出的 UDP 广播（<see cref="UnixBroadcastRelay"/>）。
 /// 套接字断开（Jay 退出或崩溃）、收到停止命令或 easytier-core 自己退出时，结束一切后退出。不写任何文件。
@@ -22,12 +24,41 @@ public static class UnixElevatedGuardHost
     public static bool IsGuardInvocation(string[] args) => args.Length > 0 && args[0] == UnixElevatedGuard.GuardFlag;
 
     /// <summary>守护入口，返回进程退出码：0 正常结束，2 参数或环境不对，3 核对失败，4 运行中出错。</summary>
-    public static int Run(string[] args) => Run(args, requireRoot: true);
+    public static int Run(string[] args)
+    {
+        // A test guard runs as its own process but, like RunForTest, never touches system files, even as root.
+        var test = Environment.GetEnvironmentVariable(NoRootForTestVariable) == "1";
+        return Run(args, requireRoot: !test, handleSignals: true, test ? () => { } : RestoreSystemLeftovers);
+    }
 
-    /// <summary>测试用：在测试进程里以当前用户身份跑守护。</summary>
-    internal static int RunForTest(string[] args) => Run(args, requireRoot: false);
+    /// <summary>
+    /// Tests only: set to "1", a guard started as its own process runs as the current user. Everything else, the signal
+    /// handlers included, is exactly what the root guard does, except that it leaves system files alone (no leftover check);
+    /// without root it can only do what the user can anyway.
+    /// </summary>
+    internal const string NoRootForTestVariable = "AMBER_ET_GUARD_TEST_NO_ROOT";
 
-    private static int Run(string[] args, bool requireRoot)
+    /// <summary>
+    /// 测试用：在测试进程里以当前用户身份跑守护（不接管测试进程的信号）。It never touches system files, even when the tests
+    /// run as root: the leftover check at each start goes to <paramref name="restoreLeftovers"/>, which does nothing unless
+    /// a test gives one.
+    /// </summary>
+    internal static int RunForTest(string[] args, Action? restoreLeftovers = null) =>
+        Run(args, requireRoot: false, handleSignals: false, restoreLeftovers ?? (() => { }));
+
+    /// <summary>Tests: receives the running session's stop action (what a SIGTERM does in the real guard).</summary>
+    internal static Action<Action>? StopHookForTest;
+
+    /// <summary>
+    /// A guard killed during an exit session may have left Jay's temporary resolv.conf in place: put the original back,
+    /// unless another Jay's exit session is using it right now.
+    /// </summary>
+    private static void RestoreSystemLeftovers()
+    {
+        if (OperatingSystem.IsLinux() && UnixIds.EffectiveUserId() == 0) UnixExitNetwork.RestoreLeftoverResolvConf();
+    }
+
+    private static int Run(string[] args, bool requireRoot, bool handleSignals, Action restoreLeftovers)
     {
         if (args.Length != 5 || !uint.TryParse(args[2], out var uid) || !int.TryParse(args[3], out var jayPid)) return 2;
         if (requireRoot && UnixIds.EffectiveUserId() != 0) return 2;
@@ -49,11 +80,37 @@ public static class UnixElevatedGuardHost
             }
         }
         catch (Exception e) when (e is IOException or SocketException or UnauthorizedAccessException or ArgumentException) { return 3; }
-        using var session = new GuardSession(socket, corePath);
-        return session.Run();
+        var session = new GuardSession(socket, corePath, restoreLeftovers);
+        // A signal (logout, kill, Ctrl+C in a terminal) must still take down the core, routes and firewall rules:
+        // stop the session and clean up instead of letting the runtime end the process. The handlers stay in place
+        // until the clean-up is over, so a second signal during it is absorbed too.
+        var signals = new List<IDisposable>();
+        if (handleSignals)
+            foreach (var signal in new[] { PosixSignal.SIGTERM, PosixSignal.SIGINT, PosixSignal.SIGHUP, PosixSignal.SIGQUIT })
+                signals.Add(PosixSignalRegistration.Create(signal, ctx => { ctx.Cancel = true; session.RequestStop(); }));
+        StopHookForTest?.Invoke(session.RequestStop);
+        return RunThenCleanUp(session.Run, session, signals);
     }
 
-    private sealed class GuardSession(Socket socket, string corePath) : IDisposable
+    /// <summary>
+    /// Runs <paramref name="run"/>, then disposes <paramref name="session"/> (stopping the core, restoring routes, DNS and
+    /// firewall), and only then <paramref name="signals"/>: a signal that arrives while the session cleans up still finds
+    /// a handler and cannot cut the clean-up short.
+    /// </summary>
+    internal static int RunThenCleanUp(Func<int> run, IDisposable session, IReadOnlyList<IDisposable> signals)
+    {
+        try
+        {
+            try { return run(); }
+            finally { session.Dispose(); }
+        }
+        finally
+        {
+            foreach (var r in signals) r.Dispose();
+        }
+    }
+
+    private sealed class GuardSession(Socket socket, string corePath, Action restoreLeftovers) : IDisposable
     {
         private readonly NetworkStream _stream = new(socket, ownsSocket: true);
         private readonly object _writeLock = new();
@@ -61,6 +118,14 @@ public static class UnixElevatedGuardHost
         private IDisposable? _relay;
         private UnixExitNetwork? _exit;
         private readonly ManualResetEventSlim _coreExited = new(false);
+        private readonly ManualResetEventSlim _stop = new(false);
+
+        /// <summary>Safe to call any number of times, from a signal handler too, also once the session is disposed.</summary>
+        public void RequestStop()
+        {
+            try { _stop.Set(); }
+            catch (ObjectDisposedException) { }
+        }
 
         public int Run()
         {
@@ -70,7 +135,8 @@ public static class UnixElevatedGuardHost
             {
                 while (true)
                 {
-                    var index = WaitHandle.WaitAny([((IAsyncResult)pending).AsyncWaitHandle, _coreExited.WaitHandle]);
+                    var index = WaitHandle.WaitAny([((IAsyncResult)pending).AsyncWaitHandle, _coreExited.WaitHandle, _stop.WaitHandle]);
+                    if (index == 2) return 0;
                     if (index == 1)
                     {
                         Send("error " + B64("easytier-core exited"));
@@ -87,6 +153,11 @@ public static class UnixElevatedGuardHost
                             StartCore(cmd);
                             Send($"started {cmd.N}");
                         }
+                        catch (StopRequestedException)
+                        {
+                            // Asked to stop while starting: end like any other stop; Dispose cleans up what was set up.
+                            return 0;
+                        }
                         catch (Exception e) when (e is IOException or InvalidOperationException or System.ComponentModel.Win32Exception or UnauthorizedAccessException)
                         {
                             StopCore();
@@ -97,23 +168,37 @@ public static class UnixElevatedGuardHost
                     pending = reader.ReadLineAsync();
                 }
             }
-            catch (Exception e) when (e is IOException or JsonException or ObjectDisposedException or SocketException or AggregateException)
+            catch (Exception)
             {
+                // Any error ends the session the same way, so the caller's using block always removes what it set up.
                 return 4;
             }
+        }
+
+        /// <summary>Thrown inside <see cref="StartCore"/> when a stop (a signal) arrives part way through a start.</summary>
+        private sealed class StopRequestedException : Exception;
+
+        private void ThrowIfStopRequested()
+        {
+            if (_stop.IsSet) throw new StopRequestedException();
         }
 
         private void StartCore(UnixGuardCommand cmd)
         {
             StopCore();
-            CheckCore(corePath);
+            // A stop can arrive together with (or before) a start command; it wins, and no new core is started.
+            ThrowIfStopRequested();
+            try { restoreLeftovers(); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Send("error " + B64(e.Message)); }
+            var core = ResolveCore();
+            CheckCore(core);
             // 经别人上网：承载地址的主机路由要在 EasyTier 加 /1 路由之前查好、加好。
             if (cmd.Network is { } plan)
             {
                 _exit = new UnixExitNetwork(plan);
                 _exit.EnterRoutes();
             }
-            var info = new ProcessStartInfo(corePath)
+            var info = new ProcessStartInfo(core)
             {
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
@@ -127,6 +212,7 @@ public static class UnixElevatedGuardHost
             info.Environment["PATH"] = "/usr/sbin:/usr/bin:/sbin:/bin";
             if (cmd.Env is { } env && env.TryGetValue(EasyTierArgs.SecretVariable, out var secret)) info.Environment[EasyTierArgs.SecretVariable] = secret;
             _coreExited.Reset();
+            ThrowIfStopRequested();
             var process = Process.Start(info) ?? throw new InvalidOperationException("easytier-core did not start");
             _core = process;
             process.StandardInput.Close();
@@ -149,6 +235,18 @@ public static class UnixElevatedGuardHost
             }
         }
 
+        /// <summary>
+        /// The program to run. A package (what Jay passes) is checked and run from the root-owned copy. A program path is
+        /// accepted only when the guard has no more rights than the Jay that asked (the guard isn't root, or that Jay is):
+        /// tests and a Jay started as root.
+        /// </summary>
+        private string ResolveCore()
+        {
+            if (ElevatedCoreStore.IsPackage(corePath)) return ElevatedCoreStore.Prepare(corePath);
+            if (UnixIds.EffectiveUserId() != 0 || UnixIds.PeerUserId(socket) == 0) return corePath;
+            throw new UnauthorizedAccessException("The guard only runs easytier-core from the checked package");
+        }
+
         /// <summary>以 root 运行的程序：必须是普通文件（不是符号链接），别的用户和组不能改它。</summary>
         internal static void CheckCore(string path)
         {
@@ -157,13 +255,15 @@ public static class UnixElevatedGuardHost
             if ((File.GetUnixFileMode(path) & (UnixFileMode.GroupWrite | UnixFileMode.OtherWrite)) != 0) throw new IOException("easytier-core is writable by others");
         }
 
-        private static string? WaitForTun(System.Net.IPAddress ip, Process core)
+        /// <summary>Waits up to 30 s for the virtual adapter; a stop request ends the wait at once.</summary>
+        private string? WaitForTun(System.Net.IPAddress ip, Process core)
         {
             for (var i = 0; i < 60 && !core.HasExited; i++)
             {
                 if (UnixBroadcastRelay.FindByAddress(ip) is { } tun) return tun.Name;
-                Thread.Sleep(500);
+                if (_stop.Wait(500)) throw new StopRequestedException();
             }
+            ThrowIfStopRequested();
             return null;
         }
 
@@ -220,6 +320,7 @@ public static class UnixElevatedGuardHost
             StopCore();
             _stream.Dispose();
             _coreExited.Dispose();
+            _stop.Dispose();
         }
     }
 }
@@ -237,6 +338,41 @@ internal static class UnixIds
     public static uint EffectiveUserId() => GetEuid();
 
     public static void Terminate(int pid) => _ = Kill(pid, 15);
+
+    [DllImport("libc", EntryPoint = "lstat", SetLastError = true)]
+    private static extern unsafe int LStat(string path, byte* buffer);
+
+    [DllImport("libc", EntryPoint = "lstat$INODE64", SetLastError = true)]
+    private static extern unsafe int LStatInode64(string path, byte* buffer);
+
+    [DllImport("libc", EntryPoint = "__lxstat", SetLastError = true)]
+    private static extern unsafe int LXStat(int version, string path, byte* buffer);
+
+    /// <summary>
+    /// The uid that owns <paramref name="path"/> itself (a link is not followed). Read with lstat; the offset of st_uid in
+    /// struct stat is known for the systems Jay ships on (Linux x64/arm64, macOS). Elsewhere, or when lstat fails, this
+    /// throws, so callers that use it for a safety check refuse instead of guessing.
+    /// </summary>
+    public static unsafe uint FileOwner(string path)
+    {
+        var arch = RuntimeInformation.ProcessArchitecture;
+        int offset;
+        if (OperatingSystem.IsMacOS() && arch is Architecture.X64 or Architecture.Arm64) offset = 16; // dev(4) mode(2) nlink(2) ino(8)
+        else if (OperatingSystem.IsLinux() && arch == Architecture.X64) offset = 28;                   // dev(8) ino(8) nlink(8) mode(4)
+        else if (OperatingSystem.IsLinux() && arch == Architecture.Arm64) offset = 24;                 // dev(8) ino(8) mode(4) nlink(4)
+        else throw new IOException("Can't read file owners on this system");
+        var buffer = stackalloc byte[512];
+        int result;
+        if (OperatingSystem.IsMacOS() && arch == Architecture.X64) result = LStatInode64(path, buffer);
+        else
+        {
+            try { result = LStat(path, buffer); }
+            // glibc before 2.33 exports lstat only as __lxstat (struct version 1 on x64, 0 on arm64).
+            catch (EntryPointNotFoundException) when (OperatingSystem.IsLinux()) { result = LXStat(arch == Architecture.X64 ? 1 : 0, path, buffer); }
+        }
+        if (result != 0) throw new IOException($"Can't read the owner of {path} (error {Marshal.GetLastPInvokeError()})");
+        return *(uint*)(buffer + offset);
+    }
 
     /// <summary>对端进程的 uid；取不到时返回 null。Linux 用 SO_PEERCRED，macOS 用 LOCAL_PEERCRED。</summary>
     public static uint? PeerUserId(Socket socket)
